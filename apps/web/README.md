@@ -1,8 +1,10 @@
 # SoloRing web (apps/web)
 
-Next.js 14 + React + TypeScript frontend (plan §3, M2 §4). Status: **M2 in
-progress** — projects/shots CRUD, the Project Asset list, and the API client
-foundation are wired; the Shot editor and reference panel land in M2C.
+Next.js 14 + React + TypeScript frontend. Status: **M6 complete** —
+project/shot editors, reference assets, Story World (entities, revisions,
+explicit approval), narrative structure (sequences → scenes → ordered
+shots), Shot semantic dependencies, takes/revisions with continuity
+hashes, and generation/rerun surfaces are wired against the M6 backend.
 
 ## Run
 

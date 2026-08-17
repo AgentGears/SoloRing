@@ -1,30 +1,35 @@
 # SoloRing
 
-Local-first creative generation loop. v0.1 implements one complete loop:
-create a project → define a shot → attach references → generate candidate
-takes → inspect → approve one → reproduce any historical generation later.
+Local-first creative generation loop: create a project → define a shot →
+attach references → generate candidate takes → inspect → approve one →
+reproduce any historical generation later.
 
-Status: **SoloRing v0.1 COMPLETE — M0 through M5 closed (686/686 ×2).** M0–M4 and
-M5A were reopened by a source-level audit (fifteen findings: unfenced
-publication, snapshot-incoherent revision capture, blob-path integrity,
-frontend occurrence identity, cancellation TOCTOU, containment prefix,
-unbounded hashing, parse/hash races, captured-bytes coherence, binding
-validation, subfolder loss, recovery prework, readiness model, history
-tolerance, queue starvation). The fifteen first-pass findings, the eight second-pass composition
-findings (R1–R8), and the four third-gate blockers are fixed with dedicated regression tests — see
-`docs/AUDIT_REMEDIATION.md`. All re-gates passed; see the executor profile
-for the live deployment contract.
+Status: **v0.2 milestone M6 (Feature-Film Continuity Foundation) COMPLETE.**
+M0 through M5 closed v0.1 (execution pipeline, durable provenance, ComfyUI
+binding — suite 686/686 ×2 after the three audit passes documented in
+`docs/AUDIT_REMEDIATION.md`). M6 adds the continuity layer on top: a
+persistent Story World (CreativeEntities with immutable, kind-specific
+design revisions and explicit approved revisions), narrative structure
+(Sequences → Scenes → ordered Shots), Shot semantic dependencies on entity
+identity, capture-time approved-revision resolution, immutable v1/v2
+ShotRevisions with a deterministic `continuity_spec_hash`, historical
+continuity provenance endpoints, and an Exact Rerun product path whose
+execution never follows current Story World state. Suite 765/765 ×2;
+see `docs/EXECUTOR_PROFILE.md` for the live deployment contract.
 
 ## Layout (plan §4)
 
 ```
-apps/web/              Next.js frontend (scaffold; UI lands in M2)
-server/soloring/       Python package (api, db, worker, assets, ...)
+apps/web/              Next.js frontend (project/shot editors, Story World,
+                       narrative structure, semantic dependencies)
+server/soloring/       Python package (api, db, domain, continuity,
+                       narrative, generation, executors, worker, assets)
 server/alembic/        migrations
 workflows/             ComfyUI workflow contracts (M4/M5)
 data/                  runtime SQLite db, blobs, staging, tmp (gitignored)
 tests/                 test suite
-scripts/               diagnostics
+scripts/               diagnostics + live gates
+docs/                  plans, audit remediation, executor profile, evidence
 ```
 
 ## Dev setup
