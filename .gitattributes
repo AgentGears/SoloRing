@@ -1,0 +1,5 @@
+# Workflow release files carry byte-exact hash contracts: workflow-package.json
+# pins the exact manifest/template bytes, and the live deployment attestation
+# pins the same hashes. Git text normalization (autocrlf) would rewrite them
+# on checkout and break those pins — store them byte-for-byte.
+workflows/** -text
