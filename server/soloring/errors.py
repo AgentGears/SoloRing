@@ -1,0 +1,118 @@
+"""Stable error codes and SoloRingError (plan §42, §100).
+
+The string codes are the durable API contract. SoloRingError carries an HTTP
+status so the API envelope handler can map it uniformly.
+"""
+
+from __future__ import annotations
+
+
+class ErrorCode:
+    # Lookups
+    PROJECT_NOT_FOUND = "PROJECT_NOT_FOUND"
+    SHOT_NOT_FOUND = "SHOT_NOT_FOUND"
+    ASSET_NOT_FOUND = "ASSET_NOT_FOUND"
+    BLOB_NOT_FOUND = "BLOB_NOT_FOUND"
+    GENERATION_NOT_FOUND = "GENERATION_NOT_FOUND"
+    TAKE_NOT_FOUND = "TAKE_NOT_FOUND"
+    TAKE_REJECTED = "TAKE_REJECTED"
+
+    # Uploads
+    UPLOAD_TOO_LARGE = "UPLOAD_TOO_LARGE"
+    EMPTY_UPLOAD = "EMPTY_UPLOAD"
+    UNSUPPORTED_MEDIA_TYPE = "UNSUPPORTED_MEDIA_TYPE"
+
+    # Workflows / references
+    WORKFLOW_VALIDATION_FAILED = "WORKFLOW_VALIDATION_FAILED"
+    WORKFLOW_INPUT_CARDINALITY_INVALID = "WORKFLOW_INPUT_CARDINALITY_INVALID"
+    REFERENCE_SET_INVALID = "REFERENCE_SET_INVALID"
+    WORKFLOW_MANIFEST_MISSING = "WORKFLOW_MANIFEST_MISSING"
+    WORKFLOW_MANIFEST_INTEGRITY = "WORKFLOW_MANIFEST_INTEGRITY"
+    COMFY_TEMPLATE_MISSING = "COMFY_TEMPLATE_MISSING"
+    COMFY_TEMPLATE_INTEGRITY = "COMFY_TEMPLATE_INTEGRITY"
+    COMFY_TEMPLATE_BINDING_INVALID = "COMFY_TEMPLATE_BINDING_INVALID"
+    COMFY_INPUT_UPLOAD_FAILED = "COMFY_INPUT_UPLOAD_FAILED"
+    COMFY_INPUT_REFERENCE_INVALID = "COMFY_INPUT_REFERENCE_INVALID"
+    COMFY_TRANSLATION_FAILED = "COMFY_TRANSLATION_FAILED"
+    COMFY_EXECUTOR_HANDLE_CONFLICT = "COMFY_EXECUTOR_HANDLE_CONFLICT"
+    COMFY_DUPLICATE_ATTEMPT = "COMFY_DUPLICATE_ATTEMPT"
+    COMFY_OUTPUT_FETCH_FAILED = "COMFY_OUTPUT_FETCH_FAILED"
+
+    # Generations
+    GENERATION_ACTIVE = "GENERATION_ACTIVE"
+    GENERATION_NOT_CANCELLABLE = "GENERATION_NOT_CANCELLABLE"
+
+    # Ownership
+    LEASE_LOST = "LEASE_LOST"
+    GENERATION_OWNERSHIP_LOST = "GENERATION_OWNERSHIP_LOST"
+
+    # Story World (M6)
+    ENTITY_NOT_FOUND = "ENTITY_NOT_FOUND"
+    ENTITY_IN_USE = "ENTITY_IN_USE"
+    ENTITY_KIND_INVALID = "ENTITY_KIND_INVALID"
+    ENTITY_REVISION_NOT_FOUND = "ENTITY_REVISION_NOT_FOUND"
+    ENTITY_REVISION_KIND_MISMATCH = "ENTITY_REVISION_KIND_MISMATCH"
+    ENTITY_APPROVAL_CONFLICT = "ENTITY_APPROVAL_CONFLICT"
+
+    # Narrative structure (M6B)
+    SEQUENCE_NOT_FOUND = "SEQUENCE_NOT_FOUND"
+    SEQUENCE_IN_USE = "SEQUENCE_IN_USE"
+    SCENE_NOT_FOUND = "SCENE_NOT_FOUND"
+    SCENE_IN_USE = "SCENE_IN_USE"
+    NARRATIVE_ORDER_INVALID = "NARRATIVE_ORDER_INVALID"
+
+    # Semantic dependencies (M6C)
+    ENTITY_APPROVED_REVISION_REQUIRED = "ENTITY_APPROVED_REVISION_REQUIRED"
+    SEMANTIC_DEPENDENCY_SET_INVALID = "SEMANTIC_DEPENDENCY_SET_INVALID"
+    SEMANTIC_DEPENDENCY_PROJECT_MISMATCH = (
+        "SEMANTIC_DEPENDENCY_PROJECT_MISMATCH"
+    )
+    SHOT_REVISION_CONTINUITY_INVALID = "SHOT_REVISION_CONTINUITY_INVALID"
+
+    # Executors
+    EXECUTOR_UNAVAILABLE = "EXECUTOR_UNAVAILABLE"
+    EXECUTOR_JOB_LOST = "EXECUTOR_JOB_LOST"
+    EXECUTOR_SUBMISSION_UNCERTAIN = "EXECUTOR_SUBMISSION_UNCERTAIN"
+
+    # Outputs
+    OUTPUT_MISSING = "OUTPUT_MISSING"
+    OUTPUT_INVALID = "OUTPUT_INVALID"
+
+    # Generic
+    VALIDATION_ERROR = "VALIDATION_ERROR"
+    INTERNAL_INVARIANT_VIOLATION = "INTERNAL_INVARIANT_VIOLATION"
+
+    # Database
+    SQLITE_BUSY = "SQLITE_BUSY"
+
+
+class SoloRingError(Exception):
+    """Domain error rendered as the stable SoloRing envelope (plan §42)."""
+
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        *,
+        status_code: int = 400,
+        details: dict | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.status_code = status_code
+        self.details = details or {}
+
+
+def not_found(code: str, message: str, details: dict | None = None) -> SoloRingError:
+    return SoloRingError(code, message, status_code=404, details=details)
+
+
+def validation_error(message: str, details: dict | None = None) -> SoloRingError:
+    return SoloRingError(ErrorCode.VALIDATION_ERROR, message, status_code=422, details=details)
+
+
+def internal_invariant(message: str, details: dict | None = None) -> SoloRingError:
+    return SoloRingError(
+        ErrorCode.INTERNAL_INVARIANT_VIOLATION, message, status_code=500, details=details
+    )

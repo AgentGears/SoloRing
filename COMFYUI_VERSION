@@ -1,0 +1,6 @@
+# ComfyUI deployment pin for SoloRing v0.1 M5B (plan §90).
+# Source: github.com/comfyanonymous/ComfyUI @ b963f4ad210a42841ab23dfc28a84143a0cce227
+# Reported version: 0.33.0 | frontend 1.49.6
+# Custom node: github.com/city96/ComfyUI-GGUF @ 6ea2651e7df66d7585f6ffee804b20e92fb38b8a
+# Runtime: python 3.12, torch 2.13.0+cu130, CUDA available (RTX 3080 Ti 12GB, driver CUDA 13.3)
+0.33.0

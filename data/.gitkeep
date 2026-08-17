@@ -1,0 +1,2 @@
+# Runtime data directory (plan §4). Contents (soloring.db, blobs/, staging/, tmp/)
+# are generated at runtime and gitignored.

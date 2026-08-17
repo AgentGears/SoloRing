@@ -1,0 +1,149 @@
+{
+  "4": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "placeholder.png"
+    }
+  },
+  "10": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "hunyuan_video_vae_bf16.safetensors"
+    }
+  },
+  "96": {
+    "class_type": "CLIPVisionEncode",
+    "inputs": {
+      "clip_vision": [
+        "97",
+        0
+      ],
+      "image": [
+        "4",
+        0
+      ],
+      "crop": "none"
+    }
+  },
+  "97": {
+    "class_type": "CLIPVisionLoader",
+    "inputs": {
+      "clip_name": "llava_llama3_vision.safetensors"
+    }
+  },
+  "98": {
+    "class_type": "UnetLoaderGGUF",
+    "inputs": {
+      "unet_name": "hunyuan-video-i2v-720p-Q4_K_M.gguf"
+    }
+  },
+  "99": {
+    "class_type": "DualCLIPLoader",
+    "inputs": {
+      "clip_name1": "clip_l.safetensors",
+      "clip_name2": "llava_llama3_fp8_scaled.safetensors",
+      "type": "hunyuan_video"
+    }
+  },
+  "12": {
+    "class_type": "TextEncodeHunyuanVideo_ImageToVideo",
+    "inputs": {
+      "clip": [
+        "99",
+        0
+      ],
+      "clip_vision_output": [
+        "96",
+        0
+      ],
+      "prompt": "",
+      "image_interleave": 2
+    }
+  },
+  "13": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "",
+      "clip": [
+        "99",
+        0
+      ]
+    }
+  },
+  "78": {
+    "class_type": "HunyuanImageToVideo",
+    "inputs": {
+      "positive": [
+        "12",
+        0
+      ],
+      "vae": [
+        "10",
+        0
+      ],
+      "width": 848,
+      "height": 480,
+      "length": 53,
+      "batch_size": 1,
+      "guidance_type": "v1 (concat)",
+      "start_image": [
+        "4",
+        0
+      ]
+    }
+  },
+  "31": {
+    "class_type": "KSampler",
+    "inputs": {
+      "model": [
+        "98",
+        0
+      ],
+      "seed": 0,
+      "steps": 30,
+      "cfg": 1.0,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "positive": [
+        "78",
+        0
+      ],
+      "negative": [
+        "13",
+        0
+      ],
+      "latent_image": [
+        "78",
+        1
+      ],
+      "denoise": 1.0
+    }
+  },
+  "8": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "31",
+        0
+      ],
+      "vae": [
+        "10",
+        0
+      ]
+    }
+  },
+  "15": {
+    "class_type": "SaveAnimatedWEBP",
+    "inputs": {
+      "images": [
+        "8",
+        0
+      ],
+      "filename_prefix": "soloring",
+      "fps": 24.0,
+      "lossless": false,
+      "quality": 90,
+      "method": "default"
+    }
+  }
+}

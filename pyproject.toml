@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "soloring"
+version = "0.1.0"
+description = "SoloRing v0.1 — local-first creative generation loop"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.111",
+    "uvicorn[standard]>=0.30",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "sqlalchemy>=2.0.30",
+    "aiosqlite>=0.20",
+    "alembic>=1.13",
+    "python-multipart>=0.0.9",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+    "httpx>=0.27",
+]
+
+# Physical source layout: the importable `soloring` package lives under server/.
+[tool.setuptools]
+package-dir = { "" = "server" }
+
+[tool.setuptools.packages.find]
+where = ["server"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+pythonpath = ["server"]
+testpaths = ["tests"]
+markers = [
+    "slow: marks tests as slow (subprocess/OS-level); deselect with -m 'not slow'",
+]
+
+[tool.ruff]
+line-length = 100
