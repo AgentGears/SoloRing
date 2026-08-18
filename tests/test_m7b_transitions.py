@@ -1303,9 +1303,20 @@ async def test_winning_clear_direct_capture_proof(client, factory, engine):
 
 
 async def _race_create_vs(client, factory, engine, competitor):
-    """Shared driver: create a transition while `competitor` (an async
-    callable taking no args, started inside the create's write unit)
-    attempts its mutation; returns (create_result, competitor_outcome)."""
+    """Deterministic parked-on-lock race driver (r4).
+
+    The competitor's ACTUAL ``BEGIN IMMEDIATE`` statement is instrumented:
+    ``AsyncConnection.exec_driver_sql`` is wrapped for the lifetime of the
+    competitor task, and the ``begin_attempted`` event fires from INSIDE
+    that call — i.e. the competitor is executing the real lock-acquisition
+    statement against the creator's held write lock at the moment the
+    creator observes the event. The creator then proceeds to commit; the
+    competitor, parked in that same statement, acquires only afterward and
+    must observe the fully committed transition. No sleep-based
+    synchronization anywhere.
+    """
+    from sqlalchemy.ext.asyncio import AsyncConnection
+
     from soloring.api.schemas.continuity_transitions import TransitionCreate
     from soloring.continuity import transitions as tsvc
 
@@ -1315,28 +1326,33 @@ async def _race_create_vs(client, factory, engine, competitor):
     f = await _feature(client, eva["id"])
 
     original = tsvc._load_active_feature
-    reached_lock = asyncio.Event()
-    state = {}
+    original_exec = AsyncConnection.exec_driver_sql
+    state: dict = {}
+    begin_attempted = asyncio.Event()
+
+    async def wrapped_exec(self, statement, *args, **kwargs):
+        task = asyncio.current_task()
+        if (
+            state.get("competitor") is not None
+            and task is state["competitor"]
+            and statement.strip().upper() == "BEGIN IMMEDIATE"
+        ):
+            begin_attempted.set()
+        return await original_exec(self, statement, *args, **kwargs)
 
     async def competitor_task():
-        # Signal that scheduling has begun, then attempt the write — the
-        # BEGIN IMMEDIATE queues on the create's held lock.
-        reached_lock.set()
-        outcome = await competitor(
+        state["outcome"] = await competitor(
             pid=pid, seq=seq, scene=scene, shots=shots, f=f
         )
-        state["outcome"] = outcome
 
     async def wrap(conn, feature_id):
         result = await original(conn, feature_id)
-        if "task" not in state:
-            state["task"] = asyncio.create_task(competitor_task())
-            # Wait until the competitor is RUNNING (it set the event just
-            # before its write attempt) — its BEGIN IMMEDIATE is now
-            # queued behind OUR held lock. Give the loop one tick to let
-            # the competitor actually issue the statement.
-            await reached_lock.wait()
-            await asyncio.sleep(0.05)
+        if "competitor" not in state:
+            AsyncConnection.exec_driver_sql = wrapped_exec
+            state["competitor"] = asyncio.create_task(competitor_task())
+            # Park until the competitor is EXECUTING its BEGIN IMMEDIATE —
+            # provably queued on the write lock WE hold right now.
+            await begin_attempted.wait()
         return result
 
     import soloring.continuity.transitions as tmod
@@ -1349,10 +1365,10 @@ async def _race_create_vs(client, factory, engine, competitor):
                                  boundary="start", operation="set",
                                  value="fresh"),
             )
-        outcome_task = state["task"]
-        await outcome_task
+        await state["competitor"]
     finally:
         tmod._load_active_feature = original
+        AsyncConnection.exec_driver_sql = original_exec
     return tid, state.get("outcome"), (pid, seq, scene, shots, f)
 
 
