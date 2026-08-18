@@ -128,6 +128,19 @@ async def delete_project(session: AsyncSession, project_id: str) -> None:
         ),
         {"now": now, "pid": project_id},
     )
+    # M7B §11: the Project cascade removes the entire working state, so
+    # active FeatureTransitions of this Project's Features are tombstoned
+    # with it (never physically deleted), leaving no active transitions
+    # under tombstoned Features/anchors.
+    await session.execute(
+        _text(
+            "UPDATE continuity_feature_transitions SET deleted_at = :now, "
+            "updated_at = :now WHERE deleted_at IS NULL AND feature_id IN ("
+            "SELECT id FROM continuity_features WHERE entity_id IN ("
+            "SELECT id FROM creative_entities WHERE project_id = :pid))"
+        ),
+        {"now": now, "pid": project_id},
+    )
     sequences = (
         await session.execute(
             select(Sequence).where(

@@ -29,10 +29,11 @@ export interface ShotDetail extends ShotListItem {
   mood: string | null;
   duration_ms: number | null;
   approved_take_id: string | null;
-  working_snapshot_hash: string;
-  working_state_differs_from_approved: boolean;
+  working_snapshot_hash: string | null;
+  working_state_differs_from_approved: boolean | null;
   semantic_dependencies: SemanticDependency[];
   continuity_ready: boolean;
+  continuity_state_ready: boolean;
 }
 
 export interface ReferenceItem {

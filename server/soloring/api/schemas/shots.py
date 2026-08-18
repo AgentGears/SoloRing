@@ -88,10 +88,11 @@ class ShotRead(BaseModel):
     scene_position: int | None = None
     created_at: str
     updated_at: str
-    working_snapshot_hash: str
-    working_state_differs_from_approved: bool
+    working_snapshot_hash: str | None
+    working_state_differs_from_approved: bool | None
     semantic_dependencies: list[SemanticDependencyItem] = []
     continuity_ready: bool = False
+    continuity_state_ready: bool = True
 
 
 class ShotListItem(BaseModel):

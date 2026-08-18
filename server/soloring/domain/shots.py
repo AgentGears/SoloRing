@@ -34,7 +34,13 @@ from soloring.domain.normalize import (
     normalize_required_text,
 )
 from soloring.domain.snapshots import ReferenceRef
-from soloring.errors import ErrorCode, internal_invariant, not_found, validation_error
+from soloring.errors import (
+    ErrorCode,
+    SoloRingError,
+    internal_invariant,
+    not_found,
+    validation_error,
+)
 
 _INSERT_RETURNING = f"""
 INSERT INTO shots (
@@ -276,11 +282,17 @@ async def read_shot_detail(engine: AsyncEngine, shot_id: str):
     ownership module. M6-F15: the effective working hash therefore reflects
     current approvals even when the Shot row itself is untouched.
 
-    Returns (shot_mapping, refs, differs_from_approved, resolved_deps).
+    Returns (shot_mapping, refs, differs_from_approved, resolved_deps,
+    effective_hash, readiness) where readiness is the M7B §7 projection:
+    continuity_state_ready + nullable hash/differs when unresolved.
     """
     from soloring.continuity.snapshots import (
         effective_working_snapshot_hash,
         resolve_working_dependencies,
+    )
+    from soloring.continuity.state import (
+        readiness_projection,
+        resolve_effective_feature_state,
     )
 
     if not is_uuid(shot_id):
@@ -307,14 +319,23 @@ async def read_shot_detail(engine: AsyncEngine, shot_id: str):
             # handed to canon is the SAME effective snapshot identity the
             # working hash exposes (M6C re-gate: one builder, one value).
             resolved = await resolve_working_dependencies(conn, shot_id)
-            effective_hash = effective_working_snapshot_hash(
-                shot, refs, resolved
-            )
-            differs = await canon.differs_from_approved(
-                conn, shot, refs, effective_hash
-            )
+            outcome = await resolve_effective_feature_state(conn, shot_id)
+            readiness = readiness_projection(outcome)
+            if readiness["continuity_state_ready"]:
+                effective_hash = effective_working_snapshot_hash(
+                    shot, refs, resolved
+                )
+                differs = await canon.differs_from_approved(
+                    conn, shot, refs, effective_hash
+                )
+            else:
+                # No authoritative working snapshot exists (M7B §7): the
+                # hash and the canon comparison are both NULL — never a
+                # fabricated hash, never a misleading "matches".
+                effective_hash = None
+                differs = None
             await conn.commit()
-            return shot, refs, differs, resolved, effective_hash
+            return shot, refs, differs, resolved, effective_hash, readiness
         except Exception:
             with contextlib.suppress(Exception):
                 await conn.rollback()
@@ -347,15 +368,65 @@ async def patch_shot(
 
 
 async def delete_shot(session: AsyncSession, shot_id: str) -> None:
-    # Same DELETE policy as Projects (plan §8.3, §44).
+    """Fenced soft-delete (M7B §11): a Shot anchoring an active Feature
+    transition is not deletable — same DELETE idempotency policy as
+    Projects otherwise."""
+    import contextlib as _cl
+
+    from sqlalchemy import text as _text
+
     if not is_uuid(shot_id):
         raise not_found(ErrorCode.SHOT_NOT_FOUND, f"Shot {shot_id} not found.")
-    shot = await session.get(Shot, shot_id)
-    if shot is None:
-        raise not_found(ErrorCode.SHOT_NOT_FOUND, f"Shot {shot_id} not found.")
-    if shot.deleted_at is not None:
-        return  # already soft-deleted -> idempotent 204
-    now = await db_now(session)
-    shot.deleted_at = now
-    shot.updated_at = now
-    await session.commit()
+    async with session.bind.connect() as conn:
+        try:
+            await conn.exec_driver_sql("BEGIN IMMEDIATE")
+            row = (
+                await conn.execute(
+                    _text(
+                        "SELECT deleted_at FROM shots WHERE id = :sid"
+                    ),
+                    {"sid": shot_id},
+                )
+            ).first()
+            if row is None:
+                await conn.exec_driver_sql("ROLLBACK")
+                raise not_found(
+                    ErrorCode.SHOT_NOT_FOUND, f"Shot {shot_id} not found."
+                )
+            if row.deleted_at is not None:
+                await conn.exec_driver_sql("COMMIT")  # idempotent 204
+                return
+            anchored = (
+                await conn.execute(
+                    _text(
+                        "SELECT 1 FROM continuity_feature_transitions "
+                        "WHERE anchor_type = 'shot' AND anchor_id = :sid "
+                        "AND deleted_at IS NULL LIMIT 1"
+                    ),
+                    {"sid": shot_id},
+                )
+            ).first()
+            if anchored is not None:
+                await conn.exec_driver_sql("ROLLBACK")
+                raise SoloRingError(
+                    ErrorCode.CONTINUITY_ANCHOR_IN_USE,
+                    f"Shot {shot_id} anchors an active Feature transition.",
+                    status_code=409,
+                )
+            await conn.execute(
+                _text(
+                    "UPDATE shots SET deleted_at = "
+                    "strftime('%Y-%m-%dT%H:%M:%fZ','now'), updated_at = "
+                    "strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = :sid"
+                ),
+                {"sid": shot_id},
+            )
+            await conn.exec_driver_sql("COMMIT")
+        except SoloRingError:
+            raise
+        except Exception as exc:
+            with _cl.suppress(Exception):
+                await conn.exec_driver_sql("ROLLBACK")
+            from soloring.continuity.entities import _translate_op_error
+
+            raise _translate_op_error(exc, "shot deletion") from exc
