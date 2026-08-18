@@ -129,20 +129,79 @@ async def _revision_continuity(session: AsyncSession, revision_id: str) -> dict:
         )
 
     dependencies: list[dict[str, Any]] = []
+    feature_states: list[dict[str, Any]] = []
+    transition_audit: list[dict[str, Any]] = []
     continuity_schema_version = None
     if rev["continuity_spec_json"] is not None:
         import json
 
-        spec = json.loads(rev["continuity_spec_json"])
-        continuity_schema_version = spec.get("schema_version")
+        from soloring.errors import internal_invariant
+
+        # Malformed historical representations are database corruption,
+        # not client input: normalize ANY decode/shape failure to the
+        # invariant error — never a raw JSONDecodeError/AttributeError,
+        # never a current-state fallback (M7C §12/§18).
+        try:
+            spec = json.loads(rev["continuity_spec_json"])
+        except (ValueError, TypeError) as exc:
+            raise internal_invariant(
+                f"ShotRevision {revision_id} continuity_spec_json is "
+                f"malformed JSON: {exc}"
+            ) from exc
+        if not isinstance(spec, dict):
+            raise internal_invariant(
+                f"ShotRevision {revision_id} continuity_spec_json is not "
+                "a JSON object."
+            )
+        version = spec.get("schema_version")
+        if not isinstance(version, int) or isinstance(version, bool):
+            raise internal_invariant(
+                f"ShotRevision {revision_id} continuity spec lacks an "
+                "integer schema_version."
+            )
+        if version not in (1, 2):
+            raise internal_invariant(
+                f"ShotRevision {revision_id} continuity spec declares "
+                f"unknown schema_version {version}."
+            )
+        if version == 1 and "feature_states" in spec:
+            raise internal_invariant(
+                f"ShotRevision {revision_id} spec 1 carries feature_states."
+            )
+        if version == 2 and "feature_states" not in spec:
+            raise internal_invariant(
+                f"ShotRevision {revision_id} spec 2 lacks feature_states."
+            )
+        # Structural container shape BEFORE any use: a non-array container
+        # must fail as the invariant error, never as an incidental
+        # TypeError from list(None) etc. (M7C r2 re-gate B3).
+        if not isinstance(spec.get("dependencies"), list):
+            raise internal_invariant(
+                f"ShotRevision {revision_id} continuity spec dependencies "
+                "is not an array."
+            )
+        if version == 2:
+            if not isinstance(spec.get("feature_states"), list):
+                raise internal_invariant(
+                    f"ShotRevision {revision_id} continuity spec "
+                    "feature_states is not an array."
+                )
+            if not isinstance(spec.get("relations"), list):
+                raise internal_invariant(
+                    f"ShotRevision {revision_id} continuity spec relations "
+                    "is not an array."
+                )
+        continuity_schema_version = version
         dependencies = list(spec.get("dependencies", []))
-        # Rebuild the FULL canonical spec from the immutable dependency rows
-        # joined with their entities/revisions and compare canonical bytes
-        # AND hash with what is persisted — the consistency claim is then
-        # literal: any provenance disagreement fails loudly (M6C hardening).
+        # Rebuild the FULL canonical spec from the IMMUTABLE ROWS and
+        # compare canonical bytes AND hash with what is persisted — the
+        # consistency claim is literal: any provenance disagreement fails
+        # loudly (M6C hardening; M7C §12).
         from soloring.continuity.snapshots import (
             ResolvedDependency,
             build_continuity_spec,
+            build_continuity_spec_v2,
+            historical_canonicalize_value,
         )
         from soloring.domain.canonical import (
             canonical_hash,
@@ -166,7 +225,7 @@ async def _revision_continuity(session: AsyncSession, revision_id: str) -> dict:
                 {"rid": revision_id},
             )
         ).mappings().all()
-        rebuilt = build_continuity_spec([
+        rebuilt_deps = [
             ResolvedDependency(
                 entity_id=r["entity_id"],
                 entity_kind=r["entity_kind"],
@@ -178,15 +237,88 @@ async def _revision_continuity(session: AsyncSession, revision_id: str) -> dict:
                 source=r["source"],
             )
             for r in rows
-        ])
+        ]
+
+        # Feature states: the shot_revision_feature_states ROWS are the
+        # authority (M7C §12). Their semantic fields are captured
+        # duplicates — NEVER re-derived from today's ContinuityFeature,
+        # transitions, or anchors. Per row, re-parse value_json and
+        # re-canonicalize CAPTURED-ROW-ONLY (no live enum schema — the
+        # freeze note), requiring the recomputed hash to match.
+        frows = (
+            await session.execute(
+                text(
+                    "SELECT entity_id, feature_id, feature_key, "
+                    "feature_kind, value_type, unit, value_json, "
+                    "value_hash, source_transition_id, "
+                    "source_anchor_type, source_anchor_id, source_boundary "
+                    "FROM shot_revision_feature_states "
+                    "WHERE shot_revision_id = :rid"
+                ),
+                {"rid": revision_id},
+            )
+        ).mappings().all()
+
+        class _CapturedFeatureState:
+            """Row-shape adapter consumed by build_continuity_spec_v2."""
+
+            def __init__(self, row):
+                self.entity_id = row["entity_id"]
+                self.feature_id = row["feature_id"]
+                self.feature_key = row["feature_key"]
+                self.feature_kind = row["feature_kind"]
+                self.value_type = row["value_type"]
+                self.unit = row["unit"]
+                self.value_json = row["value_json"]
+                self.value_hash = row["value_hash"]
+                self.source_anchor_type = row["source_anchor_type"]
+                self.source_anchor_id = row["source_anchor_id"]
+                self.source_boundary = row["source_boundary"]
+
+        for row in frows:
+            try:
+                canonical, digest = historical_canonicalize_value(
+                    row["value_type"], row["value_json"]
+                )
+            except ValueError as exc:
+                raise internal_invariant(
+                    f"ShotRevision {revision_id} feature row "
+                    f"{row['feature_id']} violates its captured value "
+                    f"type {row['value_type']!r}: {exc}"
+                ) from exc
+            if canonical != row["value_json"]:
+                raise internal_invariant(
+                    f"ShotRevision {revision_id} feature row "
+                    f"{row['feature_id']} value_json is not in canonical "
+                    "form."
+                )
+            if digest != row["value_hash"]:
+                raise internal_invariant(
+                    f"ShotRevision {revision_id} feature row "
+                    f"{row['feature_id']} value bytes disagree with its "
+                    "stored value_hash under captured-row-only "
+                    "re-canonicalization."
+                )
+            transition_audit.append({
+                "feature_id": row["feature_id"],
+                "source_transition_id": row["source_transition_id"],
+            })
+
+        if continuity_schema_version == 2:
+            rebuilt = build_continuity_spec_v2(
+                rebuilt_deps, [_CapturedFeatureState(r) for r in frows]
+            )
+        else:
+            rebuilt = build_continuity_spec(rebuilt_deps)
         if (
             canonical_json_str(rebuilt) != rev["continuity_spec_json"]
             or canonical_hash(rebuilt) != rev["continuity_spec_hash"]
         ):
             raise internal_invariant(
-                f"ShotRevision {revision_id} dependency rows disagree with "
+                f"ShotRevision {revision_id} immutable rows disagree with "
                 "its canonical continuity spec."
             )
+        feature_states = list(rebuilt.get("feature_states", []))
 
     import json as _json
 
@@ -208,6 +340,8 @@ async def _revision_continuity(session: AsyncSession, revision_id: str) -> dict:
         "continuity_schema_version": continuity_schema_version,
         "continuity_spec_hash": rev["continuity_spec_hash"],
         "dependencies": dependencies,
+        "feature_states": feature_states,
+        "source_transition_audit": transition_audit,
     }
 
 

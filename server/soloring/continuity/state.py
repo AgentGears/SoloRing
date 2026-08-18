@@ -88,16 +88,6 @@ def narrative_context_required(shot_id: str) -> SoloRingError:
     )
 
 
-def capture_unavailable() -> SoloRingError:
-    return SoloRingError(
-        ErrorCode.NARRATIVE_STATE_CAPTURE_UNAVAILABLE,
-        "The Shot has one or more effective Feature states; historical "
-        "schema-v3 capture is not implemented until M7C, so mutable-state "
-        "capture/generation is blocked.",
-        status_code=409,
-    )
-
-
 async def resolve_effective_feature_state(
     conn: AsyncConnection, shot_id: str
 ) -> ResolutionOutcome:
@@ -286,9 +276,8 @@ def readiness_projection(outcome: ResolutionOutcome) -> dict:
     """The §7 readiness matrix as a plain projection.
 
     continuity_state_ready means: the full current M7 state is resolvable
-    AND safe for current-state capture/generation under the installed
-    milestone. A correctly resolved NONEMPTY Feature state is not
-    capture-safe until M7C (temporary M7B gate, plan §9).
+    AND safe for current-state capture/generation (M7C: schema-3 capture
+    is real; the temporary M7B capture gate is gone).
     """
     if not outcome.assigned and outcome.relevant_temporal_data:
         return {
@@ -299,18 +288,11 @@ def readiness_projection(outcome: ResolutionOutcome) -> dict:
             }],
             "effective_states": (),
         }
-    if outcome.states:
-        return {
-            "continuity_state_ready": False,
-            "readiness_issues": [{
-                "code": ErrorCode.NARRATIVE_STATE_CAPTURE_UNAVAILABLE,
-                "shot_id": outcome.shot_id,
-                "effective_state_count": len(outcome.states),
-            }],
-            "effective_states": outcome.states,
-        }
+    # M7C §10.2: effective states are resolvable AND capture-safe —
+    # schema-3 capture is real, so this row is READY. The only not-ready
+    # condition remaining is NARRATIVE_CONTEXT_REQUIRED above.
     return {
         "continuity_state_ready": True,
         "readiness_issues": [],
-        "effective_states": (),
+        "effective_states": outcome.states,
     }

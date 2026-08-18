@@ -45,16 +45,15 @@ async def _snapshot_one_read(session: AsyncSession, shot_id: str):
     the working dependency rows and resolve them against current approvals,
     so a capture can never mix dependency states from two moments (§58/§59).
 
-    M7B extends the SAME unit (never a second connection — that would race)
-    with the effective Feature-state resolution, and enforces the temporary
-    capture gates INSIDE the read transaction's authority: unassigned +
-    relevant temporal data → NARRATIVE_CONTEXT_REQUIRED; nonempty effective
-    Feature state → NARRATIVE_STATE_CAPTURE_UNAVAILABLE (until M7C). Zero
-    effective state keeps the exact existing schema-1/2 path.
+    M7B extended the SAME unit (never a second connection — that would
+    race) with the effective Feature-state resolution. M7C completes it:
+    the resolved states are RETURNED as part of the captured value instead
+    of tripping the temporary capture gate. The NARRATIVE_CONTEXT_REQUIRED
+    failure (unassigned + relevant temporal data) remains — that is a
+    genuine semantic incompleteness, not an implementation limitation.
     """
     from soloring.continuity.snapshots import resolve_working_dependencies
     from soloring.continuity.state import (
-        capture_unavailable,
         narrative_context_required,
         resolve_effective_feature_state,
     )
@@ -81,10 +80,8 @@ async def _snapshot_one_read(session: AsyncSession, shot_id: str):
             outcome = await resolve_effective_feature_state(conn, shot_id)
             if not outcome.assigned and outcome.relevant_temporal_data:
                 raise narrative_context_required(shot_id)
-            if outcome.states:
-                raise capture_unavailable()
             await conn.commit()
-            return shot, refs, resolved
+            return shot, refs, resolved, outcome.states
         except Exception:
             with contextlib.suppress(Exception):
                 await conn.rollback()
@@ -105,6 +102,110 @@ async def _allocate_number(conn, shot_id: str) -> int:
     ).scalar()
 
 
+def _expected_dep_rows(resolved):
+    return {
+        (dep.entity_id, dep.entity_revision_id, dep.role, dep.position)
+        for dep in resolved
+    }
+
+
+def _expected_feature_rows(feature_states):
+    """The M7 semantic child set (M7C §9.4): NEVER source_transition_id —
+    audit provenance is not semantic identity (APR-022)."""
+    return {
+        (
+            st.entity_id, st.feature_id, st.feature_key, st.feature_kind,
+            st.value_type, st.unit, st.value_json, st.value_hash,
+            st.source_anchor_type, st.source_anchor_id, st.source_boundary,
+        )
+        for st in feature_states
+    }
+
+
+async def _validate_reuse_integrity(
+    conn, revision_id, snapshot_json, spec_json, spec_hash,
+    resolved, feature_states,
+) -> None:
+    """Fail-closed validation of an EXISTING winner (M7C §9.4, APR-023).
+
+    Full frozen chain, in order: exact parent snapshot bytes, then
+    continuity_spec bytes AND hash, then the stored M6 dependency set,
+    then the stored M7 feature-state semantic set. Any disagreement —
+    missing, extra, wrong, bad hash, wrong anchor/schema, wrong spec
+    bytes — is INTERNAL_INVARIANT_VIOLATION. Prohibited outcomes: never
+    reuse-decline-and-recapture, never repair/refill, never omit."""
+    parent = (
+        await conn.execute(
+            text(
+                "SELECT snapshot_json, continuity_spec_json, "
+                "continuity_spec_hash FROM shot_revisions WHERE id = :rid"
+            ),
+            {"rid": revision_id},
+        )
+    ).mappings().one_or_none()
+    if parent is None:  # pragma: no cover - lookup key came from this row
+        raise internal_invariant(
+            f"ShotRevision {revision_id} vanished inside its reuse unit."
+        )
+    if parent["snapshot_json"] != snapshot_json:
+        raise internal_invariant(
+            f"ShotRevision {revision_id} reuse: stored snapshot_json "
+            "disagrees with the captured expectation."
+        )
+    if parent["continuity_spec_json"] != spec_json or             parent["continuity_spec_hash"] != spec_hash:
+        raise internal_invariant(
+            f"ShotRevision {revision_id} reuse: stored continuity spec "
+            "bytes/hash disagree with the captured expectation."
+        )
+
+    dep_rows = (
+        await conn.execute(
+            text(
+                "SELECT entity_id, entity_revision_id, role, position "
+                "FROM shot_revision_entity_dependencies "
+                "WHERE shot_revision_id = :rid"
+            ),
+            {"rid": revision_id},
+        )
+    ).mappings().all()
+    stored_deps = {
+        (r["entity_id"], r["entity_revision_id"], r["role"], r["position"])
+        for r in dep_rows
+    }
+    if stored_deps != _expected_dep_rows(resolved):
+        raise internal_invariant(
+            f"ShotRevision {revision_id} reuse: stored M6 dependency "
+            "children disagree with the captured expectation."
+        )
+
+    feature_rows = (
+        await conn.execute(
+            text(
+                "SELECT entity_id, feature_id, feature_key, feature_kind, "
+                "value_type, unit, value_json, value_hash, "
+                "source_anchor_type, source_anchor_id, source_boundary "
+                "FROM shot_revision_feature_states "
+                "WHERE shot_revision_id = :rid"
+            ),
+            {"rid": revision_id},
+        )
+    ).mappings().all()
+    stored_features = {
+        (
+            r["entity_id"], r["feature_id"], r["feature_key"],
+            r["feature_kind"], r["value_type"], r["unit"], r["value_json"],
+            r["value_hash"], r["source_anchor_type"], r["source_anchor_id"],
+            r["source_boundary"],
+        )
+        for r in feature_rows
+    }
+    if stored_features != _expected_feature_rows(feature_states):
+        raise internal_invariant(
+            f"ShotRevision {revision_id} reuse: stored feature-state "
+            "children disagree with the captured expectation."
+        )
+
+
 async def _persist_revision_fenced(
     engine,
     shot_id: str,
@@ -113,17 +214,19 @@ async def _persist_revision_fenced(
     spec_json: str | None,
     spec_hash: str | None,
     resolved,
+    feature_states=(),
 ) -> str:
     """The ShotRevision write phase as ONE BEGIN IMMEDIATE unit (M6 §9/§57,
     M6C re-gate blocker 2):
 
         BEGIN IMMEDIATE
         ↓ reuse lookup by (shot_id, snapshot_hash)
-        ↓ existing? -> return the winner's id
+        ↓ existing? → VALIDATE the winner semantically (§9.4) → return it
         ↓ MAX(revision_number)+1
         ↓ INSERT ShotRevision (parent first — the UOW has no mapper
           relationship to order these tables and SQLite FKs are immediate)
         ↓ INSERT all dependency rows from the SAME captured value
+        ↓ INSERT all feature-state rows from the SAME captured value
         ↓ COMMIT
 
     Under the held write lock a revision-number collision is structurally
@@ -147,6 +250,10 @@ async def _persist_revision_fenced(
                     )
                 ).first()
                 if existing is not None:
+                    await _validate_reuse_integrity(
+                        conn, existing[0], snapshot_json, spec_json,
+                        spec_hash, resolved, feature_states,
+                    )
                     await conn.exec_driver_sql("COMMIT")
                     return existing[0]
 
@@ -187,6 +294,34 @@ async def _persist_revision_fenced(
                             "src": dep.source,
                         },
                     )
+                for st in feature_states:
+                    await conn.execute(
+                        text(
+                            "INSERT INTO shot_revision_feature_states "
+                            "(shot_revision_id, entity_id, feature_id, "
+                            " feature_key, feature_kind, value_type, unit, "
+                            " value_json, value_hash, source_transition_id, "
+                            " source_anchor_type, source_anchor_id, "
+                            " source_boundary) "
+                            "VALUES (:rid, :eid, :fid, :fkey, :fkind, :vt, "
+                            ":unit, :vj, :vh, :tid, :sat, :said, :sb)"
+                        ),
+                        {
+                            "rid": revision_id,
+                            "eid": st.entity_id,
+                            "fid": st.feature_id,
+                            "fkey": st.feature_key,
+                            "fkind": st.feature_kind,
+                            "vt": st.value_type,
+                            "unit": st.unit,
+                            "vj": st.value_json,
+                            "vh": st.value_hash,
+                            "tid": st.source_transition_id,
+                            "sat": st.source_anchor_type,
+                            "said": st.source_anchor_id,
+                            "sb": st.source_boundary,
+                        },
+                    )
                 await conn.exec_driver_sql("COMMIT")
                 return revision_id
             except IntegrityError:
@@ -206,22 +341,26 @@ async def _persist_revision_fenced(
 
 
 async def capture_revision(session: AsyncSession, shot_id: str) -> ShotRevision:
-    """Capture/reuse the immutable ShotRevision (v1 or v2, plan §52/§56-§57).
+    """Capture/reuse the immutable ShotRevision (schema 1 | 2 | 3).
 
-    Zero dependencies -> the EXACT v1 snapshot form with NULL continuity
-    columns (byte-identical to pre-M6 captures). One or more -> schema v2
-    whose continuity block, the persisted continuity columns, and the
-    immutable dependency rows all derive from the SAME in-memory resolved
-    value captured by the consistent read. Persistence is the fenced
-    BEGIN IMMEDIATE unit above.
+    Zero dependencies → the EXACT v1 form with NULL continuity columns.
+    Dependencies + zero effective Feature states → the EXACT schema-2 form.
+    One or more effective states → schema 3 + continuity-spec 2 (M7C §4).
+    In every case the snapshot bytes, the spec bytes, and ALL immutable
+    child rows derive from the SAME in-memory value captured by the one
+    consistent read (M7C §9.1). Persistence is the fenced unit above.
     """
     from soloring.continuity.snapshots import (
         build_capturable_snapshot,
         continuity_spec_bytes,
     )
 
-    shot, refs, resolved = await _snapshot_one_read(session, shot_id)
-    snapshot, continuity_spec = build_capturable_snapshot(shot, refs, resolved)
+    shot, refs, resolved, feature_states = await _snapshot_one_read(
+        session, shot_id
+    )
+    snapshot, continuity_spec = build_capturable_snapshot(
+        shot, refs, resolved, feature_states
+    )
     snapshot_hash = canonical_hash(snapshot)
     snapshot_json = canonical_json_str(snapshot)
     if continuity_spec is not None:
@@ -231,7 +370,7 @@ async def capture_revision(session: AsyncSession, shot_id: str) -> ShotRevision:
 
     revision_id = await _persist_revision_fenced(
         session.bind, shot_id, snapshot_json, snapshot_hash,
-        spec_json, spec_hash, resolved,
+        spec_json, spec_hash, resolved, feature_states,
     )
     revision = await session.get(ShotRevision, revision_id)
     assert revision is not None
