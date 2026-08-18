@@ -986,11 +986,13 @@ async def test_historical_type_violations_fail_closed(client, factory, engine):
         ("int_f", "integer", 17, "17"),
         ("dec_f", "decimal", "1.5", '"1.5"'),
         ("txt_f", "text", "soaked", '"soaked"'),
+        ("cut", "enum", "fresh", '"fresh"'),  # default enum members
     ]
     feats = {}
     for key, vt, value, _ in cases:
+        enum_vals = ["fresh", "healing", "scarred", "gone"]             if vt == "enum" else None
         feats[key] = await _feature(client, eva["id"], key=key,
-                                    value_type=vt, enum_values=None)
+                                    value_type=vt, enum_values=enum_vals)
     seq, scene, shots = await _topology(client, factory, pid, 1)
     await _depend(client, shots[0], eva["id"])
     for key, vt, value, _ in cases:
@@ -1016,7 +1018,26 @@ async def test_historical_type_violations_fail_closed(client, factory, engine):
          _h('"0.' + "1" * 19 + '"')),             # scale > 18
         ("txt_f", '" pad "', _h('" pad "')),     # untrimmed text
     ]
+    # Each case starts from the COMPLETE valid child set: the original
+    # row is saved and RESTORED after every corruption, so every later
+    # case genuinely exercises captured-type validation against an
+    # otherwise intact history (never a missing-row artifact).
+    originals = {
+        row["feature_key"]: (row["value_json"], row["value_hash"])
+        for row in await _fetch_all(
+            engine,
+            "SELECT feature_key, value_json, value_hash "
+            "FROM shot_revision_feature_states WHERE shot_revision_id = :r",
+            {"r": rev.id},
+        )
+    }
+    # Enum-shape case: untrimmed enum string with its CORRECT hash —
+    # r3 added the shape validation; this proves it load-bearing.
+    violations.append(
+        ("cut", '" fresh "', _h('" fresh "'))
+    )
     for key, vj, vh in violations:
+        assert key in originals, (key, sorted(originals))
         async with engine.connect() as conn:
             await conn.exec_driver_sql("BEGIN IMMEDIATE")
             await conn.execute(
@@ -1031,15 +1052,24 @@ async def test_historical_type_violations_fail_closed(client, factory, engine):
         r = await client.get(f"/shot-revisions/{rev.id}/continuity")
         assert r.status_code == 500, (key, r.text)
         assert r.json()["error_code"] == "INTERNAL_INVARIANT_VIOLATION"
-        # Restore for the next case.
+        # Restore the original canonical row.
+        oj, oh = originals[key]
         async with engine.connect() as conn:
             await conn.exec_driver_sql("BEGIN IMMEDIATE")
             await conn.execute(
-                text("DELETE FROM shot_revision_feature_states "
-                     "WHERE shot_revision_id = :r AND feature_key = :k"),
-                {"r": rev.id, "k": key},
+                text(
+                    "UPDATE shot_revision_feature_states SET value_json = :vj, "
+                    "value_hash = :vh WHERE shot_revision_id = :r AND "
+                    "feature_key = :k"
+                ),
+                {"vj": oj, "vh": oh, "r": rev.id, "k": key},
             )
             await conn.exec_driver_sql("COMMIT")
+
+    # With every row restored, the full history validates again — proving
+    # the loop really began from complete valid state each time.
+    r = await client.get(f"/shot-revisions/{rev.id}/continuity")
+    assert r.status_code == 200, r.text
 
 
 # --- B3 regressions: malformed historical specs ------------------------------------
@@ -1462,3 +1492,156 @@ def test_spec_v2_exact_bytes_all_value_types():
     )
     assert raw == expected
     assert "source_transition_id" not in raw
+
+# --- r4: remaining §14 deterministic open-read capture races --------------------
+# Same seam discipline as test_race_writer_commits_inside_open_read_txn:
+# the competitor's real mutation transaction runs while the capture's read
+# transaction is OPEN (snapshot established); the capture must stay
+# coherent BEFORE, the next capture observes AFTER. No sleeps.
+
+
+async def _open_read_race(client, factory, engine, competitor):
+    """Shared driver: runs `competitor` (an async callable) inside the
+    capture's open read transaction and returns the first capture's
+    revision. The competitor's completion is awaited inside the seam."""
+    from soloring.domain import revisions as revision_svc
+    import soloring.continuity.snapshots as snaps
+
+    original_deps = snaps.resolve_working_dependencies
+    state: dict = {}
+    done = asyncio.Event()
+
+    async def deps_wrap(conn, shot_id):
+        result = await original_deps(conn, shot_id)
+        if "ran" not in state:
+            state["ran"] = True
+            state["outcome"] = await competitor()
+            done.set()
+        return result
+
+    snaps.resolve_working_dependencies = deps_wrap
+    try:
+        rev = await revision_svc.capture_revision(factory(), shot_id_of(competitor))
+    finally:
+        snaps.resolve_working_dependencies = original_deps
+    assert done.is_set()
+    return rev, state.get("outcome")
+
+
+def shot_id_of(competitor):
+    return competitor._shot_id
+
+
+async def test_race_feature_soft_delete_vs_capture(client, factory, engine):
+    """§14 Feature soft-delete ↔ capture: the fenced deletion is REFUSED
+    (CONTINUITY_FEATURE_IN_USE) while the transition is active, and the
+    open-read capture stays coherent schema-3 BEFORE; the next capture
+    converges onto the same revision."""
+    from soloring.continuity import features as fsvc
+    from soloring.domain import revisions as revision_svc
+
+    pid = await _seed_project(factory)
+    eva = await _entity_approved(client, pid)
+    f = await _feature(client, eva["id"])
+    seq, scene, shots = await _topology(client, factory, pid, 1)
+    await _depend(client, shots[0], eva["id"])
+    await _transition(client, f["id"], "scene", scene, "start", "set",
+                      "fresh")
+
+    async def competitor():
+        async with factory() as s:
+            try:
+                await fsvc.delete_feature(s, f["id"])
+                return "deleted"
+            except Exception as exc:
+                return getattr(exc, "code", type(exc).__name__)
+    competitor._shot_id = shots[0]
+
+    rev, outcome = await _open_read_race(client, factory, engine, competitor)
+    assert outcome == "CONTINUITY_FEATURE_IN_USE"
+    snap = json.loads(rev.snapshot_json)
+    assert snap["schema_version"] == 3
+    assert snap["continuity"]["feature_states"][0]["value"] == "fresh"
+    again = await revision_svc.capture_revision(factory(), shots[0])
+    assert again.id == rev.id  # coherent BEFORE converged
+
+
+async def test_race_transition_soft_delete_vs_capture(client, factory, engine):
+    """§14 transition soft-delete ↔ capture: the competitor's real DELETE
+    commits while the read is open; the capture stays schema-3 BEFORE;
+    the next capture returns to schema 2 (converging onto the v2 rev)."""
+    from soloring.domain import revisions as revision_svc
+
+    pid = await _seed_project(factory)
+    eva = await _entity_approved(client, pid)
+    f = await _feature(client, eva["id"])
+    seq, scene, shots = await _topology(client, factory, pid, 1)
+    await _depend(client, shots[0], eva["id"])
+    rev2 = await revision_svc.capture_revision(factory(), shots[0])
+    assert json.loads(rev2.snapshot_json)["schema_version"] == 2
+    t = (await _transition(
+        client, f["id"], "scene", scene, "start", "set", "fresh"
+    )).json()
+
+    async def competitor():
+        async with factory() as s:
+            from soloring.continuity import transitions as tsvc
+
+            await tsvc.delete_transition(s, t["id"])
+            return "deleted"
+    competitor._shot_id = shots[0]
+
+    rev, outcome = await _open_read_race(client, factory, engine, competitor)
+    assert outcome == "deleted"
+    snap = json.loads(rev.snapshot_json)
+    assert snap["schema_version"] == 3  # BEFORE snapshot retained
+    assert snap["continuity"]["feature_states"][0]["value"] == "fresh"
+    back = await revision_svc.capture_revision(factory(), shots[0])
+    assert back.id == rev2.id  # AFTER converged onto the v2 revision
+
+
+async def test_race_narrative_reorder_vs_capture(client, factory, engine):
+    """§14 narrative reorder ↔ capture: a scene reorder commits while the
+    read is open; the capture retains the OLD ordering interpretation
+    (transition still eligible → schema 3); the next capture observes the
+    NEW ordering (transition now future → schema 2)."""
+    from soloring.domain import revisions as revision_svc
+
+    pid = await _seed_project(factory)
+    eva = await _entity_approved(client, pid)
+    f = await _feature(client, eva["id"])
+    seq, scene, shots = await _topology(client, factory, pid, 2)
+    for sid in shots:
+        await _depend(client, sid, eva["id"])
+    r = await client.post(f"/sequences/{seq}/scenes", json={"title": "C2"})
+    scene2 = r.json()["id"]
+    # Put scene2 FIRST so its /start precedes scene's shots → eligible.
+    r = await client.put(
+        f"/sequences/{seq}/scenes/order",
+        json={"scene_ids": [scene2, scene]},
+    )
+    assert r.status_code == 200
+    t = (await _transition(
+        client, f["id"], "scene", scene2, "start", "set", "fresh"
+    )).json()
+    revA = await revision_svc.capture_revision(factory(), shots[0])
+    assert json.loads(revA.snapshot_json)["schema_version"] == 3
+
+    async def competitor():
+        # Reorder scenes: scene2 moves AFTER scene → scene2/start now
+        # ranks after scene's shots → future for shots[0].
+        r = await client.put(
+            f"/sequences/{seq}/scenes/order",
+            json={"scene_ids": [scene, scene2]},
+        )
+        return r.status_code
+    competitor._shot_id = shots[0]
+
+    rev, outcome = await _open_read_race(client, factory, engine, competitor)
+    assert outcome == 200
+    snap = json.loads(rev.snapshot_json)
+    assert snap["schema_version"] == 3  # OLD ordering retained
+    assert snap["continuity"]["feature_states"][0]["value"] == "fresh"
+    revB = await revision_svc.capture_revision(factory(), shots[0])
+    assert json.loads(revB.snapshot_json)["schema_version"] == 2  # NEW
+    assert revB.id != rev.id
