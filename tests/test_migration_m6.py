@@ -258,7 +258,7 @@ def test_populated_0005_to_0006_preserves_state_and_zero_inference(
         assert raised, "uq_shots_scene_position not enforced"
 
         assert con.execute("SELECT version_num FROM alembic_version"
-                           ).fetchone()[0] == "0007_active_narrative_uniqueness"
+                           ).fetchone()[0] == "0008_narrative_continuity_state"
     finally:
         con.close()
 
@@ -315,6 +315,15 @@ def test_orm_create_all_matches_migrated_schema(tmp_path: Path, monkeypatch) -> 
         )
     # The ALTER-added shots/shot_revisions constraints match too.
     for table in ("shots", "shot_revisions"):
+        assert named(str(db_file), table) == named(str(orm_file), table), (
+            f"constraint-name drift on {table}"
+        )
+    # M7 tables (0008) hold to the same strict parity.
+    for table in ("continuity_features", "continuity_feature_transitions",
+                  "continuity_predicates", "continuity_relations",
+                  "continuity_relation_transitions",
+                  "shot_revision_feature_states",
+                  "shot_revision_relation_states"):
         assert named(str(db_file), table) == named(str(orm_file), table), (
             f"constraint-name drift on {table}"
         )

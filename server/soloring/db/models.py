@@ -51,6 +51,11 @@ from soloring.generation.models import (  # noqa: E402,F401
 )
 from soloring.continuity.models import (  # noqa: E402,F401
     CharacterRevisionSpec,
+    ContinuityFeature,
+    ContinuityFeatureTransition,
+    ContinuityPredicate,
+    ContinuityRelation,
+    ContinuityRelationTransition,
     CostumeRevisionSpec,
     CreativeEntity,
     EntityApprovedRevision,
@@ -59,6 +64,8 @@ from soloring.continuity.models import (  # noqa: E402,F401
     PropRevisionSpec,
     ShotEntityDependency,
     ShotRevisionEntityDependency,
+    ShotRevisionFeatureState,
+    ShotRevisionRelationState,
     VehicleRevisionSpec,
 )
 from soloring.narrative.models import Scene, Sequence  # noqa: E402,F401
@@ -86,4 +93,11 @@ __all__ = [
     "Scene",
     "ShotEntityDependency",
     "ShotRevisionEntityDependency",
+    "ContinuityFeature",
+    "ContinuityFeatureTransition",
+    "ContinuityPredicate",
+    "ContinuityRelation",
+    "ContinuityRelationTransition",
+    "ShotRevisionFeatureState",
+    "ShotRevisionRelationState",
 ]

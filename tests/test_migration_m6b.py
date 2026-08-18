@@ -161,7 +161,7 @@ def test_0007_rebuild_preserves_populated_rows_exactly(
         assert raised, "active-only uniqueness not enforced"
 
         assert con.execute("SELECT version_num FROM alembic_version"
-                           ).fetchone()[0] == "0007_active_narrative_uniqueness"
+                           ).fetchone()[0] == "0008_narrative_continuity_state"
     finally:
         con.close()
 
@@ -231,6 +231,9 @@ def _snapshot_rows(db_file: Path, table: str) -> list[tuple]:
 
 
 def _attempt_downgrade(cfg: Config) -> None:
+    # Legitimately leave 0008 (unused M7 schema drops cleanly), then
+    # attempt the 0007 -> 0006 boundary this suite has always targeted.
+    command.downgrade(cfg, "0007_active_narrative_uniqueness")
     command.downgrade(cfg, "0006_story_world_semantic_dependencies")
 
 
@@ -250,6 +253,7 @@ def test_downgrade_refuses_cleanly_on_sequence_coordinate_reuse(
     import uuid
 
     command.upgrade(cfg, "head")
+    command.downgrade(cfg, "0007_active_narrative_uniqueness")
     con = sq.connect(str(db_file))
     try:
         ids = [str(uuid.uuid4()) for _ in range(4)]
@@ -314,6 +318,7 @@ def test_downgrade_refuses_cleanly_on_shot_coordinate_reuse(
     import uuid
 
     command.upgrade(cfg, "head")
+    command.downgrade(cfg, "0007_active_narrative_uniqueness")
     con = sq.connect(str(db_file))
     try:
         scene = str(uuid.uuid4())

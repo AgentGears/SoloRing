@@ -115,6 +115,19 @@ async def delete_project(session: AsyncSession, project_id: str) -> None:
     for entity in entities:
         entity.deleted_at = now
         entity.updated_at = now
+    # M7A re-gate blocker 3: active Features leave working state WITH their
+    # Entities (this cascade legitimately bypasses ENTITY_IN_USE — the
+    # dependent Entities are simultaneously leaving active state).
+    from sqlalchemy import text as _text
+
+    await session.execute(
+        _text(
+            "UPDATE continuity_features SET deleted_at = :now, "
+            "updated_at = :now WHERE deleted_at IS NULL AND entity_id IN "
+            "(SELECT id FROM creative_entities WHERE project_id = :pid)"
+        ),
+        {"now": now, "pid": project_id},
+    )
     sequences = (
         await session.execute(
             select(Sequence).where(

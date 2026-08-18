@@ -310,6 +310,28 @@ async def delete_entity(session: AsyncSession, entity_id: str) -> None:
                     status_code=409,
                 )
 
+            # M7A re-gate blocker 3: an Entity with active ContinuityFeatures
+            # is not deletable — orphaned working-state identity under a
+            # tombstoned Entity is illegal.
+            has_features = (
+                await conn.execute(
+                    text(
+                        "SELECT 1 FROM continuity_features "
+                        "WHERE entity_id = :eid AND deleted_at IS NULL "
+                        "LIMIT 1"
+                    ),
+                    {"eid": entity_id},
+                )
+            ).first()
+            if has_features is not None:
+                await conn.exec_driver_sql("ROLLBACK")
+                raise SoloRingError(
+                    ErrorCode.ENTITY_IN_USE,
+                    f"Entity {entity_id} still owns active ContinuityFeatures.",
+                    status_code=409,
+                    details={"reason": "active_continuity_features"},
+                )
+
             await conn.execute(
                 text(
                     "UPDATE creative_entities SET deleted_at = "
