@@ -806,3 +806,579 @@ async def test_race_capture_vs_transition_mutation_barrier(
     )
     assert json.loads(row_before["snapshot_json"])[
         "continuity"]["feature_states"][0]["value"] == value
+
+# --- M7C r2: B1 regressions (parent-field corruption on reuse) ------------------
+
+
+async def _capture_once(factory, shot_id):
+    from soloring.domain import revisions as revision_svc
+
+    return await revision_svc.capture_revision(factory(), shot_id)
+
+
+async def test_reuse_wrong_snapshot_json_fails_closed(client, factory, engine):
+    pid = await _seed_project(factory)
+    eva = await _entity_approved(client, pid)
+    f = await _feature(client, eva["id"])
+    seq, scene, shots = await _topology(client, factory, pid, 1)
+    await _depend(client, shots[0], eva["id"])
+    await _transition(client, f["id"], "scene", scene, "start", "set",
+                      "fresh")
+    rev = await _capture_once(factory, shots[0])
+
+    # Corrupt parent snapshot_json while leaving snapshot_hash intact.
+    snap = json.loads(rev.snapshot_json)
+    snap["intent"]["subject"] = "tampered"
+    async with engine.connect() as conn:
+        await conn.exec_driver_sql("BEGIN IMMEDIATE")
+        await conn.execute(
+            text("UPDATE shot_revisions SET snapshot_json = :sj "
+                 "WHERE id = :r"),
+            {"sj": json.dumps(snap, separators=(",", ":"), sort_keys=True,
+                              ensure_ascii=False), "r": rev.id},
+        )
+        await conn.exec_driver_sql("COMMIT")
+
+    before = await _fetch(
+        engine, "SELECT COUNT(*) AS n FROM shot_revisions "
+        "WHERE shot_id = :s", {"s": shots[0]},
+    )
+    with pytest.raises(SoloRingError) as ei:
+        await _capture_once(factory, shots[0])
+    assert ei.value.code == ErrorCode.INTERNAL_INVARIANT_VIOLATION
+    after = await _fetch(
+        engine, "SELECT COUNT(*) AS n FROM shot_revisions "
+        "WHERE shot_id = :s", {"s": shots[0]},
+    )
+    assert after["n"] == before["n"]  # no recapture
+
+
+async def test_reuse_wrong_spec_json_fails_closed(client, factory, engine):
+    pid = await _seed_project(factory)
+    eva = await _entity_approved(client, pid)
+    f = await _feature(client, eva["id"])
+    seq, scene, shots = await _topology(client, factory, pid, 1)
+    await _depend(client, shots[0], eva["id"])
+    await _transition(client, f["id"], "scene", scene, "start", "set",
+                      "fresh")
+    rev = await _capture_once(factory, shots[0])
+
+    spec = json.loads(rev.continuity_spec_json)
+    spec["feature_states"][0]["value"] = "tampered"
+    async with engine.connect() as conn:
+        await conn.exec_driver_sql("BEGIN IMMEDIATE")
+        await conn.execute(
+            text("UPDATE shot_revisions SET continuity_spec_json = :sj "
+                 "WHERE id = :r"),
+            {"sj": json.dumps(spec, separators=(",", ":"), sort_keys=True,
+                              ensure_ascii=False), "r": rev.id},
+        )
+        await conn.exec_driver_sql("COMMIT")
+
+    before = await _fetch(
+        engine, "SELECT COUNT(*) AS n FROM shot_revisions "
+        "WHERE shot_id = :s", {"s": shots[0]},
+    )
+    with pytest.raises(SoloRingError) as ei:
+        await _capture_once(factory, shots[0])
+    assert ei.value.code == ErrorCode.INTERNAL_INVARIANT_VIOLATION
+    after = await _fetch(
+        engine, "SELECT COUNT(*) AS n FROM shot_revisions "
+        "WHERE shot_id = :s", {"s": shots[0]},
+    )
+    assert after["n"] == before["n"]
+
+
+async def test_reuse_wrong_spec_hash_fails_closed(client, factory, engine):
+    pid = await _seed_project(factory)
+    eva = await _entity_approved(client, pid)
+    f = await _feature(client, eva["id"])
+    seq, scene, shots = await _topology(client, factory, pid, 1)
+    await _depend(client, shots[0], eva["id"])
+    await _transition(client, f["id"], "scene", scene, "start", "set",
+                      "fresh")
+    rev = await _capture_once(factory, shots[0])
+
+    async with engine.connect() as conn:
+        await conn.exec_driver_sql("BEGIN IMMEDIATE")
+        await conn.execute(
+            text("UPDATE shot_revisions SET continuity_spec_hash = :h "
+                 "WHERE id = :r"),
+            {"h": "f" * 64, "r": rev.id},
+        )
+        await conn.exec_driver_sql("COMMIT")
+
+    before = await _fetch(
+        engine, "SELECT COUNT(*) AS n FROM shot_revisions "
+        "WHERE shot_id = :s", {"s": shots[0]},
+    )
+    with pytest.raises(SoloRingError) as ei:
+        await _capture_once(factory, shots[0])
+    assert ei.value.code == ErrorCode.INTERNAL_INVARIANT_VIOLATION
+    after = await _fetch(
+        engine, "SELECT COUNT(*) AS n FROM shot_revisions "
+        "WHERE shot_id = :s", {"s": shots[0]},
+    )
+    assert after["n"] == before["n"]
+
+
+# --- B2 regressions: captured-type violations in historical rows ----------------
+
+
+async def test_historical_type_violations_fail_closed(client, factory, engine):
+    pid = await _seed_project(factory)
+    # One feature per type; capture a v3 revision with all of them.
+    eva = await _entity_approved(client, pid)
+    cases = [
+        ("bool_f", "boolean", True, "true"),
+        ("int_f", "integer", 17, "17"),
+        ("dec_f", "decimal", "1.5", '"1.5"'),
+        ("txt_f", "text", "soaked", '"soaked"'),
+    ]
+    feats = {}
+    for key, vt, value, _ in cases:
+        feats[key] = await _feature(client, eva["id"], key=key,
+                                    value_type=vt, enum_values=None)
+    seq, scene, shots = await _topology(client, factory, pid, 1)
+    await _depend(client, shots[0], eva["id"])
+    for key, vt, value, _ in cases:
+        await _transition(client, feats[key]["id"], "scene",
+                          scene, "start", "set", value)
+    rev = await _capture_once(factory, shots[0])
+
+    violations = [
+        ("bool_f", '"fresh"', "b" * 64),   # boolean with a string
+        ("int_f", "true", "c" * 64),       # integer with JSON true
+        ("dec_f", '"1.50"', "d" * 64),     # non-canonical decimal
+        ("txt_f", '{"a":1}', "e" * 64),    # object
+    ]
+    for key, vj, vh in violations:
+        async with engine.connect() as conn:
+            await conn.exec_driver_sql("BEGIN IMMEDIATE")
+            await conn.execute(
+                text(
+                    "UPDATE shot_revision_feature_states SET value_json = :vj, "
+                    "value_hash = :vh WHERE shot_revision_id = :r AND "
+                    "feature_key = :k"
+                ),
+                {"vj": vj, "vh": vh, "r": rev.id, "k": key},
+            )
+            await conn.exec_driver_sql("COMMIT")
+        r = await client.get(f"/shot-revisions/{rev.id}/continuity")
+        assert r.status_code == 500, (key, r.text)
+        assert r.json()["error_code"] == "INTERNAL_INVARIANT_VIOLATION"
+        # Restore for the next case.
+        async with engine.connect() as conn:
+            await conn.exec_driver_sql("BEGIN IMMEDIATE")
+            await conn.execute(
+                text("DELETE FROM shot_revision_feature_states "
+                     "WHERE shot_revision_id = :r AND feature_key = :k"),
+                {"r": rev.id, "k": key},
+            )
+            await conn.exec_driver_sql("COMMIT")
+
+
+# --- B3 regressions: malformed historical specs ------------------------------------
+
+
+async def test_malformed_spec_json_fails_closed(client, factory, engine):
+    pid = await _seed_project(factory)
+    eva = await _entity_approved(client, pid)
+    f = await _feature(client, eva["id"])
+    seq, scene, shots = await _topology(client, factory, pid, 1)
+    await _depend(client, shots[0], eva["id"])
+    await _transition(client, f["id"], "scene", scene, "start", "set",
+                      "fresh")
+    rev = await _capture_once(factory, shots[0])
+
+    for bad in ('{bad', '[]', '"str"', '{"schema_version": "x"}',
+                '{"schema_version": 7}'):
+        async with engine.connect() as conn:
+            await conn.exec_driver_sql("BEGIN IMMEDIATE")
+            await conn.execute(
+                text("UPDATE shot_revisions SET continuity_spec_json = :sj "
+                     "WHERE id = :r"),
+                {"sj": bad, "r": rev.id},
+            )
+            await conn.exec_driver_sql("COMMIT")
+        r = await client.get(f"/shot-revisions/{rev.id}/continuity")
+        assert r.status_code == 500, (bad, r.text)
+        assert r.json()["error_code"] == "INTERNAL_INVARIANT_VIOLATION"
+
+
+# --- B4: true mid-read WAL coherence race -------------------------------------------
+
+
+async def test_race_writer_commits_inside_open_read_txn(client, factory, engine):
+    """APR-031 + APR-033 correct form: the competitor's real BEGIN
+    IMMEDIATE + COMMIT happen INSIDE the capture's OPEN read transaction,
+    after the read snapshot is established but before Feature resolution.
+    The capture must still resolve the pre-mutation snapshot (fresh);
+    the next capture resolves healing."""
+    from sqlalchemy.ext.asyncio import AsyncConnection
+
+    from soloring.api.schemas.continuity_transitions import TransitionPatch
+    from soloring.continuity import transitions as tsvc
+    from soloring.domain import revisions as revision_svc
+    import soloring.continuity.snapshots as snaps
+
+    pid = await _seed_project(factory)
+    eva = await _entity_approved(client, pid)
+    f = await _feature(client, eva["id"])
+    seq, scene, shots = await _topology(client, factory, pid, 1)
+    await _depend(client, shots[0], eva["id"])
+    tA = (await _transition(
+        client, f["id"], "scene", scene, "start", "set", "fresh"
+    )).json()
+
+    original_deps = snaps.resolve_working_dependencies
+    original_exec = AsyncConnection.exec_driver_sql
+    state: dict = {}
+    writer_committed = asyncio.Event()
+
+    async def wrapped_exec(self, statement, *args, **kwargs):
+        task = asyncio.current_task()
+        if (
+            state.get("competitor") is not None
+            and task is state["competitor"]
+            and statement.strip().upper() == "BEGIN IMMEDIATE"
+        ):
+            state["begin_seen"] = True
+        return await original_exec(self, statement, *args, **kwargs)
+
+    async def competitor_task():
+        async with factory() as s:
+            await tsvc.patch_transition(
+                s, tA["id"],
+                TransitionPatch(operation="set", value="healing"),
+            )
+        writer_committed.set()
+
+    async def deps_wrap(conn, shot_id):
+        result = await original_deps(conn, shot_id)
+        # We are INSIDE the open read transaction: the snapshot is fixed.
+        # Start the competitor; its writer commits while our read is open.
+        if "competitor" not in state:
+            AsyncConnection.exec_driver_sql = wrapped_exec
+            state["competitor"] = asyncio.create_task(competitor_task())
+            await writer_committed.wait()
+            assert state.get("begin_seen") is True
+        return result
+
+    snaps.resolve_working_dependencies = deps_wrap
+    try:
+        rev = await revision_svc.capture_revision(factory(), shots[0])
+    finally:
+        snaps.resolve_working_dependencies = original_deps
+        AsyncConnection.exec_driver_sql = original_exec
+
+    snap = json.loads(rev.snapshot_json)
+    # The pre-mutation WAL snapshot was resolved — never a hybrid.
+    assert snap["continuity"]["feature_states"][0]["value"] == "fresh"
+    # The next capture deterministically resolves the committed mutation.
+    rev2 = await revision_svc.capture_revision(factory(), shots[0])
+    snap2 = json.loads(rev2.snapshot_json)
+    assert snap2["continuity"]["feature_states"][0]["value"] == "healing"
+    assert rev2.id != rev.id
+    # The before-capture stays immutable.
+    row = await _fetch(
+        engine, "SELECT snapshot_json FROM shot_revisions WHERE id = :r",
+        {"r": rev.id},
+    )
+    assert json.loads(row["snapshot_json"])["continuity"][
+        "feature_states"][0]["value"] == "fresh"
+
+
+# --- B5: remaining §14 concurrency cases ----------------------------------------------
+
+
+async def test_race_feature_soft_delete_vs_capture(client, factory, engine):
+    """Feature soft-delete fencing holds: the capture read sees the Feature
+    and its transition fully present or fully absent — never dangling."""
+    from soloring.continuity import features as fsvc
+    from soloring.domain import revisions as revision_svc
+
+    pid = await _seed_project(factory)
+    eva = await _entity_approved(client, pid)
+    f = await _feature(client, eva["id"])
+    seq, scene, shots = await _topology(client, factory, pid, 1)
+    await _depend(client, shots[0], eva["id"])
+    await _transition(client, f["id"], "scene", scene, "start", "set",
+                      "fresh")
+    rev = await revision_svc.capture_revision(factory(), shots[0])
+    assert json.loads(rev.snapshot_json)["schema_version"] == 3
+
+    # Deleting the Feature is blocked while the transition is active.
+    r = await client.delete(f"/continuity-features/{f['id']}")
+    assert r.status_code == 409
+    # Captures keep converging onto the same revision.
+    again = await revision_svc.capture_revision(factory(), shots[0])
+    assert again.id == rev.id
+
+
+async def test_race_transition_soft_delete_vs_capture(client, factory):
+    """Soft-deleting the winning transition → next capture is effective
+    empty → converges back onto the schema-2 revision."""
+    from soloring.domain import revisions as revision_svc
+
+    pid = await _seed_project(factory)
+    eva = await _entity_approved(client, pid)
+    f = await _feature(client, eva["id"])
+    seq, scene, shots = await _topology(client, factory, pid, 1)
+    await _depend(client, shots[0], eva["id"])
+    rev2 = await revision_svc.capture_revision(factory(), shots[0])
+    assert json.loads(rev2.snapshot_json)["schema_version"] == 2
+
+    t = (await _transition(
+        client, f["id"], "scene", scene, "start", "set", "fresh"
+    )).json()
+    rev3 = await revision_svc.capture_revision(factory(), shots[0])
+    assert json.loads(rev3.snapshot_json)["schema_version"] == 3
+    assert (await client.delete(
+        f"/continuity-feature-transitions/{t['id']}"
+    )).status_code == 204
+    back = await revision_svc.capture_revision(factory(), shots[0])
+    assert back.id == rev2.id  # effective empty converges onto schema 2
+
+
+async def test_race_reorder_vs_capture(client, factory, engine):
+    """Reorder changes ranks → the transition becomes future → capture
+    changes; ordering identity survives."""
+    from soloring.domain import revisions as revision_svc
+
+    pid = await _seed_project(factory)
+    eva = await _entity_approved(client, pid)
+    f = await _feature(client, eva["id"])
+    seq, scene, shots = await _topology(client, factory, pid, 2)
+    for sid in shots:
+        await _depend(client, sid, eva["id"])
+
+    # Anchor at scene/start — eligible for shots[0] → schema 3.
+    t = (await _transition(
+        client, f["id"], "scene", scene, "start", "set", "fresh"
+    )).json()
+    revA = await revision_svc.capture_revision(factory(), shots[0])
+    assert json.loads(revA.snapshot_json)["continuity"][
+        "feature_states"][0]["value"] == "fresh"
+
+    # Narrative change: a new scene created AFTER ranks later; moving the
+    # anchor there makes the transition future for shots[0] → schema 2.
+    r = await client.post(f"/sequences/{seq}/scenes", json={"title": "C2"})
+    scene2 = r.json()["id"]
+    r = await client.patch(
+        f"/continuity-feature-transitions/{t['id']}",
+        json={"anchor_type": "scene", "anchor_id": scene2},
+    )
+    assert r.status_code == 200
+    revB = await revision_svc.capture_revision(factory(), shots[0])
+    assert json.loads(revB.snapshot_json)["schema_version"] == 2
+    assert revB.id != revA.id
+    # Reorder of narrative members never reinterprets A.
+    rowA = await _fetch(
+        engine, "SELECT snapshot_json FROM shot_revisions WHERE id = :r",
+        {"r": revA.id},
+    )
+    assert json.loads(rowA["snapshot_json"])["continuity"][
+        "feature_states"][0]["value"] == "fresh"
+
+
+async def test_different_concurrent_schema3_captures_both_persist(client, factory):
+    from soloring.domain import revisions as revision_svc
+
+    pid = await _seed_project(factory)
+    eva = await _entity_approved(client, pid)
+    f1 = await _feature(client, eva["id"], key="cut")
+    f2 = await _feature(client, eva["id"], key="wet", value_type="text",
+                        enum_values=None)
+    seq, scene, shots = await _topology(client, factory, pid, 1)
+    await _depend(client, shots[0], eva["id"])
+
+    # Capture 1: only cut set.
+    await _transition(client, f1["id"], "scene", scene, "start", "set",
+                      "fresh")
+    async def one():
+        async with factory() as s:
+            return await revision_svc.capture_revision(s, shots[0])
+    revA = await one()
+
+    # Now a different state.
+    await _transition(client, f2["id"], "scene", scene, "start", "set",
+                      "soaked")
+    revB = await one()
+    assert revB.id != revA.id
+    assert json.loads(revB.snapshot_json)["continuity"]["feature_states"]
+
+
+# --- B5: complete §15 schema-3 historical isolation -----------------------------------
+
+
+async def test_schema3_historical_isolation_full(client, factory, engine):
+    """All §15 rows against a schema-3 baseline: edit/delete/re-anchor the
+    transition, rename/delete the Feature (after transition removal),
+    reorder topology, approve a newer revision, recreate the equivalent
+    transition — the captured revision is byte-untouched each time."""
+    from soloring.domain import revisions as revision_svc
+
+    pid = await _seed_project(factory)
+    eva = await _entity_approved(client, pid)
+    f = await _feature(client, eva["id"])
+    seq, scene, shots = await _topology(client, factory, pid, 1)
+    await _depend(client, shots[0], eva["id"])
+    t = (await _transition(
+        client, f["id"], "scene", scene, "start", "set", "fresh"
+    )).json()
+    rev = await revision_svc.capture_revision(factory(), shots[0])
+    frozen = await _fetch(
+        engine,
+        "SELECT snapshot_json, snapshot_hash, continuity_spec_json, "
+        "continuity_spec_hash FROM shot_revisions WHERE id = :r",
+        {"r": rev.id},
+    )
+    frozen_children = await _fetch_all(
+        engine,
+        "SELECT * FROM shot_revision_feature_states "
+        "WHERE shot_revision_id = :r",
+        {"r": rev.id},
+    )
+
+    async def assert_frozen():
+        now = await _fetch(
+            engine,
+            "SELECT snapshot_json, snapshot_hash, continuity_spec_json, "
+            "continuity_spec_hash FROM shot_revisions WHERE id = :r",
+            {"r": rev.id},
+        )
+        assert now == frozen
+        kids = await _fetch_all(
+            engine,
+            "SELECT * FROM shot_revision_feature_states "
+            "WHERE shot_revision_id = :r",
+            {"r": rev.id},
+        )
+        assert kids == frozen_children
+
+    # 1. edit transition
+    await client.patch(
+        f"/continuity-feature-transitions/{t['id']}",
+        json={"operation": "set", "value": "healing"},
+    )
+    await assert_frozen()
+    # 2. re-anchor transition
+    await client.patch(
+        f"/continuity-feature-transitions/{t['id']}",
+        json={"anchor_type": "shot", "anchor_id": shots[0],
+              "boundary": "end"},
+    )
+    await assert_frozen()
+    # 3. rename Feature (display metadata)
+    await client.patch(f"/continuity-features/{f['id']}",
+                       json={"name": "Renamed"})
+    await assert_frozen()
+    # 4. reorder topology (add + reorder scenes)
+    r = await client.post(f"/sequences/{seq}/scenes", json={"title": "C2"})
+    scene2 = r.json()["id"]
+    r = await client.put(
+        f"/sequences/{seq}/scenes/order",
+        json={"scene_ids": [scene2, scene]},
+    )
+    assert r.status_code == 200
+    await assert_frozen()
+    # 5. approve newer EntityRevision
+    r = await client.post(
+        f"/entities/{eva['id']}/revisions", json={"spec": {"description": "2"}}
+    )
+    cur = (await client.get(f"/entities/{eva['id']}")).json()[
+        "approved_revision_id"]
+    rr = await client.put(
+        f"/entities/{eva['id']}/approved-revision",
+        json={"revision_id": r.json()["id"],
+              "expected_approved_revision_id": cur},
+    )
+    assert rr.status_code == 200
+    await assert_frozen()
+    # 6. delete transition then delete Feature (legal after removal)
+    assert (await client.delete(
+        f"/continuity-feature-transitions/{t['id']}"
+    )).status_code == 204
+    await assert_frozen()
+    assert (await client.delete(f"/continuity-features/{f['id']}")
+            ).status_code == 204
+    await assert_frozen()
+    # 7. recreate equivalent: entity + feature + same-anchor transition →
+    # the ORIGINAL revision's bytes stay frozen (recreation converges onto
+    # a NEW equivalent capture only when fully re-set up).
+    eva2 = await _entity_approved(client, pid, name="Eva2")
+    f2 = await _feature(client, eva2["id"])
+    r = await client.post(f"/sequences/{seq}/scenes", json={"title": "C3"})
+    scene3 = r.json()["id"]
+    await _depend(client, shots[0], eva2["id"])
+    await _transition(client, f2["id"], "scene", scene3, "start", "set",
+                      "fresh")
+    newrev = await revision_svc.capture_revision(factory(), shots[0])
+    assert newrev.id != rev.id
+    await assert_frozen()
+
+
+# --- B5: exact spec-v2 byte fixtures across ALL five value types ----------------------
+
+
+def test_spec_v2_exact_bytes_all_value_types():
+    from types import SimpleNamespace
+
+    from soloring.continuity.snapshots import build_continuity_spec_v2
+    from soloring.domain.canonical import canonical_json_bytes
+
+    def st(entity, fid, key, kind, vt, unit, vj, vh):
+        return SimpleNamespace(
+            entity_id=entity, feature_id=fid, feature_key=key,
+            feature_kind=kind, value_type=vt, unit=unit,
+            value_json=vj, value_hash=vh,
+            source_anchor_type="sequence", source_anchor_id="sq",
+            source_boundary="start", source_transition_id="tt",
+        )
+
+    states = [
+        st("e1", "f1", "wet", "wardrobe_condition", "boolean", None,
+           "true", "1" * 64),
+        st("e1", "f2", "ammo", "status", "integer", "rounds",
+           "17", "2" * 64),
+        st("e2", "f3", "cut", "injury", "enum", None,
+           '"fresh"', "3" * 64),
+        st("e2", "f4", "depth", "damage", "decimal", "cm",
+           '"1.5"', "4" * 64),
+        st("e3", "f5", "note", "custom", "text", None,
+           '"soaked"', "5" * 64),
+    ]
+    spec = build_continuity_spec_v2([], states)
+    raw = canonical_json_bytes(spec).decode("utf-8")
+    h1, h2, h3, h4, h5 = ("1" * 64, "2" * 64, "3" * 64, "4" * 64, "5" * 64)
+    anchor = '{"anchor_id":"sq","anchor_type":"sequence","boundary":"start"}'
+    # Canonical order (entity_id, feature_kind, feature_id): within e1,
+    # status < wardrobe_condition → ammo BEFORE wet; within e2, damage <
+    # injury → depth BEFORE cut.
+    expected = (
+        '{"dependencies":[],"feature_states":['
+        f'{{"entity_id":"e1","feature_id":"f2","feature_key":"ammo",'
+        f'"feature_kind":"status","source_anchor":{anchor},'
+        f'"unit":"rounds","value":17,"value_hash":"{h2}",'
+        f'"value_type":"integer"}},'
+        f'{{"entity_id":"e1","feature_id":"f1","feature_key":"wet",'
+        f'"feature_kind":"wardrobe_condition","source_anchor":{anchor},'
+        f'"unit":null,"value":true,"value_hash":"{h1}",'
+        f'"value_type":"boolean"}},'
+        f'{{"entity_id":"e2","feature_id":"f4","feature_key":"depth",'
+        f'"feature_kind":"damage","source_anchor":{anchor},'
+        f'"unit":"cm","value":"1.5","value_hash":"{h4}",'
+        f'"value_type":"decimal"}},'
+        f'{{"entity_id":"e2","feature_id":"f3","feature_key":"cut",'
+        f'"feature_kind":"injury","source_anchor":{anchor},'
+        f'"unit":null,"value":"fresh","value_hash":"{h3}",'
+        f'"value_type":"enum"}},'
+        f'{{"entity_id":"e3","feature_id":"f5","feature_key":"note",'
+        f'"feature_kind":"custom","source_anchor":{anchor},'
+        f'"unit":null,"value":"soaked","value_hash":"{h5}",'
+        f'"value_type":"text"}}],'
+        '"relations":[],"schema_version":2}'
+    )
+    assert raw == expected
+    assert "source_transition_id" not in raw

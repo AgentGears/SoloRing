@@ -195,18 +195,91 @@ def effective_working_snapshot_hash(
     return canonical_hash(snapshot)
 
 
-def historical_value_hash(value_json: str) -> str:
-    """Captured-row-only re-canonicalization (M7C §12 + freeze note).
+def historical_canonicalize_value(value_type: str, value_json: str):
+    """Captured-row-only historical canonicalization (M7C §12 + freeze note).
 
-    Parses the stored canonical value bytes, re-serializes canonically, and
-    returns the SHA-256 — with NO consultation of the live Feature schema
-    (today's enum membership is not historical truth; the captured
-    value_type/scalar/hash are the authority)."""
+    Enforces the frozen scalar grammar for the CAPTURED value_type using
+    captured-row information only — never today's Feature schema (enum
+    membership was not captured; the row's value_type/scalar/hash are the
+    authority). Returns (canonical_value_json, sha256). Raises ValueError
+    on any type violation; the caller normalizes that to the invariant
+    error.
+
+    Grammar (frozen §7 byte contracts, historical form):
+      boolean  → JSON true/false (nothing else; 0/1 are not booleans)
+      integer  → JSON int, not bool, within safe-integer bounds
+      decimal  → canonical decimal STRING form (no exponent, trimmed zeros)
+      text     → JSON string, 1–4096, non-whitespace, already trimmed
+      enum     → a JSON string (enum-shaped); membership is NOT re-checked
+    Objects and arrays are invalid for every type."""
     import hashlib
     import json as _json
 
+    try:
+        scalar = _json.loads(value_json)
+    except (ValueError, TypeError) as exc:
+        raise ValueError(f"stored value_json is not valid JSON: {exc}")
+    if isinstance(scalar, (dict, list)):
+        raise ValueError("stored value is an object/array — no M7 value type permits it")
+
+    if value_type == "boolean":
+        if not isinstance(scalar, bool):
+            raise ValueError("captured boolean is not JSON true/false")
+    elif value_type == "integer":
+        if isinstance(scalar, bool) or not isinstance(scalar, int):
+            raise ValueError("captured integer is not a JSON integer")
+        if not (-9007199254740991 <= scalar <= 9007199254740991):
+            raise ValueError("captured integer is outside safe-integer bounds")
+    elif value_type == "decimal":
+        if not isinstance(scalar, str):
+            raise ValueError("captured decimal is not a canonical string")
+        import re as _re
+        if _re.match(r"^-?(?:0|[1-9][0-9]*)(\.[0-9]+)?$", scalar) is None:
+            raise ValueError(
+                "captured decimal does not match the canonical grammar"
+            )
+        # Must already be canonical: trimmed zeros / no -0.
+        from soloring.continuity.values import canonical_decimal_string
+        if canonical_decimal_string(scalar) != scalar:
+            raise ValueError("captured decimal is not in canonical form")
+    elif value_type == "text":
+        if not isinstance(scalar, str):
+            raise ValueError("captured text is not a string")
+        if not (1 <= len(scalar) <= 4096):
+            raise ValueError("captured text length out of bounds")
+        if scalar.strip() == "" or scalar != scalar.strip():
+            raise ValueError("captured text is not already-trimmed non-whitespace")
+    elif value_type == "enum":
+        if not isinstance(scalar, str):
+            raise ValueError("captured enum value is not a string")
+        # Membership deliberately NOT re-checked: today's enum_values_json
+        # are not historical truth (the freeze note).
+    else:
+        raise ValueError(f"captured value_type {value_type!r} is outside the M7 domain")
+
+    canonical = canonical_json_str(scalar)
+    digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    return canonical, digest
+
+
+def historical_value_hash(value_json: str) -> str:
+    """Backward-compatible pure re-hash (no type grammar). Prefer
+    historical_canonicalize_value, which enforces the captured type."""
+    return historical_canonicalize_value(
+        _infer_scalar_type(value_json), value_json
+    )[1]
+
+
+def _infer_scalar_type(value_json: str) -> str:
+    """Best-effort type inference for the pure-hash helper (tests only)."""
+    import json as _json
+
     scalar = _json.loads(value_json)
-    return hashlib.sha256(canonical_json_str(scalar).encode("utf-8")).hexdigest()
+    if isinstance(scalar, bool):
+        return "boolean"
+    if isinstance(scalar, int):
+        return "integer"
+    return "text"
 
 
 _RESOLUTION_SQL = """

@@ -135,8 +135,44 @@ async def _revision_continuity(session: AsyncSession, revision_id: str) -> dict:
     if rev["continuity_spec_json"] is not None:
         import json
 
-        spec = json.loads(rev["continuity_spec_json"])
-        continuity_schema_version = spec.get("schema_version")
+        from soloring.errors import internal_invariant
+
+        # Malformed historical representations are database corruption,
+        # not client input: normalize ANY decode/shape failure to the
+        # invariant error — never a raw JSONDecodeError/AttributeError,
+        # never a current-state fallback (M7C §12/§18).
+        try:
+            spec = json.loads(rev["continuity_spec_json"])
+        except (ValueError, TypeError) as exc:
+            raise internal_invariant(
+                f"ShotRevision {revision_id} continuity_spec_json is "
+                f"malformed JSON: {exc}"
+            ) from exc
+        if not isinstance(spec, dict):
+            raise internal_invariant(
+                f"ShotRevision {revision_id} continuity_spec_json is not "
+                "a JSON object."
+            )
+        version = spec.get("schema_version")
+        if not isinstance(version, int) or isinstance(version, bool):
+            raise internal_invariant(
+                f"ShotRevision {revision_id} continuity spec lacks an "
+                "integer schema_version."
+            )
+        if version not in (1, 2):
+            raise internal_invariant(
+                f"ShotRevision {revision_id} continuity spec declares "
+                f"unknown schema_version {version}."
+            )
+        if version == 1 and "feature_states" in spec:
+            raise internal_invariant(
+                f"ShotRevision {revision_id} spec 1 carries feature_states."
+            )
+        if version == 2 and "feature_states" not in spec:
+            raise internal_invariant(
+                f"ShotRevision {revision_id} spec 2 lacks feature_states."
+            )
+        continuity_schema_version = version
         dependencies = list(spec.get("dependencies", []))
         # Rebuild the FULL canonical spec from the IMMUTABLE ROWS and
         # compare canonical bytes AND hash with what is persisted — the
@@ -146,7 +182,7 @@ async def _revision_continuity(session: AsyncSession, revision_id: str) -> dict:
             ResolvedDependency,
             build_continuity_spec,
             build_continuity_spec_v2,
-            historical_value_hash,
+            historical_canonicalize_value,
         )
         from soloring.domain.canonical import (
             canonical_hash,
@@ -221,7 +257,23 @@ async def _revision_continuity(session: AsyncSession, revision_id: str) -> dict:
                 self.source_boundary = row["source_boundary"]
 
         for row in frows:
-            if historical_value_hash(row["value_json"]) != row["value_hash"]:
+            try:
+                canonical, digest = historical_canonicalize_value(
+                    row["value_type"], row["value_json"]
+                )
+            except ValueError as exc:
+                raise internal_invariant(
+                    f"ShotRevision {revision_id} feature row "
+                    f"{row['feature_id']} violates its captured value "
+                    f"type {row['value_type']!r}: {exc}"
+                ) from exc
+            if canonical != row["value_json"]:
+                raise internal_invariant(
+                    f"ShotRevision {revision_id} feature row "
+                    f"{row['feature_id']} value_json is not in canonical "
+                    "form."
+                )
+            if digest != row["value_hash"]:
                 raise internal_invariant(
                     f"ShotRevision {revision_id} feature row "
                     f"{row['feature_id']} value bytes disagree with its "

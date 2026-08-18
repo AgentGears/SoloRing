@@ -123,15 +123,41 @@ def _expected_feature_rows(feature_states):
 
 
 async def _validate_reuse_integrity(
-    conn, revision_id, resolved, feature_states
+    conn, revision_id, snapshot_json, spec_json, spec_hash,
+    resolved, feature_states,
 ) -> None:
     """Fail-closed validation of an EXISTING winner (M7C §9.4, APR-023).
 
-    Verifies the stored M6 dependency set and the stored M7 feature-state
-    semantic set against the captured expectation. Any disagreement —
-    missing, extra, wrong, bad hash, wrong anchor/schema — is
-    INTERNAL_INVARIANT_VIOLATION. Prohibited outcomes: never
+    Full frozen chain, in order: exact parent snapshot bytes, then
+    continuity_spec bytes AND hash, then the stored M6 dependency set,
+    then the stored M7 feature-state semantic set. Any disagreement —
+    missing, extra, wrong, bad hash, wrong anchor/schema, wrong spec
+    bytes — is INTERNAL_INVARIANT_VIOLATION. Prohibited outcomes: never
     reuse-decline-and-recapture, never repair/refill, never omit."""
+    parent = (
+        await conn.execute(
+            text(
+                "SELECT snapshot_json, continuity_spec_json, "
+                "continuity_spec_hash FROM shot_revisions WHERE id = :rid"
+            ),
+            {"rid": revision_id},
+        )
+    ).mappings().one_or_none()
+    if parent is None:  # pragma: no cover - lookup key came from this row
+        raise internal_invariant(
+            f"ShotRevision {revision_id} vanished inside its reuse unit."
+        )
+    if parent["snapshot_json"] != snapshot_json:
+        raise internal_invariant(
+            f"ShotRevision {revision_id} reuse: stored snapshot_json "
+            "disagrees with the captured expectation."
+        )
+    if parent["continuity_spec_json"] != spec_json or             parent["continuity_spec_hash"] != spec_hash:
+        raise internal_invariant(
+            f"ShotRevision {revision_id} reuse: stored continuity spec "
+            "bytes/hash disagree with the captured expectation."
+        )
+
     dep_rows = (
         await conn.execute(
             text(
@@ -225,7 +251,8 @@ async def _persist_revision_fenced(
                 ).first()
                 if existing is not None:
                     await _validate_reuse_integrity(
-                        conn, existing[0], resolved, feature_states
+                        conn, existing[0], snapshot_json, spec_json,
+                        spec_hash, resolved, feature_states,
                     )
                     await conn.exec_driver_sql("COMMIT")
                     return existing[0]
