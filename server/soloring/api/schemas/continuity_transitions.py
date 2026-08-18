@@ -4,6 +4,8 @@ are never accepted from clients."""
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict
 
 _ANCHOR_TYPES = ("sequence", "scene", "shot")
@@ -14,20 +16,23 @@ _OPERATIONS = ("set", "clear")
 class TransitionCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    anchor_type: str
+    anchor_type: Literal["sequence", "scene", "shot"]
     anchor_id: str
-    boundary: str
-    operation: str
+    boundary: Literal["start", "end"]
+    operation: Literal["set", "clear"]
     value: object | None = None
 
 
 class TransitionPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    anchor_type: str | None = None
+    # Nullable so omission (preserve) is expressible, but a NON-null value
+    # must be a domain member — invalid operations are rejected 422 at the
+    # request boundary, never policed by DB constraints downstream.
+    anchor_type: Literal["sequence", "scene", "shot"] | None = None
     anchor_id: str | None = None
-    boundary: str | None = None
-    operation: str | None = None
+    boundary: Literal["start", "end"] | None = None
+    operation: Literal["set", "clear"] | None = None
     value: object | None = None
 
 

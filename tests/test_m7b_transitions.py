@@ -699,14 +699,19 @@ async def test_transition_vs_feature_delete_race(client, factory):
 async def test_resolver_query_count_bounded(client, factory, engine):
     """§14: query count must be bounded by resolver phases, not rows. A
     small fixture and a ~2500-shot fixture must issue the SAME number of
-    SQL statements to resolve one target Shot."""
+    SQL statements to resolve one target Shot. The two fixtures live in
+    SEPARATE Projects (Project-local ordering keeps them independent) so
+    the small measurement cannot be polluted by the large topology."""
     from soloring.continuity.state import resolve_effective_feature_state
 
-    pid = await _seed_project(factory)
-    eva = await _entity_approved(client, pid)
-    f = await _feature(client, eva["id"])
+    pid_small = await _seed_project(factory)
+    pid_big = await _seed_project(factory)
+    eva_small = await _entity_approved(client, pid_small)
+    f_small = await _feature(client, eva_small["id"])
+    eva_big = await _entity_approved(client, pid_big, name="BigEva")
+    f_big = await _feature(client, eva_big["id"])
 
-    async def build(n_seqs, scenes_per_seq, shots_per_scene):
+    async def build(pid, n_seqs, scenes_per_seq, shots_per_scene):
         from soloring.api.schemas.shots import ShotCreate as SC
 
         seq_ids = []
@@ -740,10 +745,10 @@ async def test_resolver_query_count_bounded(client, factory, engine):
             assert r.status_code == 200, r.text
         return seq_ids, [c for _, c in scene_ids], shot_rows
 
-    small_seq, small_scenes, small_shots = await build(2, 3, 8)  # 48 shots
-    await _depend(client, small_shots[-1], eva["id"])
-    await _transition(client, f["id"], "sequence", small_seq[0], "start",
-                      "set", "fresh")
+    small_seq, small_scenes, small_shots = await build(pid_small, 2, 3, 8)
+    await _depend(client, small_shots[-1], eva_small["id"])
+    await _transition(client, f_small["id"], "sequence", small_seq[0],
+                      "start", "set", "fresh")
 
     big_n = 2500
     big_seqs = 25
@@ -751,12 +756,12 @@ async def test_resolver_query_count_bounded(client, factory, engine):
     per_scene = big_n // (big_seqs * scenes_per)
     t0 = time.perf_counter()
     big_seq, big_scenes, big_shots = await build(
-        big_seqs, scenes_per, per_scene
+        pid_big, big_seqs, scenes_per, per_scene
     )
     build_s = time.perf_counter() - t0
     target = big_shots[-1]
-    await _depend(client, target, eva["id"])
-    await _transition(client, f["id"], "sequence", big_seq[0], "start",
+    await _depend(client, target, eva_big["id"])
+    await _transition(client, f_big["id"], "sequence", big_seq[0], "start",
                       "set", "fresh")
 
     counts = {}
@@ -801,3 +806,409 @@ async def test_resolver_query_count_bounded(client, factory, engine):
     # Bounded by resolver phases: the big fixture may not exceed the small
     # one's count by more than a small constant (per-phase queries).
     assert big_q <= small_q + 2
+
+# --- M7B r2: deterministic race proofs (B5) ----------------------------------------
+# All races use the lock-parking/seam discipline: legal serialized outcomes
+# are pinned, then an invariant query proves no dangling active transition
+# and no duplicate active coordinate.
+
+
+async def _no_dangling(engine) -> None:
+    rows = await _fetch_all_if_exists(engine)
+    assert rows == []
+
+
+async def _fetch_all_if_exists(engine):
+    async with engine.connect() as conn:
+        rows = (await conn.execute(text(
+            "SELECT t.id FROM continuity_feature_transitions t "
+            "LEFT JOIN continuity_features f ON f.id = t.feature_id "
+            "LEFT JOIN creative_entities e ON e.id = f.entity_id "
+            "WHERE t.deleted_at IS NULL AND "
+            "(f.id IS NULL OR f.deleted_at IS NOT NULL OR "
+            " e.deleted_at IS NOT NULL)"
+        ))).scalars().all()
+        dupes = (await conn.execute(text(
+            "SELECT feature_id, anchor_type, anchor_id, boundary, "
+            "COUNT(*) AS n FROM continuity_feature_transitions "
+            "WHERE deleted_at IS NULL "
+            "GROUP BY feature_id, anchor_type, anchor_id, boundary "
+            "HAVING n > 1"
+        ))).all()
+    assert dupes == []
+    return list(rows)
+
+
+async def test_race_transition_create_vs_feature_delete(client, factory, engine):
+    """Deterministic interleaving: the Feature delete parks on the write
+    lock AFTER the transition create has committed — Feature delete must
+    then see the active transition and refuse."""
+    pid = await _seed_project(factory)
+    seq, scene, shots = await _topology(client, factory, pid, 1)
+    eva = await _entity(client, pid)
+    f = await _feature(client, eva["id"])
+
+    from soloring.continuity import transitions as tsvc
+    from soloring.api.schemas.continuity_transitions import TransitionCreate
+
+    original = tsvc._load_active_feature
+    state = {}
+
+    async def wrap(conn, feature_id):
+        result = await original(conn, feature_id)
+        if "task" not in state:
+            import asyncio as _a
+
+            async def delete_it():
+                async with factory() as s:
+                    try:
+                        await __import__("soloring.continuity.features",
+                                         fromlist=["x"]).delete_feature(
+                            s, feature_id)
+                        return "deleted"
+                    except Exception as exc:
+                        return getattr(exc, "code", type(exc).__name__)
+
+            state["task"] = _a.create_task(delete_it())
+            await _a.sleep(0.3)  # parked on OUR write lock
+        return result
+
+    import soloring.continuity.transitions as tmod
+    tmod._load_active_feature = wrap
+    try:
+        async with factory() as s:
+            tid = await tsvc.create_transition(
+                s, f["id"],
+                TransitionCreate(anchor_type="shot", anchor_id=shots[0],
+                                 boundary="start", operation="set",
+                                 value="fresh"),
+            )
+    finally:
+        tmod._load_active_feature = original
+    outcome = await state["task"]
+    assert outcome == "CONTINUITY_FEATURE_IN_USE"
+    await _no_dangling(engine)
+    # Cleanup for the invariant query's duplicate check.
+    async with factory() as s:
+        await tsvc.delete_transition(s, tid)
+
+
+async def test_race_transition_create_vs_anchor_delete(client, factory, engine):
+    """Anchor (Shot) deletion parks on the write lock while the transition
+    create commits; deletion must then refuse with ANCHOR_IN_USE."""
+    pid = await _seed_project(factory)
+    seq, scene, shots = await _topology(client, factory, pid, 1)
+    eva = await _entity(client, pid)
+    f = await _feature(client, eva["id"])
+
+    from soloring.api.schemas.continuity_transitions import TransitionCreate
+    from soloring.continuity import transitions as tsvc
+
+    original = tsvc._load_active_feature
+    state = {}
+
+    async def wrap(conn, feature_id):
+        result = await original(conn, feature_id)
+        if "task" not in state:
+            import asyncio as _a
+
+            async def delete_shot():
+                async with factory() as s:
+                    try:
+                        await __import__("soloring.domain.shots",
+                                         fromlist=["x"]).delete_shot(
+                            s, shots[0])
+                        return "deleted"
+                    except Exception as exc:
+                        return getattr(exc, "code", type(exc).__name__)
+
+            state["task"] = _a.create_task(delete_shot())
+            await _a.sleep(0.3)
+        return result
+
+    import soloring.continuity.transitions as tmod
+    tmod._load_active_feature = wrap
+    try:
+        async with factory() as s:
+            tid = await tsvc.create_transition(
+                s, f["id"],
+                TransitionCreate(anchor_type="shot", anchor_id=shots[0],
+                                 boundary="start", operation="set",
+                                 value="fresh"),
+            )
+    finally:
+        tmod._load_active_feature = original
+    outcome = await state["task"]
+    assert outcome == "CONTINUITY_ANCHOR_IN_USE"
+    await _no_dangling(engine)
+    async with factory() as s:
+        await tsvc.delete_transition(s, tid)
+
+
+async def test_race_transition_create_vs_shot_unassign(client, factory, engine):
+    """Unassignment parks on the write lock; it must then refuse (the Shot
+    anchors an active transition)."""
+    pid = await _seed_project(factory)
+    seq, scene, shots = await _topology(client, factory, pid, 2)
+    eva = await _entity(client, pid)
+    f = await _feature(client, eva["id"])
+
+    from soloring.api.schemas.continuity_transitions import TransitionCreate
+    from soloring.continuity import transitions as tsvc
+
+    original = tsvc._load_active_feature
+    state = {}
+
+    async def wrap(conn, feature_id):
+        result = await original(conn, feature_id)
+        if "task" not in state:
+            import asyncio as _a
+
+            async def unassign():
+                async with factory() as s:
+                    from soloring.narrative import scenes as scene_svc
+
+                    try:
+                        await scene_svc.assign_scene_shots(
+                            s, scene, [shots[1]]
+                        )
+                        return "unassigned"
+                    except Exception as exc:
+                        return getattr(exc, "code", type(exc).__name__)
+
+            state["task"] = _a.create_task(unassign())
+            await _a.sleep(0.3)
+        return result
+
+    import soloring.continuity.transitions as tmod
+    tmod._load_active_feature = wrap
+    try:
+        async with factory() as s:
+            tid = await tsvc.create_transition(
+                s, f["id"],
+                TransitionCreate(anchor_type="shot", anchor_id=shots[0],
+                                 boundary="start", operation="set",
+                                 value="fresh"),
+            )
+    finally:
+        tmod._load_active_feature = original
+    outcome = await state["task"]
+    assert outcome == "CONTINUITY_ANCHOR_IN_USE"
+    await _no_dangling(engine)
+    async with factory() as s:
+        await tsvc.delete_transition(s, tid)
+
+
+async def test_race_patch_vs_patch_into_same_coordinate(client, factory, engine):
+    """Two PATCHes target the same free coordinate; exactly one wins, the
+    other receives the conflict — deterministic via the write lock."""
+    pid = await _seed_project(factory)
+    seq, scene, shots = await _topology(client, factory, pid, 2)
+    eva = await _entity(client, pid)
+    f = await _feature(client, eva["id"])
+
+    t1 = (await _transition(
+        client, f["id"], "shot", shots[0], "start", "set", "fresh"
+    )).json()
+    t2 = (await _transition(
+        client, f["id"], "shot", shots[1], "start", "set", "healing"
+    )).json()
+
+    async def patch(tid, anchor_id):
+        return await client.patch(
+            f"/continuity-feature-transitions/{tid}",
+            json={"anchor_type": "scene", "anchor_id": anchor_id,
+                  "boundary": "start"},
+        )
+
+    results = await asyncio.gather(
+        patch(t1["id"], scene), patch(t2["id"], scene)
+    )
+    codes = sorted(r.status_code for r in results)
+    assert codes == [200, 409], codes
+    await _no_dangling(engine)
+
+
+# --- M7B r2: missing frozen-gate pins (B7) -------------------------------------------
+
+
+async def test_exact_409_for_cross_project_anchor_all_types(client, factory):
+    pid_a = await _seed_project(factory)
+    pid_b = await _seed_project(factory)
+    seq_a, scene_a, shots_a = await _topology(client, factory, pid_a)
+    seq_b, scene_b, shots_b = await _topology(client, factory, pid_b)
+    eva = await _entity(client, pid_a)
+    f = await _feature(client, eva["id"])
+
+    for anchor_type, anchor_id in (
+        ("sequence", seq_b), ("scene", scene_b), ("shot", shots_b[0]),
+    ):
+        r = await _transition(
+            client, f["id"], anchor_type, anchor_id, "start", "set", "fresh"
+        )
+        assert r.status_code == 409, (anchor_type, r.text)
+        assert r.json()["error_code"] == "CONTINUITY_ANCHOR_PROJECT_MISMATCH"
+
+
+async def test_tombstoned_anchor_rejection_all_types(client, factory, engine):
+    pid = await _seed_project(factory)
+    seq, scene, shots = await _topology(client, factory, pid, 2)
+    eva = await _entity(client, pid)
+    f = await _feature(client, eva["id"])
+
+    # Tombstone a spare scene/sequence/shot without anchor guards firing
+    # (no transitions reference them yet).
+    r = await client.post(f"/sequences/{seq}/scenes", json={"title": "C2"})
+    scene2 = r.json()["id"]
+    lonely = await _shot(client, factory, pid)
+
+    async with engine.connect() as conn:
+        await conn.exec_driver_sql("BEGIN IMMEDIATE")
+        await conn.execute(
+            text("UPDATE scenes SET deleted_at = "
+                 "strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = :c"),
+            {"c": scene2},
+        )
+        await conn.execute(
+            text("UPDATE shots SET deleted_at = "
+                 "strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = :s"),
+            {"s": lonely},
+        )
+        await conn.execute(
+            text("UPDATE sequences SET deleted_at = "
+                 "strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = :q"),
+            {"q": seq},
+        )
+        await conn.exec_driver_sql("COMMIT")
+
+    for anchor_type, anchor_id in (
+        ("sequence", seq), ("scene", scene2), ("shot", lonely),
+    ):
+        r = await _transition(
+            client, f["id"], anchor_type, anchor_id, "start", "set", "fresh"
+        )
+        assert r.status_code == 422, (anchor_type, r.text)
+        assert r.json()["error_code"] == "INVALID_CONTINUITY_ANCHOR"
+
+
+async def test_corrupt_topology_invariant_isolation(client, factory, engine):
+    pid_a = await _seed_project(factory)
+    pid_b = await _seed_project(factory)
+    seq_a, scene_a, shots_a = await _topology(client, factory, pid_a)
+    seq_b, scene_b, shots_b = await _topology(client, factory, pid_b)
+    eva = await _entity(client, pid_a)
+    f = await _feature(client, eva["id"])
+    # B's target must actually traverse the ordering: dependency + feature
+    # + active transition on B's own entity (otherwise the resolver
+    # short-circuits on empty dependencies and never loads topology).
+    eva_b = await _entity_approved(client, pid_b, name="B")
+    f_b = await _feature(client, eva_b["id"], key="b_cut")
+    await _depend(client, shots_b[0], eva_b["id"])
+    await _transition(client, f_b["id"], "sequence", seq_b, "start", "set",
+                      "fresh")
+
+    async with engine.connect() as conn:
+        await conn.exec_driver_sql("BEGIN IMMEDIATE")
+        await conn.execute(
+            text("UPDATE sequences SET deleted_at = "
+                 "strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = :q"),
+            {"q": seq_b},
+        )
+        await conn.exec_driver_sql("COMMIT")
+
+    r = await client.get(f"/shots/{shots_a[0]}/continuity-state")
+    assert r.status_code == 200  # A unaffected by B's corruption
+    from soloring.errors import SoloRingError
+    from soloring.continuity.state import resolve_effective_feature_state
+    async with engine.connect() as conn:
+        with pytest.raises(SoloRingError) as ei:
+            await resolve_effective_feature_state(conn, shots_b[0])
+    assert ei.value.code == "INTERNAL_INVARIANT_VIOLATION"
+
+
+async def test_direct_capture_revision_gates(client, factory, engine):
+    """Direct capture_revision() (not via HTTP) enforces both gates and
+    writes no ShotRevision."""
+    from soloring.domain import revisions as revision_svc
+
+    pid = await _seed_project(factory)
+    eva = await _entity_approved(client, pid)
+    f = await _feature(client, eva["id"])
+    seq, scene, shots = await _topology(client, factory, pid, 2)
+    for sid in shots:
+        await _depend(client, sid, eva["id"])
+
+    # Zero effective state: capture legal, exact schema-2 form (deps, no M7).
+    rev = await revision_svc.capture_revision(factory(), shots[0])
+    snapshot = json.loads(rev.snapshot_json)
+    assert snapshot["schema_version"] == 2
+    assert "continuity" in snapshot
+    assert snapshot["continuity"]["dependencies"]
+    assert rev.continuity_spec_hash is not None
+
+    # Effective-empty via future transition AND winning clear: still legal,
+    # and converges back onto the SAME schema-2 revision (M6 form exact).
+    await _transition(client, f["id"], "shot", shots[1], "end", "set",
+                      "fresh")  # future for shots[0]
+    listed = None
+    rev2 = await revision_svc.capture_revision(factory(), shots[0])
+    assert rev2.id == rev.id  # converged onto the same M6 revision
+
+    # Winning clear on the target's own coordinate: effective empty.
+    tid = None
+    for row in (await client.get(
+            f"/continuity-features/{f['id']}/transitions")).json():
+        if row["anchor_type"] == "shot" and row["anchor_id"] == shots[1]:
+            tid = row["id"]
+    await client.patch(
+        f"/continuity-feature-transitions/{tid}",
+        json={"boundary": "start"},
+    )
+    await client.patch(
+        f"/continuity-feature-transitions/{tid}", json={"operation": "clear"}
+    )
+    rev3 = await revision_svc.capture_revision(factory(), shots[0])
+    assert rev3.id == rev.id
+
+    # Nonempty effective state → gate, no revision written. Anchor at
+    # scene/start (eligible for shots[0]); shots[1]/start is future for it.
+    r = await client.patch(
+        f"/continuity-feature-transitions/{tid}",
+        json={"anchor_type": "scene", "anchor_id": scene,
+              "operation": "set", "value": "fresh"},
+    )
+    assert r.status_code == 200
+    before = await _fetch(
+        engine, "SELECT COUNT(*) AS n FROM shot_revisions WHERE shot_id = :s",
+        {"s": shots[0]},
+    )
+    with pytest.raises(SoloRingError) as ei:
+        await revision_svc.capture_revision(factory(), shots[0])
+    assert ei.value.code == "NARRATIVE_STATE_CAPTURE_UNAVAILABLE"
+    after = await _fetch(
+        engine, "SELECT COUNT(*) AS n FROM shot_revisions WHERE shot_id = :s",
+        {"s": shots[0]},
+    )
+    assert after["n"] == before["n"]
+
+    # Unassigned + relevant → context gate, no revision written.
+    lonely = await _shot(client, factory, pid)
+    await _depend(client, lonely, eva["id"])
+    before = await _fetch(
+        engine, "SELECT COUNT(*) AS n FROM shot_revisions WHERE shot_id = :s",
+        {"s": lonely},
+    )
+    with pytest.raises(SoloRingError) as ei:
+        await revision_svc.capture_revision(factory(), lonely)
+    assert ei.value.code == "NARRATIVE_CONTEXT_REQUIRED"
+    after = await _fetch(
+        engine, "SELECT COUNT(*) AS n FROM shot_revisions WHERE shot_id = :s",
+        {"s": lonely},
+    )
+    assert after["n"] == before["n"]
+
+
+async def _fetch_all(engine, sql, params=None):
+    async with engine.connect() as conn:
+        rows = (await conn.execute(text(sql), params or {})).mappings().all()
+    return [dict(r) for r in rows]

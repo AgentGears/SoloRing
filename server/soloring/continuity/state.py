@@ -224,17 +224,35 @@ async def resolve_effective_feature_state(
             )
         t = best[0]
         if t["operation"] == "clear":
+            if t["value_json"] is not None or t["value_hash"] is not None:
+                raise internal_invariant(
+                    f"Stored clear transition {t['id']} carries non-NULL "
+                    "value columns."
+                )
             continue  # canonical absence (§5 clear semantics)
+        if t["operation"] != "set":
+            raise internal_invariant(
+                f"Stored transition {t['id']} has operation "
+                f"{t['operation']!r} outside the set|clear domain."
+            )
         feature = feature_by_id[fid]
         # Stored-value verification: re-canonicalize and require exact
-        # byte/hash equality with what is persisted.
-        enum_values = None
-        if feature["value_type"] == "enum":
-            enum_values = json.loads(feature["enum_values_json"])
-        stored_value = json.loads(t["value_json"])
-        v_json, v_hash = canonicalize_value(
-            feature["value_type"], stored_value, enum_values=enum_values
-        )
+        # byte/hash equality with what is persisted. ANY decoding failure
+        # here is database corruption — normalized to the invariant error,
+        # never leaked as client validation or an unstructured exception.
+        try:
+            enum_values = None
+            if feature["value_type"] == "enum":
+                enum_values = json.loads(feature["enum_values_json"])
+            stored_value = json.loads(t["value_json"])
+            v_json, v_hash = canonicalize_value(
+                feature["value_type"], stored_value, enum_values=enum_values
+            )
+        except Exception as exc:
+            raise internal_invariant(
+                f"Stored transition {t['id']} value cannot be decoded "
+                "against its Feature schema — persisted corruption."
+            ) from exc
         if v_json != t["value_json"] or v_hash != t["value_hash"]:
             raise internal_invariant(
                 f"Stored transition {t['id']} value disagrees with its "

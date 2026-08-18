@@ -421,8 +421,20 @@ async def get_shot_continuity_state(
 
     if not is_uuid(shot_id):
         raise not_found(ErrorCode.SHOT_NOT_FOUND, f"Shot {shot_id} not found.")
+    import contextlib as _cl
+
     async with session.bind.connect() as conn:
-        outcome = await resolve_effective_feature_state(conn, shot_id)
+        # One explicit consistent read unit (the established pattern):
+        # the complete M7 current state resolves from ONE WAL snapshot —
+        # all-before or all-after a concurrent mutation, never a hybrid.
+        await conn.exec_driver_sql("BEGIN")
+        try:
+            outcome = await resolve_effective_feature_state(conn, shot_id)
+            await conn.commit()
+        except Exception:
+            with _cl.suppress(Exception):
+                await conn.rollback()
+            raise
     if not outcome.assigned and outcome.relevant_temporal_data:
         raise narrative_context_required(shot_id)
     readiness = readiness_projection(outcome)

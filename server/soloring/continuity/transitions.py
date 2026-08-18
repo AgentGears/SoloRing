@@ -140,9 +140,34 @@ async def _validate_anchor_in_ordering(
                 f"Shot anchor {anchor_id} is unassigned — it has no "
                 "narrative boundary."
             )
-    # Scene ownership/reachability is proven by its presence in the
-    # canonical ordering below (missing/tombstoned/cross-Project scenes
-    # never enter the target Project's stream).
+    elif anchor_type == ANCHOR_SCENE:
+        row = (
+            await conn.execute(
+                text(
+                    "SELECT sc.deleted_at AS scene_deleted, "
+                    "sq.project_id AS seq_project, "
+                    "sq.deleted_at AS seq_deleted "
+                    "FROM scenes sc "
+                    "LEFT JOIN sequences sq ON sq.id = sc.sequence_id "
+                    "WHERE sc.id = :aid"
+                ),
+                {"aid": anchor_id},
+            )
+        ).first()
+        if row is None or row.scene_deleted is not None:
+            raise _invalid_anchor(
+                f"Scene anchor {anchor_id} is missing or tombstoned."
+            )
+        if row.seq_project is None or row.seq_deleted is not None:
+            raise _invalid_anchor(
+                f"Scene anchor {anchor_id} has no active parent Sequence."
+            )
+        if row.seq_project != project_id:
+            raise SoloRingError(
+                ErrorCode.CONTINUITY_ANCHOR_PROJECT_MISMATCH,
+                f"Scene anchor {anchor_id} belongs to another Project.",
+                status_code=409,
+            )
 
     ordering = await load_narrative_ordering(conn, project_id)
     # Both boundaries of a present anchor exist by construction; checking
