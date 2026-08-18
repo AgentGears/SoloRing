@@ -498,15 +498,15 @@ async def test_context_and_readiness_matrix(client, factory):
     assert d["continuity_state_ready"] is True
     assert d["working_snapshot_hash"] is not None
 
-    # Assigned + effective state → resolver succeeds, capture unsafe.
-    # (shots[1]/end is NOT eligible for shots[1] itself — its own /end
-    # comes after its /start — so add shots[0]/end which IS eligible.)
+    # Assigned + effective state → resolver succeeds AND capture-safe
+    # under M7C (plan §10.5 contracted flip): ready, schema-3 hash,
+    # normal comparison.
     await _transition(client, f["id"], "shot", shots[0], "end", "set",
                       "fresh")
     d = (await client.get(f"/shots/{shots[1]}")).json()
-    assert d["continuity_state_ready"] is False
-    assert d["working_snapshot_hash"] is None
-    assert d["working_state_differs_from_approved"] is None
+    assert d["continuity_state_ready"] is True
+    assert d["working_snapshot_hash"] is not None
+    assert d["working_state_differs_from_approved"] is False
     r = await client.get(f"/shots/{shots[1]}/continuity-state")
     assert r.status_code == 200
     assert len(r.json()["feature_states"]) >= 1
@@ -546,14 +546,26 @@ async def test_capture_and_generation_gates(client, factory, engine, settings):
     assert after[0]["n"] == before[0]["n"] + 1
     assert after[1]["n"] == before[1]["n"] + 1
 
-    # Nonempty effective state → both blocked, nothing written.
+    # Nonempty effective state → M7C: generation captures schema 3 (plan
+    # §10.5 contracted flip — the temporary M7B gate is gone).
     await _transition(client, f["id"], "sequence", seq, "start", "set",
                       "fresh")
     before = await counts()
     r = await client.post(f"/shots/{shots[0]}/generations")
-    assert r.status_code == 409, r.text
-    assert r.json()["error_code"] == "NARRATIVE_STATE_CAPTURE_UNAVAILABLE"
-    assert await counts() == before
+    assert r.status_code == 202, r.text
+    after = await counts()
+    assert after[0]["n"] == before[0]["n"] + 1
+    assert after[1]["n"] == before[1]["n"] + 1
+    import json as _j
+
+    rev_row = await _fetch(
+        engine,
+        "SELECT snapshot_json, continuity_spec_json FROM shot_revisions "
+        "WHERE id = :r",
+        {"r": r.json()["shot_revision_id"]},
+    )
+    assert _j.loads(rev_row["snapshot_json"])["schema_version"] == 3
+    assert _j.loads(rev_row["continuity_spec_json"])["schema_version"] == 2
 
     # Unassigned + relevant → context required, nothing written.
     lonely = await _shot(client, factory, pid)
@@ -1170,26 +1182,47 @@ async def test_direct_capture_revision_gates(client, factory, engine):
     rev3 = await revision_svc.capture_revision(factory(), shots[0])
     assert rev3.id == rev.id
 
-    # Nonempty effective state → gate, no revision written. Anchor at
-    # scene/start (eligible for shots[0]); shots[1]/start is future for it.
+    # Nonempty effective state → M7C: schema-3 capture succeeds with
+    # exact immutable feature children (plan §10.5 contracted flip).
     r = await client.patch(
         f"/continuity-feature-transitions/{tid}",
         json={"anchor_type": "scene", "anchor_id": scene,
               "operation": "set", "value": "fresh"},
     )
     assert r.status_code == 200
+    d = (await client.get(f"/shots/{shots[0]}")).json()
+    assert d["continuity_state_ready"] is True
+    assert d["working_snapshot_hash"] is not None
+    r2 = await client.get(f"/shots/{shots[0]}/continuity-state")
+    assert r2.status_code == 200
+    assert len(r2.json()["feature_states"]) >= 1
     before = await _fetch(
         engine, "SELECT COUNT(*) AS n FROM shot_revisions WHERE shot_id = :s",
         {"s": shots[0]},
     )
-    with pytest.raises(SoloRingError) as ei:
-        await revision_svc.capture_revision(factory(), shots[0])
-    assert ei.value.code == "NARRATIVE_STATE_CAPTURE_UNAVAILABLE"
+    rev4 = await revision_svc.capture_revision(factory(), shots[0])
+    snap4 = json.loads(rev4.snapshot_json)
+    assert snap4["schema_version"] == 3
+    assert snap4["continuity"]["schema_version"] == 2
+    assert snap4["continuity"]["feature_states"]
     after = await _fetch(
         engine, "SELECT COUNT(*) AS n FROM shot_revisions WHERE shot_id = :s",
         {"s": shots[0]},
     )
-    assert after["n"] == before["n"]
+    assert after["n"] == before["n"] + 1
+    frows = await _fetch_all(
+        engine,
+        "SELECT feature_key, value_json, source_anchor_type "
+        "FROM shot_revision_feature_states WHERE shot_revision_id = :r",
+        {"r": rev4.id},
+    )
+    assert len(frows) == 1
+    assert frows[0]["feature_key"] == "forehead_cut"
+    assert frows[0]["value_json"] == '"fresh"'
+    assert frows[0]["source_anchor_type"] == "scene"
+    # Inspection/capture parity at this database moment.
+    d2 = (await client.get(f"/shots/{shots[0]}")).json()
+    assert d2["working_snapshot_hash"] == rev4.snapshot_hash
 
     # Unassigned + relevant → context gate, no revision written.
     lonely = await _shot(client, factory, pid)

@@ -27,6 +27,7 @@ from soloring.domain.snapshots import build_snapshot
 from soloring.errors import internal_invariant
 
 CONTINUITY_SCHEMA_VERSION = 1
+CONTINUITY_SPEC_SCHEMA_VERSION_2 = 2
 
 
 @dataclass(frozen=True)
@@ -73,22 +74,107 @@ def build_continuity_spec(resolved: list[ResolvedDependency]) -> dict:
     }
 
 
+# M7C §5.3: canonical feature-state order — (entity_id, feature_kind,
+# feature_id). Deliberately DIFFERENT from the resolver's API display order
+# (entity_id, feature_key); the canonical builder re-sorts.
+_FEATURE_ORDER = ("entity_id", "feature_kind", "feature_id")
+
+
+def _feature_like(state) -> bool:
+    return (
+        hasattr(state, "entity_id")
+        and hasattr(state, "feature_kind")
+        and hasattr(state, "feature_id")
+        and hasattr(state, "feature_key")
+        and hasattr(state, "value_type")
+        and hasattr(state, "value_json")
+        and hasattr(state, "value_hash")
+        and hasattr(state, "source_anchor_type")
+    )
+
+
+def sort_feature_states(states):
+    """Canonical §5.3 ordering before canonicalization; display order and
+    database row order can never affect canonical bytes."""
+    return sorted(
+        states, key=lambda st: tuple(getattr(st, f) for f in _FEATURE_ORDER)
+    )
+
+
+def feature_state_spec_entry(state) -> dict:
+    """One feature_states entry in the frozen spec-v2 grammar (§5.1–§5.2).
+
+    ``value`` is the parsed canonical scalar; ``value_hash`` is the
+    resolver-verified SHA-256 of the scalar's canonical bytes — both
+    carried through from the captured state, never recomputed here."""
+    import json as _json
+
+    return {
+        "entity_id": state.entity_id,
+        "feature_id": state.feature_id,
+        "feature_key": state.feature_key,
+        "feature_kind": state.feature_kind,
+        "value_type": state.value_type,
+        "unit": state.unit,
+        "value": _json.loads(state.value_json),
+        "value_hash": state.value_hash,
+        "source_anchor": {
+            "anchor_type": state.source_anchor_type,
+            "anchor_id": state.source_anchor_id,
+            "boundary": state.source_boundary,
+        },
+    }
+
+
+def build_continuity_spec_v2(resolved, feature_states) -> dict:
+    """Continuity-spec schema 2 (M7C §5): M6 dependencies + feature
+    states + the dormant frozen relations array."""
+    return {
+        "schema_version": CONTINUITY_SPEC_SCHEMA_VERSION_2,
+        "dependencies": build_continuity_spec(resolved)["dependencies"],
+        "feature_states": [
+            feature_state_spec_entry(st)
+            for st in sort_feature_states(feature_states)
+        ],
+        "relations": [],
+    }
+
+
 def build_capturable_snapshot(
-    shot, refs, resolved: list[ResolvedDependency]
+    shot, refs, resolved: list[ResolvedDependency], feature_states=()
 ) -> tuple[dict, dict | None]:
     """(snapshot value, continuity spec or None) from ONE captured value.
 
-    Empty dependency set returns the exact v1 form and no continuity spec
-    (M6-F14: there is no empty schema-v2 alternative).
+    THE single canonical builder (M7C §10.3 structural singularity) for
+    both the working-hash path and capture persistence:
+
+        zero dependencies            → exact schema 1, no spec
+        deps + zero effective states → exact schema 2 + spec 1
+        one or more effective states → schema 3 + spec 2
+
+    There is no empty schema-3 representation (M6-F14 extended): states
+    that all clear keep the exact schema-2 form.
     """
     deps = sort_resolved(resolved)
+    states = sort_feature_states(feature_states)
     if not deps:
         return build_snapshot(shot, refs), None
     v1 = build_snapshot(shot, refs)
-    spec = build_continuity_spec(deps)
+    if not states:
+        spec = build_continuity_spec(deps)
+        return (
+            {
+                "schema_version": 2,
+                "intent": v1["intent"],
+                "references": v1["references"],
+                "continuity": spec,
+            },
+            spec,
+        )
+    spec = build_continuity_spec_v2(deps, states)
     return (
         {
-            "schema_version": 2,
+            "schema_version": 3,
             "intent": v1["intent"],
             "references": v1["references"],
             "continuity": spec,
@@ -98,14 +184,29 @@ def build_capturable_snapshot(
 
 
 def effective_working_snapshot_hash(
-    shot, refs, resolved: list[ResolvedDependency]
+    shot, refs, resolved: list[ResolvedDependency], feature_states=()
 ) -> str:
-    """The Shot's effective working hash INCLUDING current approvals (M6-F15).
+    """The Shot's effective working hash (M6-F15 + M7C §10.4).
 
-    Entity approval changes change this hash without any Shot-row mutation
-    whenever the Shot holds dependencies."""
-    snapshot, _ = build_capturable_snapshot(shot, refs, resolved)
+    Includes current approvals AND current effective Feature states: either
+    mutating changes this hash without any Shot-row mutation. Delegates to
+    THE builder — never a second hash implementation."""
+    snapshot, _ = build_capturable_snapshot(shot, refs, resolved, feature_states)
     return canonical_hash(snapshot)
+
+
+def historical_value_hash(value_json: str) -> str:
+    """Captured-row-only re-canonicalization (M7C §12 + freeze note).
+
+    Parses the stored canonical value bytes, re-serializes canonically, and
+    returns the SHA-256 — with NO consultation of the live Feature schema
+    (today's enum membership is not historical truth; the captured
+    value_type/scalar/hash are the authority)."""
+    import hashlib
+    import json as _json
+
+    scalar = _json.loads(value_json)
+    return hashlib.sha256(canonical_json_str(scalar).encode("utf-8")).hexdigest()
 
 
 _RESOLUTION_SQL = """

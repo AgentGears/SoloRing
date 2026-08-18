@@ -294,6 +294,9 @@ async def read_shot_detail(engine: AsyncEngine, shot_id: str):
         readiness_projection,
         resolve_effective_feature_state,
     )
+    # M7C §10.3 structural singularity: the effective states resolved in
+    # THIS read unit flow into the SAME builder capture would use — the
+    # working hash is the hash of the exact value capture would persist.
 
     if not is_uuid(shot_id):
         raise not_found(ErrorCode.SHOT_NOT_FOUND, f"Shot {shot_id} not found.")
@@ -323,7 +326,7 @@ async def read_shot_detail(engine: AsyncEngine, shot_id: str):
             readiness = readiness_projection(outcome)
             if readiness["continuity_state_ready"]:
                 effective_hash = effective_working_snapshot_hash(
-                    shot, refs, resolved
+                    shot, refs, resolved, outcome.states
                 )
                 differs = await canon.differs_from_approved(
                     conn, shot, refs, effective_hash
