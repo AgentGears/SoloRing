@@ -28,13 +28,14 @@ async def _shot_read(request: Request, shot_id: str) -> ShotRead:
     but never participates in the hash.
     """
     engine: AsyncEngine = request.app.state.engine
-    shot, refs, differs, resolved, effective_hash = (
+    shot, refs, differs, resolved, effective_hash, readiness = (
         await shots.read_shot_detail(engine, shot_id)
     )
     return ShotRead(
         **dict(shot),
         working_snapshot_hash=effective_hash,
         working_state_differs_from_approved=differs,
+        continuity_state_ready=readiness["continuity_state_ready"],
         semantic_dependencies=[
             SemanticDependencyItem(
                 entity_id=d.entity_id,

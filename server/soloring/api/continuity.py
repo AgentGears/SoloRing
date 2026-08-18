@@ -21,6 +21,11 @@ from soloring.api.schemas.continuity_features import (
     FeaturePatch,
     FeatureRead,
 )
+from soloring.api.schemas.continuity_transitions import (
+    TransitionCreate,
+    TransitionPatch,
+    TransitionRead,
+)
 from soloring.api.schemas.shots import SemanticDependencyWithEntity
 from soloring.continuity import dependencies as dependency_svc
 
@@ -311,3 +316,136 @@ async def delete_continuity_feature(
     from soloring.continuity import features as feature_svc
 
     await feature_svc.delete_feature(session, feature_id)
+
+
+# --- FeatureTransition surface + continuity-state (M7B §2, §8) ----------------------
+
+
+@router.get(
+    "/continuity-features/{feature_id}/transitions",
+    response_model=list[TransitionRead],
+)
+async def list_feature_transitions(
+    feature_id: str, session: AsyncSession = Depends(get_session)
+) -> list[TransitionRead]:
+    from soloring.continuity import transitions as transition_svc
+
+    return [
+        TransitionRead(**r)
+        for r in await transition_svc.list_transitions(session, feature_id)
+    ]
+
+
+@router.post(
+    "/continuity-features/{feature_id}/transitions",
+    response_model=TransitionRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_feature_transition(
+    feature_id: str,
+    payload: TransitionCreate,
+    session: AsyncSession = Depends(get_session),
+) -> TransitionRead:
+    from soloring.continuity import transitions as transition_svc
+
+    tid = await transition_svc.create_transition(session, feature_id, payload)
+    async with session.bind.connect() as conn:
+        from sqlalchemy import text as _t
+
+        row = (
+            await conn.execute(
+                _t(
+                    "SELECT id, feature_id, anchor_type, anchor_id, boundary, "
+                    "operation, value_json, value_hash, created_at, updated_at "
+                    "FROM continuity_feature_transitions WHERE id = :tid"
+                ),
+                {"tid": tid},
+            )
+        ).mappings().one()
+    return TransitionRead(**dict(row))
+
+
+@router.patch(
+    "/continuity-feature-transitions/{transition_id}",
+    response_model=TransitionRead,
+)
+async def patch_feature_transition(
+    transition_id: str,
+    payload: TransitionPatch,
+    session: AsyncSession = Depends(get_session),
+) -> TransitionRead:
+    from soloring.continuity import transitions as transition_svc
+
+    await transition_svc.patch_transition(session, transition_id, payload)
+    async with session.bind.connect() as conn:
+        from sqlalchemy import text as _t
+
+        row = (
+            await conn.execute(
+                _t(
+                    "SELECT id, feature_id, anchor_type, anchor_id, boundary, "
+                    "operation, value_json, value_hash, created_at, updated_at "
+                    "FROM continuity_feature_transitions WHERE id = :tid"
+                ),
+                {"tid": transition_id},
+            )
+        ).mappings().one()
+    return TransitionRead(**dict(row))
+
+
+@router.delete(
+    "/continuity-feature-transitions/{transition_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_feature_transition(
+    transition_id: str, session: AsyncSession = Depends(get_session)
+) -> None:
+    from soloring.continuity import transitions as transition_svc
+
+    await transition_svc.delete_transition(session, transition_id)
+
+
+@router.get("/shots/{shot_id}/continuity-state")
+async def get_shot_continuity_state(
+    shot_id: str, session: AsyncSession = Depends(get_session)
+) -> dict:
+    """Current-state endpoint only (M7B §8). Historical endpoints never
+    invoke this resolver."""
+    from soloring.continuity.state import (
+        narrative_context_required,
+        readiness_projection,
+        resolve_effective_feature_state,
+    )
+    from soloring.domain.ids import is_uuid
+    from soloring.errors import ErrorCode, not_found
+
+    if not is_uuid(shot_id):
+        raise not_found(ErrorCode.SHOT_NOT_FOUND, f"Shot {shot_id} not found.")
+    async with session.bind.connect() as conn:
+        outcome = await resolve_effective_feature_state(conn, shot_id)
+    if not outcome.assigned and outcome.relevant_temporal_data:
+        raise narrative_context_required(shot_id)
+    readiness = readiness_projection(outcome)
+    return {
+        "shot_id": shot_id,
+        "continuity_state_ready": readiness["continuity_state_ready"],
+        "readiness_issues": readiness["readiness_issues"],
+        "feature_states": [
+            {
+                "entity_id": s.entity_id,
+                "feature_id": s.feature_id,
+                "feature_key": s.feature_key,
+                "feature_kind": s.feature_kind,
+                "value_type": s.value_type,
+                "unit": s.unit,
+                "value": __import__("json").loads(s.value_json),
+                "source_transition_id": s.source_transition_id,
+                "source_anchor": {
+                    "anchor_type": s.source_anchor_type,
+                    "anchor_id": s.source_anchor_id,
+                    "boundary": s.source_boundary,
+                },
+            }
+            for s in outcome.states
+        ],
+    }

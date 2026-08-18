@@ -232,6 +232,24 @@ async def delete_scene(session: AsyncSession, scene_id: str) -> None:
                     f"Scene {scene_id} still has assigned active Shots.",
                     status_code=409,
                 )
+            # M7B §11: scene-anchored active transitions block deletion.
+            anchored = (
+                await conn.execute(
+                    text(
+                        "SELECT 1 FROM continuity_feature_transitions "
+                        "WHERE anchor_type = 'scene' AND anchor_id = :cid "
+                        "AND deleted_at IS NULL LIMIT 1"
+                    ),
+                    {"cid": scene_id},
+                )
+            ).first()
+            if anchored is not None:
+                await conn.exec_driver_sql("ROLLBACK")
+                raise SoloRingError(
+                    ErrorCode.CONTINUITY_ANCHOR_IN_USE,
+                    f"Scene {scene_id} anchors an active Feature transition.",
+                    status_code=409,
+                )
             await conn.execute(
                 text(
                     "UPDATE scenes SET deleted_at = "
@@ -324,6 +342,45 @@ async def assign_scene_shots(
                         raise order_invalid(
                             f"Shot {shot_id} is assigned to another Scene."
                         )
+
+            # M7B §11: unassigning an active Shot that anchors an active
+            # Feature transition is forbidden (reorder is legal — identity
+            # survives; unassignment destroys the narrative boundary).
+            if ordered_shot_ids:
+                removed = (
+                    await conn.execute(
+                        text(
+                            "SELECT sh.id FROM shots sh WHERE sh.scene_id = :cid "
+                            "AND sh.deleted_at IS NULL AND sh.id NOT IN "
+                            f"({placeholders}) AND EXISTS ("
+                            "SELECT 1 FROM continuity_feature_transitions t "
+                            "WHERE t.anchor_type = 'shot' AND t.anchor_id = sh.id "
+                            "AND t.deleted_at IS NULL) LIMIT 1"
+                        ),
+                        {"cid": scene_id, **params},
+                    )
+                ).first()
+            else:
+                removed = (
+                    await conn.execute(
+                        text(
+                            "SELECT sh.id FROM shots sh WHERE sh.scene_id = :cid "
+                            "AND sh.deleted_at IS NULL AND EXISTS ("
+                            "SELECT 1 FROM continuity_feature_transitions t "
+                            "WHERE t.anchor_type = 'shot' AND t.anchor_id = sh.id "
+                            "AND t.deleted_at IS NULL) LIMIT 1"
+                        ),
+                        {"cid": scene_id},
+                    )
+                ).first()
+            if removed is not None:
+                await conn.exec_driver_sql("ROLLBACK")
+                raise SoloRingError(
+                    ErrorCode.CONTINUITY_ANCHOR_IN_USE,
+                    f"Shot {removed.id} anchors an active Feature "
+                    "transition and cannot be unassigned.",
+                    status_code=409,
+                )
 
             # Full-set semantics over ACTIVE members: omitted ACTIVE members
             # unassign. A soft-deleted Shot's narrative coordinates are

@@ -32,8 +32,8 @@ MAX_REVISION_ATTEMPTS = 5
 
 
 async def _snapshot_one_read(session: AsyncSession, shot_id: str):
-    """Shot + references + resolved semantic dependencies from ONE SQLite
-    read snapshot (audit F2; M6 §55).
+    """Shot + references + resolved semantic dependencies + effective M7
+    Feature state from ONE SQLite read snapshot (audit F2; M6 §55; M7B §9).
 
     An AsyncSession alone does not hold a read snapshot across sequential
     SELECT-only statements under Python sqlite3's legacy transaction
@@ -44,8 +44,20 @@ async def _snapshot_one_read(session: AsyncSession, shot_id: str):
     for working-vs-approved comparison. M6C extends the same unit to load
     the working dependency rows and resolve them against current approvals,
     so a capture can never mix dependency states from two moments (§58/§59).
+
+    M7B extends the SAME unit (never a second connection — that would race)
+    with the effective Feature-state resolution, and enforces the temporary
+    capture gates INSIDE the read transaction's authority: unassigned +
+    relevant temporal data → NARRATIVE_CONTEXT_REQUIRED; nonempty effective
+    Feature state → NARRATIVE_STATE_CAPTURE_UNAVAILABLE (until M7C). Zero
+    effective state keeps the exact existing schema-1/2 path.
     """
     from soloring.continuity.snapshots import resolve_working_dependencies
+    from soloring.continuity.state import (
+        capture_unavailable,
+        narrative_context_required,
+        resolve_effective_feature_state,
+    )
 
     async with session.bind.connect() as conn:
         await conn.exec_driver_sql("BEGIN")
@@ -66,6 +78,11 @@ async def _snapshot_one_read(session: AsyncSession, shot_id: str):
             shot = SimpleNamespace(**dict(row))
             refs = await _reference_refs(conn, shot_id)
             resolved = await resolve_working_dependencies(conn, shot_id)
+            outcome = await resolve_effective_feature_state(conn, shot_id)
+            if not outcome.assigned and outcome.relevant_temporal_data:
+                raise narrative_context_required(shot_id)
+            if outcome.states:
+                raise capture_unavailable()
             await conn.commit()
             return shot, refs, resolved
         except Exception:

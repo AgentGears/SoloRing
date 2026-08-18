@@ -3,16 +3,17 @@
 //   approved_take_id = null  -> "No approved Take yet." (NOT "matches canon")
 //   differs = false          -> matches canon
 //   differs = true           -> working state differs from canon
+//   differs = null           -> continuity state unresolved: NEITHER
+//                               "matches" nor "differs" (M7B compatibility)
 //
-// Until M3A creates candidate Takes, the only reachable state is the honest
-// no-canon one. Server-rendered; no client logic.
+// Server-rendered; no client logic.
 
 export default function ApprovedTakePanel({
   approvedTakeId,
   differs,
 }: {
   approvedTakeId: string | null;
-  differs: boolean;
+  differs: boolean | null;
 }) {
   if (approvedTakeId === null) {
     return (
@@ -22,6 +23,17 @@ export default function ApprovedTakePanel({
           Canon is established by approving a candidate Take; approval arrives
           with generation (M3).
         </div>
+      </div>
+    );
+  }
+
+  if (differs === null) {
+    return (
+      <div className="card">
+        <div className="empty-inline">
+          Continuity state unresolved — canon comparison unavailable.
+        </div>
+        <div className="meta">approved take {approvedTakeId}</div>
       </div>
     );
   }

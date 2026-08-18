@@ -10,7 +10,9 @@ export default function WorkingStatePanel({
   workingSnapshotHash,
   updatedAt,
 }: {
-  workingSnapshotHash: string;
+  // M7B compatibility: null when continuity state is unresolved — never a
+  // fabricated hash.
+  workingSnapshotHash: string | null;
   updatedAt: string;
 }) {
   const [copied, setCopied] = useState(false);
@@ -23,6 +25,7 @@ export default function WorkingStatePanel({
   }, [updatedAt]);
 
   async function copy() {
+    if (!workingSnapshotHash) return;
     try {
       await navigator.clipboard.writeText(workingSnapshotHash);
       setCopied(true);
@@ -31,6 +34,18 @@ export default function WorkingStatePanel({
       // Clipboard unavailable (permissions/host); the full value is still
       // rendered in secondary text for manual copy.
     }
+  }
+
+  if (!workingSnapshotHash) {
+    return (
+      <div className="card">
+        <div className="empty">
+          Continuity state unresolved — no authoritative working snapshot
+          exists yet.
+        </div>
+        <div className="meta">updated {local ?? updatedAt}</div>
+      </div>
+    );
   }
 
   const compact = `${workingSnapshotHash.slice(0, 8)}…${workingSnapshotHash.slice(-6)}`;

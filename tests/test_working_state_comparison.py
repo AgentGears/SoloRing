@@ -335,7 +335,7 @@ async def test_read_unit_is_one_connection_one_transaction(factory, engine) -> N
             return getattr(self._real, name)
 
     proxy_engine = _EngineProxy(engine)
-    shot, refs, differs, _resolved, _eff = await shots.read_shot_detail(proxy_engine, sid)
+    shot, refs, differs, _resolved, _eff, _ready = await shots.read_shot_detail(proxy_engine, sid)
 
     assert differs is False  # chain intact, working == approved hash
     assert checkouts["n"] == 1, "detail read must use exactly one connection"
@@ -376,7 +376,7 @@ async def test_read_snapshot_interleave_single_snapshot(factory, engine, monkeyp
 
     # In-flight read unit: working state read first, mutation commits at the
     # checkpoint, provenance traversal reads afterwards.
-    _shot, _refs, differs, _resolved, _eff = await shots.read_shot_detail(engine, sid)
+    _shot, _refs, differs, _resolved, _eff, _ready = await shots.read_shot_detail(engine, sid)
     assert differs is False, "comparison mixed read snapshots"
 
     # The mutation did land: a fresh read unit sees the new hash.
@@ -384,5 +384,5 @@ async def test_read_snapshot_interleave_single_snapshot(factory, engine, monkeyp
         pass
 
     monkeypatch.setattr(canon, "_checkpoint", _noop)
-    _shot2, _refs2, differs2, _resolved2, _eff2 = await shots.read_shot_detail(engine, sid)
+    _shot2, _refs2, differs2, _resolved2, _eff2, _ready2 = await shots.read_shot_detail(engine, sid)
     assert differs2 is True
