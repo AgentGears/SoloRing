@@ -110,8 +110,9 @@ def upgrade() -> None:
             name="ck_continuity_features_unit_numeric_only",
         ),
         sa.CheckConstraint(
-            "unit IS NULL OR (length(unit) BETWEEN 1 AND 64)",
-            name="ck_continuity_features_unit_len",
+            "unit IS NULL OR (length(unit) BETWEEN 1 AND 64 "
+            "AND unit = trim(unit) AND length(trim(unit)) > 0)",
+            name="ck_continuity_features_unit_form",
         ),
         sa.CheckConstraint(
             "length(trim(name)) > 0",
@@ -446,8 +447,8 @@ def _preflight_downgrade_safe() -> None:
 
     rows = bind.execute(
         sa.text(
-            "SELECT id, snapshot_json, continuity_spec_json "
-            "FROM shot_revisions"
+            "SELECT id, snapshot_json, continuity_spec_json, "
+            "continuity_spec_hash FROM shot_revisions"
         )
     ).fetchall()
     for row in rows:
@@ -485,6 +486,31 @@ def _preflight_downgrade_safe() -> None:
                     f"{row.id[:8]}… {column} declares schema_version "
                     f"{version} (>= {limit}); M7 history cannot be "
                     "represented by 0007. No schema was changed."
+                )
+            if column == "snapshot_json" and version == 1:
+                if row.continuity_spec_json is not None                         or row.continuity_spec_hash is not None:
+                    raise RuntimeError(
+                        f"Cannot downgrade 0008 -> 0007: shot_revisions."
+                        f"{row.id[:8]}… schema-1 snapshot carries non-NULL "
+                        "continuity columns; structurally inconsistent "
+                        "with the stored ShotRevision columns. No schema "
+                        "was changed."
+                    )
+            if column == "snapshot_json" and version == 2:
+                if row.continuity_spec_json is None                         or row.continuity_spec_hash is None:
+                    raise RuntimeError(
+                        f"Cannot downgrade 0008 -> 0007: shot_revisions."
+                        f"{row.id[:8]}… schema-2 snapshot lacks its "
+                        "continuity spec/hash; structurally inconsistent "
+                        "with the stored ShotRevision columns. No schema "
+                        "was changed."
+                    )
+            if column == "continuity_spec_json" and version != 1:
+                raise RuntimeError(
+                    f"Cannot downgrade 0008 -> 0007: shot_revisions."
+                    f"{row.id[:8]}… schema-2 snapshots must carry "
+                    "continuity-spec schema 1; structurally inconsistent. "
+                    "No schema was changed."
                 )
 
 

@@ -418,8 +418,9 @@ class ContinuityFeature(Base):
             name="ck_continuity_features_unit_numeric_only",
         ),
         CheckConstraint(
-            "unit IS NULL OR (length(unit) BETWEEN 1 AND 64)",
-            name="ck_continuity_features_unit_len",
+            "unit IS NULL OR (length(unit) BETWEEN 1 AND 64 "
+            "AND unit = trim(unit) AND length(trim(unit)) > 0)",
+            name="ck_continuity_features_unit_form",
         ),
         CheckConstraint(
             "length(trim(name)) > 0",

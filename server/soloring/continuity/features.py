@@ -39,7 +39,7 @@ _COLUMNS = (
 
 def _feature_not_found(feature_id: str) -> SoloRingError:
     return SoloRingError(
-        ErrorCode.INVALID_CONTINUITY_FEATURE,
+        ErrorCode.CONTINUITY_FEATURE_NOT_FOUND,
         f"ContinuityFeature {feature_id} not found.",
         status_code=404,
     )
@@ -66,8 +66,10 @@ def _validate_semantics(payload) -> dict:
     """Pure validation of the immutable semantic field set (§4–§8)."""
     key = payload.key
     if not is_valid_key(key):
-        raise validation_error(
-            f"Feature key {key!r} must match [a-z][a-z0-9_]{{0,63}}."
+        raise SoloRingError(
+            ErrorCode.INVALID_CONTINUITY_FEATURE,
+            f"Feature key {key!r} must match [a-z][a-z0-9_]{{0,63}}.",
+            status_code=422,
         )
     if payload.kind not in FEATURE_KINDS:
         raise SoloRingError(
@@ -110,17 +112,29 @@ def _validate_semantics(payload) -> dict:
                 "unit is only permitted for integer/decimal features.",
                 status_code=422,
             )
-        unit = unit.strip() if unit != unit.strip() else unit
-        if not (1 <= len(unit) <= 64) or not unit.strip():
+        # Frozen input contract: units are ALREADY TRIMMED — untrimmed or
+        # whitespace-only transport is rejected, never silently normalized.
+        if unit != unit.strip() or not unit.strip():
             raise SoloRingError(
                 ErrorCode.INVALID_CONTINUITY_FEATURE,
-                "unit must be 1–64 characters (already trimmed).",
+                "unit must be 1–64 characters, already trimmed, and not "
+                "whitespace-only.",
+                status_code=422,
+            )
+        if not (1 <= len(unit) <= 64):
+            raise SoloRingError(
+                ErrorCode.INVALID_CONTINUITY_FEATURE,
+                "unit must be 1–64 characters.",
                 status_code=422,
             )
 
     name = (payload.name or "").strip()
     if not name:
-        raise validation_error("Feature name must not be empty.")
+        raise SoloRingError(
+            ErrorCode.INVALID_CONTINUITY_FEATURE,
+            "Feature name must not be empty.",
+            status_code=422,
+        )
 
     return {
         "key": key,
@@ -293,7 +307,10 @@ async def get_feature(session: AsyncSession, feature_id: str) -> dict:
             await conn.execute(
                 text(
                     f"SELECT {_COLUMNS} FROM continuity_features "
-                    "WHERE id = :fid AND deleted_at IS NULL"
+                    "WHERE id = :fid AND deleted_at IS NULL "
+                    "AND EXISTS (SELECT 1 FROM creative_entities ce "
+                    "WHERE ce.id = continuity_features.entity_id "
+                    "AND ce.deleted_at IS NULL)"
                 ),
                 {"fid": feature_id},
             )

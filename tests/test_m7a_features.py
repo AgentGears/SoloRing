@@ -591,3 +591,246 @@ def test_0008_downgrade_refuses_missing_schema_version(tmp_path, monkeypatch):
 
     with pytest.raises(RuntimeError, match="schema_version"):
         command.downgrade(cfg, "0007_active_narrative_uniqueness")
+
+# --- M7A re-gate regressions (blockers 1–4) ---------------------------------------
+
+
+async def test_unit_transport_is_rejected_not_normalized(client, factory):
+    """Blocker 1: untrimmed/whitespace-only units are 422, never stripped."""
+    pid, eva = await _seed_project_and_entity(client, factory)
+    r = await _create_feature(
+        client, eva["id"], key="ammo_count", kind="status",
+        value_type="integer", name="Ammo", enum_values=None,
+        unit=" rounds ",
+    )
+    assert r.status_code == 422
+    assert r.json()["error_code"] == "INVALID_CONTINUITY_FEATURE"
+    r = await _create_feature(
+        client, eva["id"], key="ammo_count", kind="status",
+        value_type="integer", name="Ammo", enum_values=None,
+        unit="   ",
+    )
+    assert r.status_code == 422
+    # Trimmed units still accepted.
+    r = await _create_feature(
+        client, eva["id"], key="ammo_count", kind="status",
+        value_type="integer", name="Ammo", enum_values=None,
+        unit="rounds",
+    )
+    assert r.status_code == 201
+    assert r.json()["unit"] == "rounds"
+
+
+async def test_invalid_key_uses_stable_feature_code(client, factory):
+    """Blocker 2: schema/key failures carry INVALID_CONTINUITY_FEATURE."""
+    pid, eva = await _seed_project_and_entity(client, factory)
+    r = await _create_feature(client, eva["id"], key="Bad-Key")
+    assert r.status_code == 422
+    assert r.json()["error_code"] == "INVALID_CONTINUITY_FEATURE"
+    # Lookup failures carry the dedicated 404 code, not the 422 schema code.
+    r = await client.get(f"/continuity-features/{str(new_uuid())}")
+    assert r.status_code == 404
+    assert r.json()["error_code"] == "CONTINUITY_FEATURE_NOT_FOUND"
+
+
+async def test_entity_delete_blocked_by_active_features(client, factory):
+    """Blocker 3: ENTITY_IN_USE while the Entity owns active Features."""
+    pid, eva = await _seed_project_and_entity(client, factory)
+    feature = (await _create_feature(client, eva["id"])).json()
+
+    r = await client.delete(f"/entities/{eva['id']}")
+    assert r.status_code == 409
+    assert r.json()["error_code"] == "ENTITY_IN_USE"
+
+    # Removing the Feature unblocks deletion.
+    assert (await client.delete(
+        f"/continuity-features/{feature['id']}"
+    )).status_code == 204
+    assert (await client.delete(f"/entities/{eva['id']}")).status_code == 204
+
+
+async def test_project_cascade_tombstones_features(client, factory, engine):
+    """Blocker 3: Project deletion takes active Features with its Entities;
+    direct Feature GETs no longer expose active working state."""
+    pid, eva = await _seed_project_and_entity(client, factory)
+    feature = (await _create_feature(client, eva["id"])).json()
+
+    assert (await client.delete(f"/projects/{pid}")).status_code == 204
+    row = await _fetch(
+        engine,
+        "SELECT deleted_at FROM continuity_features WHERE id = :f",
+        {"f": feature["id"]},
+    )
+    assert row["deleted_at"] is not None
+    r = await client.get(f"/continuity-features/{feature['id']}")
+    assert r.status_code == 404
+
+
+async def test_feature_hidden_when_parent_entity_deleted(
+    client, factory, engine
+):
+    """Defense in depth: even a Feature row that somehow remains active
+    under a tombstoned Entity is absent from direct reads."""
+    pid, eva = await _seed_project_and_entity(client, factory)
+    feature = (await _create_feature(client, eva["id"])).json()
+    # Force the illegal state directly (deletion is now blocked by the API).
+    async with engine.connect() as conn:
+        await conn.exec_driver_sql("BEGIN IMMEDIATE")
+        await conn.execute(
+            text("UPDATE creative_entities SET deleted_at = "
+                 "strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = :e"),
+            {"e": eva["id"]},
+        )
+        await conn.exec_driver_sql("COMMIT")
+    assert (await client.get(
+        f"/continuity-features/{feature['id']}"
+    )).status_code == 404
+
+
+def test_0008_downgrade_refuses_v2_snapshot_with_null_continuity(
+    tmp_path, monkeypatch
+):
+    """Blocker 4: the reviewer's exact reproduction — structurally
+    impossible pre-M7 row, M7 tables empty — must refuse side-effect-free."""
+    import sqlite3 as sq
+
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    db_file = data_dir / "soloring.db"
+    _point_at(data_dir, monkeypatch)
+    cfg = _cfg()
+    command.upgrade(cfg, "head")
+
+    hex64 = "a" * 64
+    con = sq.connect(str(db_file))
+    con.execute("PRAGMA foreign_keys=ON")
+    con.executescript(
+        "INSERT INTO projects(id, name, created_at, updated_at) "
+        "VALUES ('p1','P','t','t'); "
+        "INSERT INTO shots(id, project_id, shot_number, subject, "
+        "created_at, updated_at) VALUES ('s1','p1',1,'x','t','t'); "
+        f"INSERT INTO shot_revisions(id, shot_id, revision_number, "
+        f"snapshot_json, snapshot_hash, created_at) "
+        f"VALUES ('r1','s1',1,'{{\"schema_version\": 2}}','{hex64}','t'); "
+    )
+    con.commit()
+    con.close()
+
+    with pytest.raises(RuntimeError, match="structurally inconsistent"):
+        command.downgrade(cfg, "0007_active_narrative_uniqueness")
+    con = sq.connect(str(db_file))
+    try:
+        assert con.execute("SELECT version_num FROM alembic_version"
+                           ).fetchone()[0] == "0008_narrative_continuity_state"
+        tables = {r[0] for r in con.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        )}
+        assert "continuity_features" in tables  # untouched by refusal
+    finally:
+        con.close()
+
+
+def test_0008_downgrade_refuses_v1_snapshot_with_non_null_continuity(
+    tmp_path, monkeypatch
+):
+    """Blocker 4 mirror: schema-1 snapshot carrying continuity columns."""
+    import sqlite3 as sq
+
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    db_file = data_dir / "soloring.db"
+    _point_at(data_dir, monkeypatch)
+    cfg = _cfg()
+    command.upgrade(cfg, "head")
+
+    hex64 = "a" * 64
+    con = sq.connect(str(db_file))
+    con.execute("PRAGMA foreign_keys=ON")
+    con.executescript(
+        "INSERT INTO projects(id, name, created_at, updated_at) "
+        "VALUES ('p1','P','t','t'); "
+        "INSERT INTO shots(id, project_id, shot_number, subject, "
+        "created_at, updated_at) VALUES ('s1','p1',1,'x','t','t'); "
+        f"INSERT INTO shot_revisions(id, shot_id, revision_number, "
+        f"snapshot_json, snapshot_hash, continuity_spec_json, "
+        f"continuity_spec_hash, created_at) "
+        f"VALUES ('r1','s1',1,'{{\"schema_version\": 1}}','{hex64}', "
+        f"'{{\"schema_version\": 1, \"dependencies\": []}}','{hex64}','t'); "
+    )
+    con.commit()
+    con.close()
+
+    with pytest.raises(RuntimeError, match="structurally inconsistent"):
+        command.downgrade(cfg, "0007_active_narrative_uniqueness")
+
+
+def test_0008_downgrade_refuses_v2_with_inconsistent_spec_version(
+    tmp_path, monkeypatch
+):
+    """v2 snapshot whose spec declares something other than spec schema 1."""
+    import sqlite3 as sq
+
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    db_file = data_dir / "soloring.db"
+    _point_at(data_dir, monkeypatch)
+    cfg = _cfg()
+    command.upgrade(cfg, "head")
+
+    hex64 = "a" * 64
+    con = sq.connect(str(db_file))
+    con.execute("PRAGMA foreign_keys=ON")
+    con.executescript(
+        "INSERT INTO projects(id, name, created_at, updated_at) "
+        "VALUES ('p1','P','t','t'); "
+        "INSERT INTO shots(id, project_id, shot_number, subject, "
+        "created_at, updated_at) VALUES ('s1','p1',1,'x','t','t'); "
+        f"INSERT INTO shot_revisions(id, shot_id, revision_number, "
+        f"snapshot_json, snapshot_hash, continuity_spec_json, "
+        f"continuity_spec_hash, created_at) "
+        f"VALUES ('r1','s1',1,'{{\"schema_version\": 2}}','{hex64}', "
+        f"'{{\"schema_version\": 0, \"dependencies\": []}}','{hex64}','t'); "
+    )
+    con.commit()
+    con.close()
+
+    with pytest.raises(RuntimeError, match="structurally inconsistent"):
+        command.downgrade(cfg, "0007_active_narrative_uniqueness")
+
+
+def test_0008_downgrade_accepts_consistent_v2_pairing(tmp_path, monkeypatch):
+    """The consistent form (v2 snapshot + spec schema 1 + hash) downgrades
+    cleanly once 0007's own preflight is satisfied (no coordinate reuse)."""
+    import sqlite3 as sq
+
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    db_file = data_dir / "soloring.db"
+    _point_at(data_dir, monkeypatch)
+    cfg = _cfg()
+    command.upgrade(cfg, "head")
+
+    hex64 = "a" * 64
+    con = sq.connect(str(db_file))
+    con.execute("PRAGMA foreign_keys=ON")
+    con.executescript(
+        "INSERT INTO projects(id, name, created_at, updated_at) "
+        "VALUES ('p1','P','t','t'); "
+        "INSERT INTO shots(id, project_id, shot_number, subject, "
+        "created_at, updated_at) VALUES ('s1','p1',1,'x','t','t'); "
+        f"INSERT INTO shot_revisions(id, shot_id, revision_number, "
+        f"snapshot_json, snapshot_hash, continuity_spec_json, "
+        f"continuity_spec_hash, created_at) "
+        f"VALUES ('r1','s1',1,'{{\"schema_version\": 2}}','{hex64}', "
+        f"'{{\"schema_version\": 1, \"dependencies\": []}}','{hex64}','t'); "
+    )
+    con.commit()
+    con.close()
+
+    command.downgrade(cfg, "0007_active_narrative_uniqueness")
+    con = sq.connect(str(db_file))
+    try:
+        assert con.execute("SELECT version_num FROM alembic_version"
+                           ).fetchone()[0] == "0007_active_narrative_uniqueness"
+    finally:
+        con.close()
