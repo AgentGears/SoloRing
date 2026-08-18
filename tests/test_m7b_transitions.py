@@ -672,7 +672,7 @@ async def test_duplicate_coordinate_race_converges(client, factory):
     assert codes.count(409) == 3
 
 
-async def test_transition_vs_feature_delete_race(client, factory):
+async def test_transition_blocks_feature_delete_sequentially(client, factory):
     pid = await _seed_project(factory)
     seq, scene, shots = await _topology(client, factory, pid, 1)
     eva = await _entity(client, pid)
@@ -1212,3 +1212,247 @@ async def _fetch_all(engine, sql, params=None):
     async with engine.connect() as conn:
         rows = (await conn.execute(text(sql), params or {})).mappings().all()
     return [dict(r) for r in rows]
+
+# --- M7B r3: explicit-null rejection + winning-clear proof + barrier races ----
+
+
+async def test_patch_explicit_null_never_reaches_db(client, factory, engine):
+    """R1: explicit null on any non-nullable PATCH field is a request-
+    boundary 422 — the transition row is left byte-identical."""
+    pid = await _seed_project(factory)
+    seq, scene, shots = await _topology(client, factory, pid, 1)
+    eva = await _entity(client, pid)
+    f = await _feature(client, eva["id"])
+    t = (await _transition(
+        client, f["id"], "shot", shots[0], "start", "set", "fresh"
+    )).json()
+    before = await _fetch(
+        engine,
+        "SELECT anchor_type, anchor_id, boundary, operation, value_json, "
+        "value_hash, deleted_at FROM continuity_feature_transitions "
+        "WHERE id = :t",
+        {"t": t["id"]},
+    )
+
+    for field in ("anchor_type", "anchor_id", "boundary", "operation"):
+        r = await client.patch(
+            f"/continuity-feature-transitions/{t['id']}",
+            json={field: None},
+        )
+        assert r.status_code == 422, (field, r.text)
+
+    after = await _fetch(
+        engine,
+        "SELECT anchor_type, anchor_id, boundary, operation, value_json, "
+        "value_hash, deleted_at FROM continuity_feature_transitions "
+        "WHERE id = :t",
+        {"t": t["id"]},
+    )
+    assert after == before
+
+
+async def test_winning_clear_direct_capture_proof(client, factory, engine):
+    """R2: an ELIGIBLE winning clear (not a future transition) resolves to
+    effective absence and M6 capture stays legal with the exact schema-2
+    form, converging onto the same M6 revision — no schema 3 anywhere."""
+    from soloring.domain import revisions as revision_svc
+
+    pid = await _seed_project(factory)
+    eva = await _entity_approved(client, pid)
+    f = await _feature(client, eva["id"])
+    seq, scene, shots = await _topology(client, factory, pid, 2)
+    for sid in shots:
+        await _depend(client, sid, eva["id"])
+
+    # Baseline M6 revision (dependencies, no temporal data).
+    rev_m6 = await revision_svc.capture_revision(factory(), shots[0])
+    assert json.loads(rev_m6.snapshot_json)["schema_version"] == 2
+
+    # set → clear, BOTH eligible for shots[0]: the clear outranks the set.
+    await _transition(client, f["id"], "sequence", seq, "start", "set",
+                      "fresh")
+    await _transition(client, f["id"], "shot", shots[0], "start", "clear")
+
+    # The resolver sees the clear as the highest eligible transition.
+    r = await client.get(f"/shots/{shots[0]}/continuity-state")
+    assert r.status_code == 200
+    assert r.json()["feature_states"] == []
+
+    # Capture remains legal and converges onto the SAME M6 revision.
+    rev2 = await revision_svc.capture_revision(factory(), shots[0])
+    assert rev2.id == rev_m6.id
+    assert rev2.snapshot_hash == rev_m6.snapshot_hash
+    snapshot = json.loads(rev2.snapshot_json)
+    assert snapshot["schema_version"] == 2
+    assert "continuity" in snapshot
+    assert snapshot["continuity"]["dependencies"]
+    # No schema-3 revision exists for this shot at all.
+    rows = await _fetch_all(
+        engine,
+        "SELECT snapshot_json FROM shot_revisions WHERE shot_id = :s",
+        {"s": shots[0]},
+    )
+    for row in rows:
+        assert json.loads(row["snapshot_json"])["schema_version"] != 3
+
+
+# --- R3: barrier-forced races ------------------------------------------------------
+# The competitor signals AFTER issuing its BEGIN IMMEDIATE (it is parked on
+# the write lock held by the create), and the create releases only then —
+# the test mechanically proves the parked interleaving, not a timing hope.
+
+
+async def _race_create_vs(client, factory, engine, competitor):
+    """Shared driver: create a transition while `competitor` (an async
+    callable taking no args, started inside the create's write unit)
+    attempts its mutation; returns (create_result, competitor_outcome)."""
+    from soloring.api.schemas.continuity_transitions import TransitionCreate
+    from soloring.continuity import transitions as tsvc
+
+    pid = await _seed_project(factory)
+    seq, scene, shots = await _topology(client, factory, pid, 2)
+    eva = await _entity(client, pid)
+    f = await _feature(client, eva["id"])
+
+    original = tsvc._load_active_feature
+    reached_lock = asyncio.Event()
+    state = {}
+
+    async def competitor_task():
+        # Signal that scheduling has begun, then attempt the write — the
+        # BEGIN IMMEDIATE queues on the create's held lock.
+        reached_lock.set()
+        outcome = await competitor(
+            pid=pid, seq=seq, scene=scene, shots=shots, f=f
+        )
+        state["outcome"] = outcome
+
+    async def wrap(conn, feature_id):
+        result = await original(conn, feature_id)
+        if "task" not in state:
+            state["task"] = asyncio.create_task(competitor_task())
+            # Wait until the competitor is RUNNING (it set the event just
+            # before its write attempt) — its BEGIN IMMEDIATE is now
+            # queued behind OUR held lock. Give the loop one tick to let
+            # the competitor actually issue the statement.
+            await reached_lock.wait()
+            await asyncio.sleep(0.05)
+        return result
+
+    import soloring.continuity.transitions as tmod
+    tmod._load_active_feature = wrap
+    try:
+        async with factory() as s:
+            tid = await tsvc.create_transition(
+                s, f["id"],
+                TransitionCreate(anchor_type="shot", anchor_id=shots[0],
+                                 boundary="start", operation="set",
+                                 value="fresh"),
+            )
+        outcome_task = state["task"]
+        await outcome_task
+    finally:
+        tmod._load_active_feature = original
+    return tid, state.get("outcome"), (pid, seq, scene, shots, f)
+
+
+async def _anchor_integrity(engine) -> None:
+    """Every active transition's anchor path is existing, active,
+    same-Project-reachable, and — for Shot anchors — assigned and present
+    in the canonical ordering."""
+    from soloring.narrative.order import load_narrative_ordering
+
+    async with engine.connect() as conn:
+        rows = (await conn.execute(text(
+            "SELECT t.id, t.anchor_type, t.anchor_id, e.project_id "
+            "FROM continuity_feature_transitions t "
+            "JOIN continuity_features f ON f.id = t.feature_id "
+            "JOIN creative_entities e ON e.id = f.entity_id "
+            "WHERE t.deleted_at IS NULL"
+        ))).mappings().all()
+        by_project: dict[str, list] = {}
+        for row in rows:
+            by_project.setdefault(row["project_id"], []).append(row)
+        for pid, prows in by_project.items():
+            ordering = await load_narrative_ordering(conn, pid)
+            for row in prows:
+                # Presence in the canonical ordering proves existing +
+                # active + same-Project + narratively reachable (and, for
+                # shot anchors, assigned) — it is the single authority.
+                ordering.rank_of(
+                    row["anchor_type"], row["anchor_id"], "start"
+                )
+
+
+async def test_race_create_vs_feature_delete_barrier(client, factory, engine):
+    async def competitor(*, pid, seq, scene, shots, f):
+        async with factory() as s:
+            from soloring.continuity import features as fsvc
+
+            try:
+                await fsvc.delete_feature(s, f["id"])
+                return "deleted"
+            except Exception as exc:
+                return getattr(exc, "code", type(exc).__name__)
+
+    tid, outcome, ctx = await _race_create_vs(client, factory, engine, competitor)
+    assert outcome == "CONTINUITY_FEATURE_IN_USE"
+    await _anchor_integrity(engine)
+    from soloring.continuity import transitions as tsvc
+
+    async with factory() as s:
+        await tsvc.delete_transition(s, tid)
+
+
+async def test_race_create_vs_anchor_shot_delete_barrier(client, factory, engine):
+    async def competitor(*, pid, seq, scene, shots, f):
+        async with factory() as s:
+            from soloring.domain import shots as shot_svc
+
+            try:
+                await shot_svc.delete_shot(s, shots[0])
+                return "deleted"
+            except Exception as exc:
+                return getattr(exc, "code", type(exc).__name__)
+
+    tid, outcome, ctx = await _race_create_vs(client, factory, engine, competitor)
+    assert outcome == "CONTINUITY_ANCHOR_IN_USE"
+    await _anchor_integrity(engine)
+    from soloring.continuity import transitions as tsvc
+
+    async with factory() as s:
+        await tsvc.delete_transition(s, tid)
+
+
+async def test_race_create_vs_shot_unassign_barrier(client, factory, engine):
+    async def competitor(*, pid, seq, scene, shots, f):
+        async with factory() as s:
+            from soloring.narrative import scenes as scene_svc
+
+            try:
+                await scene_svc.assign_scene_shots(s, scene, [shots[1]])
+                return "unassigned"
+            except Exception as exc:
+                return getattr(exc, "code", type(exc).__name__)
+
+    tid, outcome, ctx = await _race_create_vs(client, factory, engine, competitor)
+    assert outcome == "CONTINUITY_ANCHOR_IN_USE"
+    # Postcondition specifics: the Shot is STILL assigned, the transition
+    # is STILL active, and the anchor remains in the canonical ordering.
+    pid, seq, scene, shots, f = ctx
+    row = await _fetch(
+        engine, "SELECT scene_id FROM shots WHERE id = :s", {"s": shots[0]}
+    )
+    assert row["scene_id"] == scene
+    trow = await _fetch(
+        engine,
+        "SELECT deleted_at FROM continuity_feature_transitions "
+        "WHERE id = :t",
+        {"t": tid},
+    )
+    assert trow["deleted_at"] is None
+    await _anchor_integrity(engine)
+    from soloring.continuity import transitions as tsvc
+
+    async with factory() as s:
+        await tsvc.delete_transition(s, tid)
