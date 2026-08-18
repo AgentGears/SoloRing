@@ -172,6 +172,25 @@ async def _revision_continuity(session: AsyncSession, revision_id: str) -> dict:
             raise internal_invariant(
                 f"ShotRevision {revision_id} spec 2 lacks feature_states."
             )
+        # Structural container shape BEFORE any use: a non-array container
+        # must fail as the invariant error, never as an incidental
+        # TypeError from list(None) etc. (M7C r2 re-gate B3).
+        if not isinstance(spec.get("dependencies"), list):
+            raise internal_invariant(
+                f"ShotRevision {revision_id} continuity spec dependencies "
+                "is not an array."
+            )
+        if version == 2:
+            if not isinstance(spec.get("feature_states"), list):
+                raise internal_invariant(
+                    f"ShotRevision {revision_id} continuity spec "
+                    "feature_states is not an array."
+                )
+            if not isinstance(spec.get("relations"), list):
+                raise internal_invariant(
+                    f"ShotRevision {revision_id} continuity spec relations "
+                    "is not an array."
+                )
         continuity_schema_version = version
         dependencies = list(spec.get("dependencies", []))
         # Rebuild the FULL canonical spec from the IMMUTABLE ROWS and

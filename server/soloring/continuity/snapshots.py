@@ -242,6 +242,18 @@ def historical_canonicalize_value(value_type: str, value_json: str):
         from soloring.continuity.values import canonical_decimal_string
         if canonical_decimal_string(scalar) != scalar:
             raise ValueError("captured decimal is not in canonical form")
+        # Frozen decimal bounds (M7 §7.4): reject rather than round —
+        # recoverable from the captured scalar alone.
+        from decimal import Decimal as _Dec
+        _, _digits, _exp = _Dec(scalar).as_tuple()
+        if len(_digits) > 38:
+            raise ValueError(
+                "captured decimal precision exceeds the frozen 38 digits"
+            )
+        if _exp < 0 and -_exp > 18:
+            raise ValueError(
+                "captured decimal scale exceeds the frozen 18 places"
+            )
     elif value_type == "text":
         if not isinstance(scalar, str):
             raise ValueError("captured text is not a string")
@@ -252,8 +264,16 @@ def historical_canonicalize_value(value_type: str, value_json: str):
     elif value_type == "enum":
         if not isinstance(scalar, str):
             raise ValueError("captured enum value is not a string")
-        # Membership deliberately NOT re-checked: today's enum_values_json
-        # are not historical truth (the freeze note).
+        # Enum-SHAPE bounds every legally captured value must satisfy
+        # (any legal enum member is 1–128 chars, trimmed, non-whitespace);
+        # membership itself deliberately NOT re-checked — today's
+        # enum_values_json is not historical truth (the freeze note).
+        if not (1 <= len(scalar) <= 128):
+            raise ValueError("captured enum value length out of bounds")
+        if scalar.strip() == "" or scalar != scalar.strip():
+            raise ValueError(
+                "captured enum value is not trimmed non-whitespace"
+            )
     else:
         raise ValueError(f"captured value_type {value_type!r} is outside the M7 domain")
 

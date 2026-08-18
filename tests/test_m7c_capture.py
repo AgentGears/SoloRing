@@ -706,16 +706,19 @@ async def test_concurrent_identical_v3_captures_converge(client, factory):
                for r in results)
 
 # --- APR-033 deterministic race: capture vs feature-transition mutation --------
+# Superseded framing (r2 gate): the original version started the
+# competitor AFTER the capture read committed and BEFORE the write unit —
+# a read-to-write HANDOFF boundary, not a held-lock race. The true
+# held-open-read coherence proof lives in
+# test_race_writer_commits_inside_open_read_txn; this handoff case is kept
+# under an honest name.
 
 
-async def test_race_capture_vs_transition_mutation_barrier(
-    client, factory, engine
-):
-    """APR-033: the competing transition PATCH is provably executing its
-    real BEGIN IMMEDIATE against the capture's held write lock before the
-    capture commits. The capture must then observe the complete AFTER
-    state (healing), never a hybrid; the winner's children are validated
-    on reuse."""
+async def test_capture_read_to_write_handoff_boundary(client, factory, engine):
+    """Deterministic handoff boundary (not a held-lock race): the
+    competitor's real BEGIN IMMEDIATE lands between the capture's read
+    COMMIT and its write BEGIN — the capture persists its already-read
+    coherent state; the AFTER state arrives at the next capture."""
     from sqlalchemy.ext.asyncio import AsyncConnection
 
     from soloring.api.schemas.continuity_transitions import TransitionPatch
@@ -754,8 +757,6 @@ async def test_race_capture_vs_transition_mutation_barrier(
 
     async def read_wrap(session, shot_id):
         result = await original_read(session, shot_id)
-        # The read has committed; the write phase has NOT begun. Start the
-        # competitor now so it parks on the upcoming write-unit lock.
         if "competitor" not in state:
             AsyncConnection.exec_driver_sql = wrapped_exec
             state["competitor"] = asyncio.create_task(competitor_task())
@@ -770,42 +771,93 @@ async def test_race_capture_vs_transition_mutation_barrier(
         AsyncConnection.exec_driver_sql = original_exec
     await state["competitor"]
 
-    # The competitor provably reached its BEGIN IMMEDIATE against the
-    # held lock mid-capture, but the capture's ONE read had already
-    # committed — so the capture legitimately observed the complete BEFORE
-    # state. Either complete state is legal; a hybrid is not.
+    # The read had already committed: deterministic BEFORE state.
     snap = json.loads(rev.snapshot_json)
-    assert snap["schema_version"] == 3
-    value = snap["continuity"]["feature_states"][0]["value"]
-    assert value in ("fresh", "healing")
-    # The child rows agree with whichever complete state was captured
-    # (reuse-integrity would fail otherwise), and the persisted anchor
-    # triple is whole — never a mixture of old value + new anchor.
+    assert snap["continuity"]["feature_states"][0]["value"] == "fresh"
     frow = await _fetch(
         engine,
-        "SELECT value_json, source_anchor_type, source_anchor_id "
-        "FROM shot_revision_feature_states WHERE shot_revision_id = :r",
+        "SELECT value_json, source_anchor_type FROM "
+        "shot_revision_feature_states WHERE shot_revision_id = :r",
         {"r": rev.id},
     )
+    assert json.loads(frow["value_json"]) == "fresh"
     assert frow["source_anchor_type"] == "scene"
-    assert frow["source_anchor_id"] == scene
-    assert json.loads(frow["value_json"]) == value
-    # The AFTER state arrives at the NEXT capture (healing), and the
-    # BEFORE capture stays immutable.
-    after_rev = await revision_svc.capture_revision(factory(), shots[0])
-    after_value = json.loads(after_rev.snapshot_json)["continuity"][
-        "feature_states"][0]["value"]
-    assert after_value == "healing"
-    if value == "fresh":
-        assert after_rev.id != rev.id
-    else:
-        assert after_rev.id == rev.id
-    row_before = await _fetch(
-        engine, "SELECT snapshot_json FROM shot_revisions WHERE id = :r",
-        {"r": rev.id},
+    # AFTER arrives next capture; the handoff capture stays frozen.
+    rev2 = await revision_svc.capture_revision(factory(), shots[0])
+    assert json.loads(rev2.snapshot_json)["continuity"][
+        "feature_states"][0]["value"] == "healing"
+    assert rev2.id != rev.id
+
+
+async def test_true_concurrent_different_schema3_captures_both_persist(
+    client, factory, engine
+):
+    """Frozen §14: two captures of the SAME Shot that read DIFFERENT
+    coherent states (a mutation commits between their reads) both persist
+    with distinct revision numbers — neither is discarded. The second
+    capture's full lifecycle (read → fenced write → COMMIT) provably runs
+    while the first capture is still in flight between its own read and
+    write."""
+    from soloring.api.schemas.continuity_transitions import TransitionPatch
+    from soloring.continuity import transitions as tsvc
+    from soloring.domain import revisions as revision_svc
+
+    pid = await _seed_project(factory)
+    eva = await _entity_approved(client, pid)
+    f = await _feature(client, eva["id"])
+    seq, scene, shots = await _topology(client, factory, pid, 1)
+    await _depend(client, shots[0], eva["id"])
+    tA = (await _transition(
+        client, f["id"], "scene", scene, "start", "set", "fresh"
+    )).json()
+
+    original_read = revision_svc._snapshot_one_read
+    state: dict = {}
+
+    async def capture2_task():
+        async with factory() as s2:
+            return await revision_svc.capture_revision(s2, shots[0])
+
+    async def read_wrap(session, shot_id):
+        result = await original_read(session, shot_id)  # state A (fresh)
+        if "ran" not in state:
+            state["ran"] = True
+            # Mutate AFTER capture1's read committed.
+            async with factory() as s2:
+                await tsvc.patch_transition(
+                    s2, tA["id"],
+                    TransitionPatch(operation="set", value="healing"),
+                )
+            # capture2's FULL lifecycle completes while capture1 is
+            # parked between its read and its write.
+            state["rev2"] = await asyncio.create_task(capture2_task())
+        return result
+
+    revision_svc._snapshot_one_read = read_wrap
+    try:
+        revA = await revision_svc.capture_revision(factory(), shots[0])
+    finally:
+        revision_svc._snapshot_one_read = original_read
+    revB = state["rev2"]
+
+    assert revA.id != revB.id
+    numbers = sorted((revA.revision_number, revB.revision_number))
+    assert numbers == [1, 2]  # distinct, persistence order
+    snapA = json.loads(revA.snapshot_json)
+    snapB = json.loads(revB.snapshot_json)
+    assert snapA["continuity"]["feature_states"][0]["value"] == "fresh"
+    assert snapB["continuity"]["feature_states"][0]["value"] == "healing"
+    assert revA.snapshot_hash != revB.snapshot_hash
+    # Both immutable children sets survive.
+    rows = await _fetch_all(
+        engine,
+        "SELECT shot_revision_id, value_json FROM "
+        "shot_revision_feature_states ORDER BY shot_revision_id",
+        {},
     )
-    assert json.loads(row_before["snapshot_json"])[
-        "continuity"]["feature_states"][0]["value"] == value
+    assert len(rows) == 2
+    values = sorted(json.loads(r["value_json"]) for r in rows)
+    assert values == ["fresh", "healing"]
 
 # --- M7C r2: B1 regressions (parent-field corruption on reuse) ------------------
 
@@ -946,11 +998,23 @@ async def test_historical_type_violations_fail_closed(client, factory, engine):
                           scene, "start", "set", value)
     rev = await _capture_once(factory, shots[0])
 
+    import hashlib as _hl
+
+    def _h(vj):
+        return _hl.sha256(vj.encode("utf-8")).hexdigest()
+
+    # CORRECT SHA-256 for the exact invalid bytes: the failure must come
+    # from captured-type validation, never from a hash mismatch.
     violations = [
-        ("bool_f", '"fresh"', "b" * 64),   # boolean with a string
-        ("int_f", "true", "c" * 64),       # integer with JSON true
-        ("dec_f", '"1.50"', "d" * 64),     # non-canonical decimal
-        ("txt_f", '{"a":1}', "e" * 64),    # object
+        ("bool_f", '"fresh"', _h('"fresh"')),   # boolean with a string
+        ("int_f", "true", _h("true")),           # integer with JSON true
+        ("dec_f", '"1.50"', _h('"1.50"')),       # non-canonical decimal
+        ("txt_f", '{"a":1}', _h('{"a":1}')),     # object
+        ("dec_f", '"' + "1" * 39 + '"',
+         _h('"' + "1" * 39 + '"')),               # precision > 38
+        ("dec_f", '"0.' + "1" * 19 + '"',
+         _h('"0.' + "1" * 19 + '"')),             # scale > 18
+        ("txt_f", '" pad "', _h('" pad "')),     # untrimmed text
     ]
     for key, vj, vh in violations:
         async with engine.connect() as conn:
@@ -992,7 +1056,14 @@ async def test_malformed_spec_json_fails_closed(client, factory, engine):
     rev = await _capture_once(factory, shots[0])
 
     for bad in ('{bad', '[]', '"str"', '{"schema_version": "x"}',
-                '{"schema_version": 7}'):
+                '{"schema_version": 7}',
+                '{"schema_version": 2, "dependencies": null, '
+                '"feature_states": [], "relations": []}',
+                '{"schema_version": 2, "dependencies": [], '
+                '"feature_states": null, "relations": []}',
+                '{"schema_version": 2, "dependencies": [], '
+                '"feature_states": [], "relations": null}',
+                '{"schema_version": 1, "dependencies": {"a": 1}}'):
         async with engine.connect() as conn:
             await conn.exec_driver_sql("BEGIN IMMEDIATE")
             await conn.execute(
@@ -1092,9 +1163,12 @@ async def test_race_writer_commits_inside_open_read_txn(client, factory, engine)
 # --- B5: remaining §14 concurrency cases ----------------------------------------------
 
 
-async def test_race_feature_soft_delete_vs_capture(client, factory, engine):
-    """Feature soft-delete fencing holds: the capture read sees the Feature
-    and its transition fully present or fully absent — never dangling."""
+async def test_feature_soft_delete_blocks_then_captures_converge(
+    client, factory, engine
+):
+    """Sequential boundary case (not a race): Feature soft-delete fencing
+    holds — deletion is refused while the transition is active, and
+    captures keep converging onto the schema-3 revision."""
     from soloring.continuity import features as fsvc
     from soloring.domain import revisions as revision_svc
 
@@ -1116,9 +1190,12 @@ async def test_race_feature_soft_delete_vs_capture(client, factory, engine):
     assert again.id == rev.id
 
 
-async def test_race_transition_soft_delete_vs_capture(client, factory):
-    """Soft-deleting the winning transition → next capture is effective
-    empty → converges back onto the schema-2 revision."""
+async def test_transition_soft_delete_returns_to_schema2(
+    client, factory
+):
+    """Sequential boundary case (not a race): soft-deleting the winning
+    transition → next capture is effective empty → converges back onto the
+    schema-2 revision."""
     from soloring.domain import revisions as revision_svc
 
     pid = await _seed_project(factory)
@@ -1141,9 +1218,10 @@ async def test_race_transition_soft_delete_vs_capture(client, factory):
     assert back.id == rev2.id  # effective empty converges onto schema 2
 
 
-async def test_race_reorder_vs_capture(client, factory, engine):
-    """Reorder changes ranks → the transition becomes future → capture
-    changes; ordering identity survives."""
+async def test_narrative_reposition_changes_capture(client, factory, engine):
+    """Sequential boundary case (not a race): moving the transition to a
+    later narrative position makes it future → schema-2 capture; ordering
+    identity survives; A stays frozen."""
     from soloring.domain import revisions as revision_svc
 
     pid = await _seed_project(factory)
@@ -1182,7 +1260,9 @@ async def test_race_reorder_vs_capture(client, factory, engine):
         "feature_states"][0]["value"] == "fresh"
 
 
-async def test_different_concurrent_schema3_captures_both_persist(client, factory):
+async def test_different_schema3_states_sequential_both_persist(
+    client, factory
+):
     from soloring.domain import revisions as revision_svc
 
     pid = await _seed_project(factory)
