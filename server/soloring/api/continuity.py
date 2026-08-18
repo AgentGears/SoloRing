@@ -10,12 +10,17 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, status
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from soloring.api.deps import get_session
+from soloring.api.schemas.continuity_features import (
+    FeatureCreate,
+    FeaturePatch,
+    FeatureRead,
+)
 from soloring.api.schemas.shots import SemanticDependencyWithEntity
 from soloring.continuity import dependencies as dependency_svc
 
@@ -239,3 +244,70 @@ async def generation_continuity(
     projection = await _revision_continuity(session, revision_id)
     projection["generation_id"] = generation_id
     return projection
+
+
+# --- ContinuityFeature surface (M7A §47) ------------------------------------------
+
+
+@router.get(
+    "/entities/{entity_id}/continuity-features",
+    response_model=list[FeatureRead],
+)
+async def list_continuity_features(
+    entity_id: str, session: AsyncSession = Depends(get_session)
+) -> list[FeatureRead]:
+    from soloring.continuity import features as feature_svc
+
+    return [
+        FeatureRead(**r)
+        for r in await feature_svc.list_features(session, entity_id)
+    ]
+
+
+@router.post(
+    "/entities/{entity_id}/continuity-features",
+    response_model=FeatureRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_continuity_feature(
+    entity_id: str,
+    payload: FeatureCreate,
+    session: AsyncSession = Depends(get_session),
+) -> FeatureRead:
+    from soloring.continuity import features as feature_svc
+
+    fid = await feature_svc.create_feature(session, entity_id, payload)
+    return FeatureRead(**await feature_svc.get_feature(session, fid))
+
+
+@router.get("/continuity-features/{feature_id}", response_model=FeatureRead)
+async def get_continuity_feature(
+    feature_id: str, session: AsyncSession = Depends(get_session)
+) -> FeatureRead:
+    from soloring.continuity import features as feature_svc
+
+    return FeatureRead(**await feature_svc.get_feature(session, feature_id))
+
+
+@router.patch("/continuity-features/{feature_id}", response_model=FeatureRead)
+async def patch_continuity_feature(
+    feature_id: str,
+    payload: FeaturePatch,
+    session: AsyncSession = Depends(get_session),
+) -> FeatureRead:
+    from soloring.continuity import features as feature_svc
+
+    await feature_svc.patch_feature(session, feature_id, payload)
+    return FeatureRead(**await feature_svc.get_feature(session, feature_id))
+
+
+@router.delete(
+    "/continuity-features/{feature_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_continuity_feature(
+    feature_id: str, session: AsyncSession = Depends(get_session)
+) -> None:
+    from soloring.continuity import features as feature_svc
+
+    await feature_svc.delete_feature(session, feature_id)

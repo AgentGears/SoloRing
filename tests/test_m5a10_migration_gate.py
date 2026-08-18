@@ -46,7 +46,7 @@ def _populate_0004_db(db_file: Path) -> str:
         con.execute(
             "INSERT INTO shot_revisions (id, shot_id, revision_number, "
             "snapshot_hash, snapshot_json, created_at) VALUES "
-            "(?, ?, 1, ?, '{}', datetime('now'))",
+            "(?, ?, 1, ?, '{\"schema_version\": 1}', datetime('now'))",
             (rid, sid, "a" * 64),
         )
         con.execute(
@@ -109,7 +109,7 @@ def test_populated_0004_to_head_defaults_and_integrity(
     finally:
         con.close()
 
-    assert rev[0] == "0007_active_narrative_uniqueness"
+    assert rev[0] == "0008_narrative_continuity_state"
     assert "soft_cancel_selected_at" in cols
     # Documented defaults for pre-existing rows: submission not_started, no
     # attempt, no job, no soft cancel, no artifact.
