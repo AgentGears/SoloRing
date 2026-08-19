@@ -70,15 +70,32 @@ export default function ContinuityStatePanel({
   state,
   notReadyCode,
   notReadyIssues,
+  loadError,
   entityNames,
 }: {
   state: ContinuityStateResponse | null;
-  /** Error envelope code from the strict endpoint, when it raised. */
+  /** Error-envelope code from the strict endpoint — ONLY the two semantic
+   * not-ready conditions (classified by the caller); anything else is a
+   * loadError and renders as an error, never as readiness. */
   notReadyCode: string | null;
   /** The FULL ordered issue set from the error envelope details. */
   notReadyIssues: ReadinessIssue[];
+  /** Any non-semantic failure of the strict endpoint (500s, transport,
+   * invariant violations) — rendered honestly as what it is. */
+  loadError: { code: string; message: string } | null;
   entityNames: Record<string, string>;
 }) {
+  if (loadError) {
+    return (
+      <section>
+        <div className="empty">
+          Continuity state failed to load — {loadError.code}:{" "}
+          {loadError.message} This is a load/integrity error, NOT a
+          continuity-readiness condition.
+        </div>
+      </section>
+    );
+  }
   if (notReadyCode) {
     return (
       <section>

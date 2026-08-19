@@ -17,6 +17,7 @@ import {
   deletePredicate,
   deleteRelation,
   deleteRelationTransition,
+  patchPredicate,
   patchRelationTransition,
 } from "@/lib/api.client";
 import { asApiError, type ApiError } from "@/lib/api.shared";
@@ -129,13 +130,161 @@ function RelationTransitionForm({
   );
 }
 
-function RelationTransitionRow({
+function PredicateEditForm({ predicate }: { predicate: ContinuityPredicate }) {
+  const router = useRouter();
+  const [name, setName] = useState(predicate.name);
+  const [description, setDescription] = useState(predicate.description ?? "");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<ApiError | null>(null);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      // Omitted ≠ null mirrored: `key` is immutable identity and never
+      // sent; empty description is an EXPLICIT null (clear).
+      await patchPredicate(predicate.id, {
+        name: name.trim(),
+        description: description.trim() ? description.trim() : null,
+      });
+      router.refresh();
+    } catch (err) {
+      setError(asApiError(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form className="card form-row" onSubmit={submit}>
+      {error ? (
+        <ErrorBanner error={error} onDismiss={() => setError(null)} />
+      ) : null}
+      <input
+        placeholder="Display name"
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        required
+      />
+      <input
+        placeholder="Description (empty clears)"
+        value={description}
+        onChange={(e) => setDescription(e.target.value)}
+      />
+      <button className="btn" type="submit" disabled={busy || !name.trim()}>
+        Save metadata (key is immutable)
+      </button>
+    </form>
+  );
+}
+
+function RelationTransitionEditForm({
   transition,
+  shots,
 }: {
   transition: RelationTransition;
+  shots: ShotListItem[];
+}) {
+  const router = useRouter();
+  const [anchorType, setAnchorType] = useState(transition.anchor_type);
+  const [anchorId, setAnchorId] = useState(transition.anchor_id);
+  const [boundary, setBoundary] = useState(transition.boundary);
+  const [state, setState] = useState(transition.state);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<ApiError | null>(null);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await patchRelationTransition(transition.id, {
+        anchor_type: anchorType,
+        anchor_id: anchorId.trim(),
+        boundary,
+        state,
+      });
+      router.refresh();
+    } catch (err) {
+      setError(asApiError(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form className="card form-row" onSubmit={submit}>
+      {error ? (
+        <ErrorBanner error={error} onDismiss={() => setError(null)} />
+      ) : null}
+      <select
+        value={anchorType}
+        onChange={(e) => {
+          setAnchorType(e.target.value);
+          setAnchorId("");
+        }}
+      >
+        {ANCHOR_TYPES.map((t) => (
+          <option key={t} value={t}>
+            {t}
+          </option>
+        ))}
+      </select>
+      {anchorType === "shot" ? (
+        <select
+          value={shots.some((s) => s.id === anchorId) ? anchorId : ""}
+          onChange={(e) => setAnchorId(e.target.value)}
+          required
+        >
+          <option value="" disabled>
+            Select shot…
+          </option>
+          {shots.map((s) => (
+            <option key={s.id} value={s.id}>
+              Shot {s.shot_number}
+              {s.title ? ` — ${s.title}` : ""}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <input
+          placeholder={`${anchorType} UUID`}
+          value={anchorId}
+          onChange={(e) => setAnchorId(e.target.value)}
+          required
+        />
+      )}
+      <select value={boundary} onChange={(e) => setBoundary(e.target.value)}>
+        {BOUNDARIES.map((b) => (
+          <option key={b} value={b}>
+            {b}
+          </option>
+        ))}
+      </select>
+      <select value={state} onChange={(e) => setState(e.target.value)}>
+        <option value="active">active</option>
+        <option value="inactive">inactive</option>
+      </select>
+      <button className="btn" type="submit" disabled={busy || !anchorId.trim()}>
+        Save transition
+      </button>
+    </form>
+  );
+}
+
+function RelationTransitionRow({
+  transition,
+  shots,
+}: {
+  transition: RelationTransition;
+  shots: ShotListItem[];
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
 
   async function flip() {
@@ -181,8 +330,15 @@ function RelationTransitionRow({
           created {transition.created_at}
         </div>
         {error ? <ErrorBanner error={error} onDismiss={() => setError(null)} /> : null}
+        {editing ? (
+          <RelationTransitionEditForm transition={transition} shots={shots} />
+        ) : null}
       </div>
       <div>
+        <button className="btn" onClick={() => setEditing(!editing)}
+                disabled={busy}>
+          {editing ? "Close edit" : "Edit"}
+        </button>{" "}
         <button className="btn" onClick={flip} disabled={busy}>
           {transition.state === "active" ? "→ inactive" : "→ active"}
         </button>{" "}
@@ -220,6 +376,9 @@ export function ProjectContinuityPanel({
   const [object, setObject] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
+  const [editingPredicateId, setEditingPredicateId] = useState<string | null>(
+    null,
+  );
 
   async function submitPredicate(e: React.FormEvent) {
     e.preventDefault();
@@ -290,22 +449,40 @@ export function ProjectContinuityPanel({
         <div className="empty">No predicates yet.</div>
       ) : (
         predicates.map((p) => (
-          <div className="card row" key={p.id}>
-            <div>
-              <strong>{p.key}</strong>
-              <span className="meta"> · {p.name}</span>
+          <div key={p.id}>
+            <div className="card row">
+              <div>
+                <strong>{p.key}</strong>
+                <span className="meta"> · {p.name}</span>
+              </div>
+              <div>
+                <button
+                  className="btn"
+                  onClick={() =>
+                    setEditingPredicateId(
+                      editingPredicateId === p.id ? null : p.id,
+                    )
+                  }
+                  disabled={busy}
+                >
+                  {editingPredicateId === p.id ? "Close edit" : "Edit"}
+                </button>{" "}
+                <button
+                  className="btn"
+                  onClick={() => removePredicate(p.id)}
+                  disabled={
+                    busy ||
+                    relations.some((r) => r.predicate_id === p.id)
+                  }
+                  title="Delete blocked while relations reference the predicate"
+                >
+                  Delete
+                </button>
+              </div>
             </div>
-            <button
-              className="btn"
-              onClick={() => removePredicate(p.id)}
-              disabled={
-                busy ||
-                relations.some((r) => r.predicate_id === p.id)
-              }
-              title="Delete blocked while relations reference the predicate"
-            >
-              Delete
-            </button>
+            {editingPredicateId === p.id ? (
+              <PredicateEditForm predicate={p} />
+            ) : null}
           </div>
         ))
       )}
@@ -363,7 +540,11 @@ export function ProjectContinuityPanel({
                 </button>
               </div>
               {transitions.map((t) => (
-                <RelationTransitionRow key={t.id} transition={t} />
+                <RelationTransitionRow
+                  key={t.id}
+                  transition={t}
+                  shots={shots}
+                />
               ))}
               <RelationTransitionForm relation={r} shots={shots} />
             </div>

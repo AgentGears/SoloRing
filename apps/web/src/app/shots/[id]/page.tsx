@@ -55,8 +55,20 @@ export default async function ShotPage({
   let continuity: ContinuityStateResponse | null = null;
   let notReadyCode: string | null = null;
   let notReadyIssues: ReadinessIssue[] = [];
-  let provenance: Record<string, RevisionContinuity | null> = {};
+  let continuityLoadError: { code: string; message: string } | null = null;
+  let provenance: Record<
+    string,
+    import("@/lib/types").RevisionContinuity | ApiError | null
+  > = {};
   let loadError: ApiError | null = null;
+
+  // ONLY these two are semantic not-ready conditions (r2 B6); any other
+  // failure of the strict endpoint is a load/integrity error and renders
+  // as one — never reinterpreted as continuity readiness.
+  const NOT_READY_CODES = new Set([
+    "NARRATIVE_CONTEXT_REQUIRED",
+    "CONTINUITY_RELATION_ENDPOINT_REQUIRED",
+  ]);
 
   try {
     shot = await serverGetShot(id);
@@ -73,27 +85,34 @@ export default async function ShotPage({
     loadError = asApiError(err);
   }
 
-  // The strict current-state endpoint RAISES when not ready; the error
-  // envelope carries the full ordered issue set — render it honestly
-  // (APR-051) instead of a partial body.
   if (!loadError) {
     try {
       continuity = await serverGetContinuityState(id);
     } catch (err) {
       const apiErr = asApiError(err);
-      notReadyCode = apiErr.code;
-      const issues = apiErr.details?.issues;
-      if (Array.isArray(issues)) {
-        notReadyIssues = issues as ReadinessIssue[];
+      if (NOT_READY_CODES.has(apiErr.code)) {
+        notReadyCode = apiErr.code;
+        const issues = apiErr.details?.issues;
+        if (Array.isArray(issues)) {
+          notReadyIssues = issues as ReadinessIssue[];
+        }
+      } else {
+        continuityLoadError = {
+          code: apiErr.code,
+          message: apiErr.message,
+        };
       }
     }
+    // Historical provenance errors surface VISIBLY (fail-closed integrity
+    // responses are never silently nulled); null only for a response that
+    // legitimately could not be attempted.
     provenance = Object.fromEntries(
       await Promise.all(
         revisions.map(async (r) => {
           try {
             return [r.id, await serverGetRevisionContinuity(r.id)] as const;
-          } catch {
-            return [r.id, null] as const;
+          } catch (err) {
+            return [r.id, asApiError(err)] as const;
           }
         }),
       ),
@@ -174,6 +193,7 @@ export default async function ShotPage({
         state={continuity}
         notReadyCode={notReadyCode}
         notReadyIssues={notReadyIssues}
+        loadError={continuityLoadError}
         entityNames={Object.fromEntries(entities.map((e) => [e.id, e.name]))}
       />
     </main>

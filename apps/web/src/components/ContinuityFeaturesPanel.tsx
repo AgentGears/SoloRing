@@ -15,6 +15,7 @@ import {
   createFeatureTransition,
   deleteContinuityFeature,
   deleteFeatureTransition,
+  patchContinuityFeature,
   patchFeatureTransition,
 } from "@/lib/api.client";
 import { ApiError, asApiError } from "@/lib/api.shared";
@@ -149,32 +150,174 @@ function TransitionForm({
   );
 }
 
-function TransitionRow({
-  transition,
-}: {
-  transition: ContinuityFeatureTransition;
-}) {
+function FeatureEditForm({ feature }: { feature: ContinuityFeature }) {
   const router = useRouter();
+  const [name, setName] = useState(feature.name);
+  const [description, setDescription] = useState(feature.description ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
 
-  async function flipOperation() {
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
     if (busy) return;
     setBusy(true);
     setError(null);
     try {
-      if (transition.operation === "set") {
-        await patchFeatureTransition(transition.id, { operation: "clear" });
-      } else {
-        setError(
-          new ApiError(
-            "CLIENT_MIRROR",
-            "clear → set requires a value — delete and recreate the transition.",
-            0,
-          ),
-        );
-        return;
+      // Omitted ≠ null mirrored: both fields are sent as the prospective
+      // row; an EMPTY description is an EXPLICIT null (clear), never an
+      // omission.
+      await patchContinuityFeature(feature.id, {
+        name: name.trim(),
+        description: description.trim() ? description.trim() : null,
+      });
+      router.refresh();
+    } catch (err) {
+      setError(asApiError(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form className="card form-row" onSubmit={submit}>
+      {error ? (
+        <ErrorBanner error={error} onDismiss={() => setError(null)} />
+      ) : null}
+      <input
+        placeholder="Display name"
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        required
+      />
+      <input
+        placeholder="Description (empty clears)"
+        value={description}
+        onChange={(e) => setDescription(e.target.value)}
+      />
+      <button className="btn" type="submit" disabled={busy || !name.trim()}>
+        Save metadata (key/kind/value_type are immutable)
+      </button>
+    </form>
+  );
+}
+
+function TransitionEditForm({
+  transition,
+  feature,
+}: {
+  transition: ContinuityFeatureTransition;
+  feature: ContinuityFeature;
+}) {
+  const router = useRouter();
+  const [anchorType, setAnchorType] = useState(transition.anchor_type);
+  const [anchorId, setAnchorId] = useState(transition.anchor_id);
+  const [boundary, setBoundary] = useState(transition.boundary);
+  const [operation, setOperation] = useState(transition.operation);
+  const [valueText, setValueText] = useState(
+    transition.value_json ?? "",
+  );
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<ApiError | null>(null);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      // Full prospective-row PATCH: the server is the authority; the
+      // value field is present only for a prospective `set` (omitted for
+      // clear — value:null is never sent).
+      const fields: Parameters<typeof patchFeatureTransition>[1] = {
+        anchor_type: anchorType,
+        anchor_id: anchorId.trim(),
+        boundary,
+        operation,
+      };
+      if (operation === "set") {
+        fields.value = JSON.parse(valueText);
       }
+      await patchFeatureTransition(transition.id, fields);
+      router.refresh();
+    } catch (err) {
+      setError(asApiError(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form className="card form-row" onSubmit={submit}>
+      {error ? (
+        <ErrorBanner error={error} onDismiss={() => setError(null)} />
+      ) : null}
+      <select
+        value={anchorType}
+        onChange={(e) => setAnchorType(e.target.value)}
+      >
+        {ANCHOR_TYPES.map((t) => (
+          <option key={t} value={t}>
+            {t}
+          </option>
+        ))}
+      </select>
+      <input
+        placeholder="Anchor UUID"
+        value={anchorId}
+        onChange={(e) => setAnchorId(e.target.value)}
+        required
+      />
+      <select value={boundary} onChange={(e) => setBoundary(e.target.value)}>
+        {BOUNDARIES.map((b) => (
+          <option key={b} value={b}>
+            {b}
+          </option>
+        ))}
+      </select>
+      <select value={operation} onChange={(e) => setOperation(e.target.value)}>
+        <option value="set">set</option>
+        <option value="clear">clear</option>
+      </select>
+      {operation === "set" ? (
+        <>
+          <input
+            placeholder="JSON value (required for set)"
+            value={valueText}
+            onChange={(e) => setValueText(e.target.value)}
+            required
+          />
+          <ValueInputHint valueType={feature.value_type} />
+        </>
+      ) : null}
+      <button
+        className="btn"
+        type="submit"
+        disabled={busy || !anchorId.trim()}
+      >
+        Save transition
+      </button>
+    </form>
+  );
+}
+
+function TransitionRow({
+  transition,
+  feature,
+}: {
+  transition: ContinuityFeatureTransition;
+  feature: ContinuityFeature;
+}) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [error, setError] = useState<ApiError | null>(null);
+
+  async function flipToClear() {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await patchFeatureTransition(transition.id, { operation: "clear" });
       router.refresh();
     } catch (err) {
       setError(asApiError(err));
@@ -213,11 +356,20 @@ function TransitionRow({
           created {transition.created_at}
         </div>
         {error ? <ErrorBanner error={error} onDismiss={() => setError(null)} /> : null}
+        {editing ? (
+          <TransitionEditForm transition={transition} feature={feature} />
+        ) : null}
       </div>
       <div>
-        <button className="btn" onClick={flipOperation} disabled={busy}>
-          {transition.operation === "set" ? "→ clear" : "→ set (recreate)"}
+        <button className="btn" onClick={() => setEditing(!editing)}
+                disabled={busy}>
+          {editing ? "Close edit" : "Edit"}
         </button>{" "}
+        {transition.operation === "set" ? (
+          <button className="btn" onClick={flipToClear} disabled={busy}>
+            → clear
+          </button>
+        ) : null}{" "}
         <button className="btn" onClick={remove} disabled={busy}>
           Delete
         </button>
@@ -244,6 +396,9 @@ export function ContinuityFeaturesPanel({
   const [unit, setUnit] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
+  const [editingFeatureId, setEditingFeatureId] = useState<string | null>(
+    null,
+  );
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -318,21 +473,37 @@ export function ContinuityFeaturesPanel({
                       : ""}
                   </div>
                 </div>
-                <button
-                  className="btn"
-                  onClick={() => removeFeature(f.id)}
-                  disabled={busy || transitions.length > 0}
-                  title={
-                    transitions.length > 0
-                      ? "Delete blocked while transitions are active"
-                      : "Soft-delete this feature"
-                  }
-                >
-                  Delete
-                </button>
+                <div>
+                  <button
+                    className="btn"
+                    onClick={() =>
+                      setEditingFeatureId(
+                        editingFeatureId === f.id ? null : f.id,
+                      )
+                    }
+                    disabled={busy}
+                  >
+                    {editingFeatureId === f.id ? "Close edit" : "Edit"}
+                  </button>{" "}
+                  <button
+                    className="btn"
+                    onClick={() => removeFeature(f.id)}
+                    disabled={busy || transitions.length > 0}
+                    title={
+                      transitions.length > 0
+                        ? "Delete blocked while transitions are active"
+                        : "Soft-delete this feature"
+                    }
+                  >
+                    Delete
+                  </button>
+                </div>
               </div>
+              {editingFeatureId === f.id ? (
+                <FeatureEditForm feature={f} />
+              ) : null}
               {transitions.map((t) => (
-                <TransitionRow key={t.id} transition={t} />
+                <TransitionRow key={t.id} transition={t} feature={f} />
               ))}
               <TransitionForm feature={f} />
             </div>

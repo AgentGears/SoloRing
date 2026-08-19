@@ -271,6 +271,29 @@ export interface ContinuityStateResponse {
   relation_states: EffectiveRelationState[];
 }
 
+/** Historical spec entries (captured-row reconstruction): no
+ * source_transition_id — audit ids ride in source_transition_audit. */
+export interface HistoricalFeatureStateEntry {
+  entity_id: string;
+  feature_id: string;
+  feature_key: string;
+  feature_kind: string;
+  value_type: string;
+  unit: string | null;
+  value: unknown;
+  value_hash: string;
+  source_anchor: SourceAnchor;
+}
+
+export interface HistoricalRelationEntry {
+  subject_entity_id: string;
+  relation_id: string;
+  predicate_id: string;
+  predicate_key: string;
+  object_entity_id: string;
+  source_anchor: SourceAnchor;
+}
+
 export interface RevisionContinuity {
   shot_revision_id: string;
   snapshot_schema_version: number | null;
@@ -278,8 +301,8 @@ export interface RevisionContinuity {
   continuity_schema_version: number | null;
   continuity_spec_hash: string | null;
   dependencies: unknown[];
-  feature_states: EffectiveFeatureState[];
-  relations: EffectiveRelationState[];
+  feature_states: HistoricalFeatureStateEntry[];
+  relations: HistoricalRelationEntry[];
   source_transition_audit: {
     feature_id?: string;
     relation_id?: string;

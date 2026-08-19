@@ -2,8 +2,11 @@
  * M7D §18.2.6 — historical continuity provenance per revision (pure
  * display, server-fed from the immutable-row reconstruction endpoint).
  * Never re-resolves current state; renders exactly what was captured.
+ * Fail-closed historical errors (e.g. INTERNAL_INVARIANT_VIOLATION)
+ * render VISIBLY as errors — never silently reclassified as absence.
  */
 
+import { ApiError } from "@/lib/api.shared";
 import type { RevisionContinuity, RevisionSummary } from "@/lib/types";
 
 export default function RevisionProvenanceList({
@@ -12,7 +15,7 @@ export default function RevisionProvenanceList({
   entityNames,
 }: {
   revisions: RevisionSummary[];
-  continuity: Record<string, RevisionContinuity | null>;
+  continuity: Record<string, RevisionContinuity | ApiError | null>;
   entityNames: Record<string, string>;
 }) {
   if (revisions.length === 0) {
@@ -22,6 +25,20 @@ export default function RevisionProvenanceList({
     <section>
       {revisions.map((r) => {
         const c = continuity[r.id];
+        if (c && c instanceof ApiError) {
+          return (
+            <div className="card row" key={r.id}>
+              <div>
+                <strong>Revision {r.revision_number}</strong>
+                <div className="empty">
+                  Provenance failed to load — {c.code}: {c.message}. The
+                  backend surfaced this integrity failure deliberately; it
+                  is not hidden as absence.
+                </div>
+              </div>
+            </div>
+          );
+        }
         return (
           <div className="card" key={r.id}>
             <div className="row">
