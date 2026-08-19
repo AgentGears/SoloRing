@@ -140,6 +140,7 @@ async def _revision_continuity(session: AsyncSession, revision_id: str) -> dict:
 
     dependencies: list[dict[str, Any]] = []
     feature_states: list[dict[str, Any]] = []
+    relations: list[dict[str, Any]] = []
     transition_audit: list[dict[str, Any]] = []
     continuity_schema_version = None
     if rev["continuity_spec_json"] is not None:
@@ -314,9 +315,59 @@ async def _revision_continuity(session: AsyncSession, revision_id: str) -> dict:
                 "source_transition_id": row["source_transition_id"],
             })
 
+        # Relation states (M7D §11): the shot_revision_relation_states ROWS
+        # are the authority — captured duplicates, NEVER re-derived from
+        # today's relations/predicates. There is no value payload; the
+        # per-row captured-only check is the ONE key grammar (a pure regex
+        # — today's predicate table is never consulted, mirroring the enum
+        # freeze note), and the byte-level rebuild below is the master
+        # check.
+        relrows = (
+            await session.execute(
+                text(
+                    "SELECT relation_id, subject_entity_id, predicate_id, "
+                    "predicate_key, object_entity_id, "
+                    "source_transition_id, source_anchor_type, "
+                    "source_anchor_id, source_boundary "
+                    "FROM shot_revision_relation_states "
+                    "WHERE shot_revision_id = :rid"
+                ),
+                {"rid": revision_id},
+            )
+        ).mappings().all()
+        from soloring.continuity.values import is_valid_key
+
+        class _CapturedRelationState:
+            """Row-shape adapter consumed by build_continuity_spec_v2."""
+
+            def __init__(self, row):
+                self.relation_id = row["relation_id"]
+                self.subject_entity_id = row["subject_entity_id"]
+                self.predicate_id = row["predicate_id"]
+                self.predicate_key = row["predicate_key"]
+                self.object_entity_id = row["object_entity_id"]
+                self.source_anchor_type = row["source_anchor_type"]
+                self.source_anchor_id = row["source_anchor_id"]
+                self.source_boundary = row["source_boundary"]
+
+        for row in relrows:
+            if not is_valid_key(row["predicate_key"]):
+                raise internal_invariant(
+                    f"ShotRevision {revision_id} relation row "
+                    f"{row['relation_id']} carries predicate_key "
+                    f"{row['predicate_key']!r} outside the frozen key "
+                    "grammar."
+                )
+            transition_audit.append({
+                "relation_id": row["relation_id"],
+                "source_transition_id": row["source_transition_id"],
+            })
+
         if continuity_schema_version == 2:
             rebuilt = build_continuity_spec_v2(
-                rebuilt_deps, [_CapturedFeatureState(r) for r in frows]
+                rebuilt_deps,
+                [_CapturedFeatureState(r) for r in frows],
+                [_CapturedRelationState(r) for r in relrows],
             )
         else:
             rebuilt = build_continuity_spec(rebuilt_deps)
@@ -329,6 +380,7 @@ async def _revision_continuity(session: AsyncSession, revision_id: str) -> dict:
                 "its canonical continuity spec."
             )
         feature_states = list(rebuilt.get("feature_states", []))
+        relations = list(rebuilt.get("relations", []))
 
     import json as _json
 
@@ -351,6 +403,7 @@ async def _revision_continuity(session: AsyncSession, revision_id: str) -> dict:
         "continuity_spec_hash": rev["continuity_spec_hash"],
         "dependencies": dependencies,
         "feature_states": feature_states,
+        "relations": relations,
         "source_transition_audit": transition_audit,
     }
 

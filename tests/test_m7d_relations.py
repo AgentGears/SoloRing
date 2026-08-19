@@ -863,3 +863,368 @@ async def test_resolver_unassigned_precedence_with_relation_data(client, factory
         r.json()["readiness_issues"][0]["error_code"]
         == "NARRATIVE_CONTEXT_REQUIRED"
     )
+
+
+# --- §21.5–§21.8 Capture, reuse integrity, historical provenance -----------------
+
+
+async def _capture(factory, shot_id):
+    from soloring.domain import revisions as revision_svc
+
+    return await revision_svc.capture_revision(factory(), shot_id)
+
+
+async def _fetch(engine, sql, params=None):
+    from sqlalchemy import text
+
+    async with engine.connect() as conn:
+        return (
+            await conn.execute(text(sql), params or {})
+        ).mappings().all()
+
+
+async def test_capture_relation_only_promotes_schema_2_to_3(client, factory,
+                                                            engine):
+    """A relation state alone (deps present, zero Feature states) promotes
+    the capture to schema 3 + spec 2 — and zero-of-both keeps the exact
+    schema-2 form (APR-016 extension)."""
+    pid = await _seed_project(factory)
+    seq, scene, shots = await _topology(client, factory, pid, n_shots=1)
+    eva = await _entity_approved(client, pid, name="Eva")
+    bag = await _entity_approved(client, pid, kind="prop", name="Bag")
+    carries = await _predicate(client, pid, key="carries")
+    await _depend(client, shots[0], [eva["id"], bag["id"]])
+
+    # Before any relation temporal state: deps only → exact schema 2.
+    legacy = await _capture(factory, shots[0])
+    snap = (await _fetch(
+        engine, "SELECT snapshot_json FROM shot_revisions WHERE id = :r",
+        {"r": legacy.id},
+    ))[0]["snapshot_json"]
+    import json as _json
+
+    assert _json.loads(snap)["schema_version"] == 2
+
+    rel = await _relation(client, pid, eva["id"], carries["id"], bag["id"])
+    assert (
+        await _rt(client, rel["id"], "shot", shots[0], "start", "active")
+    ).status_code == 201
+
+    rev = await _capture(factory, shots[0])
+    assert rev.id != legacy.id
+    snap = (await _fetch(
+        engine, "SELECT snapshot_json, continuity_spec_json FROM "
+        "shot_revisions WHERE id = :r", {"r": rev.id},
+    ))[0]
+    assert _json.loads(snap["snapshot_json"])["schema_version"] == 3
+    spec = _json.loads(snap["continuity_spec_json"])
+    assert spec["schema_version"] == 2
+    assert len(spec["relations"]) == 1
+    entry = spec["relations"][0]
+    assert entry["subject_entity_id"] == eva["id"]
+    assert entry["relation_id"] == rel["id"]
+    assert entry["predicate_id"] == carries["id"]
+    assert entry["predicate_key"] == "carries"
+    assert entry["object_entity_id"] == bag["id"]
+    assert entry["source_anchor"] == {
+        "anchor_type": "shot", "anchor_id": shots[0], "boundary": "start",
+    }
+    assert "source_transition_id" not in entry  # audit-only (APR-022)
+    # The legacy schema-2 revision is untouched: relations still [].
+    legacy_proj = await client.get(f"/shot-revisions/{legacy.id}/continuity")
+    assert legacy_proj.status_code == 200
+    assert legacy_proj.json()["relations"] == []
+
+
+async def test_capture_exact_relation_bytes_and_canonical_order(client, factory,
+                                                                 engine):
+    """The relations array is byte-exact under the canonical
+    (subject, predicate_key, object, relation_id) order — including the
+    predicate_key tiebreak between two relations of one subject."""
+    pid = await _seed_project(factory)
+    seq, scene, shots = await _topology(client, factory, pid, n_shots=1)
+    eva = await _entity_approved(client, pid, name="Eva")
+    bag = await _entity_approved(client, pid, kind="prop", name="Bag")
+    axe = await _entity_approved(client, pid, kind="prop", name="Axe")
+    holds = await _predicate(client, pid, key="holds")
+    carries = await _predicate(client, pid, key="carries")  # carries < holds
+    await _depend(client, shots[0], [eva["id"], bag["id"], axe["id"]])
+
+    r_bag = await _relation(client, pid, eva["id"], holds["id"], bag["id"])
+    r_axe = await _relation(client, pid, eva["id"], carries["id"], axe["id"])
+    assert (
+        await _rt(client, r_bag["id"], "scene", scene, "start", "active")
+    ).status_code == 201
+    assert (
+        await _rt(client, r_axe["id"], "scene", scene, "start", "active")
+    ).status_code == 201
+
+    rev = await _capture(factory, shots[0])
+    spec_json = (await _fetch(
+        engine, "SELECT continuity_spec_json FROM shot_revisions "
+        "WHERE id = :r", {"r": rev.id},
+    ))[0]["continuity_spec_json"]
+
+    from soloring.domain.canonical import canonical_json_str
+
+    # Byte-exact expectation built from the SAME canonical serializer:
+    # insertion-ordered entries, carries (c) before holds (h).
+    expected_entries = [
+        {
+            "subject_entity_id": eva["id"],
+            "relation_id": r_axe["id"],
+            "predicate_id": carries["id"],
+            "predicate_key": "carries",
+            "object_entity_id": axe["id"],
+            "source_anchor": {
+                "anchor_type": "scene", "anchor_id": scene,
+                "boundary": "start",
+            },
+        },
+        {
+            "subject_entity_id": eva["id"],
+            "relation_id": r_bag["id"],
+            "predicate_id": holds["id"],
+            "predicate_key": "holds",
+            "object_entity_id": bag["id"],
+            "source_anchor": {
+                "anchor_type": "scene", "anchor_id": scene,
+                "boundary": "start",
+            },
+        },
+    ]
+    spec = __import__("json").loads(spec_json)
+    assert spec["relations"] == expected_entries
+    rebuilt = {
+        "schema_version": 2,
+        "dependencies": spec["dependencies"],
+        "feature_states": spec["feature_states"],
+        "relations": expected_entries,
+    }
+    assert spec_json == canonical_json_str(rebuilt)
+
+
+async def test_capture_persists_relation_rows_exactly(client, factory, engine):
+    pid = await _seed_project(factory)
+    seq, scene, shots = await _topology(client, factory, pid, n_shots=1)
+    eva = await _entity_approved(client, pid, name="Eva")
+    bag = await _entity_approved(client, pid, kind="prop", name="Bag")
+    carries = await _predicate(client, pid, key="carries")
+    rel = await _relation(client, pid, eva["id"], carries["id"], bag["id"])
+    tr = (
+        await _rt(client, rel["id"], "shot", shots[0], "start", "active")
+    ).json()
+    await _depend(client, shots[0], [eva["id"], bag["id"]])
+
+    rev = await _capture(factory, shots[0])
+    rows = await _fetch(
+        engine,
+        "SELECT relation_id, subject_entity_id, predicate_id, "
+        "predicate_key, object_entity_id, source_transition_id, "
+        "source_anchor_type, source_anchor_id, source_boundary "
+        "FROM shot_revision_relation_states WHERE shot_revision_id = :r",
+        {"r": rev.id},
+    )
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["relation_id"] == rel["id"]
+    assert row["subject_entity_id"] == eva["id"]
+    assert row["predicate_id"] == carries["id"]
+    assert row["predicate_key"] == "carries"
+    assert row["object_entity_id"] == bag["id"]
+    assert row["source_transition_id"] == tr["id"]  # audit id persisted
+    assert row["source_anchor_type"] == "shot"
+    assert row["source_anchor_id"] == shots[0]
+    assert row["source_boundary"] == "start"
+
+
+async def test_working_hash_moves_on_relation_mutation_without_shot_change(
+    client, factory,
+):
+    """M6-F15 extension (§21.6): relation mutation changes the effective
+    working hash with NO Shot-row mutation."""
+    pid = await _seed_project(factory)
+    seq, scene, shots = await _topology(client, factory, pid, n_shots=1)
+    eva = await _entity_approved(client, pid, name="Eva")
+    bag = await _entity_approved(client, pid, kind="prop", name="Bag")
+    carries = await _predicate(client, pid, key="carries")
+    await _depend(client, shots[0], [eva["id"], bag["id"]])
+
+    before = (await client.get(f"/shots/{shots[0]}")).json()
+    rel = await _relation(client, pid, eva["id"], carries["id"], bag["id"])
+    await _rt(client, rel["id"], "shot", shots[0], "start", "active")
+
+    after = (await client.get(f"/shots/{shots[0]}")).json()
+    assert after["working_snapshot_hash"] != before["working_snapshot_hash"]
+    assert after["updated_at"] == before["updated_at"]  # no Shot-row change
+
+    # Deactivating the relation changes the hash again.
+    trs = (
+        await client.get(f"/continuity-relations/{rel['id']}/transitions")
+    ).json()
+    r = await client.patch(
+        f"/continuity-relation-transitions/{trs[0]['id']}",
+        json={"state": "inactive"},
+    )
+    assert r.status_code == 200
+    cleared = (await client.get(f"/shots/{shots[0]}")).json()
+    assert cleared["working_snapshot_hash"] != after["working_snapshot_hash"]
+
+
+async def test_capture_blocked_when_endpoint_incomplete(client, factory,
+                                                        engine):
+    """An endpoint-incomplete Shot captures NOTHING (§8.3): the read unit
+    raises before the builder — no ShotRevision row is written."""
+    pid = await _seed_project(factory)
+    seq, scene, shots = await _topology(client, factory, pid, n_shots=1)
+    eva = await _entity_approved(client, pid, name="Eva")
+    bag = await _entity_approved(client, pid, kind="prop", name="Bag")
+    carries = await _predicate(client, pid, key="carries")
+    rel = await _relation(client, pid, eva["id"], carries["id"], bag["id"])
+    await _rt(client, rel["id"], "shot", shots[0], "start", "active")
+    await _depend(client, shots[0], [eva["id"]])  # exactly one endpoint
+
+    r = await client.post(f"/shots/{shots[0]}/generations")
+    assert r.status_code == 409
+    assert (
+        r.json()["error_code"] == "CONTINUITY_RELATION_ENDPOINT_REQUIRED"
+    )
+    rows = await _fetch(
+        engine, "SELECT id FROM shot_revisions WHERE shot_id = :s",
+        {"s": shots[0]},
+    )
+    assert rows == []
+
+
+async def test_reuse_convergence_and_relation_corruption_fails_closed(
+    client, factory, engine,
+):
+    """Identical relation captures converge onto one revision; a corrupted
+    stored relation row makes the NEXT capture fail closed (UPDATE-then-
+    restore loop, never DELETE); the loop ends from valid state."""
+    from soloring.domain import revisions as revision_svc
+    from soloring.errors import SoloRingError
+    from sqlalchemy import text
+
+    pid = await _seed_project(factory)
+    seq, scene, shots = await _topology(client, factory, pid, n_shots=1)
+    eva = await _entity_approved(client, pid, name="Eva")
+    bag = await _entity_approved(client, pid, kind="prop", name="Bag")
+    carries = await _predicate(client, pid, key="carries")
+    rel = await _relation(client, pid, eva["id"], carries["id"], bag["id"])
+    await _rt(client, rel["id"], "shot", shots[0], "start", "active")
+    await _depend(client, shots[0], [eva["id"], bag["id"]])
+
+    first = await revision_svc.capture_revision(factory(), shots[0])
+    second = await revision_svc.capture_revision(factory(), shots[0])
+    assert first.id == second.id  # convergence (APR-032)
+
+    rows = await _fetch(
+        engine,
+        "SELECT relation_id, predicate_key, object_entity_id FROM "
+        "shot_revision_relation_states WHERE shot_revision_id = :r",
+        {"r": first.id},
+    )
+    assert len(rows) == 1
+    originals = dict(rows[0])
+
+    # Corruption matrix: each case UPDATEs in its OWN committed unit (a
+    # pending transaction would be invisible to the capture connection
+    # under WAL), expects the invariant failure, then RESTORES the
+    # original bytes (never DELETE — later cases must hit THIS field's
+    # validation, not missing-children).
+    async def run(sql, params):
+        async with engine.begin() as conn:
+            await conn.execute(text(sql), params)
+
+    cases = [
+        ("predicate_key", "Bad Key!"),
+        ("predicate_key", "wrong_key"),
+        ("object_entity_id", "00000000-0000-4000-8000-000000000099"),
+    ]
+    for field, bad in cases:
+        await run(
+            f"UPDATE shot_revision_relation_states SET {field} = :v "
+            "WHERE shot_revision_id = :r",
+            {"v": bad, "r": first.id},
+        )
+        try:
+            await revision_svc.capture_revision(factory(), shots[0])
+            raised = False
+        except SoloRingError as exc:
+            raised = (
+                exc.code == "INTERNAL_INVARIANT_VIOLATION"
+                and exc.status_code == 500
+            )
+        assert raised, (field, bad)
+        await run(
+            "UPDATE shot_revision_relation_states SET relation_id = :rid, "
+            "predicate_key = :pk, object_entity_id = :oid "
+            "WHERE shot_revision_id = :r",
+            {"rid": originals["relation_id"],
+             "pk": originals["predicate_key"],
+             "oid": originals["object_entity_id"], "r": first.id},
+        )
+
+    # Positive control: the loop began and ended from valid state.
+    final = await revision_svc.capture_revision(factory(), shots[0])
+    assert final.id == first.id
+
+
+async def test_historical_relations_projection_and_legal_teardown_isolation(
+    client, factory, engine,
+):
+    """§21.8 + §16: the historical projection exposes relations + audit;
+    the LEGAL teardown sequence (transition → relation → predicate) after
+    capture never changes stored bytes."""
+    pid = await _seed_project(factory)
+    seq, scene, shots = await _topology(client, factory, pid, n_shots=1)
+    eva = await _entity_approved(client, pid, name="Eva")
+    bag = await _entity_approved(client, pid, kind="prop", name="Bag")
+    carries = await _predicate(client, pid, key="carries")
+    rel = await _relation(client, pid, eva["id"], carries["id"], bag["id"])
+    tr = (
+        await _rt(client, rel["id"], "shot", shots[0], "start", "active")
+    ).json()
+    await _depend(client, shots[0], [eva["id"], bag["id"]])
+
+    rev = await _capture(factory, shots[0])
+    stored = (await _fetch(
+        engine, "SELECT snapshot_json, continuity_spec_json, "
+        "continuity_spec_hash FROM shot_revisions WHERE id = :r",
+        {"r": rev.id},
+    ))[0]
+
+    proj = await client.get(f"/shot-revisions/{rev.id}/continuity")
+    assert proj.status_code == 200, proj.text
+    body = proj.json()
+    assert len(body["relations"]) == 1
+    assert body["relations"][0]["relation_id"] == rel["id"]
+    audit_ids = {
+        e.get("relation_id") for e in body["source_transition_audit"]
+    }
+    assert rel["id"] in audit_ids
+
+    # Legal teardown (each step releases the previous in-use guard).
+    assert (
+        await client.delete(
+            f"/continuity-relation-transitions/{tr['id']}"
+        )
+    ).status_code == 204
+    assert (
+        await client.delete(f"/continuity-relations/{rel['id']}")
+    ).status_code == 204
+    assert (
+        await client.delete(f"/continuity-predicates/{carries['id']}")
+    ).status_code == 204
+
+    after = (await _fetch(
+        engine, "SELECT snapshot_json, continuity_spec_json, "
+        "continuity_spec_hash FROM shot_revisions WHERE id = :r",
+        {"r": rev.id},
+    ))[0]
+    assert dict(after) == dict(stored)  # history is immutable fact
+
+    proj = await client.get(f"/shot-revisions/{rev.id}/continuity")
+    assert proj.status_code == 200
+    assert len(proj.json()["relations"]) == 1  # unchanged by teardown

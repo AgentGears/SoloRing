@@ -330,7 +330,8 @@ async def read_shot_detail(engine: AsyncEngine, shot_id: str):
             readiness = readiness_projection(outcome, relation_outcome)
             if readiness["continuity_state_ready"]:
                 effective_hash = effective_working_snapshot_hash(
-                    shot, refs, resolved, outcome.states
+                    shot, refs, resolved, outcome.states,
+                    relation_outcome.relation_states,
                 )
                 differs = await canon.differs_from_approved(
                     conn, shot, refs, effective_hash
