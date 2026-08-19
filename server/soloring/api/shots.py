@@ -36,6 +36,7 @@ async def _shot_read(request: Request, shot_id: str) -> ShotRead:
         working_snapshot_hash=effective_hash,
         working_state_differs_from_approved=differs,
         continuity_state_ready=readiness["continuity_state_ready"],
+        readiness_issues=readiness["readiness_issues"],
         semantic_dependencies=[
             SemanticDependencyItem(
                 entity_id=d.entity_id,

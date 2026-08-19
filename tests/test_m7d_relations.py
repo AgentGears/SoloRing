@@ -464,3 +464,402 @@ async def test_relation_list_display_order_and_filters(client, factory):
 
     r = await client.get("/projects/not-a-uuid/continuity-relations")
     assert r.status_code == 404
+
+
+# --- §21.3 RelationTransition ---------------------------------------------------
+
+_M7D2_IMPORTS = True  # marker: section below uses shot/topology helpers
+
+
+async def _topology(client, factory, pid, n_shots=2):
+    from soloring.api.schemas.shots import ShotCreate
+    from soloring.domain import shots as shot_svc
+
+    r = await client.post(f"/projects/{pid}/sequences", json={"title": "S"})
+    assert r.status_code == 201, r.text
+    seq = r.json()["id"]
+    r = await client.post(f"/sequences/{seq}/scenes", json={"title": "C"})
+    assert r.status_code == 201, r.text
+    scene = r.json()["id"]
+    shot_ids = []
+    for _ in range(n_shots):
+        async with factory() as s:
+            shot_ids.append(
+                (await shot_svc.create_shot(
+                    s, pid, ShotCreate(subject="x")
+                )).id
+            )
+    r = await client.put(f"/scenes/{scene}/shots", json={"shot_ids": shot_ids})
+    assert r.status_code == 200, r.text
+    return seq, scene, shot_ids
+
+
+async def _rt(client, relation_id, anchor_type, anchor_id, boundary, state):
+    return await client.post(
+        f"/continuity-relations/{relation_id}/transitions",
+        json={
+            "anchor_type": anchor_type, "anchor_id": anchor_id,
+            "boundary": boundary, "state": state,
+        },
+    )
+
+
+async def _depend(client, shot_id, entity_ids):
+    r = await client.put(
+        f"/shots/{shot_id}/semantic-dependencies",
+        json={
+            "dependencies": [
+                {"entity_id": eid, "role": f"role{i}"}
+                for i, eid in enumerate(entity_ids)
+            ]
+        },
+    )
+    assert r.status_code == 200, r.text
+
+
+async def _entity_approved(client, pid, kind="character", name="Eva"):
+    """Entities used as semantic dependencies need an approved revision
+    (the M6 assignment rule)."""
+    e = await _entity(client, pid, kind=kind, name=name)
+    r = await client.post(
+        f"/entities/{e['id']}/revisions", json={"spec": {"description": "d"}}
+    )
+    assert r.status_code == 201, r.text
+    r = await client.put(
+        f"/entities/{e['id']}/approved-revision",
+        json={
+            "revision_id": r.json()["id"],
+            "expected_approved_revision_id": None,
+        },
+    )
+    assert r.status_code == 200, r.text
+    return e
+
+
+async def test_relation_transition_create_patch_delete_matrix(client, factory):
+    pid = await _seed_project(factory)
+    seq, scene, shots = await _topology(client, factory, pid, n_shots=2)
+    eva = await _entity(client, pid, name="Eva")
+    bag = await _entity(client, pid, kind="prop", name="Bag")
+    p = await _predicate(client, pid, key="carries")
+    rel = await _relation(client, pid, eva["id"], p["id"], bag["id"])
+
+    r = await _rt(client, rel["id"], "shot", shots[0], "start", "active")
+    assert r.status_code == 201, r.text
+    t = r.json()
+    assert t["state"] == "active" and t["relation_id"] == rel["id"]
+
+    # Bad boundary / bad state.
+    r = await _rt(client, rel["id"], "shot", shots[0], "end ", "active")
+    assert r.status_code == 422
+    assert r.json()["error_code"] == "INVALID_CONTINUITY_ANCHOR"
+    r = await _rt(client, rel["id"], "shot", shots[0], "end", "on")
+    assert r.status_code == 422
+    assert r.json()["error_code"] == "VALIDATION_ERROR"
+
+    # Cross-Project anchor → the existing anchor mismatch code.
+    pid2 = await _seed_project(factory, name="Q")
+    r2 = await client.post(f"/projects/{pid2}/sequences", json={"title": "S2"})
+    foreign_seq = r2.json()["id"]
+    r = await _rt(client, rel["id"], "sequence", foreign_seq, "start", "active")
+    assert r.status_code == 409
+    assert r.json()["error_code"] == "CONTINUITY_ANCHOR_PROJECT_MISMATCH"
+
+    # Unassigned shot anchor.
+    from soloring.api.schemas.shots import ShotCreate
+    from soloring.domain import shots as shot_svc
+    async with factory() as s:
+        loose = (await shot_svc.create_shot(s, pid, ShotCreate(subject="y"))).id
+    r = await _rt(client, rel["id"], "shot", loose, "start", "active")
+    assert r.status_code == 422
+    assert r.json()["error_code"] == "INVALID_CONTINUITY_ANCHOR"
+
+    # Duplicate active coordinate.
+    r = await _rt(client, rel["id"], "shot", shots[0], "start", "inactive")
+    assert r.status_code == 409
+    assert r.json()["error_code"] == "CONTINUITY_TRANSITION_CONFLICT"
+
+    # PATCH: state flip; anchor move; no-op; coordinate conflict.
+    r = await client.patch(
+        f"/continuity-relation-transitions/{t['id']}",
+        json={"state": "inactive"},
+    )
+    assert r.status_code == 200 and r.json()["state"] == "inactive"
+
+    r = await client.patch(
+        f"/continuity-relation-transitions/{t['id']}",
+        json={"anchor_type": "shot", "anchor_id": shots[1], "boundary": "end"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["anchor_id"] == shots[1]
+
+    r = await client.patch(
+        f"/continuity-relation-transitions/{t['id']}", json={}
+    )
+    assert r.status_code == 200
+    assert r.json()["anchor_id"] == shots[1] and r.json()["state"] == "inactive"
+
+    other = (
+        await _rt(client, rel["id"], "scene", scene, "start", "active")
+    ).json()
+    r = await client.patch(
+        f"/continuity-relation-transitions/{t['id']}",
+        json={"anchor_type": "scene", "anchor_id": scene, "boundary": "start"},
+    )
+    assert r.status_code == 409
+    assert r.json()["error_code"] == "CONTINUITY_TRANSITION_CONFLICT"
+
+    # Unknown relation / transition.
+    r = await _rt(client, "not-a-uuid", "shot", shots[0], "start", "active")
+    assert r.status_code == 409
+    r = await client.patch(
+        "/continuity-relation-transitions/not-a-uuid", json={"state": "active"}
+    )
+    assert r.status_code == 409
+
+    # List is ordered and active-only.
+    rows = (
+        await client.get(f"/continuity-relations/{rel['id']}/transitions")
+    ).json()
+    assert [row["id"] for row in rows] == [t["id"], other["id"]]
+
+    # Delete: idempotent; conflict for never-existed.
+    r = await client.delete(f"/continuity-relation-transitions/{other['id']}")
+    assert r.status_code == 204
+    r = await client.delete(f"/continuity-relation-transitions/{other['id']}")
+    assert r.status_code == 204
+    r = await client.delete(
+        "/continuity-relation-transitions/"
+        "00000000-0000-4000-8000-000000000077"
+    )
+    assert r.status_code == 409
+
+
+async def test_relation_delete_blocked_by_active_transitions(client, factory):
+    """§13.2 / §21.2 in-use proof — active once transitions exist."""
+    pid = await _seed_project(factory)
+    seq, scene, shots = await _topology(client, factory, pid, n_shots=1)
+    eva = await _entity(client, pid, name="Eva")
+    bag = await _entity(client, pid, kind="prop", name="Bag")
+    p = await _predicate(client, pid, key="carries")
+    rel = await _relation(client, pid, eva["id"], p["id"], bag["id"])
+
+    r = await _rt(client, rel["id"], "shot", shots[0], "start", "active")
+    assert r.status_code == 201
+    tid = r.json()["id"]
+
+    r = await client.delete(f"/continuity-relations/{rel['id']}")
+    assert r.status_code == 409
+    assert r.json()["error_code"] == "CONTINUITY_RELATION_IN_USE"
+
+    r = await client.delete(f"/continuity-relation-transitions/{tid}")
+    assert r.status_code == 204
+    r = await client.delete(f"/continuity-relations/{rel['id']}")
+    assert r.status_code == 204
+
+
+# --- §21.4 Effective relation resolver + readiness ------------------------------
+
+
+async def test_resolver_effective_relation_state(client, factory):
+    """Both endpoints dependent + winner active → effective relation in
+    the strict current-state response; display fields exact."""
+    pid = await _seed_project(factory)
+    seq, scene, shots = await _topology(client, factory, pid, n_shots=2)
+    eva = await _entity_approved(client, pid, kind="character", name="Eva")
+    bag = await _entity_approved(client, pid, kind="prop", name="Bag")
+    carries = await _predicate(client, pid, key="carries")
+    rel = await _relation(client, pid, eva["id"], carries["id"], bag["id"])
+    await _depend(client, shots[0], [eva["id"], bag["id"]])
+    await _depend(client, shots[1], [eva["id"], bag["id"]])
+
+    r = await _rt(client, rel["id"], "shot", shots[0], "start", "active")
+    assert r.status_code == 201
+
+    r = await client.get(f"/shots/{shots[1]}/continuity-state")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["continuity_state_ready"] is True
+    assert body["readiness_issues"] == []
+    assert len(body["relation_states"]) == 1
+    rs = body["relation_states"][0]
+    assert rs["relation_id"] == rel["id"]
+    assert rs["predicate_key"] == "carries"
+    assert rs["subject_entity_id"] == eva["id"]
+    assert rs["object_entity_id"] == bag["id"]
+    assert rs["predicate_id"] == carries["id"]
+    assert rs["source_anchor"] == {
+        "anchor_type": "shot", "anchor_id": shots[0], "boundary": "start",
+    }
+    assert rs["source_transition_id"]
+
+
+async def test_resolver_neither_endpoint_relation_is_irrelevant(client, factory):
+    """A relation whose NEITHER endpoint is a dependency never appears —
+    not in relation_states, not as an issue, no readiness impact."""
+    pid = await _seed_project(factory)
+    seq, scene, shots = await _topology(client, factory, pid, n_shots=1)
+    eva = await _entity_approved(client, pid, kind="character", name="Eva")
+    bag = await _entity_approved(client, pid, kind="prop", name="Bag")
+    axe = await _entity(client, pid, kind="prop", name="Axe")
+    rusts = await _predicate(client, pid, key="rusts")
+    # axe--rusts-->bag: neither endpoint is a dependency of the shot.
+    await _relation(client, pid, axe["id"], rusts["id"], bag["id"])
+    await _depend(client, shots[0], [eva["id"]])
+
+    relations = (
+        await client.get(f"/projects/{pid}/continuity-relations")
+    ).json()
+    r = await _rt(
+        client, relations[0]["id"], "shot", shots[0], "start", "active"
+    )
+    assert r.status_code == 201
+
+    r = await client.get(f"/shots/{shots[0]}/continuity-state")
+    assert r.status_code == 200
+    assert r.json()["relation_states"] == []
+    assert r.json()["readiness_issues"] == []
+    assert r.json()["continuity_state_ready"] is True
+
+
+async def test_resolver_endpoint_required_contract(client, factory):
+    """The load-bearing §5.3/§7.1/§12.3–12.4 contract: exactly one
+    dependency endpoint → not-ready, NULL hash/differs, blocked strict
+    endpoint, full ordered §12.4 issue elements; completing the endpoint
+    makes the relation EFFECTIVE; removing it again flips not-ready."""
+    pid = await _seed_project(factory)
+    seq, scene, shots = await _topology(client, factory, pid, n_shots=2)
+    eva = await _entity_approved(client, pid, kind="character", name="Eva")
+    bag = await _entity_approved(client, pid, kind="prop", name="Bag")
+    carries = await _predicate(client, pid, key="carries")
+    holds = await _predicate(client, pid, key="holds")
+
+    rel = await _relation(client, pid, eva["id"], carries["id"], bag["id"])
+    rel2 = await _relation(client, pid, eva["id"], holds["id"], bag["id"])
+    # BOTH shots depend on eva only — exactly one endpoint everywhere.
+    await _depend(client, shots[0], [eva["id"]])
+    await _depend(client, shots[1], [eva["id"]])
+
+    assert (
+        await _rt(client, rel["id"], "shot", shots[0], "start", "active")
+    ).status_code == 201
+    assert (
+        await _rt(client, rel2["id"], "shot", shots[0], "start", "active")
+    ).status_code == 201
+
+    # Strict endpoint raises ONE 409 with the FULL ordered issue set.
+    r = await client.get(f"/shots/{shots[1]}/continuity-state")
+    assert r.status_code == 409, r.text
+    body = r.json()
+    assert body["error_code"] == "CONTINUITY_RELATION_ENDPOINT_REQUIRED"
+    issues = body["details"]["issues"]
+    assert len(issues) == 2  # ALL issues, never first-row
+    assert issues == sorted(
+        issues,
+        key=lambda i: (
+            i["subject_entity_id"], i["predicate_key"],
+            i["object_entity_id"], i["relation_id"],
+        ),
+    )
+    for issue, relation in zip(issues, sorted(
+        (rel, rel2), key=lambda x: x["predicate_key"]
+    )):
+        assert issue["error_code"] == "CONTINUITY_RELATION_ENDPOINT_REQUIRED"
+        assert issue["relation_id"] == relation["id"]
+        assert issue["subject_entity_id"] == eva["id"]
+        assert issue["object_entity_id"] == bag["id"]
+        assert issue["present_entity_id"] == eva["id"]
+        assert issue["missing_entity_id"] == bag["id"]
+
+    # ShotRead: not-ready with NULL hash/differs and the same issues.
+    r = await client.get(f"/shots/{shots[1]}")
+    assert r.status_code == 200
+    shot = r.json()
+    assert shot["continuity_state_ready"] is False
+    assert shot["working_snapshot_hash"] is None
+    assert shot["working_state_differs_from_approved"] is None
+    assert len(shot["readiness_issues"]) == 2
+    assert (
+        shot["readiness_issues"][0]["error_code"]
+        == "CONTINUITY_RELATION_ENDPOINT_REQUIRED"
+    )
+    assert shot["readiness_issues"][0]["missing_entity_id"] == bag["id"]
+
+    # Completing the state: add the missing endpoint → ready, and the
+    # relations become EFFECTIVE (no hidden dependency was created).
+    await _depend(client, shots[1], [eva["id"], bag["id"]])
+    r = await client.get(f"/shots/{shots[1]}/continuity-state")
+    assert r.status_code == 200
+    assert r.json()["readiness_issues"] == []
+    assert len(r.json()["relation_states"]) == 2
+
+    # Dependency removal is legal and flips the shot not-ready (§5.3).
+    await _depend(client, shots[1], [eva["id"]])
+    r = await client.get(f"/shots/{shots[1]}/continuity-state")
+    assert r.status_code == 409
+    assert (
+        r.json()["error_code"] == "CONTINUITY_RELATION_ENDPOINT_REQUIRED"
+    )
+
+
+async def test_resolver_inactive_winner_and_boundary_eligibility(client, factory):
+    pid = await _seed_project(factory)
+    seq, scene, shots = await _topology(client, factory, pid, n_shots=2)
+    eva = await _entity_approved(client, pid, kind="character", name="Eva")
+    bag = await _entity_approved(client, pid, kind="prop", name="Bag")
+    carries = await _predicate(client, pid, key="carries")
+    rel = await _relation(client, pid, eva["id"], carries["id"], bag["id"])
+    await _depend(client, shots[0], [eva["id"], bag["id"]])
+    await _depend(client, shots[1], [eva["id"], bag["id"]])
+
+    # Inactive winner at shot1/start → canonical absence, ready.
+    r = await _rt(client, rel["id"], "shot", shots[0], "start", "inactive")
+    assert r.status_code == 201
+    r = await client.get(f"/shots/{shots[1]}/continuity-state")
+    assert r.status_code == 200
+    assert r.json()["relation_states"] == []
+
+    # Active at shot2/end — AFTER shot2/start → not eligible (APR-011).
+    r = await _rt(client, rel["id"], "shot", shots[1], "end", "active")
+    assert r.status_code == 201
+    r = await client.get(f"/shots/{shots[1]}/continuity-state")
+    assert r.status_code == 200
+    assert r.json()["relation_states"] == []
+    # The shot1/start inactive winner is still the eligible winner there.
+    r = await client.get(f"/shots/{shots[0]}/continuity-state")
+    assert r.status_code == 200
+    assert r.json()["relation_states"] == []
+
+
+async def test_resolver_unassigned_precedence_with_relation_data(client, factory):
+    """Unassigned + relevant relation data → NARRATIVE_CONTEXT_REQUIRED,
+    taking precedence over endpoint classification (§7.1)."""
+    from soloring.api.schemas.shots import ShotCreate
+    from soloring.domain import shots as shot_svc
+
+    pid = await _seed_project(factory)
+    seq, scene, shots = await _topology(client, factory, pid, n_shots=1)
+    eva = await _entity_approved(client, pid, kind="character", name="Eva")
+    bag = await _entity_approved(client, pid, kind="prop", name="Bag")
+    carries = await _predicate(client, pid, key="carries")
+    rel = await _relation(client, pid, eva["id"], carries["id"], bag["id"])
+
+    async with factory() as s:
+        loose = (await shot_svc.create_shot(s, pid, ShotCreate(subject="y"))).id
+    await _depend(client, loose, [eva["id"]])  # exactly one endpoint
+
+    # The transition is anchored at a REAL boundary → relevant data exists.
+    r = await _rt(client, rel["id"], "shot", shots[0], "start", "active")
+    assert r.status_code == 201
+
+    r = await client.get(f"/shots/{loose}/continuity-state")
+    assert r.status_code == 409
+    assert r.json()["error_code"] == "NARRATIVE_CONTEXT_REQUIRED"
+
+    r = await client.get(f"/shots/{loose}")
+    assert r.status_code == 200
+    assert r.json()["continuity_state_ready"] is False
+    assert (
+        r.json()["readiness_issues"][0]["error_code"]
+        == "NARRATIVE_CONTEXT_REQUIRED"
+    )

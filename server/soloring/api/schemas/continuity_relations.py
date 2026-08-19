@@ -56,3 +56,39 @@ class RelationRead(BaseModel):
     predicate_key: str
     object_entity_id: str
     created_at: str
+
+
+class RelationTransitionCreate(BaseModel):
+    """Relation temporal state: ``state`` replaces the feature set/clear
+    operation vocabulary — `active` is presence, `inactive` is canonical
+    absence (M7D §6.1). No value fields exist."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    anchor_type: str
+    anchor_id: str
+    boundary: str
+    state: str
+
+
+class RelationTransitionPatch(BaseModel):
+    """Prospective-row semantics (§6.2): every field omitted → preserve.
+    There is no value matrix — nothing to inherit or clear."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    anchor_type: str | None = None
+    anchor_id: str | None = None
+    boundary: str | None = None
+    state: str | None = None
+
+
+class RelationTransitionRead(BaseModel):
+    id: str
+    relation_id: str
+    anchor_type: str
+    anchor_id: str
+    boundary: str
+    state: str
+    created_at: str
+    updated_at: str

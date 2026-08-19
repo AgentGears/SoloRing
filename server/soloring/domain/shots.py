@@ -293,6 +293,7 @@ async def read_shot_detail(engine: AsyncEngine, shot_id: str):
     from soloring.continuity.state import (
         readiness_projection,
         resolve_effective_feature_state,
+        resolve_effective_relation_state,
     )
     # M7C §10.3 structural singularity: the effective states resolved in
     # THIS read unit flow into the SAME builder capture would use — the
@@ -323,7 +324,10 @@ async def read_shot_detail(engine: AsyncEngine, shot_id: str):
             # working hash exposes (M6C re-gate: one builder, one value).
             resolved = await resolve_working_dependencies(conn, shot_id)
             outcome = await resolve_effective_feature_state(conn, shot_id)
-            readiness = readiness_projection(outcome)
+            relation_outcome = await resolve_effective_relation_state(
+                conn, shot_id
+            )
+            readiness = readiness_projection(outcome, relation_outcome)
             if readiness["continuity_state_ready"]:
                 effective_hash = effective_working_snapshot_hash(
                     shot, refs, resolved, outcome.states
