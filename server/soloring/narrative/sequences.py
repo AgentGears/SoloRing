@@ -224,6 +224,25 @@ async def delete_sequence(session: AsyncSession, sequence_id: str) -> None:
                     "transition.",
                     status_code=409,
                 )
+            # M7D §13.5: the same guard for Relation transitions.
+            anchored_relation = (
+                await conn.execute(
+                    text(
+                        "SELECT 1 FROM continuity_relation_transitions "
+                        "WHERE anchor_type = 'sequence' AND anchor_id = :sid "
+                        "AND deleted_at IS NULL LIMIT 1"
+                    ),
+                    {"sid": sequence_id},
+                )
+            ).first()
+            if anchored_relation is not None:
+                await conn.exec_driver_sql("ROLLBACK")
+                raise SoloRingError(
+                    ErrorCode.CONTINUITY_ANCHOR_IN_USE,
+                    f"Sequence {sequence_id} anchors an active Relation "
+                    "transition.",
+                    status_code=409,
+                )
             await conn.execute(
                 text(
                     "UPDATE sequences SET deleted_at = "

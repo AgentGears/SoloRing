@@ -421,6 +421,23 @@ async def delete_shot(session: AsyncSession, shot_id: str) -> None:
                     f"Shot {shot_id} anchors an active Feature transition.",
                     status_code=409,
                 )
+            anchored_relation = (
+                await conn.execute(
+                    _text(
+                        "SELECT 1 FROM continuity_relation_transitions "
+                        "WHERE anchor_type = 'shot' AND anchor_id = :sid "
+                        "AND deleted_at IS NULL LIMIT 1"
+                    ),
+                    {"sid": shot_id},
+                )
+            ).first()
+            if anchored_relation is not None:
+                await conn.exec_driver_sql("ROLLBACK")
+                raise SoloRingError(
+                    ErrorCode.CONTINUITY_ANCHOR_IN_USE,
+                    f"Shot {shot_id} anchors an active Relation transition.",
+                    status_code=409,
+                )
             await conn.execute(
                 _text(
                     "UPDATE shots SET deleted_at = "

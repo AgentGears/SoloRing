@@ -332,6 +332,31 @@ async def delete_entity(session: AsyncSession, entity_id: str) -> None:
                     details={"reason": "active_continuity_features"},
                 )
 
+            # M7D §13.3: an Entity that is an endpoint of an active
+            # Relation is not deletable — the resolver's guard chain
+            # (active Relation ⇒ active subject ⇒ active object ⇒ active
+            # Predicate) must stay true.
+            has_relations = (
+                await conn.execute(
+                    text(
+                        "SELECT 1 FROM continuity_relations "
+                        "WHERE (subject_entity_id = :eid "
+                        "OR object_entity_id = :eid) "
+                        "AND deleted_at IS NULL LIMIT 1"
+                    ),
+                    {"eid": entity_id},
+                )
+            ).first()
+            if has_relations is not None:
+                await conn.exec_driver_sql("ROLLBACK")
+                raise SoloRingError(
+                    ErrorCode.ENTITY_IN_USE,
+                    f"Entity {entity_id} is an endpoint of an active "
+                    "ContinuityRelation.",
+                    status_code=409,
+                    details={"reason": "active_continuity_relation_endpoint"},
+                )
+
             await conn.execute(
                 text(
                     "UPDATE creative_entities SET deleted_at = "
