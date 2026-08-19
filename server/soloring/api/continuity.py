@@ -21,6 +21,13 @@ from soloring.api.schemas.continuity_features import (
     FeaturePatch,
     FeatureRead,
 )
+from soloring.api.schemas.continuity_relations import (
+    PredicateCreate,
+    PredicatePatch,
+    PredicateRead,
+    RelationCreate,
+    RelationRead,
+)
 from soloring.api.schemas.continuity_transitions import (
     TransitionCreate,
     TransitionPatch,
@@ -595,3 +602,143 @@ async def get_shot_continuity_state(
             for s in outcome.states
         ],
     }
+
+
+# --- ContinuityPredicate + ContinuityRelation surface (M7D §4–§5) ---------------
+
+
+@router.get(
+    "/projects/{project_id}/continuity-predicates",
+    response_model=list[PredicateRead],
+)
+async def list_continuity_predicates(
+    project_id: str, session: AsyncSession = Depends(get_session)
+) -> list[PredicateRead]:
+    from soloring.continuity import relations as relation_svc
+
+    return [
+        PredicateRead(**r)
+        for r in await relation_svc.list_predicates(session, project_id)
+    ]
+
+
+@router.post(
+    "/projects/{project_id}/continuity-predicates",
+    response_model=PredicateRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_continuity_predicate(
+    project_id: str,
+    payload: PredicateCreate,
+    session: AsyncSession = Depends(get_session),
+) -> PredicateRead:
+    from soloring.continuity import relations as relation_svc
+
+    pid = await relation_svc.create_predicate(session, project_id, payload)
+    return PredicateRead(
+        **await relation_svc.get_predicate(session, pid)
+    )
+
+
+@router.get(
+    "/continuity-predicates/{predicate_id}", response_model=PredicateRead
+)
+async def get_continuity_predicate(
+    predicate_id: str, session: AsyncSession = Depends(get_session)
+) -> PredicateRead:
+    from soloring.continuity import relations as relation_svc
+
+    return PredicateRead(
+        **await relation_svc.get_predicate(session, predicate_id)
+    )
+
+
+@router.patch(
+    "/continuity-predicates/{predicate_id}", response_model=PredicateRead
+)
+async def patch_continuity_predicate(
+    predicate_id: str,
+    payload: PredicatePatch,
+    session: AsyncSession = Depends(get_session),
+) -> PredicateRead:
+    from soloring.continuity import relations as relation_svc
+
+    await relation_svc.patch_predicate(session, predicate_id, payload)
+    return PredicateRead(
+        **await relation_svc.get_predicate(session, predicate_id)
+    )
+
+
+@router.delete(
+    "/continuity-predicates/{predicate_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_continuity_predicate(
+    predicate_id: str, session: AsyncSession = Depends(get_session)
+) -> None:
+    from soloring.continuity import relations as relation_svc
+
+    await relation_svc.delete_predicate(session, predicate_id)
+
+
+@router.get(
+    "/projects/{project_id}/continuity-relations",
+    response_model=list[RelationRead],
+)
+async def list_continuity_relations(
+    project_id: str,
+    subject_entity_id: str | None = None,
+    object_entity_id: str | None = None,
+    predicate_id: str | None = None,
+    session: AsyncSession = Depends(get_session),
+) -> list[RelationRead]:
+    from soloring.continuity import relations as relation_svc
+
+    return [
+        RelationRead(**r)
+        for r in await relation_svc.list_relations(
+            session, project_id,
+            subject_entity_id=subject_entity_id,
+            object_entity_id=object_entity_id,
+            predicate_id=predicate_id,
+        )
+    ]
+
+
+@router.post(
+    "/projects/{project_id}/continuity-relations",
+    response_model=RelationRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_continuity_relation(
+    project_id: str,
+    payload: RelationCreate,
+    session: AsyncSession = Depends(get_session),
+) -> RelationRead:
+    from soloring.continuity import relations as relation_svc
+
+    rid = await relation_svc.create_relation(session, project_id, payload)
+    return RelationRead(**await relation_svc.get_relation(session, rid))
+
+
+@router.get(
+    "/continuity-relations/{relation_id}", response_model=RelationRead
+)
+async def get_continuity_relation(
+    relation_id: str, session: AsyncSession = Depends(get_session)
+) -> RelationRead:
+    from soloring.continuity import relations as relation_svc
+
+    return RelationRead(**await relation_svc.get_relation(session, relation_id))
+
+
+@router.delete(
+    "/continuity-relations/{relation_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_continuity_relation(
+    relation_id: str, session: AsyncSession = Depends(get_session)
+) -> None:
+    from soloring.continuity import relations as relation_svc
+
+    await relation_svc.delete_relation(session, relation_id)
