@@ -6,11 +6,16 @@
 import { ApiError, fetchJson, fetchVoid } from "./api.shared";
 import type {
   Asset,
+  ContinuityFeature,
+  ContinuityFeatureTransition,
+  ContinuityPredicate,
+  ContinuityRelation,
   Entity,
   EntityRevisionSummary,
   GenerationInfo,
   Project,
   ReferenceItem,
+  RelationTransition,
   Scene,
   Sequence,
   ShotDetail,
@@ -308,5 +313,249 @@ export async function putSemanticDependencies(
     method: "PUT",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ dependencies }),
+  });
+}
+
+
+// --- Continuity state (M7/M7D) ------------------------------------------------------
+
+export async function listContinuityFeatures(
+  entityId: string,
+): Promise<ContinuityFeature[]> {
+  return fetchJson<ContinuityFeature[]>(
+    `${BASE}/entities/${entityId}/continuity-features`,
+  );
+}
+
+export async function createContinuityFeature(
+  entityId: string,
+  payload: {
+    key: string;
+    kind: string;
+    value_type: string;
+    name: string;
+    description?: string | null;
+    enum_values?: string[] | null;
+    unit?: string | null;
+    supersedes_feature_id?: string | null;
+  },
+): Promise<ContinuityFeature> {
+  return fetchJson<ContinuityFeature>(
+    `${BASE}/entities/${entityId}/continuity-features`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export async function patchContinuityFeature(
+  featureId: string,
+  fields: { name?: string; description?: string | null },
+): Promise<ContinuityFeature> {
+  return fetchJson<ContinuityFeature>(
+    `${BASE}/continuity-features/${featureId}`,
+    {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(fields),
+    },
+  );
+}
+
+export async function deleteContinuityFeature(
+  featureId: string,
+): Promise<void> {
+  await fetchVoid(`${BASE}/continuity-features/${featureId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function listFeatureTransitions(
+  featureId: string,
+): Promise<ContinuityFeatureTransition[]> {
+  return fetchJson<ContinuityFeatureTransition[]>(
+    `${BASE}/continuity-features/${featureId}/transitions`,
+  );
+}
+
+export async function createFeatureTransition(
+  featureId: string,
+  payload: {
+    anchor_type: string;
+    anchor_id: string;
+    boundary: string;
+    operation: string;
+    value?: unknown;
+  },
+): Promise<ContinuityFeatureTransition> {
+  return fetchJson<ContinuityFeatureTransition>(
+    `${BASE}/continuity-features/${featureId}/transitions`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export async function patchFeatureTransition(
+  transitionId: string,
+  fields: Partial<{
+    anchor_type: string;
+    anchor_id: string;
+    boundary: string;
+    operation: string;
+    value: unknown;
+  }>,
+): Promise<ContinuityFeatureTransition> {
+  return fetchJson<ContinuityFeatureTransition>(
+    `${BASE}/continuity-feature-transitions/${transitionId}`,
+    {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(fields),
+    },
+  );
+}
+
+export async function deleteFeatureTransition(
+  transitionId: string,
+): Promise<void> {
+  await fetchVoid(`${BASE}/continuity-feature-transitions/${transitionId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function listPredicates(
+  projectId: string,
+): Promise<ContinuityPredicate[]> {
+  return fetchJson<ContinuityPredicate[]>(
+    `${BASE}/projects/${projectId}/continuity-predicates`,
+  );
+}
+
+export async function createPredicate(
+  projectId: string,
+  key: string,
+  name: string,
+  description: string | null,
+): Promise<ContinuityPredicate> {
+  return fetchJson<ContinuityPredicate>(
+    `${BASE}/projects/${projectId}/continuity-predicates`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ key, name, description }),
+    },
+  );
+}
+
+export async function patchPredicate(
+  predicateId: string,
+  fields: { name?: string; description?: string | null },
+): Promise<ContinuityPredicate> {
+  return fetchJson<ContinuityPredicate>(
+    `${BASE}/continuity-predicates/${predicateId}`,
+    {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(fields),
+    },
+  );
+}
+
+export async function deletePredicate(predicateId: string): Promise<void> {
+  await fetchVoid(`${BASE}/continuity-predicates/${predicateId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function listRelations(
+  projectId: string,
+): Promise<ContinuityRelation[]> {
+  return fetchJson<ContinuityRelation[]>(
+    `${BASE}/projects/${projectId}/continuity-relations`,
+  );
+}
+
+export async function createRelation(
+  projectId: string,
+  subjectEntityId: string,
+  predicateId: string,
+  objectEntityId: string,
+): Promise<ContinuityRelation> {
+  return fetchJson<ContinuityRelation>(
+    `${BASE}/projects/${projectId}/continuity-relations`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        subject_entity_id: subjectEntityId,
+        predicate_id: predicateId,
+        object_entity_id: objectEntityId,
+      }),
+    },
+  );
+}
+
+export async function deleteRelation(relationId: string): Promise<void> {
+  await fetchVoid(`${BASE}/continuity-relations/${relationId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function listRelationTransitions(
+  relationId: string,
+): Promise<RelationTransition[]> {
+  return fetchJson<RelationTransition[]>(
+    `${BASE}/continuity-relations/${relationId}/transitions`,
+  );
+}
+
+export async function createRelationTransition(
+  relationId: string,
+  payload: {
+    anchor_type: string;
+    anchor_id: string;
+    boundary: string;
+    state: string;
+  },
+): Promise<RelationTransition> {
+  return fetchJson<RelationTransition>(
+    `${BASE}/continuity-relations/${relationId}/transitions`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export async function patchRelationTransition(
+  transitionId: string,
+  fields: Partial<{
+    anchor_type: string;
+    anchor_id: string;
+    boundary: string;
+    state: string;
+  }>,
+): Promise<RelationTransition> {
+  return fetchJson<RelationTransition>(
+    `${BASE}/continuity-relation-transitions/${transitionId}`,
+    {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(fields),
+    },
+  );
+}
+
+export async function deleteRelationTransition(
+  transitionId: string,
+): Promise<void> {
+  await fetchVoid(`${BASE}/continuity-relation-transitions/${transitionId}`, {
+    method: "DELETE",
   });
 }

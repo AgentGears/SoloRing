@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 
+import { ContinuityFeaturesPanel } from "@/components/ContinuityFeaturesPanel";
 import {
   ApproveRevisionButton,
   EntityRenameForm,
@@ -11,9 +12,16 @@ import { asApiError, type ApiError } from "@/lib/api.shared";
 import {
   serverGetEntity,
   serverGetEntityRevision,
+  serverListContinuityFeatures,
   serverListEntityRevisions,
+  serverListFeatureTransitions,
 } from "@/lib/api.server";
-import type { EntityRevisionDetail, EntityRevisionSummary } from "@/lib/types";
+import type {
+  ContinuityFeature,
+  ContinuityFeatureTransition,
+  EntityRevisionDetail,
+  EntityRevisionSummary,
+} from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -27,6 +35,8 @@ export default async function EntityPage({
   let entity;
   let revisions: EntityRevisionSummary[] = [];
   let details: EntityRevisionDetail[] = [];
+  let features: ContinuityFeature[] = [];
+  let transitionsByFeature: Record<string, ContinuityFeatureTransition[]> = {};
   let loadError: ApiError | null = null;
 
   try {
@@ -34,6 +44,13 @@ export default async function EntityPage({
     revisions = await serverListEntityRevisions(id);
     details = await Promise.all(
       revisions.map((r) => serverGetEntityRevision(r.id)),
+    );
+    features = await serverListContinuityFeatures(id);
+    const perFeature = await Promise.all(
+      features.map((f) => serverListFeatureTransitions(f.id)),
+    );
+    transitionsByFeature = Object.fromEntries(
+      features.map((f, i) => [f.id, perFeature[i]]),
     );
   } catch (err) {
     loadError = asApiError(err);
@@ -116,6 +133,13 @@ export default async function EntityPage({
           })
       )}
       <RevisionCreateForm entityId={entity!.id} />
+
+      <h2>Continuity features</h2>
+      <ContinuityFeaturesPanel
+        entityId={entity!.id}
+        features={features}
+        transitionsByFeature={transitionsByFeature}
+      />
     </main>
   );
 }
