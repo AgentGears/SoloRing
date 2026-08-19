@@ -421,10 +421,14 @@ async def resolve_effective_relation_state(
     relations = (
         await conn.execute(
             text(
-                "SELECT r.id, r.subject_entity_id, r.object_entity_id, "
+                "SELECT r.id, r.project_id AS relation_project, "
+                "r.subject_entity_id, r.object_entity_id, "
                 "r.predicate_id, p.key AS predicate_key, "
+                "p.project_id AS predicate_project, "
                 "p.deleted_at AS predicate_deleted, "
+                "ss.project_id AS subject_project, "
                 "ss.deleted_at AS subject_deleted, "
+                "os.project_id AS object_project, "
                 "os.deleted_at AS object_deleted "
                 "FROM continuity_relations r "
                 "JOIN continuity_predicates p ON p.id = r.predicate_id "
@@ -444,17 +448,25 @@ async def resolve_effective_relation_state(
             endpoint_requirements=(),
         )
 
-    # The §13 guard chain keeps active relations fully active; anything
-    # else is stored corruption, fail closed.
+    # The §13 guard chain keeps active relations fully active AND
+    # same-Project (the service transaction enforces it; there is no
+    # composite FK). Anything else is stored corruption — fail closed
+    # (M7D r2 B1): never endpoint-required, never silent exclusion,
+    # never a client 4xx.
     for r in relations:
         if (
             r["predicate_deleted"] is not None
             or r["subject_deleted"] is not None
             or r["object_deleted"] is not None
+            or r["relation_project"] != shot.project_id
+            or r["subject_project"] != r["relation_project"]
+            or r["object_project"] != r["relation_project"]
+            or r["predicate_project"] != r["relation_project"]
         ):
             raise internal_invariant(
-                f"Active relation {r['id']} has a tombstoned predicate or "
-                "endpoint — the M7D guard chain was violated."
+                f"Active relation {r['id']} contradicts its guarded "
+                "endpoint/predicate invariants (tombstoned or cross-Project "
+                "reference) — the M7D guard chain was violated."
             )
 
     relation_ids = [r["id"] for r in relations]

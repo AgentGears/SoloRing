@@ -865,6 +865,65 @@ async def test_resolver_unassigned_precedence_with_relation_data(client, factory
     )
 
 
+async def test_resolver_fails_closed_on_cross_project_corruption(
+    client, factory, engine,
+):
+    """M7D r2 B1: a raw-corrupted active relation referencing another
+    Project's VALID entity or predicate (simple FKs satisfied, no
+    composite FK exists) must fail closed — INTERNAL_INVARIANT_VIOLATION,
+    never interpreted as current continuity state, never
+    endpoint-required, never silent exclusion."""
+    from sqlalchemy import text as _text
+
+    pid = await _seed_project(factory)
+    pid2 = await _seed_project(factory, name="Q")
+    seq, scene, shots = await _topology(client, factory, pid, n_shots=1)
+    eva = await _entity_approved(client, pid, name="Eva")
+    bag = await _entity_approved(client, pid, kind="prop", name="Bag")
+    carries = await _predicate(client, pid, key="carries")
+    foreign_entity = await _entity(client, pid2, name="ForeignEntity")
+    foreign_pred = await _predicate(client, pid2, key="foreign_pred")
+    rel = await _relation(client, pid, eva["id"], carries["id"], bag["id"])
+    await _rt(client, rel["id"], "shot", shots[0], "start", "active")
+    await _depend(client, shots[0], [eva["id"], bag["id"]])
+
+    # Baseline resolves normally.
+    r = await client.get(f"/shots/{shots[0]}/continuity-state")
+    assert r.status_code == 200, r.text
+
+    original = {
+        "object_entity_id": bag["id"],
+        "predicate_id": carries["id"],
+    }
+    for field, bad in (
+        ("object_entity_id", foreign_entity["id"]),
+        ("predicate_id", foreign_pred["id"]),
+    ):
+        async with engine.begin() as conn:
+            await conn.execute(
+                _text(
+                    f"UPDATE continuity_relations SET {field} = :v "
+                    "WHERE id = :r"
+                ),
+                {"v": bad, "r": rel["id"]},
+            )
+        r = await client.get(f"/shots/{shots[0]}/continuity-state")
+        assert r.status_code == 500, (field, r.text)
+        assert r.json()["error_code"] == "INTERNAL_INVARIANT_VIOLATION"
+        async with engine.begin() as conn:
+            await conn.execute(
+                _text(
+                    f"UPDATE continuity_relations SET {field} = :v "
+                    "WHERE id = :r"
+                ),
+                {"v": original[field], "r": rel["id"]},
+            )
+
+    # Positive control after restore.
+    r = await client.get(f"/shots/{shots[0]}/continuity-state")
+    assert r.status_code == 200
+
+
 # --- §21.5–§21.8 Capture, reuse integrity, historical provenance -----------------
 
 
@@ -1463,9 +1522,13 @@ async def test_exact_rerun_both_resolvers_disabled(client, factory, engine,
 
 
 async def _race_capture(factory, shot_id, competitor):
-    """capture_revision with the competitor's REAL mutation committing
-    INSIDE the open read, at the relation-resolution seam (the M7C
-    _open_read_race pattern; no sleeps)."""
+    """APR-033 forced interleaving, corrected in r2: the read snapshot is
+    ESTABLISHED (shot row, references, dependencies, and feature
+    resolution have all read inside the open transaction), the
+    competitor's REAL mutation then commits, and the relation resolver
+    SUBSEQUENTLY reads inside that already-established snapshot — it must
+    observe the coherent BEFORE state; the next capture observes AFTER.
+    No sleeps; the seam is the resolver call itself."""
     import asyncio as _a
     import soloring.continuity.state as state_mod
     from soloring.domain import revisions as revision_svc
@@ -1474,19 +1537,10 @@ async def _race_capture(factory, shot_id, competitor):
     fired = {}
 
     async def wrap(conn, sid):
-        result = await original(conn, sid)
-        if "task" not in fired:
-            done = _a.Event()
-
-            async def run():
-                try:
-                    fired["outcome"] = await competitor()
-                finally:
-                    done.set()
-
-            fired["task"] = _a.create_task(run())
-            await done.wait()
-        return result
+        if not fired.get("done"):
+            fired["done"] = True
+            await competitor()  # commits AFTER the snapshot is pinned
+        return await original(conn, sid)  # reads the BEFORE snapshot
 
     state_mod.resolve_effective_relation_state = wrap
     try:
@@ -1705,39 +1759,57 @@ async def test_race_r5_narrative_reorder_changes_relation_winner(client, factory
 async def test_race_r6_relation_delete_vs_transition_create(client, factory,
                                                             engine):
     """R6: Relation DELETE ↔ RelationTransition CREATE. The create holds
-    its fence; the delete parks on the write lock; after the create
-    commits the delete must refuse IN_USE. The reverse order rejects the
-    create against the tombstoned relation. Never-state: no active
-    transition under a tombstoned relation."""
+    its fence; the delete parks ON the write lock — proven mechanically by
+    an Event set when the competitor's BEGIN IMMEDIATE call ENTERS (it
+    cannot return while the holder holds the fence; no sleeps, APR-033).
+    After the create commits the delete must refuse IN_USE. The reverse
+    order rejects the create against the tombstoned relation. Never-state:
+    no active transition under a tombstoned relation."""
+    import asyncio
+
+    from sqlalchemy.ext.asyncio import AsyncConnection
+
     from soloring.api.schemas.continuity_relations import (
         RelationTransitionCreate,
     )
     from soloring.continuity import relation_transitions as rt_svc
     from soloring.continuity import relations as rel_svc
-    from soloring.api.schemas.continuity_relations import RelationCreate
 
     pid, seq, scene, shots, eva, bag, carries, rel, _ = (
         await _relation_fixture(client, factory, with_transition=False)
     )
 
-    original = rt_svc._load_active_relation
+    original_load = rt_svc._load_active_relation
+    original_exec = AsyncConnection.exec_driver_sql
     state = {}
+    competitor_at_fence = asyncio.Event()
+
+    async def wrapped_exec(self, statement, *args, **kwargs):
+        # Mechanical proof the competitor REACHED the contested fence: its
+        # BEGIN IMMEDIATE call entered (it then parks on OUR write lock).
+        if (
+            state.get("competitor") is not None
+            and asyncio.current_task() is state["competitor"]
+            and statement.strip().upper() == "BEGIN IMMEDIATE"
+        ):
+            competitor_at_fence.set()
+        return await original_exec(self, statement, *args, **kwargs)
+
+    async def delete_it():
+        async with factory() as s:
+            try:
+                await rel_svc.delete_relation(s, rel["id"])
+                return "deleted"
+            except Exception as exc:
+                return getattr(exc, "code", type(exc).__name__)
 
     async def wrap(conn, relation_id):
-        result = await original(conn, relation_id)
-        if "task" not in state:
-            import asyncio as _a
-
-            async def delete_it():
-                async with factory() as s:
-                    try:
-                        await rel_svc.delete_relation(s, relation_id)
-                        return "deleted"
-                    except Exception as exc:
-                        return getattr(exc, "code", type(exc).__name__)
-
-            state["task"] = _a.create_task(delete_it())
-            await _a.sleep(0.3)  # parked on OUR write lock
+        result = await original_load(conn, relation_id)
+        if "launched" not in state:
+            state["launched"] = True
+            AsyncConnection.exec_driver_sql = wrapped_exec
+            state["competitor"] = asyncio.create_task(delete_it())
+            await competitor_at_fence.wait()  # parked at OUR write fence
         return result
 
     import soloring.continuity.relation_transitions as rtmod
@@ -1752,8 +1824,9 @@ async def test_race_r6_relation_delete_vs_transition_create(client, factory,
                 ),
             )
     finally:
-        rtmod._load_active_relation = original
-    outcome = await state["task"]
+        rtmod._load_active_relation = original_load
+        AsyncConnection.exec_driver_sql = original_exec
+    outcome = await state["competitor"]
     assert outcome == "CONTINUITY_RELATION_IN_USE"
 
     # Never-state: no active transition under a tombstoned relation.
@@ -1781,36 +1854,53 @@ async def test_race_r6_relation_delete_vs_transition_create(client, factory,
 async def test_race_r7_predicate_delete_vs_relation_create(client, factory,
                                                            engine):
     """R7: Predicate DELETE ↔ Relation CREATE. The create holds its fence;
-    the predicate delete parks on the write lock; after the create commits
-    the delete must refuse PREDICATE_IN_USE. The reverse order rejects the
-    create as INVALID_CONTINUITY_RELATION. Never-state: no active relation
-    under a tombstoned predicate."""
+    the predicate delete parks ON the write lock — proven mechanically by
+    an Event set when the competitor's BEGIN IMMEDIATE call ENTERS (no
+    sleeps, APR-033). After the create commits the delete must refuse
+    PREDICATE_IN_USE. The reverse order rejects the create as
+    INVALID_CONTINUITY_RELATION. Never-state: no active relation under a
+    tombstoned predicate."""
+    import asyncio
+
+    from sqlalchemy.ext.asyncio import AsyncConnection
+
+    from soloring.continuity import relations as rel_svc
+    from soloring.api.schemas.continuity_relations import RelationCreate
+
     pid = await _seed_project(factory)
     eva = await _entity_approved(client, pid, name="Eva")
     bag = await _entity_approved(client, pid, kind="prop", name="Bag")
     carries = await _predicate(client, pid, key="carries")
 
-    from soloring.continuity import relations as rel_svc
-    from soloring.api.schemas.continuity_relations import RelationCreate
-
     original = rel_svc._verify_relation_inputs
+    original_exec = AsyncConnection.exec_driver_sql
     state = {}
+    competitor_at_fence = asyncio.Event()
+
+    async def wrapped_exec(self, statement, *args, **kwargs):
+        if (
+            state.get("competitor") is not None
+            and asyncio.current_task() is state["competitor"]
+            and statement.strip().upper() == "BEGIN IMMEDIATE"
+        ):
+            competitor_at_fence.set()
+        return await original_exec(self, statement, *args, **kwargs)
+
+    async def delete_it():
+        async with factory() as s:
+            try:
+                await rel_svc.delete_predicate(s, carries["id"])
+                return "deleted"
+            except Exception as exc:
+                return getattr(exc, "code", type(exc).__name__)
 
     async def wrap(conn, project_id, subject, predicate_id, obj):
         key = await original(conn, project_id, subject, predicate_id, obj)
-        if "task" not in state:
-            import asyncio as _a
-
-            async def delete_it():
-                async with factory() as s:
-                    try:
-                        await rel_svc.delete_predicate(s, predicate_id)
-                        return "deleted"
-                    except Exception as exc:
-                        return getattr(exc, "code", type(exc).__name__)
-
-            state["task"] = _a.create_task(delete_it())
-            await _a.sleep(0.3)  # parked on OUR write lock
+        if "launched" not in state:
+            state["launched"] = True
+            AsyncConnection.exec_driver_sql = wrapped_exec
+            state["competitor"] = asyncio.create_task(delete_it())
+            await competitor_at_fence.wait()  # parked at OUR write fence
         return key
 
     import soloring.continuity.relations as relmod
@@ -1826,7 +1916,8 @@ async def test_race_r7_predicate_delete_vs_relation_create(client, factory,
             )
     finally:
         relmod._verify_relation_inputs = original
-    outcome = await state["task"]
+        AsyncConnection.exec_driver_sql = original_exec
+    outcome = await state["competitor"]
     assert outcome == "CONTINUITY_PREDICATE_IN_USE"
 
     dangling = await _fetch(
@@ -1858,96 +1949,231 @@ async def test_race_r7_predicate_delete_vs_relation_create(client, factory,
 async def test_race_r8_concurrent_identical_relation_captures_converge(
     client, factory,
 ):
-    """R8: two captures of the same relation state, launched together —
-    exactly one insert; both return the same revision (APR-032)."""
+    """R8 (APR-032, forced): capture A enters its fenced unit (reuse
+    lookup found nothing, now allocating) and WAITS until capture B is
+    parked at the write fence — proven mechanically by an Event set when
+    B's BEGIN IMMEDIATE call ENTERS. A commits; B's reuse lookup then
+    finds A's revision, validates it, and converges: both return the SAME
+    revision id, exactly one insert. No sleeps; no natural-serialization
+    shortcut."""
     import asyncio as _a
+    from sqlalchemy.ext.asyncio import AsyncConnection
 
-    pid, seq, scene, shots, *_ = await _relation_fixture(client, factory)
-    revs = await _a.gather(*(
-        _capture_one(factory, shots[0]) for _ in range(2)
-    ))
-    assert len({r.id for r in revs}) == 1
-
-
-async def _capture_one(factory, shot_id):
     from soloring.domain import revisions as revision_svc
 
-    return await revision_svc.capture_revision(factory(), shot_id)
+    pid, seq, scene, shots, *_ = await _relation_fixture(client, factory)
+
+    original_alloc = revision_svc._allocate_number
+    original_exec = AsyncConnection.exec_driver_sql
+    state = {}
+    second_at_fence = _a.Event()
+
+    async def alloc_wrap(conn, shot_id):
+        if state.get("first") is None:
+            state["first"] = _a.current_task()
+            await second_at_fence.wait()  # B parks at OUR write fence
+        return await original_alloc(conn, shot_id)
+
+    async def wrapped_exec(self, statement, *args, **kwargs):
+        if (
+            statement.strip().upper() == "BEGIN IMMEDIATE"
+            and state.get("first") is not None
+            and _a.current_task() is not state["first"]
+        ):
+            second_at_fence.set()
+        return await original_exec(self, statement, *args, **kwargs)
+
+    revision_svc._allocate_number = alloc_wrap
+    AsyncConnection.exec_driver_sql = wrapped_exec
+    try:
+        rev_a, rev_b = await _a.gather(
+            revision_svc.capture_revision(factory(), shots[0]),
+            revision_svc.capture_revision(factory(), shots[0]),
+        )
+    finally:
+        revision_svc._allocate_number = original_alloc
+        AsyncConnection.exec_driver_sql = original_exec
+
+    assert rev_a.id == rev_b.id  # convergence, exactly one insert
 
 
-async def test_race_r9_sequential_different_captures_ordered(client, factory):
-    """R9: mutation between captures → two revisions, numbers strictly
-    ordered."""
-    from soloring.continuity import relation_transitions as rt_svc
+async def test_race_r9_concurrent_different_captures_both_persist(
+    client, factory, engine,
+):
+    """R9 (frozen form, APR-072 name): two captures of the SAME Shot that
+    read DIFFERENT coherent states (a mutation commits between their
+    reads) both persist with distinct revision numbers — capture B's full
+    lifecycle provably completes while capture A is still parked in flight
+    between its own read and write (the M7C shape)."""
+    import json as _json
+
     from soloring.api.schemas.continuity_relations import (
         RelationTransitionPatch,
     )
+    from soloring.continuity import relation_transitions as rt_svc
     from soloring.domain import revisions as revision_svc
 
-    pid, seq, scene, shots, *_ , rel, tr = await _relation_fixture(client,
-                                                                   factory)
-    r1 = await revision_svc.capture_revision(factory(), shots[0])
-    async with factory() as s:
-        await rt_svc.patch_transition(
-            s, tr["id"], RelationTransitionPatch(state="inactive"),
-        )
-    r2 = await revision_svc.capture_revision(factory(), shots[0])
-    assert r2.id != r1.id
-    assert r2.revision_number > r1.revision_number
+    pid, seq, scene, shots, *_, rel, tr = await _relation_fixture(
+        client, factory
+    )
+
+    original_read = revision_svc._snapshot_one_read
+    state: dict = {}
+
+    async def capture2_task():
+        async with factory() as s2:
+            return await revision_svc.capture_revision(s2, shots[0])
+
+    async def read_wrap(session, shot_id):
+        result = await original_read(session, shot_id)  # state A (active)
+        if "ran" not in state:
+            state["ran"] = True
+            # Mutate AFTER capture A's read committed.
+            async with factory() as s2:
+                await rt_svc.patch_transition(
+                    s2, tr["id"], RelationTransitionPatch(state="inactive"),
+                )
+            # Capture B's FULL lifecycle completes while A is parked
+            # between its read and its write.
+            state["revB"] = await capture2_task()
+        return result
+
+    revision_svc._snapshot_one_read = read_wrap
+    try:
+        revA = await revision_svc.capture_revision(factory(), shots[0])
+    finally:
+        revision_svc._snapshot_one_read = original_read
+    revB = state["revB"]
+
+    assert revA.id != revB.id
+    numbers = sorted((revA.revision_number, revB.revision_number))
+    assert numbers[1] > numbers[0]  # distinct, persistence order
+    assert _json.loads(revA.snapshot_json)["schema_version"] == 3
+    assert _json.loads(revB.snapshot_json)["schema_version"] == 2
+    # Both immutable child sets survive.
+    rows = await _fetch(
+        engine,
+        "SELECT shot_revision_id FROM shot_revision_relation_states",
+        {},
+    )
+    assert len(rows) == 1  # only the schema-3 revision carries relations
 
 
 async def test_race_r11_relation_transition_coordinate_create_vs_create(
     client, factory,
 ):
-    """R11: concurrent creates at the same coordinate — exactly one wins;
-    the losers get the 409 conflict."""
+    """R11 (forced): create A parks INSIDE its fenced unit after its
+    coordinate check found the coordinate free; create B parks AT the
+    write fence (Event set when its BEGIN IMMEDIATE call ENTERS); A
+    commits; B's coordinate check then finds A's row → 409. Exactly one
+    201, one 409 — mechanically forced at the contested seam, no sleeps."""
     import asyncio as _a
+    from sqlalchemy.ext.asyncio import AsyncConnection
 
-    pid, seq, scene, shots, *_ , rel, _ = await _relation_fixture(
+    from soloring.continuity import relation_transitions as rt_svc
+
+    pid, seq, scene, shots, *_, rel, _tr = await _relation_fixture(
         client, factory, with_transition=False
     )
+
+    original_taken = rt_svc._coordinate_taken
+    original_exec = AsyncConnection.exec_driver_sql
+    state = {}
+    competitor_at_fence = _a.Event()
+
+    async def wrapped_exec(self, statement, *args, **kwargs):
+        if (
+            state.get("competitor") is not None
+            and _a.current_task() is state["competitor"]
+            and statement.strip().upper() == "BEGIN IMMEDIATE"
+        ):
+            competitor_at_fence.set()
+        return await original_exec(self, statement, *args, **kwargs)
 
     async def one():
         return await _rt(client, rel["id"], "shot", shots[0], "start",
                          "active")
 
-    results = await _a.gather(*(one() for _ in range(4)))
-    codes = sorted(r.status_code for r in results)
-    assert codes.count(201) == 1
-    assert codes.count(409) == 3
+    async def taken_wrap(conn, relation_id, anchor_type, anchor_id, boundary,
+                         exclude_transition_id=None):
+        taken = await original_taken(
+            conn, relation_id, anchor_type, anchor_id, boundary,
+            exclude_transition_id=exclude_transition_id,
+        )
+        if (
+            not taken
+            and exclude_transition_id is None
+            and "launched" not in state
+        ):
+            state["launched"] = True
+            AsyncConnection.exec_driver_sql = wrapped_exec
+            state["competitor"] = _a.create_task(one())
+            await competitor_at_fence.wait()  # parked at OUR write fence
+        return taken
+
+    rt_svc._coordinate_taken = taken_wrap
+    try:
+        first = await one()
+    finally:
+        rt_svc._coordinate_taken = original_taken
+        AsyncConnection.exec_driver_sql = original_exec
+    second = await state["competitor"]
+
+    codes = sorted((first.status_code, second.status_code))
+    assert codes == [201, 409]
+    assert (
+        second.json()["error_code"] == "CONTINUITY_TRANSITION_CONFLICT"
+    )
 
 
 # --- Scale / N+1 (§19, APR-044) ---------------------------------------------------
 
 
 async def test_relation_resolver_query_count_bounded(client, factory, engine):
-    """§19: the relation resolver issues a FIXED number of SQL statements
-    regardless of topology size — small vs ~2,500-shot fixtures in
-    separate Projects must issue the SAME count."""
+    """§19 FROZEN GATE (r2 B3): the resolver issues a FIXED number of SQL
+    statements at feature-film scale —
+
+        small: 48 shots, small semantic set (2 dep rows, 2 relations,
+               4 transitions)
+        big:   ~2,500 shots, 2,500 dependency rows, 500 relations,
+               1,000 relation transitions
+
+    Query-count identity is the gate (7 vs 7 or better); wall time is
+    informational. Topology is built through the real services (canonical
+    ordering requires real positions); the bulk working-state rows are
+    wired by direct SQL in ONE transaction — fixture volume, not behavior
+    under test — with values that satisfy every guarded invariant the
+    resolver verifies (active, same-Project endpoints/predicates)."""
     import time
 
     from soloring.api.schemas.shots import ShotCreate as SC
     from soloring.continuity.state import resolve_effective_relation_state
     from soloring.domain import shots as shot_svc
+    from sqlalchemy import text
 
     pid_small = await _seed_project(factory)
     pid_big = await _seed_project(factory)
 
-    async def build(pid):
-
-        r = await client.post(f"/projects/{pid}/sequences",
-                              json={"title": "S"})
-        seq = r.json()["id"]
-        scene_ids = []
-        for ci in range(10):
+    async def build(pid, n_seqs, scenes_per_seq, shots_per_scene):
+        seq_ids = []
+        for si in range(n_seqs):
             r = await client.post(
-                f"/sequences/{seq}/scenes", json={"title": f"C{ci}"}
+                f"/projects/{pid}/sequences", json={"title": f"S{si}"}
             )
-            scene_ids.append(r.json()["id"])
+            assert r.status_code == 201, r.text
+            seq_ids.append(r.json()["id"])
+        scene_ids = []
+        for sq in seq_ids:
+            for ci in range(scenes_per_seq):
+                r = await client.post(
+                    f"/sequences/{sq}/scenes", json={"title": f"C{ci}"}
+                )
+                assert r.status_code == 201, r.text
+                scene_ids.append((sq, r.json()["id"]))
         shot_rows = []
-        for cid in scene_ids:
+        for sq, cid in scene_ids:
             batch = []
-            for _ in range(5):
+            for _ in range(shots_per_scene):
                 async with factory() as s:
                     shot = await shot_svc.create_shot(s, pid, SC(subject="x"))
                 batch.append(shot.id)
@@ -1956,80 +2182,140 @@ async def test_relation_resolver_query_count_bounded(client, factory, engine):
                 f"/scenes/{cid}/shots", json={"shot_ids": batch}
             )
             assert r.status_code == 200, r.text
-        return seq, scene_ids, shot_rows
+        return seq_ids, [c for _, c in scene_ids], shot_rows
 
-    async def relations_for(pid, n_relations, shots):
-        eva = await _entity_approved(client, pid, name="Eva")
-        bag = await _entity_approved(client, pid, kind="prop", name="Bag")
-        carries = await _predicate(client, pid, key="carries")
-        rel_ids = []
-        for k in range(n_relations):
-            # n_relations needs distinct props to avoid duplicate identity;
-            # reuse the pair for k=0 and create extra endpoints otherwise.
-            if k == 0:
-                rel = await _relation(
-                    client, pid, eva["id"], carries["id"], bag["id"]
-                )
-            else:
-                side = await _entity_approved(
-                    client, pid, kind="prop", name=f"P{k}"
-                )
-                pred = await _predicate(client, pid, key=f"p{k}")
-                rel = await _relation(
-                    client, pid, side["id"], pred["id"], bag["id"]
-                )
-            rel_ids.append(rel["id"])
-        # Only the FIRST relation touches the target's dependencies (via
-        # eva/bag); the rest exercise candidate-set row volume.
-        return eva, bag, rel_ids
-
-    # Small: 50 shots; Big: 2,500-shot-equivalent topology.
-    small_seq, small_scenes, small_shots = await build(pid_small)
-    # Rebuild big at the same scale as the M7B gate: 25x10x10.
-    big_seq, big_scenes, big_shots = await build(pid_big)
-    # grow big to 25 sequences
-    for si in range(24):
-        r = await client.post(
-            f"/projects/{pid_big}/sequences", json={"title": f"S{si}"}
-        )
-        bsq = r.json()["id"]
-        for ci in range(10):
-            r = await client.post(
-                f"/sequences/{bsq}/scenes", json={"title": f"C{ci}"}
+    # 48-shot baseline (2 x 3 x 8) with a small semantic set.
+    small_seq, small_scenes, small_shots = await build(pid_small, 2, 3, 8)
+    eva_s = await _entity_approved(client, pid_small, name="Eva")
+    bag_s = await _entity_approved(client, pid_small, kind="prop", name="Bag")
+    small_pred = await _predicate(client, pid_small, key="carries")
+    small_pred2 = await _predicate(client, pid_small, key="holds")
+    await _relation(client, pid_small, eva_s["id"], small_pred["id"],
+                    bag_s["id"])
+    await _relation(client, pid_small, eva_s["id"], small_pred2["id"],
+                    bag_s["id"])
+    for rel in (
+        await client.get(f"/projects/{pid_small}/continuity-relations")
+    ).json():
+        assert (
+            await _rt(
+                client, rel["id"], "sequence", small_seq[0], "start",
+                "active",
             )
-            bsc = r.json()["id"]
-            batch = []
-            for _ in range(10):
-                async with factory() as s:
-                    shot = await shot_svc.create_shot(
-                        s, pid_big, SC(subject="x")
-                    )
-                batch.append(shot.id)
-            r = await client.put(
-                f"/scenes/{bsc}/shots", json={"shot_ids": batch}
+        ).status_code == 201
+        assert (
+            await _rt(
+                client, rel["id"], "shot", small_shots[-2], "start",
+                "inactive",
             )
-            assert r.status_code == 200, r.text
+        ).status_code == 201
+    small_target = small_shots[-1]
+    await _depend(client, small_target, [eva_s["id"], bag_s["id"]])
 
-    eva_s, bag_s, small_rels = await relations_for(pid_small, 20, small_shots)
-    eva_b, bag_b, big_rels = await relations_for(pid_big, 20, big_shots)
-    assert (
-        await _rt(
-            client, small_rels[0], "sequence", small_seq, "start", "active",
+    # Big fixture: 25 x 10 x 10 = 2,500 shots.
+    t0 = time.perf_counter()
+    big_seq, big_scenes, big_shots = await build(pid_big, 25, 10, 10)
+    eva_b = await _entity_approved(client, pid_big, name="Eva")
+    bag_b = await _entity_approved(client, pid_big, kind="prop", name="Bag")
+    big_target = big_shots[-1]
+
+    now = "2026-01-01T00:00:00.000Z"
+    async with engine.begin() as conn:
+        # 2,500 dependency rows total: target carries both endpoints;
+        # 2,498 other shots carry one row each.
+        await conn.execute(
+            text(
+                "INSERT INTO shot_entity_dependencies "
+                "(shot_id, entity_id, role, position, created_at) VALUES "
+                "(:sid, :eid, 'subject', 0, :now)"
+            ),
+            [
+                {"sid": s, "eid": eva_b["id"], "now": now}
+                for s in big_shots[:2498]
+            ],
         )
-    ).status_code == 201
-    assert (
-        await _rt(
-            client, big_rels[0], "sequence", big_seq, "start", "active"
+        await conn.execute(
+            text(
+                "INSERT INTO shot_entity_dependencies "
+                "(shot_id, entity_id, role, position, created_at) VALUES "
+                "(:sid, :eid, 'subject', 0, :now)"
+            ),
+            [{"sid": big_target, "eid": eva_b["id"], "now": now}],
         )
-    ).status_code == 201
-    await _depend(client, small_shots[-1], [eva_s["id"], bag_s["id"]])
-    await _depend(client, big_shots[-1], [eva_b["id"], bag_b["id"]])
+        await conn.execute(
+            text(
+                "INSERT INTO shot_entity_dependencies "
+                "(shot_id, entity_id, role, position, created_at) VALUES "
+                "(:sid, :eid, 'object', 1, :now)"
+            ),
+            [{"sid": big_target, "eid": bag_b["id"], "now": now}],
+        )
+        # 500 predicates + 500 both-endpoint relations.
+        pred_rows = [
+            {
+                "id": f"50000000-0000-4000-8000-{k:012d}",
+                "key": f"p{k:03d}",
+                "name": f"P{k}",
+            }
+            for k in range(500)
+        ]
+        await conn.execute(
+            text(
+                "INSERT INTO continuity_predicates "
+                "(id, project_id, key, name, description, created_at, "
+                " updated_at) VALUES (:id, :pid, :key, :name, NULL, :now, "
+                ":now)"
+            ),
+            [{**r, "pid": pid_big, "now": now} for r in pred_rows],
+        )
+        rel_rows = [
+            {"id": f"60000000-0000-4000-8000-{k:012d}", "pred": r["id"]}
+            for k, r in enumerate(pred_rows)
+        ]
+        await conn.execute(
+            text(
+                "INSERT INTO continuity_relations "
+                "(id, project_id, subject_entity_id, predicate_id, "
+                " object_entity_id, created_at) VALUES "
+                "(:id, :pid, :s, :pred, :o, :now)"
+            ),
+            [
+                {
+                    **r, "pid": pid_big, "s": eva_b["id"],
+                    "o": bag_b["id"], "now": now,
+                }
+                for r in rel_rows
+            ],
+        )
+        # 1,000 relation transitions: per relation an early active at the
+        # first sequence start and a later inactive at the penultimate
+        # shot's start — the inactive wins at the target.
+        tr_rows = []
+        for r in rel_rows:
+            n = int(r["id"][-12:])
+            tr_rows.append({
+                "id": f"70000000-0000-4000-8000-{n * 2 + 1:012d}",
+                "rel": r["id"], "at": "sequence", "aid": big_seq[0],
+                "b": "start", "st": "active",
+            })
+            tr_rows.append({
+                "id": f"70000000-0000-4000-8000-{n * 2 + 2:012d}",
+                "rel": r["id"], "at": "shot", "aid": big_shots[-2],
+                "b": "start", "st": "inactive",
+            })
+        await conn.execute(
+            text(
+                "INSERT INTO continuity_relation_transitions "
+                "(id, relation_id, anchor_type, anchor_id, boundary, "
+                " state, created_at, updated_at) VALUES "
+                "(:id, :rel, :at, :aid, :b, :st, :now, :now)"
+            ),
+            [{**t, "now": now} for t in tr_rows],
+        )
+    wire_s = time.perf_counter() - t0
 
     counts = {}
-    for label, shot_id in (
-        ("small", small_shots[-1]),
-        ("big", big_shots[-1]),
-    ):
+    for label, shot_id in (("small", small_target), ("big", big_target)):
         counter = {"n": 0}
         async with engine.connect() as conn:
             from sqlalchemy import event
@@ -2050,14 +2336,20 @@ async def test_relation_resolver_query_count_bounded(client, factory, engine):
                 event.remove(conn.sync_connection,
                              "before_cursor_execute",
                              before_cursor_execute)
-        counts[label] = (counter["n"], dt, len(outcome.relation_states))
-        assert len(outcome.relation_states) == 1
+        counts[label] = (counter["n"], dt, outcome)
+        # Every winner is the later INACTIVE transition → canonical
+        # absence at the target; both endpoints are dependencies → no
+        # endpoint requirements.
+        assert len(outcome.relation_states) == 0, label
+        assert len(outcome.endpoint_requirements) == 0, label
 
     small_q, small_dt, _ = counts["small"]
     big_q, big_dt, _ = counts["big"]
     print(
-        f"\nrelation resolver: small {small_q} queries {small_dt*1000:.1f}ms"
-        f" | big({len(big_shots)+2400} shots) {big_q} queries "
-        f"{big_dt*1000:.1f}ms"
+        f"\nrelation resolver: small(48 shots/2 rel/4 tr) {small_q} queries "
+        f"{small_dt*1000:.1f}ms | big(2500 shots/2500 deps/500 rel/1000 tr) "
+        f"{big_q} queries {big_dt*1000:.1f}ms | wiring {wire_s:.1f}s"
     )
     assert small_q == big_q  # APR-044: rows grow, round trips do not
+
+
