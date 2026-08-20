@@ -559,3 +559,134 @@ export async function deleteRelationTransition(
     method: "DELETE",
   });
 }
+
+
+// --- Visual Identity (M8) ---------------------------------------------------------
+
+import type {
+  ValuePolicy,
+  VisualAnchorDetail,
+  VisualAnchorRevisionSummary,
+  VisualContinuityState,
+  VisualFacet,
+} from "./visualTypes";
+
+export async function listVisualFacets(
+  projectId: string,
+): Promise<VisualFacet[]> {
+  return fetchJson<VisualFacet[]>(
+    `${BASE}/projects/${projectId}/visual-facets`,
+  );
+}
+
+export async function createVisualFacet(
+  projectId: string,
+  payload: {
+    target_kind: string;
+    entity_id?: string;
+    feature_id?: string;
+    facet_key: string;
+    label?: string | null;
+    requirement?: string;
+  },
+): Promise<VisualFacet> {
+  return fetchJson<VisualFacet>(
+    `${BASE}/projects/${projectId}/visual-facets`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export async function patchVisualFacet(
+  facetId: string,
+  fields: { label?: string | null; requirement?: string },
+): Promise<VisualFacet> {
+  return fetchJson<VisualFacet>(`${BASE}/visual-facets/${facetId}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(fields),
+  });
+}
+
+export async function deleteVisualFacet(facetId: string): Promise<void> {
+  await fetchVoid(`${BASE}/visual-facets/${facetId}`, { method: "DELETE" });
+}
+
+export async function putValuePolicies(
+  facetId: string,
+  policies: { value: unknown; policy: string }[],
+): Promise<ValuePolicy[]> {
+  return fetchJson<ValuePolicy[]>(
+    `${BASE}/visual-facets/${facetId}/value-policies`,
+    {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ policies }),
+    },
+  );
+}
+
+export async function getVisualAnchor(
+  anchorId: string,
+): Promise<VisualAnchorDetail> {
+  return fetchJson<VisualAnchorDetail>(
+    `${BASE}/visual-anchors/${anchorId}`,
+  );
+}
+
+export async function putWorkingSet(
+  anchorId: string,
+  items: { asset_id: string; role: string; view_key?: string | null }[],
+): Promise<VisualAnchorDetail> {
+  return fetchJson<VisualAnchorDetail>(
+    `${BASE}/visual-anchors/${anchorId}/items`,
+    {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ items }),
+    },
+  );
+}
+
+export async function captureRevision(
+  anchorId: string,
+): Promise<VisualAnchorRevisionSummary> {
+  return fetchJson<VisualAnchorRevisionSummary>(
+    `${BASE}/visual-anchors/${anchorId}/revisions`,
+    { method: "POST" },
+  );
+}
+
+export async function approveRevision(
+  revisionId: string,
+  expected: string | null,
+): Promise<void> {
+  await fetchVoid(
+    `${BASE}/visual-anchor-revisions/${revisionId}/approve`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ expected_approved_revision_id: expected }),
+    },
+  );
+}
+
+export async function unapproveAnchor(
+  anchorId: string,
+  expected: string | null,
+): Promise<void> {
+  await fetchVoid(`${BASE}/visual-anchors/${anchorId}/unapprove`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ expected_approved_revision_id: expected }),
+  });
+}
+
+export async function deleteVisualAnchor(anchorId: string): Promise<void> {
+  await fetchVoid(`${BASE}/visual-anchors/${anchorId}`, {
+    method: "DELETE",
+  });
+}

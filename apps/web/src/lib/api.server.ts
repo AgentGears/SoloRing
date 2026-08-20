@@ -168,3 +168,38 @@ export async function serverGetRevisionContinuity(
     `${apiOrigin()}/shot-revisions/${revisionId}/continuity`,
   );
 }
+
+
+// --- Visual Identity (M8) ---------------------------------------------------------
+
+export async function serverListVisualFacets(
+  projectId: string,
+): Promise<import("./visualTypes").VisualFacet[]> {
+  return fetchJson<import("./visualTypes").VisualFacet[]>(
+    `${apiOrigin()}/projects/${projectId}/visual-facets`,
+  );
+}
+
+export async function serverListVisualAnchors(
+  facetId: string,
+): Promise<import("./visualTypes").VisualAnchor[]> {
+  return fetchJson<import("./visualTypes").VisualAnchor[]>(
+    `${apiOrigin()}/visual-facets/${facetId}/anchors`,
+  );
+}
+
+export async function serverGetVisualAnchor(
+  anchorId: string,
+): Promise<import("./visualTypes").VisualAnchorDetail> {
+  return fetchJson<import("./visualTypes").VisualAnchorDetail>(
+    `${apiOrigin()}/visual-anchors/${anchorId}`,
+  );
+}
+
+export async function serverGetVisualContinuity(
+  shotId: string,
+): Promise<import("./visualTypes").VisualContinuityState> {
+  return fetchJson<import("./visualTypes").VisualContinuityState>(
+    `${apiOrigin()}/shots/${shotId}/visual-continuity`,
+  );
+}

@@ -7,6 +7,7 @@ import Link from "next/link";
 
 import ApprovedTakePanel from "@/components/ApprovedTakePanel";
 import ContinuityStatePanel from "@/components/ContinuityStatePanel";
+import VisualContinuityPanel from "@/components/VisualContinuityPanel";
 import ReferencePanel from "@/components/ReferencePanel";
 import { SemanticDependenciesPanel } from "@/components/SemanticDependenciesPanel";
 import RevisionProvenanceList from "@/components/RevisionProvenanceList";
@@ -20,6 +21,7 @@ import {
   serverGetReferences,
   serverGetRevisionContinuity,
   serverGetShot,
+  serverGetVisualContinuity,
   serverListAssets,
   serverListRevisions,
   serverListTakes,
@@ -56,6 +58,8 @@ export default async function ShotPage({
   let notReadyCode: string | null = null;
   let notReadyIssues: ReadinessIssue[] = [];
   let continuityLoadError: { code: string; message: string } | null = null;
+  let visualState: import("@/lib/visualTypes").VisualContinuityState | null =
+    null;
   let provenance: Record<
     string,
     import("@/lib/types").RevisionContinuity | ApiError | null
@@ -106,6 +110,13 @@ export default async function ShotPage({
     // Historical provenance errors surface VISIBLY (fail-closed integrity
     // responses are never silently nulled); null only for a response that
     // legitimately could not be attempted.
+    try {
+      visualState = await serverGetVisualContinuity(id);
+    } catch {
+      // Honest failure: the composed endpoint raised a non-semantic
+      // error; the panel renders the unresolved state.
+      visualState = null;
+    }
     provenance = Object.fromEntries(
       await Promise.all(
         revisions.map(async (r) => {
@@ -187,6 +198,9 @@ export default async function ShotPage({
           entities.map((e) => [e.id, e.name]),
         )}
       />
+
+      <h2>Visual continuity</h2>
+      <VisualContinuityPanel state={visualState} />
 
       <h2>Current continuity state</h2>
       <ContinuityStatePanel
