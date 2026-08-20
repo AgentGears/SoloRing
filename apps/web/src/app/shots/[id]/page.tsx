@@ -6,15 +6,19 @@
 import Link from "next/link";
 
 import ApprovedTakePanel from "@/components/ApprovedTakePanel";
+import ContinuityStatePanel from "@/components/ContinuityStatePanel";
 import ReferencePanel from "@/components/ReferencePanel";
 import { SemanticDependenciesPanel } from "@/components/SemanticDependenciesPanel";
+import RevisionProvenanceList from "@/components/RevisionProvenanceList";
 import RevisionList from "@/components/RevisionList";
 import ShotForm from "@/components/ShotForm";
 import TakesPanel from "@/components/TakesPanel";
 import WorkingStatePanel from "@/components/WorkingStatePanel";
 import { asApiError, type ApiError } from "@/lib/api.shared";
 import {
+  serverGetContinuityState,
   serverGetReferences,
+  serverGetRevisionContinuity,
   serverGetShot,
   serverListAssets,
   serverListRevisions,
@@ -23,7 +27,10 @@ import {
 import { serverListEntities, serverListSemanticDependencies } from "@/lib/api.server";
 import type {
   Asset,
+  ContinuityStateResponse,
+  ReadinessIssue,
   ReferenceItem,
+  RevisionContinuity,
   RevisionSummary,
   ShotDetail,
   TakeItem,
@@ -45,7 +52,23 @@ export default async function ShotPage({
   let takes: TakeItem[] = [];
   let entities: import("@/lib/types").Entity[] = [];
   let semanticDeps: import("@/lib/types").SemanticDependency[] = [];
+  let continuity: ContinuityStateResponse | null = null;
+  let notReadyCode: string | null = null;
+  let notReadyIssues: ReadinessIssue[] = [];
+  let continuityLoadError: { code: string; message: string } | null = null;
+  let provenance: Record<
+    string,
+    import("@/lib/types").RevisionContinuity | ApiError | null
+  > = {};
   let loadError: ApiError | null = null;
+
+  // ONLY these two are semantic not-ready conditions (r2 B6); any other
+  // failure of the strict endpoint is a load/integrity error and renders
+  // as one — never reinterpreted as continuity readiness.
+  const NOT_READY_CODES = new Set([
+    "NARRATIVE_CONTEXT_REQUIRED",
+    "CONTINUITY_RELATION_ENDPOINT_REQUIRED",
+  ]);
 
   try {
     shot = await serverGetShot(id);
@@ -60,6 +83,40 @@ export default async function ShotPage({
       ]);
   } catch (err) {
     loadError = asApiError(err);
+  }
+
+  if (!loadError) {
+    try {
+      continuity = await serverGetContinuityState(id);
+    } catch (err) {
+      const apiErr = asApiError(err);
+      if (NOT_READY_CODES.has(apiErr.code)) {
+        notReadyCode = apiErr.code;
+        const issues = apiErr.details?.issues;
+        if (Array.isArray(issues)) {
+          notReadyIssues = issues as ReadinessIssue[];
+        }
+      } else {
+        continuityLoadError = {
+          code: apiErr.code,
+          message: apiErr.message,
+        };
+      }
+    }
+    // Historical provenance errors surface VISIBLY (fail-closed integrity
+    // responses are never silently nulled); null only for a response that
+    // legitimately could not be attempted.
+    provenance = Object.fromEntries(
+      await Promise.all(
+        revisions.map(async (r) => {
+          try {
+            return [r.id, await serverGetRevisionContinuity(r.id)] as const;
+          } catch (err) {
+            return [r.id, asApiError(err)] as const;
+          }
+        }),
+      ),
+    );
   }
 
   if (loadError) {
@@ -121,6 +178,24 @@ export default async function ShotPage({
 
       <h2>Revision history</h2>
       <RevisionList revisions={revisions} />
+
+      <h2>Revision continuity provenance</h2>
+      <RevisionProvenanceList
+        revisions={revisions}
+        continuity={provenance}
+        entityNames={Object.fromEntries(
+          entities.map((e) => [e.id, e.name]),
+        )}
+      />
+
+      <h2>Current continuity state</h2>
+      <ContinuityStatePanel
+        state={continuity}
+        notReadyCode={notReadyCode}
+        notReadyIssues={notReadyIssues}
+        loadError={continuityLoadError}
+        entityNames={Object.fromEntries(entities.map((e) => [e.id, e.name]))}
+      />
     </main>
   );
 }

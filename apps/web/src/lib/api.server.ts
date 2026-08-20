@@ -109,3 +109,62 @@ export async function serverListSemanticDependencies(
     `${apiOrigin()}/shots/${shotId}/semantic-dependencies`,
   );
 }
+
+
+// --- Narrative continuity state (M7D) ----------------------------------------------
+
+export async function serverListContinuityFeatures(
+  entityId: string,
+): Promise<import("./types").ContinuityFeature[]> {
+  return fetchJson<import("./types").ContinuityFeature[]>(
+    `${apiOrigin()}/entities/${entityId}/continuity-features`,
+  );
+}
+
+export async function serverListFeatureTransitions(
+  featureId: string,
+): Promise<import("./types").ContinuityFeatureTransition[]> {
+  return fetchJson<import("./types").ContinuityFeatureTransition[]>(
+    `${apiOrigin()}/continuity-features/${featureId}/transitions`,
+  );
+}
+
+export async function serverListPredicates(
+  projectId: string,
+): Promise<import("./types").ContinuityPredicate[]> {
+  return fetchJson<import("./types").ContinuityPredicate[]>(
+    `${apiOrigin()}/projects/${projectId}/continuity-predicates`,
+  );
+}
+
+export async function serverListRelations(
+  projectId: string,
+): Promise<import("./types").ContinuityRelation[]> {
+  return fetchJson<import("./types").ContinuityRelation[]>(
+    `${apiOrigin()}/projects/${projectId}/continuity-relations`,
+  );
+}
+
+export async function serverListRelationTransitions(
+  relationId: string,
+): Promise<import("./types").RelationTransition[]> {
+  return fetchJson<import("./types").RelationTransition[]>(
+    `${apiOrigin()}/continuity-relations/${relationId}/transitions`,
+  );
+}
+
+export async function serverGetContinuityState(
+  shotId: string,
+): Promise<import("./types").ContinuityStateResponse> {
+  return fetchJson<import("./types").ContinuityStateResponse>(
+    `${apiOrigin()}/shots/${shotId}/continuity-state`,
+  );
+}
+
+export async function serverGetRevisionContinuity(
+  revisionId: string,
+): Promise<import("./types").RevisionContinuity> {
+  return fetchJson<import("./types").RevisionContinuity>(
+    `${apiOrigin()}/shot-revisions/${revisionId}/continuity`,
+  );
+}

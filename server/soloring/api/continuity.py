@@ -21,6 +21,16 @@ from soloring.api.schemas.continuity_features import (
     FeaturePatch,
     FeatureRead,
 )
+from soloring.api.schemas.continuity_relations import (
+    PredicateCreate,
+    PredicatePatch,
+    PredicateRead,
+    RelationCreate,
+    RelationRead,
+    RelationTransitionCreate,
+    RelationTransitionPatch,
+    RelationTransitionRead,
+)
 from soloring.api.schemas.continuity_transitions import (
     TransitionCreate,
     TransitionPatch,
@@ -130,6 +140,7 @@ async def _revision_continuity(session: AsyncSession, revision_id: str) -> dict:
 
     dependencies: list[dict[str, Any]] = []
     feature_states: list[dict[str, Any]] = []
+    relations: list[dict[str, Any]] = []
     transition_audit: list[dict[str, Any]] = []
     continuity_schema_version = None
     if rev["continuity_spec_json"] is not None:
@@ -304,9 +315,59 @@ async def _revision_continuity(session: AsyncSession, revision_id: str) -> dict:
                 "source_transition_id": row["source_transition_id"],
             })
 
+        # Relation states (M7D §11): the shot_revision_relation_states ROWS
+        # are the authority — captured duplicates, NEVER re-derived from
+        # today's relations/predicates. There is no value payload; the
+        # per-row captured-only check is the ONE key grammar (a pure regex
+        # — today's predicate table is never consulted, mirroring the enum
+        # freeze note), and the byte-level rebuild below is the master
+        # check.
+        relrows = (
+            await session.execute(
+                text(
+                    "SELECT relation_id, subject_entity_id, predicate_id, "
+                    "predicate_key, object_entity_id, "
+                    "source_transition_id, source_anchor_type, "
+                    "source_anchor_id, source_boundary "
+                    "FROM shot_revision_relation_states "
+                    "WHERE shot_revision_id = :rid"
+                ),
+                {"rid": revision_id},
+            )
+        ).mappings().all()
+        from soloring.continuity.values import is_valid_key
+
+        class _CapturedRelationState:
+            """Row-shape adapter consumed by build_continuity_spec_v2."""
+
+            def __init__(self, row):
+                self.relation_id = row["relation_id"]
+                self.subject_entity_id = row["subject_entity_id"]
+                self.predicate_id = row["predicate_id"]
+                self.predicate_key = row["predicate_key"]
+                self.object_entity_id = row["object_entity_id"]
+                self.source_anchor_type = row["source_anchor_type"]
+                self.source_anchor_id = row["source_anchor_id"]
+                self.source_boundary = row["source_boundary"]
+
+        for row in relrows:
+            if not is_valid_key(row["predicate_key"]):
+                raise internal_invariant(
+                    f"ShotRevision {revision_id} relation row "
+                    f"{row['relation_id']} carries predicate_key "
+                    f"{row['predicate_key']!r} outside the frozen key "
+                    "grammar."
+                )
+            transition_audit.append({
+                "relation_id": row["relation_id"],
+                "source_transition_id": row["source_transition_id"],
+            })
+
         if continuity_schema_version == 2:
             rebuilt = build_continuity_spec_v2(
-                rebuilt_deps, [_CapturedFeatureState(r) for r in frows]
+                rebuilt_deps,
+                [_CapturedFeatureState(r) for r in frows],
+                [_CapturedRelationState(r) for r in relrows],
             )
         else:
             rebuilt = build_continuity_spec(rebuilt_deps)
@@ -319,6 +380,7 @@ async def _revision_continuity(session: AsyncSession, revision_id: str) -> dict:
                 "its canonical continuity spec."
             )
         feature_states = list(rebuilt.get("feature_states", []))
+        relations = list(rebuilt.get("relations", []))
 
     import json as _json
 
@@ -341,6 +403,7 @@ async def _revision_continuity(session: AsyncSession, revision_id: str) -> dict:
         "continuity_spec_hash": rev["continuity_spec_hash"],
         "dependencies": dependencies,
         "feature_states": feature_states,
+        "relations": relations,
         "source_transition_audit": transition_audit,
     }
 
@@ -543,12 +606,14 @@ async def delete_feature_transition(
 async def get_shot_continuity_state(
     shot_id: str, session: AsyncSession = Depends(get_session)
 ) -> dict:
-    """Current-state endpoint only (M7B §8). Historical endpoints never
-    invoke this resolver."""
+    """Current-state endpoint only (M7B §8; M7D §12.3). Historical
+    endpoints never invoke either resolver."""
     from soloring.continuity.state import (
         narrative_context_required,
         readiness_projection,
+        relation_endpoint_required,
         resolve_effective_feature_state,
+        resolve_effective_relation_state,
     )
     from soloring.domain.ids import is_uuid
     from soloring.errors import ErrorCode, not_found
@@ -559,19 +624,30 @@ async def get_shot_continuity_state(
 
     async with session.bind.connect() as conn:
         # One explicit consistent read unit (the established pattern):
-        # the complete M7 current state resolves from ONE WAL snapshot —
-        # all-before or all-after a concurrent mutation, never a hybrid.
+        # the complete M7 current state — features AND relations — resolves
+        # from ONE WAL snapshot: all-before or all-after a concurrent
+        # mutation, never a hybrid.
         await conn.exec_driver_sql("BEGIN")
         try:
             outcome = await resolve_effective_feature_state(conn, shot_id)
+            relation_outcome = await resolve_effective_relation_state(
+                conn, shot_id
+            )
             await conn.commit()
         except Exception:
             with _cl.suppress(Exception):
                 await conn.rollback()
             raise
-    if not outcome.assigned and outcome.relevant_temporal_data:
+    if not outcome.assigned and (
+        outcome.relevant_temporal_data
+        or relation_outcome.relevant_relation_data
+    ):
         raise narrative_context_required(shot_id)
-    readiness = readiness_projection(outcome)
+    if relation_outcome.endpoint_requirements:
+        raise relation_endpoint_required(
+            shot_id, list(relation_outcome.endpoint_requirements)
+        )
+    readiness = readiness_projection(outcome, relation_outcome)
     return {
         "shot_id": shot_id,
         "continuity_state_ready": readiness["continuity_state_ready"],
@@ -594,4 +670,247 @@ async def get_shot_continuity_state(
             }
             for s in outcome.states
         ],
+        "relation_states": [
+            {
+                "subject_entity_id": s.subject_entity_id,
+                "relation_id": s.relation_id,
+                "predicate_id": s.predicate_id,
+                "predicate_key": s.predicate_key,
+                "object_entity_id": s.object_entity_id,
+                "source_transition_id": s.source_transition_id,
+                "source_anchor": {
+                    "anchor_type": s.source_anchor_type,
+                    "anchor_id": s.source_anchor_id,
+                    "boundary": s.source_boundary,
+                },
+            }
+            for s in relation_outcome.relation_states
+        ],
     }
+
+
+# --- RelationTransition surface (M7D §6.2) --------------------------------------
+
+
+@router.get(
+    "/continuity-relations/{relation_id}/transitions",
+    response_model=list[RelationTransitionRead],
+)
+async def list_relation_transitions(
+    relation_id: str, session: AsyncSession = Depends(get_session)
+) -> list[RelationTransitionRead]:
+    from soloring.continuity import relation_transitions as rt_svc
+
+    return [
+        RelationTransitionRead(**r)
+        for r in await rt_svc.list_transitions(session, relation_id)
+    ]
+
+
+@router.post(
+    "/continuity-relations/{relation_id}/transitions",
+    response_model=RelationTransitionRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_relation_transition(
+    relation_id: str,
+    payload: RelationTransitionCreate,
+    session: AsyncSession = Depends(get_session),
+) -> RelationTransitionRead:
+    from soloring.continuity import relation_transitions as rt_svc
+
+    tid = await rt_svc.create_transition(session, relation_id, payload)
+    async with session.bind.connect() as conn:
+        from sqlalchemy import text as _t
+
+        row = (
+            await conn.execute(
+                _t(
+                    "SELECT id, relation_id, anchor_type, anchor_id, "
+                    "boundary, state, created_at, updated_at "
+                    "FROM continuity_relation_transitions WHERE id = :tid"
+                ),
+                {"tid": tid},
+            )
+        ).mappings().one()
+    return RelationTransitionRead(**dict(row))
+
+
+@router.patch(
+    "/continuity-relation-transitions/{transition_id}",
+    response_model=RelationTransitionRead,
+)
+async def patch_relation_transition(
+    transition_id: str,
+    payload: RelationTransitionPatch,
+    session: AsyncSession = Depends(get_session),
+) -> RelationTransitionRead:
+    from soloring.continuity import relation_transitions as rt_svc
+
+    await rt_svc.patch_transition(session, transition_id, payload)
+    async with session.bind.connect() as conn:
+        from sqlalchemy import text as _t
+
+        row = (
+            await conn.execute(
+                _t(
+                    "SELECT id, relation_id, anchor_type, anchor_id, "
+                    "boundary, state, created_at, updated_at "
+                    "FROM continuity_relation_transitions WHERE id = :tid"
+                ),
+                {"tid": transition_id},
+            )
+        ).mappings().one()
+    return RelationTransitionRead(**dict(row))
+
+
+@router.delete(
+    "/continuity-relation-transitions/{transition_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_relation_transition(
+    transition_id: str, session: AsyncSession = Depends(get_session)
+) -> None:
+    from soloring.continuity import relation_transitions as rt_svc
+
+    await rt_svc.delete_transition(session, transition_id)
+
+
+# --- ContinuityPredicate + ContinuityRelation surface (M7D §4–§5) ---------------
+
+
+@router.get(
+    "/projects/{project_id}/continuity-predicates",
+    response_model=list[PredicateRead],
+)
+async def list_continuity_predicates(
+    project_id: str, session: AsyncSession = Depends(get_session)
+) -> list[PredicateRead]:
+    from soloring.continuity import relations as relation_svc
+
+    return [
+        PredicateRead(**r)
+        for r in await relation_svc.list_predicates(session, project_id)
+    ]
+
+
+@router.post(
+    "/projects/{project_id}/continuity-predicates",
+    response_model=PredicateRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_continuity_predicate(
+    project_id: str,
+    payload: PredicateCreate,
+    session: AsyncSession = Depends(get_session),
+) -> PredicateRead:
+    from soloring.continuity import relations as relation_svc
+
+    pid = await relation_svc.create_predicate(session, project_id, payload)
+    return PredicateRead(
+        **await relation_svc.get_predicate(session, pid)
+    )
+
+
+@router.get(
+    "/continuity-predicates/{predicate_id}", response_model=PredicateRead
+)
+async def get_continuity_predicate(
+    predicate_id: str, session: AsyncSession = Depends(get_session)
+) -> PredicateRead:
+    from soloring.continuity import relations as relation_svc
+
+    return PredicateRead(
+        **await relation_svc.get_predicate(session, predicate_id)
+    )
+
+
+@router.patch(
+    "/continuity-predicates/{predicate_id}", response_model=PredicateRead
+)
+async def patch_continuity_predicate(
+    predicate_id: str,
+    payload: PredicatePatch,
+    session: AsyncSession = Depends(get_session),
+) -> PredicateRead:
+    from soloring.continuity import relations as relation_svc
+
+    await relation_svc.patch_predicate(session, predicate_id, payload)
+    return PredicateRead(
+        **await relation_svc.get_predicate(session, predicate_id)
+    )
+
+
+@router.delete(
+    "/continuity-predicates/{predicate_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_continuity_predicate(
+    predicate_id: str, session: AsyncSession = Depends(get_session)
+) -> None:
+    from soloring.continuity import relations as relation_svc
+
+    await relation_svc.delete_predicate(session, predicate_id)
+
+
+@router.get(
+    "/projects/{project_id}/continuity-relations",
+    response_model=list[RelationRead],
+)
+async def list_continuity_relations(
+    project_id: str,
+    subject_entity_id: str | None = None,
+    object_entity_id: str | None = None,
+    predicate_id: str | None = None,
+    session: AsyncSession = Depends(get_session),
+) -> list[RelationRead]:
+    from soloring.continuity import relations as relation_svc
+
+    return [
+        RelationRead(**r)
+        for r in await relation_svc.list_relations(
+            session, project_id,
+            subject_entity_id=subject_entity_id,
+            object_entity_id=object_entity_id,
+            predicate_id=predicate_id,
+        )
+    ]
+
+
+@router.post(
+    "/projects/{project_id}/continuity-relations",
+    response_model=RelationRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_continuity_relation(
+    project_id: str,
+    payload: RelationCreate,
+    session: AsyncSession = Depends(get_session),
+) -> RelationRead:
+    from soloring.continuity import relations as relation_svc
+
+    rid = await relation_svc.create_relation(session, project_id, payload)
+    return RelationRead(**await relation_svc.get_relation(session, rid))
+
+
+@router.get(
+    "/continuity-relations/{relation_id}", response_model=RelationRead
+)
+async def get_continuity_relation(
+    relation_id: str, session: AsyncSession = Depends(get_session)
+) -> RelationRead:
+    from soloring.continuity import relations as relation_svc
+
+    return RelationRead(**await relation_svc.get_relation(session, relation_id))
+
+
+@router.delete(
+    "/continuity-relations/{relation_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_continuity_relation(
+    relation_id: str, session: AsyncSession = Depends(get_session)
+) -> None:
+    from soloring.continuity import relations as relation_svc
+
+    await relation_svc.delete_relation(session, relation_id)

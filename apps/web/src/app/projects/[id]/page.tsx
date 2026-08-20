@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 
+import { ProjectContinuityPanel } from "@/components/ProjectContinuityPanel";
 import { ShotCreateForm, ShotDeleteButton } from "@/components/ShotActions";
 import { NarrativePanel } from "@/components/NarrativePanel";
 import { StoryWorldPanel } from "@/components/StoryWorldPanel";
@@ -10,14 +11,20 @@ import {
   serverGetProject,
   serverListAssets,
   serverListEntities,
+  serverListPredicates,
+  serverListRelationTransitions,
+  serverListRelations,
   serverListScenes,
   serverListSequences,
   serverListShots,
 } from "@/lib/api.server";
 import type {
   Asset,
+  ContinuityPredicate,
+  ContinuityRelation,
   Entity,
   Project,
+  RelationTransition,
   Scene,
   Sequence,
   ShotListItem,
@@ -59,21 +66,33 @@ export default async function ProjectPage({
   let entities: Entity[] = [];
   let sequences: Sequence[] = [];
   let scenes: Scene[] = [];
+  let predicates: ContinuityPredicate[] = [];
+  let relations: ContinuityRelation[] = [];
+  let transitionsByRelation: Record<string, RelationTransition[]> = {};
   let loadError: ApiError | null = null;
 
   try {
     project = await serverGetProject(id);
-    [shots, assets, entities, sequences] = await Promise.all([
-      serverListShots(id),
-      serverListAssets(id),
-      serverListEntities(id),
-      serverListSequences(id),
-    ]);
+    [shots, assets, entities, sequences, predicates, relations] =
+      await Promise.all([
+        serverListShots(id),
+        serverListAssets(id),
+        serverListEntities(id),
+        serverListSequences(id),
+        serverListPredicates(id),
+        serverListRelations(id),
+      ]);
     scenes = (
       await Promise.all(
         sequences.map((s) => serverListScenes(s.id)),
       )
     ).flat();
+    const perRelation = await Promise.all(
+      relations.map((r) => serverListRelationTransitions(r.id)),
+    );
+    transitionsByRelation = Object.fromEntries(
+      relations.map((r, i) => [r.id, perRelation[i]]),
+    );
   } catch (err) {
     loadError = asApiError(err);
   }
@@ -147,6 +166,16 @@ export default async function ProjectPage({
 
       <h2>Story World</h2>
       <StoryWorldPanel projectId={id} entities={entities} />
+
+      <h2>Continuity relations</h2>
+      <ProjectContinuityPanel
+        projectId={id}
+        entities={entities}
+        predicates={predicates}
+        relations={relations}
+        transitionsByRelation={transitionsByRelation}
+        shots={shots}
+      />
     </main>
   );
 }

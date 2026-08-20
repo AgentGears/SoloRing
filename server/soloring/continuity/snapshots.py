@@ -126,9 +126,10 @@ def feature_state_spec_entry(state) -> dict:
     }
 
 
-def build_continuity_spec_v2(resolved, feature_states) -> dict:
-    """Continuity-spec schema 2 (M7C §5): M6 dependencies + feature
-    states + the dormant frozen relations array."""
+def build_continuity_spec_v2(resolved, feature_states, relation_states=()) -> dict:
+    """Continuity-spec schema 2 (M7C §5 + M7D §8): M6 dependencies +
+    feature states + relation states. The grammar does not change — M7D
+    only POPULATES the relations field that M7C froze and emitted empty."""
     return {
         "schema_version": CONTINUITY_SPEC_SCHEMA_VERSION_2,
         "dependencies": build_continuity_spec(resolved)["dependencies"],
@@ -136,12 +137,67 @@ def build_continuity_spec_v2(resolved, feature_states) -> dict:
             feature_state_spec_entry(st)
             for st in sort_feature_states(feature_states)
         ],
-        "relations": [],
+        "relations": [
+            relation_state_spec_entry(rs)
+            for rs in sort_relation_states(relation_states)
+        ],
+    }
+
+
+# M7D §8.2: canonical relation-state order — (subject_entity_id,
+# predicate_key, object_entity_id, relation_id); relation_id is the final
+# tiebreaker only. The resolver's API display order drops the tiebreak;
+# the canonical builder re-sorts (same discipline as feature states).
+_RELATION_ORDER = (
+    "subject_entity_id", "predicate_key", "object_entity_id", "relation_id",
+)
+
+
+def _relation_like(state) -> bool:
+    return (
+        hasattr(state, "subject_entity_id")
+        and hasattr(state, "relation_id")
+        and hasattr(state, "predicate_id")
+        and hasattr(state, "predicate_key")
+        and hasattr(state, "object_entity_id")
+        and hasattr(state, "source_anchor_type")
+        and hasattr(state, "source_anchor_id")
+        and hasattr(state, "source_boundary")
+    )
+
+
+def sort_relation_states(states):
+    """Canonical §8.2 ordering before canonicalization; display order and
+    database row order can never affect canonical bytes."""
+    return sorted(
+        states, key=lambda st: tuple(getattr(st, f) for f in _RELATION_ORDER)
+    )
+
+
+def relation_state_spec_entry(state) -> dict:
+    """One relations entry in the frozen spec-v2 grammar (§8.2).
+
+    Insertion order is the canonical serialization order.
+    ``source_transition_id`` is deliberately ABSENT — audit provenance is
+    not semantic identity (APR-022): recreated equivalent transitions
+    converge; the captured bytes carry the anchor triple only."""
+    return {
+        "subject_entity_id": state.subject_entity_id,
+        "relation_id": state.relation_id,
+        "predicate_id": state.predicate_id,
+        "predicate_key": state.predicate_key,
+        "object_entity_id": state.object_entity_id,
+        "source_anchor": {
+            "anchor_type": state.source_anchor_type,
+            "anchor_id": state.source_anchor_id,
+            "boundary": state.source_boundary,
+        },
     }
 
 
 def build_capturable_snapshot(
-    shot, refs, resolved: list[ResolvedDependency], feature_states=()
+    shot, refs, resolved: list[ResolvedDependency], feature_states=(),
+    relation_states=(),
 ) -> tuple[dict, dict | None]:
     """(snapshot value, continuity spec or None) from ONE captured value.
 
@@ -149,18 +205,22 @@ def build_capturable_snapshot(
     both the working-hash path and capture persistence:
 
         zero dependencies            → exact schema 1, no spec
-        deps + zero effective states → exact schema 2 + spec 1
-        one or more effective states → schema 3 + spec 2
+        deps + zero effective states
+          (features AND relations)   → exact schema 2 + spec 1
+        one or more effective Feature states
+        OR relation states           → schema 3 + spec 2
 
-    There is no empty schema-3 representation (M6-F14 extended): states
-    that all clear keep the exact schema-2 form.
-    """
+    There is no empty schema-3 representation (M6-F14 extended by M7D
+    §8.3): states that all clear — features AND relations alike — keep
+    the exact schema-2 form. An endpoint-incomplete Shot never reaches
+    this builder at all (the read unit raises first)."""
     deps = sort_resolved(resolved)
     states = sort_feature_states(feature_states)
+    relations = sort_relation_states(relation_states)
     if not deps:
         return build_snapshot(shot, refs), None
     v1 = build_snapshot(shot, refs)
-    if not states:
+    if not states and not relations:
         spec = build_continuity_spec(deps)
         return (
             {
@@ -171,7 +231,7 @@ def build_capturable_snapshot(
             },
             spec,
         )
-    spec = build_continuity_spec_v2(deps, states)
+    spec = build_continuity_spec_v2(deps, states, relations)
     return (
         {
             "schema_version": 3,
@@ -184,14 +244,18 @@ def build_capturable_snapshot(
 
 
 def effective_working_snapshot_hash(
-    shot, refs, resolved: list[ResolvedDependency], feature_states=()
+    shot, refs, resolved: list[ResolvedDependency], feature_states=(),
+    relation_states=(),
 ) -> str:
-    """The Shot's effective working hash (M6-F15 + M7C §10.4).
+    """The Shot's effective working hash (M6-F15 + M7C §10.4 + M7D §10.2).
 
-    Includes current approvals AND current effective Feature states: either
-    mutating changes this hash without any Shot-row mutation. Delegates to
-    THE builder — never a second hash implementation."""
-    snapshot, _ = build_capturable_snapshot(shot, refs, resolved, feature_states)
+    Includes current approvals AND current effective Feature AND Relation
+    states: mutating any of them changes this hash without any Shot-row
+    mutation. Delegates to THE builder — never a second hash
+    implementation."""
+    snapshot, _ = build_capturable_snapshot(
+        shot, refs, resolved, feature_states, relation_states
+    )
     return canonical_hash(snapshot)
 
 

@@ -250,6 +250,25 @@ async def delete_scene(session: AsyncSession, scene_id: str) -> None:
                     f"Scene {scene_id} anchors an active Feature transition.",
                     status_code=409,
                 )
+            # M7D §13.5: the same guard for Relation transitions.
+            anchored_relation = (
+                await conn.execute(
+                    text(
+                        "SELECT 1 FROM continuity_relation_transitions "
+                        "WHERE anchor_type = 'scene' AND anchor_id = :cid "
+                        "AND deleted_at IS NULL LIMIT 1"
+                    ),
+                    {"cid": scene_id},
+                )
+            ).first()
+            if anchored_relation is not None:
+                await conn.exec_driver_sql("ROLLBACK")
+                raise SoloRingError(
+                    ErrorCode.CONTINUITY_ANCHOR_IN_USE,
+                    f"Scene {scene_id} anchors an active Relation "
+                    "transition.",
+                    status_code=409,
+                )
             await conn.execute(
                 text(
                     "UPDATE scenes SET deleted_at = "
@@ -378,6 +397,44 @@ async def assign_scene_shots(
                 raise SoloRingError(
                     ErrorCode.CONTINUITY_ANCHOR_IN_USE,
                     f"Shot {removed.id} anchors an active Feature "
+                    "transition and cannot be unassigned.",
+                    status_code=409,
+                )
+
+            # M7D §13.5: the same unassign guard for Relation transitions
+            # (mirrors the feature form in both full-set branches).
+            if ordered_shot_ids:
+                removed_rel = (
+                    await conn.execute(
+                        text(
+                            "SELECT sh.id FROM shots sh WHERE sh.scene_id = :cid "
+                            "AND sh.deleted_at IS NULL AND sh.id NOT IN "
+                            f"({placeholders}) AND EXISTS ("
+                            "SELECT 1 FROM continuity_relation_transitions t "
+                            "WHERE t.anchor_type = 'shot' AND t.anchor_id = sh.id "
+                            "AND t.deleted_at IS NULL) LIMIT 1"
+                        ),
+                        {"cid": scene_id, **params},
+                    )
+                ).first()
+            else:
+                removed_rel = (
+                    await conn.execute(
+                        text(
+                            "SELECT sh.id FROM shots sh WHERE sh.scene_id = :cid "
+                            "AND sh.deleted_at IS NULL AND EXISTS ("
+                            "SELECT 1 FROM continuity_relation_transitions t "
+                            "WHERE t.anchor_type = 'shot' AND t.anchor_id = sh.id "
+                            "AND t.deleted_at IS NULL) LIMIT 1"
+                        ),
+                        {"cid": scene_id},
+                    )
+                ).first()
+            if removed_rel is not None:
+                await conn.exec_driver_sql("ROLLBACK")
+                raise SoloRingError(
+                    ErrorCode.CONTINUITY_ANCHOR_IN_USE,
+                    f"Shot {removed_rel.id} anchors an active Relation "
                     "transition and cannot be unassigned.",
                     status_code=409,
                 )

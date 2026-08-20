@@ -93,6 +93,10 @@ class ShotRead(BaseModel):
     semantic_dependencies: list[SemanticDependencyItem] = []
     continuity_ready: bool = False
     continuity_state_ready: bool = True
+    # M7D §12.4: the ONE additive ShotRead field. Default-empty; populated
+    # only from authoritative current-state resolution — never historical
+    # provenance, never fabricated client-side.
+    readiness_issues: list = []
 
 
 class ShotListItem(BaseModel):

@@ -141,6 +141,39 @@ async def delete_project(session: AsyncSession, project_id: str) -> None:
         ),
         {"now": now, "pid": project_id},
     )
+    # M7D §13.5 (plan correction B): the cascade removes the ENTIRE
+    # relation working state under the same fence and the same timestamp —
+    # active RelationTransitions, then active Relations, then active
+    # Predicates. Leaving Relations/Predicates active while their
+    # Project's Entities are tombstoned would falsify the guard-chain
+    # invariant (active Relation ⇒ active subject ⇒ active object ⇒
+    # active Predicate) immediately after a legal Project deletion. The
+    # ordinary in-use guards are bypassed here for the same reason as
+    # above: the complete Project working state is leaving activity
+    # together. Historical shot_revision_relation_states stay untouched.
+    await session.execute(
+        _text(
+            "UPDATE continuity_relation_transitions SET deleted_at = :now, "
+            "updated_at = :now WHERE deleted_at IS NULL AND relation_id IN ("
+            "SELECT id FROM continuity_relations WHERE project_id = :pid)"
+        ),
+        {"now": now, "pid": project_id},
+    )
+    await session.execute(
+        _text(
+            "UPDATE continuity_relations SET deleted_at = :now "
+            "WHERE deleted_at IS NULL AND project_id = :pid"
+        ),
+        {"now": now, "pid": project_id},
+    )
+    await session.execute(
+        _text(
+            "UPDATE continuity_predicates SET deleted_at = :now, "
+            "updated_at = :now WHERE deleted_at IS NULL "
+            "AND project_id = :pid"
+        ),
+        {"now": now, "pid": project_id},
+    )
     sequences = (
         await session.execute(
             select(Sequence).where(
