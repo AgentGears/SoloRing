@@ -287,3 +287,69 @@ async def delete_visual_anchor(
     from soloring.visual import facets as facet_svc
 
     await facet_svc.delete_anchor(session, anchor_id)
+
+
+# --- Shot visual inspection (§42, §52, §67) ---------------------------------------
+
+
+@router.get("/shots/{shot_id}/visual-continuity")
+async def get_shot_visual_continuity(
+    shot_id: str, session: AsyncSession = Depends(get_session)
+) -> dict:
+    """The composed current-state visual projection on one coherent read
+    unit (§44): M7 semantics resolve first; M8 projects blocked (§52.1)
+    or resolves fully (§52.2)."""
+    import contextlib as _cl
+
+    from soloring.continuity.snapshots import resolve_working_dependencies
+    from soloring.continuity.state import (
+        readiness_projection,
+        resolve_effective_feature_state,
+    )
+    from soloring.domain.ids import is_uuid
+    from soloring.errors import ErrorCode, not_found
+    from soloring.visual.readiness import resolve_visual_readiness
+
+    if not is_uuid(shot_id):
+        raise not_found(ErrorCode.SHOT_NOT_FOUND, f"Shot {shot_id} not found.")
+
+    async with session.bind.connect() as conn:
+        await conn.exec_driver_sql("BEGIN")
+        try:
+            outcome = await resolve_effective_feature_state(conn, shot_id)
+            readiness = readiness_projection(outcome)
+            semantic_ready = readiness["continuity_state_ready"]
+            m7_issues = readiness["readiness_issues"]
+            deps = await resolve_working_dependencies(conn, shot_id)
+            result = await resolve_visual_readiness(
+                conn, shot_id, semantic_ready, m7_issues, deps,
+                outcome.states,
+            )
+            await conn.commit()
+        except Exception:
+            with _cl.suppress(Exception):
+                await conn.rollback()
+            raise
+
+    return {
+        "shot_id": shot_id,
+        "continuity_state_ready": semantic_ready,
+        "visual_continuity_ready": result.visual_continuity_ready,
+        "visual_reference_pack_hash": result.visual_reference_pack_hash,
+        "visual_continuity_issues": list(result.issues),
+        "facet_statuses": [
+            {
+                "visual_facet_id": s.visual_facet_id,
+                "facet_key": s.facet_key,
+                "target_kind": s.target_kind,
+                "entity_id": s.entity_id,
+                "feature_id": s.feature_id,
+                "requirement": s.requirement,
+                "resolved": s.resolved,
+                "visual_anchor_id": s.visual_anchor_id,
+                "approved_revision_id": s.approved_revision_id,
+            }
+            for s in result.facet_statuses
+        ],
+        "visual_reference_pack": result.pack,
+    }
