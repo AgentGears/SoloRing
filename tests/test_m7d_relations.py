@@ -2130,12 +2130,14 @@ async def test_race_r11_relation_transition_coordinate_create_vs_create(
 
 
 async def test_relation_resolver_query_count_bounded(client, factory, engine):
-    """§19 FROZEN GATE (r2 B3): the resolver issues a FIXED number of SQL
-    statements at feature-film scale —
+    """§19 FROZEN GATE (r2 B3 + r3): the resolver issues a FIXED number of
+    SQL statements at feature-film scale —
 
-        small: 48 shots, small semantic set (2 dep rows, 2 relations,
+        small: 48 shots, small semantic set (2 dep ids, 2 relations,
                4 transitions)
-        big:   ~2,500 shots, 2,500 dependency rows, 500 relations,
+        big:   ~2,500-shot project; the TARGET itself resolves 2,500
+               dependency IDs (the dep-id → OR-touch candidate query is
+               built from the target's own ids — r3); 500 relations;
                1,000 relation transitions
 
     Query-count identity is the gate (7 vs 7 or better); wall time is
@@ -2221,24 +2223,42 @@ async def test_relation_resolver_query_count_bounded(client, factory, engine):
 
     now = "2026-01-01T00:00:00.000Z"
     async with engine.begin() as conn:
-        # 2,500 dependency rows total: target carries both endpoints;
-        # 2,498 other shots carry one row each.
+        # 2,500 TARGET dependency IDs (r3): 2,498 dedicated active
+        # entities plus Eva and Bag. The resolver's dep-id → OR-touch
+        # candidate query is therefore constructed from a 2,500-id set.
+        dep_entities = [
+            {"id": f"40000000-0000-4000-8000-{k:012d}", "name": f"D{k}"}
+            for k in range(2498)
+        ]
         await conn.execute(
             text(
-                "INSERT INTO shot_entity_dependencies "
-                "(shot_id, entity_id, role, position, created_at) VALUES "
-                "(:sid, :eid, 'subject', 0, :now)"
+                "INSERT INTO creative_entities "
+                "(id, project_id, kind, name, description, created_at, "
+                " updated_at) VALUES (:id, :pid, 'prop', :name, NULL, "
+                ":now, :now)"
             ),
             [
-                {"sid": s, "eid": eva_b["id"], "now": now}
-                for s in big_shots[:2498]
+                {**e, "pid": pid_big, "now": now} for e in dep_entities
             ],
         )
         await conn.execute(
             text(
                 "INSERT INTO shot_entity_dependencies "
                 "(shot_id, entity_id, role, position, created_at) VALUES "
-                "(:sid, :eid, 'subject', 0, :now)"
+                "(:sid, :eid, 'dep', :pos, :now)"
+            ),
+            [
+                {
+                    "sid": big_target, "eid": e["id"], "pos": k, "now": now,
+                }
+                for k, e in enumerate(dep_entities)
+            ],
+        )
+        await conn.execute(
+            text(
+                "INSERT INTO shot_entity_dependencies "
+                "(shot_id, entity_id, role, position, created_at) VALUES "
+                "(:sid, :eid, 'subject', 2498, :now)"
             ),
             [{"sid": big_target, "eid": eva_b["id"], "now": now}],
         )
@@ -2246,7 +2266,7 @@ async def test_relation_resolver_query_count_bounded(client, factory, engine):
             text(
                 "INSERT INTO shot_entity_dependencies "
                 "(shot_id, entity_id, role, position, created_at) VALUES "
-                "(:sid, :eid, 'object', 1, :now)"
+                "(:sid, :eid, 'object', 2499, :now)"
             ),
             [{"sid": big_target, "eid": bag_b["id"], "now": now}],
         )
@@ -2314,6 +2334,16 @@ async def test_relation_resolver_query_count_bounded(client, factory, engine):
         )
     wire_s = time.perf_counter() - t0
 
+    # Fixture contract: the big target itself resolves 2,500 dependency
+    # ids (the dimension r3 exercises).
+    dep_count = await _fetch(
+        engine,
+        "SELECT COUNT(*) AS n FROM shot_entity_dependencies "
+        "WHERE shot_id = :s",
+        {"s": big_target},
+    )
+    assert dep_count[0]["n"] == 2500
+
     counts = {}
     for label, shot_id in (("small", small_target), ("big", big_target)):
         counter = {"n": 0}
@@ -2346,9 +2376,10 @@ async def test_relation_resolver_query_count_bounded(client, factory, engine):
     small_q, small_dt, _ = counts["small"]
     big_q, big_dt, _ = counts["big"]
     print(
-        f"\nrelation resolver: small(48 shots/2 rel/4 tr) {small_q} queries "
-        f"{small_dt*1000:.1f}ms | big(2500 shots/2500 deps/500 rel/1000 tr) "
-        f"{big_q} queries {big_dt*1000:.1f}ms | wiring {wire_s:.1f}s"
+        f"\nrelation resolver: small(48 shots/2 deps/2 rel/4 tr) "
+        f"{small_q} queries {small_dt*1000:.1f}ms | big(2500 shots/2500 "
+        f"target deps/500 rel/1000 tr) {big_q} queries {big_dt*1000:.1f}ms"
+        f" | wiring {wire_s:.1f}s"
     )
     assert small_q == big_q  # APR-044: rows grow, round trips do not
 

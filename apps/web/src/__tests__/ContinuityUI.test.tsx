@@ -378,6 +378,69 @@ describe("ContinuityFeaturesPanel authoring (M7D §18.2.1–18.2.2)", () => {
     );
   }
 
+  it("creates a Feature with the exact payload (r3 B5)", async () => {
+    const { container } = panel();
+    const key = container.querySelector(
+      "input[placeholder='key [a-z][a-z0-9_]{0,63}']",
+    ) as HTMLInputElement;
+    fireEvent.change(key, { target: { value: "wound" } });
+    const name = container.querySelector(
+      "input[placeholder='Display name']",
+    ) as HTMLInputElement;
+    fireEvent.change(name, { target: { value: "Wound" } });
+    const enums = container.querySelector(
+      "input[placeholder='Enum members, comma-separated']",
+    ) as HTMLInputElement;
+    fireEvent.change(enums, { target: { value: "small, large" } });
+    fireEvent.submit(key.closest("form")!);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("/api/entities/eva-0001/continuity-features");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body as string)).toEqual({
+      key: "wound",
+      kind: "injury",
+      value_type: "enum",
+      name: "Wound",
+      enum_values: ["small", "large"],
+    });
+  });
+
+  it("DELETEs a Feature when no transitions hold it (r3 B5)", async () => {
+    fetchMock.mockImplementation(async () => jsonResponse(204, null));
+    const { container } = render(
+      <ContinuityFeaturesPanel
+        entityId="eva-0001"
+        features={[FEATURE]}
+        transitionsByFeature={{}}
+      />,
+    );
+    const del = [...container.querySelectorAll("button")].find(
+      (b) => b.textContent === "Delete",
+    )!;
+    expect(del.disabled).toBe(false);
+    fireEvent.click(del);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("/api/continuity-features/feat-1");
+    expect(init.method).toBe("DELETE");
+  });
+
+  it("DELETEs a FeatureTransition (r3 B5)", async () => {
+    fetchMock.mockImplementation(async () => jsonResponse(204, null));
+    const { container } = panel();
+    const deletes = [...container.querySelectorAll("button")].filter(
+      (b) => b.textContent === "Delete",
+    );
+    // First is the feature's (disabled while the transition is active).
+    expect(deletes[0].disabled).toBe(true);
+    fireEvent.click(deletes[1]);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("/api/continuity-feature-transitions/ft-1");
+    expect(init.method).toBe("DELETE");
+  });
+
   it("renders the feature and its transition with in-use delete disabled", () => {
     const { container } = panel();
     expect(container.textContent).toContain("forehead_cut");
@@ -576,6 +639,36 @@ const SHOTS: ShotListItem[] = [
   },
 ];
 
+// r3 B5 fixtures: an unreferenced predicate and a transition-less
+// relation so the enabled DELETE paths are exercisable.
+const PREDICATE2: ContinuityPredicate = {
+  id: "pred-2",
+  project_id: "proj-1",
+  key: "holds",
+  name: "Holds",
+  description: null,
+  created_at: "2026-01-01",
+  updated_at: "2026-01-01",
+};
+
+const RELATION2: ContinuityRelation = {
+  id: "rel-2",
+  project_id: "proj-1",
+  subject_entity_id: "bag-0002",
+  predicate_id: "pred-2",
+  predicate_key: "holds",
+  object_entity_id: "eva-0001",
+  created_at: "2026-01-01",
+};
+
+function cardWith(container: HTMLElement, text: string) {
+  const card = [...container.querySelectorAll(".card")].find((c) =>
+    c.textContent?.includes(text),
+  );
+  expect(card).toBeDefined();
+  return card!;
+}
+
 describe("ProjectContinuityPanel authoring (M7D §18.2.3–18.2.4)", () => {
   let fetchMock: ReturnType<typeof vi.fn>;
 
@@ -588,13 +681,14 @@ describe("ProjectContinuityPanel authoring (M7D §18.2.3–18.2.4)", () => {
     cleanup();
   });
 
-  function panel() {
+  function panel(extraPredicates: ContinuityPredicate[] = [],
+                 extraRelations: ContinuityRelation[] = []) {
     return render(
       <ProjectContinuityPanel
         projectId="proj-1"
         entities={ENTITIES}
-        predicates={[PREDICATE]}
-        relations={[RELATION]}
+        predicates={[PREDICATE, ...extraPredicates]}
+        relations={[RELATION, ...extraRelations]}
         transitionsByRelation={{ "rel-1": [RT] }}
         shots={SHOTS}
       />,
@@ -717,5 +811,101 @@ describe("ProjectContinuityPanel authoring (M7D §18.2.3–18.2.4)", () => {
     await waitFor(() =>
       expect(container.textContent).toContain("CONTINUITY_RELATION_IN_USE"),
     );
+  });
+
+  it("creates a Predicate with the exact payload (r3 B5)", async () => {
+    const { container } = panel();
+    const key = container.querySelector(
+      "input[placeholder='key [a-z][a-z0-9_]{0,63}']",
+    ) as HTMLInputElement;
+    fireEvent.change(key, { target: { value: "allies_with" } });
+    const name = container.querySelector(
+      "input[placeholder='Display name']",
+    ) as HTMLInputElement;
+    fireEvent.change(name, { target: { value: "Allies" } });
+    fireEvent.submit(key.closest("form")!);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("/api/projects/proj-1/continuity-predicates");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body as string)).toEqual({
+      key: "allies_with",
+      name: "Allies",
+      description: null,
+    });
+  });
+
+  it("DELETEs an unreferenced Predicate (r3 B5)", async () => {
+    fetchMock.mockImplementation(async () => jsonResponse(204, null));
+    const { container } = panel([PREDICATE2]);
+    const del = [...cardWith(container, "holds").querySelectorAll("button")]
+      .find((b) => b.textContent === "Delete")!;
+    expect(del.disabled).toBe(false);
+    fireEvent.click(del);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("/api/continuity-predicates/pred-2");
+    expect(init.method).toBe("DELETE");
+  });
+
+  it("DELETEs a Relation without transitions (r3 B5)", async () => {
+    fetchMock.mockImplementation(async () => jsonResponse(204, null));
+    const { container } = panel([PREDICATE2], [RELATION2]);
+    // The relation card's exact label (the predicate card shares the
+    // "holds" key text but renders no arrow).
+    const del = [...cardWith(container, "Bag — holds")
+      .querySelectorAll("button")]
+      .find((b) => b.textContent === "Delete")!;
+    expect(del.disabled).toBe(false);
+    fireEvent.click(del);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("/api/continuity-relations/rel-2");
+    expect(init.method).toBe("DELETE");
+  });
+
+  it("PATCHes a RelationTransition's FULL anchor/boundary row (r3 B5)", async () => {
+    const { container } = panel();
+    const card = cardWith(container, "shot/start");
+    fireEvent.click(
+      [...card.querySelectorAll("button")].find(
+        (b) => b.textContent === "Edit",
+      )!,
+    );
+    const form = card.querySelector("form")!;
+    const selects = form.querySelectorAll("select");
+    // selects: [anchor_type, boundary, state] once anchor_type ≠ shot.
+    fireEvent.change(selects[0], { target: { value: "scene" } });
+    const anchor = form.querySelector("input") as HTMLInputElement;
+    fireEvent.change(anchor, { target: { value: "scene-9" } });
+    fireEvent.change(form.querySelectorAll("select")[1], {
+      target: { value: "end" },
+    });
+    fireEvent.submit(form);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("/api/continuity-relation-transitions/rt-1");
+    expect(init.method).toBe("PATCH");
+    expect(JSON.parse(init.body as string)).toEqual({
+      anchor_type: "scene",
+      anchor_id: "scene-9",
+      boundary: "end",
+      state: "active",
+    });
+  });
+
+  it("DELETEs a RelationTransition (r3 B5)", async () => {
+    fetchMock.mockImplementation(async () => jsonResponse(204, null));
+    const { container } = panel();
+    const card = cardWith(container, "shot/start");
+    fireEvent.click(
+      [...card.querySelectorAll("button")].find(
+        (b) => b.textContent === "Delete",
+      )!,
+    );
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("/api/continuity-relation-transitions/rt-1");
+    expect(init.method).toBe("DELETE");
   });
 });
