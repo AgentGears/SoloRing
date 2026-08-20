@@ -590,11 +590,14 @@ def test_ast_no_second_builder_or_generation_resolution():
                     )
 
 
-def test_no_migration_changed_and_head_is_0008():
+def test_migration_files_and_head_is_0009():
+    """M7C itself added no migration (0008 was M7A's); the head advanced
+    to 0009 only with M8A's visual-identity migration."""
     versions = BASE_DIR / "server" / "alembic" / "versions"
     files = sorted(p.name for p in versions.glob("*.py"))
-    assert files[-1] == "0008_narrative_continuity_state.py"
-    assert len(files) == 8
+    assert files[-2] == "0008_narrative_continuity_state.py"
+    assert files[-1] == "0009_m8_visual_identity.py"
+    assert len(files) == 9
 
 
 # --- Reuse integrity fail-closed ----------------------------------------------------------------

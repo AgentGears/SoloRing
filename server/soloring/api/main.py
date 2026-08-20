@@ -25,6 +25,7 @@ from soloring.api.references import router as references_router
 from soloring.api.revisions import router as revisions_router
 from soloring.api.shots import router as shots_router
 from soloring.api.takes import router as takes_router
+from soloring.api.visual import router as visual_router
 from soloring.db.engine import create_soloring_engine, create_session_factory
 from soloring.settings import Settings, get_settings
 
@@ -75,6 +76,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(blobs_router)
     app.include_router(generations_router)
     app.include_router(takes_router)
+    app.include_router(visual_router)
 
     return app
 
