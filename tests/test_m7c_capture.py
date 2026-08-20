@@ -516,9 +516,13 @@ async def test_structural_singularity_both_paths_invoke_builder(
     calls = []
     original = snaps.build_capturable_snapshot
 
-    def spy(shot, refs, resolved, feature_states=(), relation_states=()):
+    def spy(shot, refs, resolved, feature_states=(), relation_states=(),
+            visual_pack=None):
         calls.append(len(feature_states))
-        return original(shot, refs, resolved, feature_states, relation_states)
+        return original(
+            shot, refs, resolved, feature_states, relation_states,
+            visual_pack,
+        )
 
     monkeypatch.setattr(snaps, "build_capturable_snapshot", spy)
     # Patch the consumed symbol in the working-hash wrapper too (it calls
@@ -526,11 +530,11 @@ async def test_structural_singularity_both_paths_invoke_builder(
     monkeypatch.setattr(
         snaps, "effective_working_snapshot_hash",
         lambda shot, refs, resolved, feature_states=(),
-        relation_states=(): (
+        relation_states=(), visual_pack=None: (
             __import__("soloring.domain.canonical",
                        fromlist=["canonical_hash"]).canonical_hash(
                 spy(shot, refs, resolved, feature_states,
-                    relation_states)[0])
+                    relation_states, visual_pack)[0])
         ),
     )
 

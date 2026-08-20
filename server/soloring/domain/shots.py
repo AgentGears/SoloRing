@@ -328,10 +328,21 @@ async def read_shot_detail(engine: AsyncEngine, shot_id: str):
                 conn, shot_id
             )
             readiness = readiness_projection(outcome, relation_outcome)
+            visual_result = None
             if readiness["continuity_state_ready"]:
+                # M8 §52: visual resolution only after semantic readiness,
+                # on the same pinned snapshot (one coherent unit).
+                from soloring.visual.readiness import (
+                    resolve_visual_readiness,
+                )
+
+                visual_result = await resolve_visual_readiness(
+                    conn, shot_id, True, [], resolved, outcome.states,
+                )
                 effective_hash = effective_working_snapshot_hash(
                     shot, refs, resolved, outcome.states,
                     relation_outcome.relation_states,
+                    visual_result.pack,
                 )
                 differs = await canon.differs_from_approved(
                     conn, shot, refs, effective_hash
@@ -343,7 +354,10 @@ async def read_shot_detail(engine: AsyncEngine, shot_id: str):
                 effective_hash = None
                 differs = None
             await conn.commit()
-            return shot, refs, differs, resolved, effective_hash, readiness
+            return (
+                shot, refs, differs, resolved, effective_hash, readiness,
+                visual_result,
+            )
         except Exception:
             with contextlib.suppress(Exception):
                 await conn.rollback()

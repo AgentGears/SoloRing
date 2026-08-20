@@ -55,6 +55,7 @@ async def _snapshot_one_read(session: AsyncSession, shot_id: str):
     from soloring.continuity.snapshots import resolve_working_dependencies
     from soloring.continuity.state import (
         narrative_context_required,
+        readiness_projection,
         relation_endpoint_required,
         resolve_effective_feature_state,
         resolve_effective_relation_state,
@@ -96,10 +97,31 @@ async def _snapshot_one_read(session: AsyncSession, shot_id: str):
                 raise relation_endpoint_required(
                     shot_id, list(relation_outcome.endpoint_requirements)
                 )
+            # M8 §53: visual resolution runs only after M7 readiness, on
+            # the same pinned snapshot; the combined gate (§52.3) raises
+            # the first canonical M8 blocker before any builder runs.
+            from soloring.visual.readiness import (
+                resolve_visual_readiness,
+                visual_first_blocker,
+            )
+
+            m7_projection = readiness_projection(
+                outcome, relation_outcome
+            )
+            visual_result = await resolve_visual_readiness(
+                conn, shot_id,
+                m7_projection["continuity_state_ready"],
+                m7_projection["readiness_issues"],
+                resolved, outcome.states,
+            )
+            blocker = visual_first_blocker(visual_result)
+            if blocker is not None:
+                raise blocker
             await conn.commit()
             return (
                 shot, refs, resolved, outcome.states,
                 relation_outcome.relation_states,
+                visual_result,
             )
         except Exception:
             with contextlib.suppress(Exception):
@@ -156,7 +178,7 @@ def _expected_relation_rows(relation_states):
 
 async def _validate_reuse_integrity(
     conn, revision_id, snapshot_json, spec_json, spec_hash,
-    resolved, feature_states, relation_states=(),
+    resolved, feature_states, relation_states=(), visual_result=None,
 ) -> None:
     """Fail-closed validation of an EXISTING winner (M7C §9.4 + M7D §10.4,
     APR-023).
@@ -266,6 +288,11 @@ async def _validate_reuse_integrity(
             "children disagree with the captured expectation."
         )
 
+    if visual_result is not None:
+        from soloring.visual.capture import validate_visual_reuse
+
+        await validate_visual_reuse(conn, revision_id, visual_result.pack)
+
 
 async def _persist_revision_fenced(
     engine,
@@ -277,6 +304,7 @@ async def _persist_revision_fenced(
     resolved,
     feature_states=(),
     relation_states=(),
+    visual_result=None,
 ) -> str:
     """The ShotRevision write phase as ONE BEGIN IMMEDIATE unit (M6 §9/§57,
     M6C re-gate blocker 2; M7D §10.3 adds the relation children):
@@ -290,6 +318,7 @@ async def _persist_revision_fenced(
         ↓ INSERT all dependency rows from the SAME captured value
         ↓ INSERT all feature-state rows from the SAME captured value
         ↓ INSERT all relation-state rows from the SAME captured value
+        ↓ INSERT all visual anchor/item rows from the SAME captured pack
         ↓ COMMIT
 
     Under the held write lock a revision-number collision is structurally
@@ -316,6 +345,7 @@ async def _persist_revision_fenced(
                     await _validate_reuse_integrity(
                         conn, existing[0], snapshot_json, spec_json,
                         spec_hash, resolved, feature_states, relation_states,
+                        visual_result,
                     )
                     await conn.exec_driver_sql("COMMIT")
                     return existing[0]
@@ -410,6 +440,14 @@ async def _persist_revision_fenced(
                             "sb": rs.source_boundary,
                         },
                     )
+                if visual_result is not None and visual_result.pack:
+                    from soloring.visual.capture import (
+                        persist_visual_children,
+                    )
+
+                    await persist_visual_children(
+                        conn, revision_id, visual_result.pack
+                    )
                 await conn.exec_driver_sql("COMMIT")
                 return revision_id
             except IntegrityError:
@@ -445,11 +483,14 @@ async def capture_revision(session: AsyncSession, shot_id: str) -> ShotRevision:
         continuity_spec_bytes,
     )
 
-    shot, refs, resolved, feature_states, relation_states = (
-        await _snapshot_one_read(session, shot_id)
+    read = await _snapshot_one_read(session, shot_id)
+    shot, refs, resolved = read[0], read[1], read[2]
+    feature_states, relation_states, visual_result = read[3], read[4], read[5]
+    visual_pack = (
+        visual_result.pack if visual_result is not None else None
     )
     snapshot, continuity_spec = build_capturable_snapshot(
-        shot, refs, resolved, feature_states, relation_states
+        shot, refs, resolved, feature_states, relation_states, visual_pack
     )
     snapshot_hash = canonical_hash(snapshot)
     snapshot_json = canonical_json_str(snapshot)
@@ -461,6 +502,7 @@ async def capture_revision(session: AsyncSession, shot_id: str) -> ShotRevision:
     revision_id = await _persist_revision_fenced(
         session.bind, shot_id, snapshot_json, snapshot_hash,
         spec_json, spec_hash, resolved, feature_states, relation_states,
+        visual_result,
     )
     revision = await session.get(ShotRevision, revision_id)
     assert revision is not None
