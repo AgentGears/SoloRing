@@ -7,13 +7,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from soloring.api.deps import get_session
 from soloring.api.schemas.visual import (
+    ApproveRequest,
+    UnapproveRequest,
     ValuePolicyPut,
     ValuePolicyRead,
     VisualAnchorCreate,
+    VisualAnchorDetail,
     VisualAnchorRead,
+    VisualAnchorRevisionRead,
+    VisualAnchorRevisionSummary,
     VisualFacetCreate,
     VisualFacetPatch,
     VisualFacetRead,
+    WorkingSetPut,
 )
 
 router = APIRouter(tags=["visual"])
@@ -157,13 +163,118 @@ async def create_visual_anchor(
     return VisualAnchorRead(**await facet_svc.get_anchor(session, aid))
 
 
-@router.get("/visual-anchors/{anchor_id}", response_model=VisualAnchorRead)
+@router.get(
+    "/visual-anchors/{anchor_id}", response_model=VisualAnchorDetail
+)
 async def get_visual_anchor(
     anchor_id: str, session: AsyncSession = Depends(get_session)
-) -> VisualAnchorRead:
+) -> VisualAnchorDetail:
+    from soloring.visual import anchors as anchor_svc
     from soloring.visual import facets as facet_svc
 
-    return VisualAnchorRead(**await facet_svc.get_anchor(session, anchor_id))
+    detail = await anchor_svc.get_anchor_detail(session, anchor_id)
+    base = await facet_svc.get_anchor(session, anchor_id)
+    detail["created_at"] = base["created_at"]
+    detail["updated_at"] = base["updated_at"]
+    return VisualAnchorDetail(**detail)
+
+
+@router.put(
+    "/visual-anchors/{anchor_id}/items", response_model=VisualAnchorDetail
+)
+async def put_visual_anchor_items(
+    anchor_id: str,
+    payload: WorkingSetPut,
+    session: AsyncSession = Depends(get_session),
+) -> VisualAnchorDetail:
+    from soloring.visual import anchors as anchor_svc
+
+    await anchor_svc.put_working_set(session, anchor_id, payload)
+    return await get_visual_anchor(anchor_id, session)
+
+
+@router.get(
+    "/visual-anchors/{anchor_id}/revisions",
+    response_model=list[VisualAnchorRevisionSummary],
+)
+async def list_visual_anchor_revisions(
+    anchor_id: str, session: AsyncSession = Depends(get_session)
+) -> list[VisualAnchorRevisionSummary]:
+    from soloring.visual import anchors as anchor_svc
+
+    return [
+        VisualAnchorRevisionSummary(**r)
+        for r in await anchor_svc.list_revisions(session, anchor_id)
+    ]
+
+
+@router.post(
+    "/visual-anchors/{anchor_id}/revisions",
+    response_model=VisualAnchorRevisionSummary,
+    status_code=status.HTTP_201_CREATED,
+)
+async def capture_visual_anchor_revision(
+    anchor_id: str, session: AsyncSession = Depends(get_session)
+) -> VisualAnchorRevisionSummary:
+    from soloring.visual import anchors as anchor_svc
+
+    rid = await anchor_svc.capture_revision(session, anchor_id)
+    row = await anchor_svc.get_revision(session, rid)
+    return VisualAnchorRevisionSummary(
+        id=row["id"],
+        visual_anchor_id=row["visual_anchor_id"],
+        revision_number=row["revision_number"],
+        snapshot_hash=row["snapshot_hash"],
+        created_at=row["created_at"],
+    )
+
+
+@router.get(
+    "/visual-anchor-revisions/{revision_id}",
+    response_model=VisualAnchorRevisionRead,
+)
+async def get_visual_anchor_revision(
+    revision_id: str, session: AsyncSession = Depends(get_session)
+) -> VisualAnchorRevisionRead:
+    from soloring.visual import anchors as anchor_svc
+
+    return VisualAnchorRevisionRead(
+        **await anchor_svc.get_revision(session, revision_id)
+    )
+
+
+@router.post(
+    "/visual-anchor-revisions/{revision_id}/approve",
+    status_code=status.HTTP_200_OK,
+)
+async def approve_visual_anchor_revision(
+    revision_id: str,
+    payload: ApproveRequest,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    from soloring.visual import anchors as anchor_svc
+
+    await anchor_svc.approve_revision(
+        session, revision_id, payload.expected_approved_revision_id
+    )
+    return {"approved": revision_id}
+
+
+@router.post(
+    "/visual-anchors/{anchor_id}/unapprove",
+    status_code=status.HTTP_200_OK,
+)
+async def unapprove_visual_anchor(
+    anchor_id: str,
+    payload: UnapproveRequest,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    from soloring.visual import anchors as anchor_svc
+
+    await anchor_svc.unapprove_anchor(
+        session, anchor_id, payload.expected_approved_revision_id
+    )
+    return {"unapproved": anchor_id}
 
 
 @router.delete(

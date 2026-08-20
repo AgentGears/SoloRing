@@ -98,3 +98,62 @@ class VisualAnchorRead(BaseModel):
     approved_revision_id: str | None
     created_at: str
     updated_at: str
+
+
+class WorkingItemIn(BaseModel):
+    """One submitted working item (§23): order is the submitted order."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    asset_id: str
+    role: str
+    view_key: str | None = None
+
+
+class WorkingSetPut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[WorkingItemIn]
+
+
+class WorkingItemOut(BaseModel):
+    asset_id: str
+    role: str
+    view_key: str | None
+    position: int
+
+
+class VisualAnchorDetail(VisualAnchorRead):
+    items: list[WorkingItemOut]
+    working_snapshot_hash: str | None
+    approved_snapshot_hash: str | None
+    working_state_differs_from_approved: bool | None
+
+
+class ApproveRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_approved_revision_id: str | None = None
+
+
+class UnapproveRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_approved_revision_id: str | None = None
+
+
+class VisualAnchorRevisionSummary(BaseModel):
+    id: str
+    visual_anchor_id: str
+    revision_number: int
+    snapshot_hash: str
+    created_at: str
+
+
+class VisualAnchorRevisionRead(BaseModel):
+    id: str
+    visual_anchor_id: str
+    revision_number: int
+    snapshot_json: str
+    snapshot_hash: str
+    created_at: str
