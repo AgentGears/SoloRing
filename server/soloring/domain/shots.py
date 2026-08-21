@@ -328,17 +328,20 @@ async def read_shot_detail(engine: AsyncEngine, shot_id: str):
                 conn, shot_id
             )
             readiness = readiness_projection(outcome, relation_outcome)
-            visual_result = None
-            if readiness["continuity_state_ready"]:
-                # M8 §52: visual resolution only after semantic readiness,
-                # on the same pinned snapshot (one coherent unit).
-                from soloring.visual.readiness import (
-                    resolve_visual_readiness,
-                )
+            # M8 §52: visual resolution only after semantic readiness, on
+            # the same pinned snapshot (one coherent unit). When M7 is not
+            # ready the composed result projects blocked (§52.1) — M7
+            # blockers surface through visual_continuity_issues and the
+            # visual flag is false; NULL-as-ready is never fabricated.
+            from soloring.visual.readiness import resolve_visual_readiness
 
-                visual_result = await resolve_visual_readiness(
-                    conn, shot_id, True, [], resolved, outcome.states,
-                )
+            visual_result = await resolve_visual_readiness(
+                conn, shot_id,
+                readiness["continuity_state_ready"],
+                readiness["readiness_issues"],
+                resolved, outcome.states,
+            )
+            if readiness["continuity_state_ready"]:
                 effective_hash = effective_working_snapshot_hash(
                     shot, refs, resolved, outcome.states,
                     relation_outcome.relation_states,

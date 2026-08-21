@@ -308,4 +308,8 @@ export interface RevisionContinuity {
     relation_id?: string;
     source_transition_id: string;
   }[];
+  /** M8 §73: captured visual authority (schema-4 revisions only; null
+   * for earlier schemas). Server-fed; current-vs-captured stays
+   * explicitly separated in the payload and the UI. */
+  visual?: import("./visualTypes").VisualProvenance | null;
 }

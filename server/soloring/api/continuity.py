@@ -393,7 +393,108 @@ async def _revision_continuity(session: AsyncSession, revision_id: str) -> dict:
         )
     ).scalar_one_or_none()
     if snap_row is not None:
-        schema_version = _json.loads(snap_row).get("schema_version")
+        snapshot = _json.loads(snap_row)
+        schema_version = snapshot.get("schema_version")
+
+    # M8 §73: captured visual authority, strictly separated from current
+    # approval. The captured side reads ONLY immutable provenance (§57);
+    # the current side is presented as contrast, never as execution input.
+    visual_provenance: dict | None = None
+    if schema_version == 4:
+        pack_hash = None
+        visual_block = (snapshot or {}).get("visual") or {}
+        if isinstance(visual_block, dict):
+            pack_hash = visual_block.get("visual_reference_pack_hash")
+        vrows = (
+            await session.execute(
+                text(
+                    "SELECT srva.position, srva.visual_facet_id, "
+                    "srva.facet_key, srva.visual_anchor_id, "
+                    "srva.visual_anchor_revision_id, "
+                    "srva.visual_anchor_snapshot_hash, srva.target_kind, "
+                    "srva.entity_id, srva.entity_revision_id, "
+                    "srva.feature_id, srva.feature_value_hash, "
+                    "srva.feature_value_json, "
+                    "srva.visual_context_entity_revision_id, "
+                    "var.revision_number AS "
+                    "captured_revision_number, "
+                    "va.approved_revision_id AS "
+                    "current_approved_revision_id, "
+                    "car.revision_number AS "
+                    "current_approved_revision_number "
+                    "FROM shot_revision_visual_anchors srva "
+                    "LEFT JOIN visual_anchor_revisions var "
+                    "ON var.id = srva.visual_anchor_revision_id "
+                    "LEFT JOIN visual_anchors va "
+                    "ON va.id = srva.visual_anchor_id "
+                    "LEFT JOIN visual_anchor_revisions car "
+                    "ON car.id = va.approved_revision_id "
+                    "WHERE srva.shot_revision_id = :rid "
+                    "ORDER BY srva.position"
+                ),
+                {"rid": revision_id},
+            )
+        ).mappings().all()
+        irows = (
+            await session.execute(
+                text(
+                    "SELECT anchor_position, item_position, asset_id, "
+                    "blob_hash, role, view_key FROM "
+                    "shot_revision_visual_anchor_items "
+                    "WHERE shot_revision_id = :rid "
+                    "ORDER BY anchor_position, item_position"
+                ),
+                {"rid": revision_id},
+            )
+        ).mappings().all()
+        items_by_anchor_pos: dict[int, list[dict]] = {}
+        for it in irows:
+            items_by_anchor_pos.setdefault(
+                it["anchor_position"], []
+            ).append({
+                "asset_id": it["asset_id"],
+                "blob_hash": it["blob_hash"],
+                "role": it["role"],
+                "view_key": it["view_key"],
+                "position": it["item_position"],
+            })
+        visual_provenance = {
+            "visual_reference_pack_hash": pack_hash,
+            "anchors": [
+                {
+                    "position": r["position"],
+                    "visual_facet_id": r["visual_facet_id"],
+                    "facet_key": r["facet_key"],
+                    "visual_anchor_id": r["visual_anchor_id"],
+                    "captured_visual_anchor_revision_id": (
+                        r["visual_anchor_revision_id"]
+                    ),
+                    "captured_revision_number": (
+                        r["captured_revision_number"]
+                    ),
+                    "captured_snapshot_hash": (
+                        r["visual_anchor_snapshot_hash"]
+                    ),
+                    "current_approved_revision_id": (
+                        r["current_approved_revision_id"]
+                    ),
+                    "current_approved_revision_number": (
+                        r["current_approved_revision_number"]
+                    ),
+                    "target_kind": r["target_kind"],
+                    "entity_id": r["entity_id"],
+                    "entity_revision_id": r["entity_revision_id"],
+                    "feature_id": r["feature_id"],
+                    "feature_value_hash": r["feature_value_hash"],
+                    "feature_value_json": r["feature_value_json"],
+                    "visual_context_entity_revision_id": (
+                        r["visual_context_entity_revision_id"]
+                    ),
+                    "items": items_by_anchor_pos.get(r["position"], []),
+                }
+                for r in vrows
+            ],
+        }
 
     return {
         "shot_revision_id": rev["id"],
@@ -405,6 +506,7 @@ async def _revision_continuity(session: AsyncSession, revision_id: str) -> dict:
         "feature_states": feature_states,
         "relations": relations,
         "source_transition_audit": transition_audit,
+        "visual": visual_provenance,
     }
 
 

@@ -54,6 +54,10 @@ class FacetStatus:
     resolved: str  # 'approved' | 'missing' | 'unapproved' | 'not_applicable'
     visual_anchor_id: str | None = None
     approved_revision_id: str | None = None
+    # §72 row payload: primary Asset, reference count, blocking issue.
+    primary_asset_id: str | None = None
+    item_count: int = 0
+    issue: dict | None = None
 
 
 @dataclass(frozen=True)
@@ -195,23 +199,86 @@ async def _batch_fetch_anchors(
     return rows
 
 
-async def _verify_approved_revision(
-    conn: AsyncConnection, revision_id: str, anchor_id: str
-) -> dict:
-    """§48 integrity gate: canonical bytes hash-match + item projection."""
-    rev = (
+async def _batch_fetch_revisions(
+    conn: AsyncConnection, revision_ids: list[str]
+) -> dict[str, dict]:
+    """§64.6: ONE query for every candidate approved revision."""
+    if not revision_ids:
+        return {}
+    ph = ", ".join(f":rv{i}" for i in range(len(revision_ids)))
+    rows = (
         await conn.execute(
             text(
                 "SELECT id, visual_anchor_id, snapshot_json, snapshot_hash "
-                "FROM visual_anchor_revisions WHERE id = :rid"
+                f"FROM visual_anchor_revisions WHERE id IN ({ph})"
             ),
-            {"rid": revision_id},
+            {f"rv{i}": r for i, r in enumerate(revision_ids)},
         )
-    ).mappings().one_or_none()
-    if rev is None or rev["visual_anchor_id"] != anchor_id:
+    ).mappings().all()
+    return {r["id"]: dict(r) for r in rows}
+
+
+async def _batch_fetch_assets(
+    conn: AsyncConnection, asset_ids: list[str]
+) -> dict[str, dict]:
+    """§64.7: ONE query for every referenced Asset (id -> project_id)."""
+    if not asset_ids:
+        return {}
+    ph = ", ".join(f":a{i}" for i in range(len(asset_ids)))
+    rows = (
+        await conn.execute(
+            text(
+                f"SELECT id, project_id FROM assets WHERE id IN ({ph})"
+            ),
+            {f"a{i}": a for i, a in enumerate(asset_ids)},
+        )
+    ).mappings().all()
+    return {r["id"]: dict(r) for r in rows}
+
+
+async def _batch_fetch_blobs(
+    conn: AsyncConnection, blob_hashes: list[str]
+) -> set[str]:
+    """§64.7: ONE query for every referenced Blob identity."""
+    if not blob_hashes:
+        return set()
+    ph = ", ".join(f":b{i}" for i in range(len(blob_hashes)))
+    rows = (
+        await conn.execute(
+            text(f"SELECT hash FROM blobs WHERE hash IN ({ph})"),
+            {f"b{i}": b for i, b in enumerate(blob_hashes)},
+        )
+    ).all()
+    return {r[0] for r in rows}
+
+
+def _verify_approved_revision_inmemory(
+    anchor: dict,
+    facet: dict,
+    rev: dict | None,
+    item_rows: list[tuple],
+    assets_by_id: dict[str, dict],
+    registered_blobs: set[str],
+    live_blob_files: set[str],
+) -> list[tuple]:
+    """§48 integrity gate, fully in-memory over the batch phases.
+
+    Verifies: revision exists and belongs to this VisualAnchor; canonical
+    snapshot bytes hash to the stored snapshot_hash; normalized immutable
+    item rows exactly project the snapshot; and the referenced
+    Asset/Blob provenance remains valid (Asset exists in the owning
+    Project, Blob identity is registered, physical bytes exist).
+    Corruption fails closed — no approved authority is silently omitted.
+    Returns the ordered item tuples for the effective pack.
+
+    ``item_rows`` are the asset-first ``(asset_id, blob_hash, role,
+    view_key, position)`` tuples produced by ``_batch_revision_items``.
+    """
+    revision_id = anchor["approved_revision_id"]
+    if rev is None or rev["visual_anchor_id"] != anchor["id"]:
         raise internal_invariant(
             f"approved_revision_id {revision_id} does not resolve to an "
-            f"immutable revision of VisualAnchor {anchor_id}."
+            f"immutable revision of VisualAnchor {anchor['id']}."
         )
     try:
         parsed = json.loads(rev["snapshot_json"])
@@ -230,27 +297,53 @@ async def _verify_approved_revision(
             f"VisualAnchorRevision {revision_id} canonical bytes disagree "
             "with its stored snapshot_hash."
         )
-    item_rows = (
-        await conn.execute(
-            text(
-                "SELECT position, asset_id, blob_hash, role, view_key FROM "
-                "visual_anchor_revision_items WHERE "
-                "visual_anchor_revision_id = :rid"
-            ),
-            {"rid": revision_id},
-        )
-    ).all()
     projected = {
         (it["position"], it["asset_id"], it["blob_hash"], it["role"],
          it["view_key"])
         for it in parsed.get("items", [])
     }
-    if set(item_rows) != projected:
+    stored = {(pos, asset, blob, role, view)
+              for asset, blob, role, view, pos in item_rows}
+    if stored != projected:
         raise internal_invariant(
             f"VisualAnchorRevision {revision_id} normalized item rows "
             "disagree with its canonical snapshot."
         )
-    return dict(rev)
+    primaries = [
+        it for it in parsed.get("items", []) if it.get("role") == "primary"
+    ]
+    if not parsed.get("items") or len(primaries) != 1:
+        raise internal_invariant(
+            f"VisualAnchorRevision {revision_id} violates the one-primary "
+            "capture invariant."
+        )
+    for it in parsed.get("items", []):
+        asset = assets_by_id.get(it["asset_id"])
+        if asset is None:
+            raise internal_invariant(
+                f"VisualAnchorRevision {revision_id} references Asset "
+                f"{it['asset_id']}, which no longer exists."
+            )
+        if asset["project_id"] != facet["project_id"]:
+            raise internal_invariant(
+                f"VisualAnchorRevision {revision_id} references Asset "
+                f"{it['asset_id']} outside the owning Project."
+            )
+        if it["blob_hash"] not in registered_blobs:
+            raise internal_invariant(
+                f"VisualAnchorRevision {revision_id} references unregistered "
+                f"Blob {it['blob_hash']}."
+            )
+        if it["blob_hash"] not in live_blob_files:
+            raise internal_invariant(
+                f"Blob {it['blob_hash']} physical bytes are missing — "
+                "registered identity with missing bytes is corruption "
+                "(§40/§91)."
+            )
+    ordered = sorted(
+        item_rows, key=lambda t: (t[4], t[0])
+    )  # position, then asset_id for totality
+    return ordered
 
 
 async def _batch_revision_items(
@@ -340,12 +433,6 @@ def build_reference_pack(anchors: list[ResolvedAnchor]) -> dict:
     }
 
 
-def resolve_visual_reference_pack(
-    semantic_resolution, *, conn: AsyncConnection
-) -> VisualResolutionResult:
-    raise NotImplementedError  # async wrapper below
-
-
 async def resolve_visual_reference_pack_async(
     shot_id: str,
     semantic_resolution,
@@ -401,11 +488,38 @@ async def resolve_visual_reference_pack_async(
     anchors = await _batch_fetch_anchors(
         conn, entity_bindings, feature_bindings
     )
-    # Re-key the binding scan (needed the tuples above); recompute per
-    # facet below from the actual anchor rows.
     anchor_by_facet: dict[str, dict] = {}
     for a in anchors:
         anchor_by_facet[a["visual_facet_id"]] = a
+
+    # §64.6–64.7: batch-fetch EVERY applicable approved revision, its
+    # immutable items, and the Asset/Blob provenance in bounded query
+    # classes — never one query per anchor/revision/item.
+    approved_anchor_rows = [
+        a for a in anchors if a["approved_revision_id"] is not None
+    ]
+    approved_ids = [a["approved_revision_id"] for a in approved_anchor_rows]
+    revisions_by_id = await _batch_fetch_revisions(conn, approved_ids)
+    items_by_rev = await _batch_revision_items(conn, approved_ids)
+    referenced_assets = sorted({
+        it[0]
+        for rows in items_by_rev.values()
+        for it in rows
+    })
+    assets_by_id = await _batch_fetch_assets(conn, referenced_assets)
+    referenced_blobs = sorted({
+        it[1]
+        for rows in items_by_rev.values()
+        for it in rows
+    })
+    registered_blobs = await _batch_fetch_blobs(conn, referenced_blobs)
+    from soloring.assets.blob_store import BlobStore
+    from soloring.settings import get_settings
+
+    store = BlobStore(get_settings())
+    live_blob_files = {
+        h for h in referenced_blobs if store.path_for_hash(h).is_file()
+    }
 
     approved: list[ResolvedAnchor] = []
     for f in facets:
@@ -433,15 +547,16 @@ async def resolve_visual_reference_pack_async(
         a = anchor_by_facet.get(fid)
         if a is None:
             if policy == "required":
-                issues.append(_issue(
+                issue = _issue(
                     ErrorCode.VISUAL_REALIZATION_REQUIRED,
                     visual_facet_id=fid, facet_key=f["facet_key"],
-                ))
+                )
+                issues.append(issue)
                 statuses.append(FacetStatus(
                     visual_facet_id=fid, facet_key=f["facet_key"],
                     target_kind=f["target_kind"], entity_id=f["entity_id"],
                     feature_id=f["feature_id"], requirement=policy,
-                    resolved="missing",
+                    resolved="missing", issue=issue,
                 ))
             else:
                 statuses.append(FacetStatus(
@@ -453,27 +568,33 @@ async def resolve_visual_reference_pack_async(
             continue
         if a["approved_revision_id"] is None:
             if policy == "required":
-                issues.append(_issue(
+                issue = _issue(
                     ErrorCode.VISUAL_ANCHOR_APPROVAL_REQUIRED,
                     visual_facet_id=fid, facet_key=f["facet_key"],
                     visual_anchor_id=a["id"],
-                ))
+                )
+                issues.append(issue)
+            else:
+                issue = None
             statuses.append(FacetStatus(
                 visual_facet_id=fid, facet_key=f["facet_key"],
                 target_kind=f["target_kind"], entity_id=f["entity_id"],
                 feature_id=f["feature_id"], requirement=policy,
                 resolved="unapproved", visual_anchor_id=a["id"],
+                issue=issue if policy == "required" else None,
             ))
             continue
 
-        # §48 integrity gate for every applicable approved revision.
-        rev = await _verify_approved_revision(
-            conn, a["approved_revision_id"], a["id"]
+        # §48 integrity gate for every applicable approved revision —
+        # verified in memory over the batch phases above.
+        rev = revisions_by_id.get(a["approved_revision_id"])
+        items = _verify_approved_revision_inmemory(
+            a, f, rev, items_by_rev.get(a["approved_revision_id"], []),
+            assets_by_id, registered_blobs, live_blob_files,
         )
-        items_map = await _batch_revision_items(
-            conn, [a["approved_revision_id"]]
+        primary_asset = next(
+            (it[0] for it in items if it[2] == "primary"), None
         )
-        items = items_map.get(a["approved_revision_id"], [])
         approved.append(ResolvedAnchor(
             visual_facet_id=fid,
             facet_key=f["facet_key"],
@@ -497,6 +618,7 @@ async def resolve_visual_reference_pack_async(
             feature_id=f["feature_id"], requirement=policy,
             resolved="approved", visual_anchor_id=a["id"],
             approved_revision_id=a["approved_revision_id"],
+            primary_asset_id=primary_asset, item_count=len(items),
         ))
 
     ready = not issues

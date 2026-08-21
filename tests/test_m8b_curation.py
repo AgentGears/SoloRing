@@ -580,3 +580,48 @@ async def test_generated_output_promotion_never_automatic(
             )
         ).scalar()
     assert kind == "output"
+
+
+async def test_working_hash_null_when_provenance_dead(
+    client, factory, engine,
+):
+    """r2 B2 / §33: invalid Asset/Blob provenance makes the working state
+    NON-CAPTURABLE — the detail projection reports working_snapshot_hash
+    NULL instead of hashing dead references."""
+    from soloring.assets.blob_store import BlobStore
+    from soloring.settings import get_settings
+
+    from tests.test_m8a_visual import _entity_with_revision, _facet
+    from tests.test_m8c_resolver import _approve_anchor
+
+    pid = await _seed_project(factory)
+    eva, rev1 = await _entity_with_revision(client, factory, pid)
+    assets = await _assets(engine, pid, 1)
+    f = await _facet(client, pid, "entity", entity_id=eva["id"],
+                     facet_key="face")
+    r = await client.post(
+        f"/visual-facets/{f['id']}/anchors", json={"entity_revision_id": rev1}
+    )
+    anchor_id = r.json()["id"]
+    await _approve_anchor(client, anchor_id, assets, ["front"])
+
+    detail = (await client.get(f"/visual-anchors/{anchor_id}")).json()
+    assert detail["working_snapshot_hash"] is not None
+
+    store = BlobStore(get_settings())
+    async with engine.connect() as conn:
+        bh = (await conn.execute(
+            text("SELECT blob_hash FROM assets WHERE id = :a"),
+            {"a": assets[0]},
+        )).scalar_one()
+    store.path_for_hash(bh).unlink()
+
+    detail = (await client.get(f"/visual-anchors/{anchor_id}")).json()
+    assert detail["working_snapshot_hash"] is None  # §33 non-capturable
+    assert detail["approved_snapshot_hash"] is not None
+    assert detail["working_state_differs_from_approved"] is None
+
+    # Capture of the dead working state fails closed (§31.1 corruption).
+    r = await client.post(f"/visual-anchors/{anchor_id}/revisions")
+    assert r.status_code == 500, r.text
+    assert r.json()["error_code"] == "INTERNAL_INVARIANT_VIOLATION"

@@ -18,6 +18,7 @@ import {
 } from "@/lib/api.client";
 import { ApiError, asApiError } from "@/lib/api.shared";
 import type { TakeItem } from "@/lib/types";
+import AddToVisualIdentity from "./AddToVisualIdentity";
 import ErrorBanner from "./ErrorBanner";
 
 const TERMINAL = new Set(["succeeded", "failed", "interrupted", "cancelled"]);
@@ -33,9 +34,18 @@ interface GenStatus {
 export default function TakesPanel({
   shotId,
   initialTakes,
+  visualTargets,
 }: {
   shotId: string;
   initialTakes: TakeItem[];
+  /** M8 §71 promotion targets; absent = promotion UI not offered. */
+  visualTargets?: {
+    facets: import("@/lib/visualTypes").VisualFacet[];
+    anchorsByFacet: Record<
+      string,
+      import("@/lib/visualTypes").VisualAnchor[]
+    >;
+  };
 }) {
   const router = useRouter();
   const [gen, setGen] = useState<GenStatus | null>(null);
@@ -193,6 +203,13 @@ export default function TakesPanel({
                 >
                   Reject
                 </button>
+                {visualTargets && t.asset_id ? (
+                  <AddToVisualIdentity
+                    assetId={t.asset_id}
+                    facets={visualTargets.facets}
+                    anchorsByFacet={visualTargets.anchorsByFacet}
+                  />
+                ) : null}
               </div>
             </div>
           );

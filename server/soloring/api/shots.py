@@ -38,7 +38,9 @@ async def _shot_read(request: Request, shot_id: str) -> ShotRead:
         continuity_state_ready=readiness["continuity_state_ready"],
         readiness_issues=readiness["readiness_issues"],
         visual_continuity_ready=(
-            visual.visual_continuity_ready if visual is not None else True
+            # read_shot_detail ALWAYS returns a composed §52 result; this
+            # guard only keeps an impossible None from fabricating ready.
+            visual.visual_continuity_ready if visual is not None else False
         ),
         visual_reference_pack_hash=(
             visual.visual_reference_pack_hash if visual is not None else None

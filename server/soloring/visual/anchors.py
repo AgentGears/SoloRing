@@ -229,6 +229,36 @@ def _capturable(items: list[WorkingItem]) -> bool:
     ) == 1
 
 
+async def _working_provenance_valid(
+    conn: AsyncConnection, items: list[WorkingItem]
+) -> bool:
+    """§33: invalid Asset/Blob provenance makes the working state
+    non-capturable. ONE batched Blob-identity query + physical-byte stats
+    for the distinct hashes — the detail projection reports the state
+    honestly as NULL rather than hashing dead references."""
+    from soloring.assets.blob_store import BlobStore
+    from soloring.settings import get_settings
+
+    hashes = sorted({it.blob_hash for it in items})
+    registered: set[str] = set()
+    if hashes:
+        ph = ", ".join(f":h{i}" for i in range(len(hashes)))
+        rows = (
+            await conn.execute(
+                text(f"SELECT hash FROM blobs WHERE hash IN ({ph})"),
+                {f"h{i}": h for i, h in enumerate(hashes)},
+            )
+        ).all()
+        registered = {r[0] for r in rows}
+    store = BlobStore(get_settings())
+    for h in hashes:
+        if h not in registered:
+            return False
+        if not store.path_for_hash(h).is_file():
+            return False
+    return True
+
+
 async def _read_capture_state(conn: AsyncConnection, anchor_id: str):
     """§31.1 read phase: anchor + items + provenance, fully validated."""
     anchor = await _load_anchor_row(conn, anchor_id)
@@ -649,7 +679,9 @@ async def get_anchor_detail(session: AsyncSession, anchor_id: str) -> dict:
             raise _anchor_not_found(anchor_id)
         items = await _load_working_items(conn, anchor_id)
         working_hash = None
-        if _capturable(items):
+        if _capturable(items) and await _working_provenance_valid(
+            conn, items
+        ):
             snapshot = build_revision_snapshot(
                 _binding_of(anchor), items
             )

@@ -440,3 +440,105 @@ async def test_same_value_new_transition_uuid_same_applicability(
     )
     h2 = (await _resolver_result(engine, shots[0])).visual_reference_pack_hash
     assert h1 == h2  # same semantic value → same pack bytes
+
+
+# --- r2 B2: §48 provenance/liveness at the resolver ------------------------------
+
+
+async def _approved_single_anchor_fixture(client, factory, engine, pid):
+    from tests.test_m8a_visual import _entity_with_revision, _facet
+
+    eva, rev1 = await _entity_with_revision(client, factory, pid)
+    assets = await _assets(engine, pid, 1)
+    f = await _facet(client, pid, "entity", entity_id=eva["id"],
+                     facet_key="face")
+    r = await client.post(
+        f"/visual-facets/{f['id']}/anchors", json={"entity_revision_id": rev1}
+    )
+    anchor_id = r.json()["id"]
+    await _approve_anchor(client, anchor_id, assets, ["front"])
+    seq, scene, shots = await _topology(client, factory, pid)
+    await _depend(client, shots[0], [eva["id"]])
+    return eva, rev1, assets, anchor_id, shots
+
+
+def _blob_file(blob_hash):
+    from soloring.assets.blob_store import BlobStore
+    from soloring.settings import get_settings
+
+    return BlobStore(get_settings()).path_for_hash(blob_hash)
+
+
+async def _asset_blob_hash(engine, asset_id) -> str:
+    async with engine.connect() as conn:
+        return (await conn.execute(
+            text("SELECT blob_hash FROM assets WHERE id = :a"),
+            {"a": asset_id},
+        )).scalar_one()
+
+
+async def test_resolver_fails_closed_on_missing_physical_blob(
+    client, factory, engine,
+):
+    """§48/§52.2: applicable approved revision whose referenced Blob's
+    physical bytes are gone is corruption — INTERNAL_INVARIANT_VIOLATION,
+    no pack/hash produced."""
+    from soloring.errors import SoloRingError
+
+    pid = await _seed_project(factory)
+    eva, rev1, assets, anchor_id, shots = (
+        await _approved_single_anchor_fixture(client, factory, engine, pid)
+    )
+    path = _blob_file(await _asset_blob_hash(engine, assets[0]))
+    assert path.is_file()
+    path.unlink()
+
+    with pytest.raises(SoloRingError) as ei:
+        await _resolver_result(engine, shots[0])
+    assert ei.value.code == "INTERNAL_INVARIANT_VIOLATION"
+    assert "physical bytes are missing" in ei.value.message
+
+
+async def test_resolver_fails_closed_on_snapshot_tamper(
+    client, factory, engine,
+):
+    pid = await _seed_project(factory)
+    eva, rev1, assets, anchor_id, shots = (
+        await _approved_single_anchor_fixture(client, factory, engine, pid)
+    )
+    async with engine.begin() as conn:
+        await conn.execute(
+            text(
+                "UPDATE visual_anchor_revisions SET snapshot_json = "
+                "'{\"tampered\": true}' WHERE visual_anchor_id = :a"
+            ),
+            {"a": anchor_id},
+        )
+    from soloring.errors import SoloRingError
+
+    with pytest.raises(SoloRingError) as ei:
+        await _resolver_result(engine, shots[0])
+    assert ei.value.code == "INTERNAL_INVARIANT_VIOLATION"
+
+
+async def test_resolver_fails_closed_on_item_row_tamper(
+    client, factory, engine,
+):
+    pid = await _seed_project(factory)
+    eva, rev1, assets, anchor_id, shots = (
+        await _approved_single_anchor_fixture(client, factory, engine, pid)
+    )
+    async with engine.begin() as conn:
+        await conn.execute(
+            text(
+                "UPDATE visual_anchor_revision_items SET role = 'detail' "
+                "WHERE visual_anchor_revision_id = (SELECT "
+                "approved_revision_id FROM visual_anchors WHERE id = :a)"
+            ),
+            {"a": anchor_id},
+        )
+    from soloring.errors import SoloRingError
+
+    with pytest.raises(SoloRingError) as ei:
+        await _resolver_result(engine, shots[0])
+    assert ei.value.code == "INTERNAL_INVARIANT_VIOLATION"

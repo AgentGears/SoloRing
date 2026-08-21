@@ -305,6 +305,7 @@ async def get_shot_visual_continuity(
     from soloring.continuity.state import (
         readiness_projection,
         resolve_effective_feature_state,
+        resolve_effective_relation_state,
     )
     from soloring.domain.ids import is_uuid
     from soloring.errors import ErrorCode, not_found
@@ -317,7 +318,13 @@ async def get_shot_visual_continuity(
         await conn.exec_driver_sql("BEGIN")
         try:
             outcome = await resolve_effective_feature_state(conn, shot_id)
-            readiness = readiness_projection(outcome)
+            # Both M7 dimensions compose readiness (§52.1): relation
+            # endpoint blockers are semantic blockers of visual readiness
+            # too — never silently absent from this projection.
+            relation_outcome = await resolve_effective_relation_state(
+                conn, shot_id
+            )
+            readiness = readiness_projection(outcome, relation_outcome)
             semantic_ready = readiness["continuity_state_ready"]
             m7_issues = readiness["readiness_issues"]
             deps = await resolve_working_dependencies(conn, shot_id)
@@ -348,6 +355,9 @@ async def get_shot_visual_continuity(
                 "resolved": s.resolved,
                 "visual_anchor_id": s.visual_anchor_id,
                 "approved_revision_id": s.approved_revision_id,
+                "primary_asset_id": s.primary_asset_id,
+                "item_count": s.item_count,
+                "issue": s.issue,
             }
             for s in result.facet_statuses
         ],

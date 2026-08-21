@@ -690,3 +690,37 @@ export async function deleteVisualAnchor(anchorId: string): Promise<void> {
     method: "DELETE",
   });
 }
+
+export async function createVisualAnchor(
+  facetId: string,
+  payload: {
+    entity_revision_id?: string | null;
+    value?: unknown;
+    visual_context_entity_revision_id?: string | null;
+  },
+): Promise<import("./visualTypes").VisualAnchor> {
+  return fetchJson<import("./visualTypes").VisualAnchor>(
+    `${BASE}/visual-facets/${facetId}/anchors`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export async function listVisualAnchorRevisions(
+  anchorId: string,
+): Promise<VisualAnchorRevisionSummary[]> {
+  return fetchJson<VisualAnchorRevisionSummary[]>(
+    `${BASE}/visual-anchors/${anchorId}/revisions`,
+  );
+}
+
+export async function listValuePolicies(
+  facetId: string,
+): Promise<ValuePolicy[]> {
+  return fetchJson<ValuePolicy[]>(
+    `${BASE}/visual-facets/${facetId}/value-policies`,
+  );
+}

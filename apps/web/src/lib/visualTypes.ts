@@ -64,6 +64,11 @@ export interface FacetStatus {
   resolved: "approved" | "missing" | "unapproved" | "not_applicable";
   visual_anchor_id: string | null;
   approved_revision_id: string | null;
+  /** §72 row payload: primary Asset and reference count of the
+   * approved realization (null/0 when not approved). */
+  primary_asset_id: string | null;
+  item_count: number;
+  issue: { error_code: string; [k: string]: unknown } | null;
 }
 
 export interface VisualContinuityState {
@@ -73,4 +78,40 @@ export interface VisualContinuityState {
   visual_reference_pack_hash: string | null;
   visual_continuity_issues: { error_code: string }[];
   facet_statuses: FacetStatus[];
+}
+
+// --- §73 historical visual provenance (server-fed, immutable) ---------------------
+
+export interface CapturedVisualItem {
+  asset_id: string;
+  blob_hash: string;
+  role: string;
+  view_key: string | null;
+  position: number;
+}
+
+export interface CapturedVisualAnchor {
+  position: number;
+  visual_facet_id: string;
+  facet_key: string;
+  visual_anchor_id: string;
+  captured_visual_anchor_revision_id: string;
+  captured_revision_number: number | null;
+  captured_snapshot_hash: string;
+  /** Current authority, clearly distinct from the captured authority. */
+  current_approved_revision_id: string | null;
+  current_approved_revision_number: number | null;
+  target_kind: string;
+  entity_id: string | null;
+  entity_revision_id: string | null;
+  feature_id: string | null;
+  feature_value_hash: string | null;
+  feature_value_json: string | null;
+  visual_context_entity_revision_id: string | null;
+  items: CapturedVisualItem[];
+}
+
+export interface VisualProvenance {
+  visual_reference_pack_hash: string | null;
+  anchors: CapturedVisualAnchor[];
 }

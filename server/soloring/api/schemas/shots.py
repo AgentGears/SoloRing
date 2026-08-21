@@ -97,8 +97,9 @@ class ShotRead(BaseModel):
     # only from authoritative current-state resolution — never historical
     # provenance, never fabricated client-side.
     readiness_issues: list = []
-    # M8 §52 additive fields: visual readiness/honest NULLs.
-    visual_continuity_ready: bool = True
+    # M8 §52 additive fields: visual readiness/honest NULLs. §52.1: no
+    # ready-by-default — an unpopulated projection is not visual readiness.
+    visual_continuity_ready: bool = False
     visual_reference_pack_hash: str | None = None
     visual_continuity_issues: list = []
 

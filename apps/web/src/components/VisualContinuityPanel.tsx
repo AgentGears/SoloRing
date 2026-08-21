@@ -1,14 +1,23 @@
 /**
  * M8 §72 — Shot Visual Continuity inspector (pure display, server-fed).
  * Honest unresolved rendering per APR-051: no fabricated pack hash.
+ * Each row exposes the stable facet, semantic target, approved
+ * realization + revision, primary Asset, reference count, and blocking
+ * issue. No model/executor terminology (§72).
  */
 
 import type { VisualContinuityState } from "@/lib/visualTypes";
 
+function short(id: string | null): string {
+  return id ? `${id.slice(0, 8)}…` : "—";
+}
+
 export default function VisualContinuityPanel({
   state,
+  entityNames = {},
 }: {
   state: VisualContinuityState | null;
+  entityNames?: Record<string, string>;
 }) {
   if (state === null) {
     return (
@@ -45,7 +54,9 @@ export default function VisualContinuityPanel({
           <div className="card row" key={s.visual_facet_id}>
             <div>
               <strong>
-                {s.target_kind === "entity" ? "entity" : "feature"} /{" "}
+                {entityNames[s.entity_id ?? ""]
+                  ? `${entityNames[s.entity_id ?? ""]} / `
+                  : `${s.target_kind} / `}
                 {s.facet_key}
               </strong>
               <div className="meta">
@@ -55,6 +66,7 @@ export default function VisualContinuityPanel({
                   : s.resolved === "unapproved"
                     ? "realization not approved"
                     : s.resolved}
+                {s.issue ? ` · ${s.issue.error_code}` : ""}
               </div>
             </div>
           </div>
@@ -73,12 +85,14 @@ export default function VisualContinuityPanel({
         <div className="card row" key={s.visual_facet_id}>
           <div>
             <strong>
-              {s.target_kind === "entity" ? "entity" : "feature"} /{" "}
+              {entityNames[s.entity_id ?? ""]
+                ? `${entityNames[s.entity_id ?? ""]} / `
+                : `${s.target_kind} / `}
               {s.facet_key}
             </strong>
             <div className="meta">
               {s.resolved === "approved"
-                ? `✓ approved (${s.approved_revision_id?.slice(0, 8)}…)`
+                ? `✓ approved (${short(s.approved_revision_id)}) · primary ${short(s.primary_asset_id)} · ${s.item_count} reference${s.item_count === 1 ? "" : "s"}`
                 : s.resolved === "not_applicable"
                   ? "— not applicable"
                   : s.resolved === "missing"

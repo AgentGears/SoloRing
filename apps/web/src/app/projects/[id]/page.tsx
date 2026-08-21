@@ -11,6 +11,7 @@ import { asApiError, type ApiError } from "@/lib/api.shared";
 import {
   serverGetProject,
   serverListAssets,
+  serverListContinuityFeatures,
   serverListEntities,
   serverListPredicates,
   serverListRelationTransitions,
@@ -77,6 +78,10 @@ export default async function ProjectPage({
     string,
     import("@/lib/visualTypes").VisualAnchor[]
   > = {};
+  let featuresByEntity: Record<
+    string,
+    import("@/lib/types").ContinuityFeature[]
+  > = {};
   let loadError: ApiError | null = null;
 
   try {
@@ -96,6 +101,13 @@ export default async function ProjectPage({
     );
     anchorsByFacet = Object.fromEntries(
       visualFacets.map((vf, i) => [vf.id, anchorsByFacetList[i]]),
+    );
+    // §69 feature facets author against the owning entity's features.
+    const featuresPerEntity = await Promise.all(
+      entities.map((e) => serverListContinuityFeatures(e.id)),
+    );
+    featuresByEntity = Object.fromEntries(
+      entities.map((e, i) => [e.id, featuresPerEntity[i]]),
     );
     scenes = (
       await Promise.all(
@@ -187,6 +199,9 @@ export default async function ProjectPage({
         projectId={id}
         facets={visualFacets}
         anchorsByFacet={anchorsByFacet}
+        entities={entities}
+        featuresByEntity={featuresByEntity}
+        assets={assets}
       />
 
       <h2>Continuity relations</h2>
