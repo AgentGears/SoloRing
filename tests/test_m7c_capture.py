@@ -764,7 +764,7 @@ async def test_capture_read_to_write_handoff_boundary(client, factory, engine):
                 TransitionPatch(operation="set", value="healing"),
             )
 
-    async def read_wrap(session, shot_id):
+    async def read_wrap(session, shot_id, **kwargs):
         result = await original_read(session, shot_id)
         if "competitor" not in state:
             AsyncConnection.exec_driver_sql = wrapped_exec
@@ -827,7 +827,7 @@ async def test_true_concurrent_different_schema3_captures_both_persist(
         async with factory() as s2:
             return await revision_svc.capture_revision(s2, shots[0])
 
-    async def read_wrap(session, shot_id):
+    async def read_wrap(session, shot_id, **kwargs):
         result = await original_read(session, shot_id)  # state A (fresh)
         if "ran" not in state:
             state["ran"] = True

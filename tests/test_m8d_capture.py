@@ -386,3 +386,54 @@ async def test_blob_retention_via_restrictive_fks(client, factory, engine):
         with pytest.raises(Exception):
             async with engine.begin() as conn:
                 await conn.execute(text(sql), params)
+
+
+async def test_visual_provenance_current_follows_applicable_state(
+    client, factory, engine,
+):
+    """r2-gate B6 (§73): the provenance projection's "current" fields
+    follow the CURRENTLY APPLICABLE state-specific realization — after
+    the entity advances to rev2 (no rev2 realization), the captured
+    rev1 anchor keeps its captured authority display but current
+    applicability is honestly none."""
+    pid = await _seed_project(factory)
+    eva, rev1, assets, f, anchor_id, (seq, scene, shots) = (
+        await _visual_fixture(client, factory, engine, pid)
+    )
+    captured = await _capture(factory, shots[0])
+
+    body = (await client.get(
+        f"/shot-revisions/{captured.id}/continuity"
+    )).json()
+    assert body["visual"] is not None
+    row = body["visual"]["anchors"][0]
+    assert row["visual_anchor_id"] == anchor_id
+    assert row["current_applicable_anchor_id"] == anchor_id
+    assert row["current_approved_revision_id"] is not None
+
+    # Advance the entity: approve a second revision with no realization.
+    r = await client.post(
+        f"/entities/{eva['id']}/revisions",
+        json={"spec": {"description": "second"}},
+    )
+    rev2 = r.json()["id"]
+    await client.put(
+        f"/entities/{eva['id']}/approved-revision",
+        json={"revision_id": rev2,
+              "expected_approved_revision_id": rev1},
+    )
+
+    body = (await client.get(
+        f"/shot-revisions/{captured.id}/continuity"
+    )).json()
+    row = body["visual"]["anchors"][0]
+    # Captured authority is unchanged and still displayed...
+    assert row["visual_anchor_id"] == anchor_id
+    assert row["captured_revision_number"] is not None
+    assert len(row["items"]) >= 1
+    assert all(it["blob_hash"] for it in row["items"])  # §73 identity
+    # ...but the current authority follows the APPLICABLE state, which
+    # no longer matches the captured anchor.
+    assert row["current_applicable_anchor_id"] is None
+    assert row["current_approved_revision_id"] is None
+    assert row["current_approved_revision_number"] is None

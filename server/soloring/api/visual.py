@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from soloring.api.deps import get_session
@@ -23,6 +23,18 @@ from soloring.api.schemas.visual import (
 )
 
 router = APIRouter(tags=["visual"])
+
+
+def _endpoint_blob_store(request):
+    """Physical-bytes authority from the RUNNING APP's settings
+    (r2-gate B2); process singleton only as a non-HTTP fallback."""
+    from soloring.assets.blob_store import BlobStore
+    from soloring.settings import get_settings
+
+    settings = getattr(request.app.state, "settings", None)
+    return BlobStore(settings) if settings is not None else BlobStore(
+        get_settings()
+    )
 
 
 # --- VisualFacets ---------------------------------------------------------------
@@ -167,12 +179,17 @@ async def create_visual_anchor(
     "/visual-anchors/{anchor_id}", response_model=VisualAnchorDetail
 )
 async def get_visual_anchor(
-    anchor_id: str, session: AsyncSession = Depends(get_session)
+    anchor_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
 ) -> VisualAnchorDetail:
     from soloring.visual import anchors as anchor_svc
     from soloring.visual import facets as facet_svc
 
-    detail = await anchor_svc.get_anchor_detail(session, anchor_id)
+    detail = await anchor_svc.get_anchor_detail(
+        session, anchor_id,
+        settings=getattr(request.app.state, 'settings', None),
+    )
     base = await facet_svc.get_anchor(session, anchor_id)
     detail["created_at"] = base["created_at"]
     detail["updated_at"] = base["updated_at"]
@@ -185,12 +202,13 @@ async def get_visual_anchor(
 async def put_visual_anchor_items(
     anchor_id: str,
     payload: WorkingSetPut,
+    request: Request,
     session: AsyncSession = Depends(get_session),
 ) -> VisualAnchorDetail:
     from soloring.visual import anchors as anchor_svc
 
     await anchor_svc.put_working_set(session, anchor_id, payload)
-    return await get_visual_anchor(anchor_id, session)
+    return await get_visual_anchor(anchor_id, request, session)
 
 
 @router.get(
@@ -214,11 +232,16 @@ async def list_visual_anchor_revisions(
     status_code=status.HTTP_201_CREATED,
 )
 async def capture_visual_anchor_revision(
-    anchor_id: str, session: AsyncSession = Depends(get_session)
+    anchor_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
 ) -> VisualAnchorRevisionSummary:
     from soloring.visual import anchors as anchor_svc
 
-    rid = await anchor_svc.capture_revision(session, anchor_id)
+    rid = await anchor_svc.capture_revision(
+        session, anchor_id,
+        settings=getattr(request.app.state, 'settings', None),
+    )
     row = await anchor_svc.get_revision(session, rid)
     return VisualAnchorRevisionSummary(
         id=row["id"],
@@ -294,7 +317,9 @@ async def delete_visual_anchor(
 
 @router.get("/shots/{shot_id}/visual-continuity")
 async def get_shot_visual_continuity(
-    shot_id: str, session: AsyncSession = Depends(get_session)
+    shot_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
 ) -> dict:
     """The composed current-state visual projection on one coherent read
     unit (§44): M7 semantics resolve first; M8 projects blocked (§52.1)
@@ -331,6 +356,7 @@ async def get_shot_visual_continuity(
             result = await resolve_visual_readiness(
                 conn, shot_id, semantic_ready, m7_issues, deps,
                 outcome.states,
+                blob_store=_endpoint_blob_store(request),
             )
             await conn.commit()
         except Exception:
@@ -358,6 +384,12 @@ async def get_shot_visual_continuity(
                 "primary_asset_id": s.primary_asset_id,
                 "item_count": s.item_count,
                 "issue": s.issue,
+                "entity_revision_id": s.entity_revision_id,
+                "feature_value_hash": s.feature_value_hash,
+                "feature_value_json": s.feature_value_json,
+                "visual_context_entity_revision_id": (
+                    s.visual_context_entity_revision_id
+                ),
             }
             for s in result.facet_statuses
         ],

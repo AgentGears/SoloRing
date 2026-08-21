@@ -230,15 +230,12 @@ def _capturable(items: list[WorkingItem]) -> bool:
 
 
 async def _working_provenance_valid(
-    conn: AsyncConnection, items: list[WorkingItem]
+    conn: AsyncConnection, items: list[WorkingItem], store
 ) -> bool:
     """§33: invalid Asset/Blob provenance makes the working state
     non-capturable. ONE batched Blob-identity query + physical-byte stats
     for the distinct hashes — the detail projection reports the state
     honestly as NULL rather than hashing dead references."""
-    from soloring.assets.blob_store import BlobStore
-    from soloring.settings import get_settings
-
     hashes = sorted({it.blob_hash for it in items})
     registered: set[str] = set()
     if hashes:
@@ -250,7 +247,6 @@ async def _working_provenance_valid(
             )
         ).all()
         registered = {r[0] for r in rows}
-    store = BlobStore(get_settings())
     for h in hashes:
         if h not in registered:
             return False
@@ -259,7 +255,20 @@ async def _working_provenance_valid(
     return True
 
 
-async def _read_capture_state(conn: AsyncConnection, anchor_id: str):
+def _blob_store(settings=None):
+    """The physical-bytes authority: the RUNNING APP's Settings when the
+    HTTP path supplies it (r2-gate B2), else the process singleton."""
+    from soloring.assets.blob_store import BlobStore
+    from soloring.settings import get_settings
+
+    return BlobStore(settings) if settings is not None else BlobStore(
+        get_settings()
+    )
+
+
+async def _read_capture_state(
+    conn: AsyncConnection, anchor_id: str, store
+):
     """§31.1 read phase: anchor + items + provenance, fully validated."""
     anchor = await _load_anchor_row(conn, anchor_id)
     if anchor["deleted_at"] is not None:
@@ -267,10 +276,6 @@ async def _read_capture_state(conn: AsyncConnection, anchor_id: str):
     items = await _load_working_items(conn, anchor_id)
     # Provenance: every referenced Blob row + physical file must exist
     # (§31.1) — registered identity with missing bytes is corruption.
-    from soloring.assets.blob_store import BlobStore
-    from soloring.settings import get_settings
-
-    store = BlobStore(get_settings())
     for it in items:
         blob = (
             await conn.execute(
@@ -298,10 +303,13 @@ def _expected_item_rows(items: list[WorkingItem]) -> set[tuple]:
     }
 
 
-async def capture_revision(session: AsyncSession, anchor_id: str) -> str:
+async def capture_revision(
+    session: AsyncSession, anchor_id: str, *, settings=None
+) -> str:
     """Two-phase revision capture (§31): coherent read -> freeze ->
     canonicalize outside the write txn -> fenced write with fail-closed
-    reuse validation."""
+    reuse validation. ``settings`` is the RUNNING APP's Settings when
+    supplied by the HTTP path (r2-gate B2)."""
     if not is_uuid(anchor_id):
         raise _anchor_not_found(anchor_id)
 
@@ -309,7 +317,9 @@ async def capture_revision(session: AsyncSession, anchor_id: str) -> str:
     async with session.bind.connect() as conn:
         await conn.exec_driver_sql("BEGIN")
         try:
-            anchor, items = await _read_capture_state(conn, anchor_id)
+            anchor, items = await _read_capture_state(
+                conn, anchor_id, _blob_store(settings)
+            )
             await conn.commit()
         except Exception:
             with contextlib.suppress(Exception):
@@ -668,7 +678,9 @@ async def get_revision(session: AsyncSession, revision_id: str) -> dict:
     return dict(row)
 
 
-async def get_anchor_detail(session: AsyncSession, anchor_id: str) -> dict:
+async def get_anchor_detail(
+    session: AsyncSession, anchor_id: str, *, settings=None
+) -> dict:
     """§33 detail: anchor + ordered items + working/approved hashes +
     differs — all server-computed through the ONE builder."""
     if not is_uuid(anchor_id):
@@ -680,7 +692,7 @@ async def get_anchor_detail(session: AsyncSession, anchor_id: str) -> dict:
         items = await _load_working_items(conn, anchor_id)
         working_hash = None
         if _capturable(items) and await _working_provenance_valid(
-            conn, items
+            conn, items, _blob_store(settings)
         ):
             snapshot = build_revision_snapshot(
                 _binding_of(anchor), items

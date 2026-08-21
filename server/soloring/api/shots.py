@@ -29,7 +29,10 @@ async def _shot_read(request: Request, shot_id: str) -> ShotRead:
     """
     engine: AsyncEngine = request.app.state.engine
     shot, refs, differs, resolved, effective_hash, readiness, visual = (
-        await shots.read_shot_detail(engine, shot_id)
+        await shots.read_shot_detail(
+            engine, shot_id,
+            settings=getattr(request.app.state, "settings", None),
+        )
     )
     return ShotRead(
         **dict(shot),

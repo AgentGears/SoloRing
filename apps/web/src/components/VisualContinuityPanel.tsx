@@ -12,6 +12,53 @@ function short(id: string | null): string {
   return id ? `${id.slice(0, 8)}…` : "—";
 }
 
+/** §72: the current semantic/design state one row binds to. */
+function semanticState(s: VisualContinuityState["facet_statuses"][number]) {
+  if (s.target_kind === "entity") {
+    return `revision ${short(s.entity_revision_id)}`;
+  }
+  const value = s.feature_value_json
+    ? s.feature_value_json.replace(/^"|"$/g, "")
+    : "absent";
+  return `value ${value} @ ${short(s.visual_context_entity_revision_id)}`;
+}
+
+function StatusRow({
+  s,
+  entityNames,
+}: {
+  s: VisualContinuityState["facet_statuses"][number];
+  entityNames: Record<string, string>;
+}) {
+  return (
+    <div className="card row">
+      <div>
+        <strong>
+          {entityNames[s.entity_id ?? ""]
+            ? `${entityNames[s.entity_id ?? ""]} / `
+            : `${s.target_kind} / `}
+          {s.facet_key}
+        </strong>
+        <div className="meta">
+          state: {semanticState(s)}
+          {s.visual_anchor_id
+            ? ` · anchor ${short(s.visual_anchor_id)}`
+            : " · no matching anchor"}
+        </div>
+        <div className="meta">
+          {s.resolved === "approved"
+            ? `✓ approved (${short(s.approved_revision_id)}) · primary ${short(s.primary_asset_id)} · ${s.item_count} reference${s.item_count === 1 ? "" : "s"}`
+            : s.resolved === "not_applicable"
+              ? "— not applicable"
+              : s.resolved === "missing"
+                ? `missing realization${s.issue ? ` · ${s.issue.error_code}` : " (optional)"}`
+                : `not approved${s.issue ? ` · ${s.issue.error_code}` : " (optional)"}`}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function VisualContinuityPanel({
   state,
   entityNames = {},
@@ -51,25 +98,7 @@ export default function VisualContinuityPanel({
           realizations exist and are approved.
         </div>
         {state.facet_statuses.map((s) => (
-          <div className="card row" key={s.visual_facet_id}>
-            <div>
-              <strong>
-                {entityNames[s.entity_id ?? ""]
-                  ? `${entityNames[s.entity_id ?? ""]} / `
-                  : `${s.target_kind} / `}
-                {s.facet_key}
-              </strong>
-              <div className="meta">
-                {s.requirement} ·{" "}
-                {s.resolved === "missing"
-                  ? "missing realization"
-                  : s.resolved === "unapproved"
-                    ? "realization not approved"
-                    : s.resolved}
-                {s.issue ? ` · ${s.issue.error_code}` : ""}
-              </div>
-            </div>
-          </div>
+          <StatusRow key={s.visual_facet_id} s={s} entityNames={entityNames} />
         ))}
       </section>
     );
@@ -82,25 +111,7 @@ export default function VisualContinuityPanel({
         </div>
       ) : null}
       {state.facet_statuses.map((s) => (
-        <div className="card row" key={s.visual_facet_id}>
-          <div>
-            <strong>
-              {entityNames[s.entity_id ?? ""]
-                ? `${entityNames[s.entity_id ?? ""]} / `
-                : `${s.target_kind} / `}
-              {s.facet_key}
-            </strong>
-            <div className="meta">
-              {s.resolved === "approved"
-                ? `✓ approved (${short(s.approved_revision_id)}) · primary ${short(s.primary_asset_id)} · ${s.item_count} reference${s.item_count === 1 ? "" : "s"}`
-                : s.resolved === "not_applicable"
-                  ? "— not applicable"
-                  : s.resolved === "missing"
-                    ? "missing realization (optional)"
-                    : "not approved (optional)"}
-            </div>
-          </div>
-        </div>
+        <StatusRow key={s.visual_facet_id} s={s} entityNames={entityNames} />
       ))}
       {state.visual_reference_pack_hash ? (
         <div className="meta">

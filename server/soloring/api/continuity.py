@@ -127,7 +127,7 @@ async def _revision_continuity(session: AsyncSession, revision_id: str) -> dict:
     rev = (
         await session.execute(
             text(
-                "SELECT id, snapshot_hash, continuity_spec_json, "
+                "SELECT id, shot_id, snapshot_hash, continuity_spec_json, "
                 "continuity_spec_hash FROM shot_revisions WHERE id = :rid"
             ),
             {"rid": revision_id},
@@ -417,18 +417,10 @@ async def _revision_continuity(session: AsyncSession, revision_id: str) -> dict:
                     "srva.feature_value_json, "
                     "srva.visual_context_entity_revision_id, "
                     "var.revision_number AS "
-                    "captured_revision_number, "
-                    "va.approved_revision_id AS "
-                    "current_approved_revision_id, "
-                    "car.revision_number AS "
-                    "current_approved_revision_number "
+                    "captured_revision_number "
                     "FROM shot_revision_visual_anchors srva "
                     "LEFT JOIN visual_anchor_revisions var "
                     "ON var.id = srva.visual_anchor_revision_id "
-                    "LEFT JOIN visual_anchors va "
-                    "ON va.id = srva.visual_anchor_id "
-                    "LEFT JOIN visual_anchor_revisions car "
-                    "ON car.id = va.approved_revision_id "
                     "WHERE srva.shot_revision_id = :rid "
                     "ORDER BY srva.position"
                 ),
@@ -458,6 +450,111 @@ async def _revision_continuity(session: AsyncSession, revision_id: str) -> dict:
                 "view_key": it["view_key"],
                 "position": it["item_position"],
             })
+
+        # §73: "current" means the CURRENTLY APPLICABLE state-specific
+        # realization for this Shot — resolved against the CURRENT
+        # semantic state (r2-gate B6), never the captured historical
+        # anchor row. After an EntityRevision/feature-value change the
+        # old captured anchor is NOT reported as current.
+        current_by_facet: dict[str, dict | None] = {}
+        rev_numbers: dict[str, int] = {}
+        if vrows:
+            from soloring.continuity.snapshots import (
+                resolve_working_dependencies,
+            )
+            from soloring.continuity.state import (
+                resolve_effective_feature_state,
+            )
+
+            async with session.bind.connect() as conn:
+                await conn.exec_driver_sql("BEGIN")
+                try:
+                    deps = await resolve_working_dependencies(
+                        conn, rev["shot_id"]
+                    )
+                    outcome = await resolve_effective_feature_state(
+                        conn, rev["shot_id"]
+                    )
+                    facet_ids = sorted(
+                        {r["visual_facet_id"] for r in vrows}
+                    )
+                    facet_ph = ", ".join(
+                        f":vf{i}" for i in range(len(facet_ids))
+                    )
+                    cur_anchors = (
+                        await conn.execute(
+                            text(
+                                "SELECT id, visual_facet_id, "
+                                "entity_revision_id, feature_value_hash, "
+                                "visual_context_entity_revision_id, "
+                                "approved_revision_id FROM visual_anchors "
+                                "WHERE deleted_at IS NULL AND "
+                                f"visual_facet_id IN ({facet_ph})"
+                            ),
+                            {
+                                f"vf{i}": fid
+                                for i, fid in enumerate(facet_ids)
+                            },
+                        )
+                    ).mappings().all()
+                    await conn.commit()
+                except Exception:
+                    import contextlib as _cl
+
+                    with _cl.suppress(Exception):
+                        await conn.rollback()
+                    raise
+            entity_rev_by_entity = {
+                d.entity_id: d.entity_revision_id for d in deps
+            }
+            value_hash_by_feature = {
+                st.feature_id: st.value_hash for st in outcome.states
+            }
+            owner_by_feature = {
+                st.feature_id: st.entity_id for st in outcome.states
+            }
+            for row in vrows:
+                applicable = None
+                for ca in cur_anchors:
+                    if ca["visual_facet_id"] != row["visual_facet_id"]:
+                        continue
+                    if row["target_kind"] == "entity":
+                        if ca["entity_revision_id"] == (
+                            entity_rev_by_entity.get(row["entity_id"])
+                        ):
+                            applicable = dict(ca)
+                            break
+                    else:
+                        ctx = entity_rev_by_entity.get(
+                            owner_by_feature.get(row["feature_id"])
+                        )
+                        if (
+                            ca["feature_value_hash"]
+                            == value_hash_by_feature.get(row["feature_id"])
+                            and ca["visual_context_entity_revision_id"]
+                            == ctx
+                        ):
+                            applicable = dict(ca)
+                            break
+                current_by_facet[row["visual_facet_id"]] = applicable
+            approved_ids = {
+                ca["approved_revision_id"]
+                for ca in current_by_facet.values()
+                if ca is not None and ca["approved_revision_id"]
+            }
+            if approved_ids:
+                ph = ", ".join(f":cr{i}" for i in range(len(approved_ids)))
+                num_rows = (
+                    await session.execute(
+                        text(
+                            "SELECT id, revision_number FROM "
+                            f"visual_anchor_revisions WHERE id IN ({ph})"
+                        ),
+                        {f"cr{i}": rid for i, rid in enumerate(approved_ids)},
+                    )
+                ).all()
+                rev_numbers = {r[0]: r[1] for r in num_rows}
+
         visual_provenance = {
             "visual_reference_pack_hash": pack_hash,
             "anchors": [
@@ -475,11 +572,29 @@ async def _revision_continuity(session: AsyncSession, revision_id: str) -> dict:
                     "captured_snapshot_hash": (
                         r["visual_anchor_snapshot_hash"]
                     ),
+                    "current_applicable_anchor_id": (
+                        current_by_facet[r["visual_facet_id"]]["id"]
+                        if current_by_facet.get(r["visual_facet_id"])
+                        else None
+                    ),
                     "current_approved_revision_id": (
-                        r["current_approved_revision_id"]
+                        current_by_facet[r["visual_facet_id"]][
+                            "approved_revision_id"
+                        ]
+                        if current_by_facet.get(r["visual_facet_id"])
+                        else None
                     ),
                     "current_approved_revision_number": (
-                        r["current_approved_revision_number"]
+                        rev_numbers.get(
+                            current_by_facet[r["visual_facet_id"]][
+                                "approved_revision_id"
+                            ]
+                        )
+                        if current_by_facet.get(r["visual_facet_id"])
+                        and current_by_facet[r["visual_facet_id"]][
+                            "approved_revision_id"
+                        ]
+                        else None
                     ),
                     "target_kind": r["target_kind"],
                     "entity_id": r["entity_id"],

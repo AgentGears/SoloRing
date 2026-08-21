@@ -270,7 +270,19 @@ _DETAIL_COLUMNS = (
 )
 
 
-async def read_shot_detail(engine: AsyncEngine, shot_id: str):
+def _visual_blob_store(settings=None):
+    """Physical-bytes authority for the visual resolver (r2-gate B2):
+    the RUNNING APP's Settings when supplied, else the process
+    singleton."""
+    from soloring.assets.blob_store import BlobStore
+    from soloring.settings import get_settings
+
+    if settings is not None:
+        return BlobStore(settings)
+    return BlobStore(get_settings())
+
+
+async def read_shot_detail(engine: AsyncEngine, shot_id: str, *, settings=None):
     """One bounded consistent read unit (M2 §3.2, §47; M6C §48).
 
     Explicit BEGIN on one checked-out connection so the shot row, its
@@ -340,6 +352,7 @@ async def read_shot_detail(engine: AsyncEngine, shot_id: str):
                 readiness["continuity_state_ready"],
                 readiness["readiness_issues"],
                 resolved, outcome.states,
+                blob_store=_visual_blob_store(settings),
             )
             if readiness["continuity_state_ready"]:
                 effective_hash = effective_working_snapshot_hash(

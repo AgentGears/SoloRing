@@ -73,7 +73,17 @@ export default function VisualProvenanceList({
                       )}
                     </div>
                     <div className="meta">
-                      current approved realization:{" "}
+                      currently applicable realization:{" "}
+                      {a.current_applicable_anchor_id
+                        ? `${short(a.current_applicable_anchor_id)}${
+                            a.current_applicable_anchor_id ===
+                            a.visual_anchor_id
+                              ? " (same as captured)"
+                              : " (changed since capture)"
+                          }`
+                        : "none (no exact state match now)"}
+                      {" · "}
+                      current approved authority:{" "}
                       {a.current_approved_revision_number != null
                         ? `revision ${a.current_approved_revision_number}`
                         : "none (changed or unapproved since capture)"}
@@ -88,9 +98,13 @@ export default function VisualProvenanceList({
                           <span key={it.asset_id} className="meta">
                             {" · "}
                             {it.role}
-                            {it.view_key ? ` (${it.view_key})` : ""}{" "}
+                            {it.view_key ? ` (${it.view_key})` : ""} asset{" "}
                             <span className="hash">
                               {short(it.asset_id)}
+                            </span>{" "}
+                            blob{" "}
+                            <span className="hash">
+                              {short(it.blob_hash)}
                             </span>
                           </span>
                         ))}

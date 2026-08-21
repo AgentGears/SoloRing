@@ -18,12 +18,13 @@ of cardinality.
 Direct-SQL bulk wiring is used ONLY for scale scaffolding, disclosed
 here per §66: ``shots`` (volume), ``entity_revisions`` (historical,
 unapproved), ``visual_facets`` (optional, no anchors), ``visual_anchors``
-+ ``visual_anchor_revisions`` (noise, bound to historical revisions,
-never applicable, never approved), and ``shot_revisions`` (schema-4
-history rows never re-captured). Every frozen constraint is preserved;
-the designated target Shot's semantic/visual state is built through the
-real services so the production resolver performs the actual
-applicability work.
++ ``visual_anchor_revisions`` + ``visual_anchor_revision_items`` (noise,
+bound to historical revisions, never applicable, never approved, with
+snapshots built by the PRODUCTION canonical builders so every §26–28
+invariant holds). Historical schema-4 ShotRevisions are REAL service
+captures — never synthetic rows. The designated target Shot's
+semantic/visual state is built through the real services so the
+production resolver performs the actual applicability work.
 """
 
 from __future__ import annotations
@@ -557,6 +558,257 @@ async def test_race_entity_revision_approval_before_first_read(
     assert codes == {"VISUAL_REALIZATION_REQUIRED"}
 
 
+# --- §82.1 Feature value-policy mutations during the pinned resolver read ---------
+
+
+async def _feature_facet_race_fixture(
+    client, factory, engine, pid, *, not_applicable=False,
+):
+    """Feature facet (required) at the effective value "fresh" with an
+    approved realization; optionally pre-applied not_applicable override
+    (then no realization exists)."""
+    eva, rev1 = await _entity_with_revision(client, factory, pid)
+    feat = await _feature(client, eva["id"])
+    assets = await _assets(engine, pid, 1)
+    f = await _facet(
+        client, pid, "feature", feature_id=feat["id"], facet_key="cut",
+    )
+    seq, scene, shots = await _topology(client, factory, pid)
+    await _depend(client, shots[0], [eva["id"]])
+    await client.post(
+        f"/continuity-features/{feat['id']}/transitions",
+        json={"anchor_type": "scene", "anchor_id": scene,
+              "boundary": "start", "operation": "set", "value": "fresh"},
+    )
+    anchor_id = None
+    if not not_applicable:
+        r = await client.post(
+            f"/visual-facets/{f['id']}/anchors",
+            json={"value": "fresh",
+                  "visual_context_entity_revision_id": rev1},
+        )
+        anchor_id = r.json()["id"]
+        await _approve_anchor(client, anchor_id, assets, ["front"])
+    else:
+        await client.put(
+            f"/visual-facets/{f['id']}/value-policies",
+            json={"policies": [{"value": "fresh",
+                                "policy": "not_applicable"}]},
+        )
+    return f, anchor_id, shots
+
+
+async def test_race_value_policy_required_to_not_applicable_after_snapshot(
+    client, factory, engine,
+):
+    """Form B: snapshot pinned with the required+approved binding; the
+    not_applicable override commits inside the pinned read → the SAME
+    read still yields the complete BEFORE pack (anchor included)."""
+    pid = await _seed_project(factory)
+    f, anchor_id, shots = await _feature_facet_race_fixture(
+        client, factory, engine, pid
+    )
+    before = await _resolver_result(engine, shots[0])
+    assert before.visual_continuity_ready is True
+
+    async def competitor():
+        return await client.put(
+            f"/visual-facets/{f['id']}/value-policies",
+            json={"policies": [{"value": "fresh",
+                                "policy": "not_applicable"}]},
+        )
+
+    result, comp, ev = await _reader_vs_competitor(
+        lambda: _resolver_result(engine, shots[0]), competitor,
+        form="after_snapshot",
+    )
+    assert comp.status_code == 200, comp.text
+    assert ev.snapshot_established.is_set()
+    assert ev.competitor_committed.is_set()
+    assert result.visual_continuity_ready is True  # BEFORE holds
+    assert result.visual_reference_pack_hash == (
+        before.visual_reference_pack_hash
+    )
+    assert len(result.pack["anchors"]) == 1
+
+    # A fresh read observes AFTER: not applicable, anchor omitted.
+    after = await _resolver_result(engine, shots[0])
+    assert after.visual_continuity_ready is True
+    assert after.pack is None or after.pack["anchors"] == []
+    statuses = {s.facet_key: s.resolved for s in after.facet_statuses}
+    assert statuses["cut"] == "not_applicable"
+
+
+async def test_race_value_policy_required_to_not_applicable_before_first_read(
+    client, factory, engine,
+):
+    """Form A: the override commits before the resolver's first pinned
+    SELECT → the read observes complete AFTER (not applicable, no pack
+    hash fabricated)."""
+    pid = await _seed_project(factory)
+    f, anchor_id, shots = await _feature_facet_race_fixture(
+        client, factory, engine, pid
+    )
+
+    async def competitor():
+        return await client.put(
+            f"/visual-facets/{f['id']}/value-policies",
+            json={"policies": [{"value": "fresh",
+                                "policy": "not_applicable"}]},
+        )
+
+    result, comp, ev = await _reader_vs_competitor(
+        lambda: _resolver_result(engine, shots[0]), competitor,
+        form="before_first_read",
+    )
+    assert comp.status_code == 200, comp.text
+    assert ev.competitor_committed.is_set()
+    assert result.visual_continuity_ready is True  # AFTER
+    assert result.visual_reference_pack_hash is None
+    statuses = {s.facet_key: s.resolved for s in result.facet_statuses}
+    assert statuses["cut"] == "not_applicable"
+
+
+async def test_race_value_policy_not_applicable_to_required_after_snapshot(
+    client, factory, engine,
+):
+    """Form B (reverse direction): snapshot pinned under the override;
+    restoring the required policy commits inside the pinned read → the
+    SAME read stays ready-with-no-realization (complete BEFORE)."""
+    pid = await _seed_project(factory)
+    f, anchor_id, shots = await _feature_facet_race_fixture(
+        client, factory, engine, pid, not_applicable=True
+    )
+    assert (await _resolver_result(engine, shots[0])).visual_continuity_ready
+
+    async def competitor():
+        return await client.put(
+            f"/visual-facets/{f['id']}/value-policies",
+            json={"policies": [{"value": "fresh",
+                                "policy": "required"}]},
+        )
+
+    result, comp, ev = await _reader_vs_competitor(
+        lambda: _resolver_result(engine, shots[0]), competitor,
+        form="after_snapshot",
+    )
+    assert comp.status_code == 200, comp.text
+    assert ev.snapshot_established.is_set()
+    assert ev.competitor_committed.is_set()
+    assert result.visual_continuity_ready is True  # BEFORE holds
+    statuses = {s.facet_key: s.resolved for s in result.facet_statuses}
+    assert statuses["cut"] == "not_applicable"
+
+    # A fresh read observes AFTER: required with no realization blocks.
+    after = await _resolver_result(engine, shots[0])
+    assert after.visual_continuity_ready is False
+    codes = {i["error_code"] for i in after.issues}
+    assert codes == {"VISUAL_REALIZATION_REQUIRED"}
+
+
+async def test_race_value_policy_not_applicable_to_required_before_first_read(
+    client, factory, engine,
+):
+    """Form A (reverse direction): the policy restore commits before the
+    first pinned SELECT → the read observes complete AFTER (blocked)."""
+    pid = await _seed_project(factory)
+    f, anchor_id, shots = await _feature_facet_race_fixture(
+        client, factory, engine, pid, not_applicable=True
+    )
+
+    async def competitor():
+        return await client.put(
+            f"/visual-facets/{f['id']}/value-policies",
+            json={"policies": [{"value": "fresh",
+                                "policy": "required"}]},
+        )
+
+    result, comp, ev = await _reader_vs_competitor(
+        lambda: _resolver_result(engine, shots[0]), competitor,
+        form="before_first_read",
+    )
+    assert comp.status_code == 200, comp.text
+    assert ev.competitor_committed.is_set()
+    assert result.visual_continuity_ready is False  # AFTER
+    codes = {i["error_code"] for i in result.issues}
+    assert codes == {"VISUAL_REALIZATION_REQUIRED"}
+
+
+# --- §82.1 M7 Feature transition / effective-value change ---------------------------
+
+
+async def test_race_feature_transition_after_snapshot_binding_survives(
+    client, factory, engine,
+):
+    """Form B (M7 feature dimension): snapshot pinned at effective value
+    "fresh"; a later-anchored "scarred" transition commits inside the
+    pinned read → the SAME read keeps the exact BEFORE binding (fresh
+    anchor in the pack); a fresh read binds scarred → missing."""
+    pid = await _seed_project(factory)
+    f, anchor_id, shots = await _feature_facet_race_fixture(
+        client, factory, engine, pid
+    )
+    feat_id = f["feature_id"]
+    before = await _resolver_result(engine, shots[0])
+    assert before.visual_continuity_ready is True
+
+    async def competitor():
+        return await client.post(
+            f"/continuity-features/{feat_id}/transitions",
+            json={"anchor_type": "shot", "anchor_id": shots[0],
+                  "boundary": "start", "operation": "set",
+                  "value": "scarred"},
+        )
+
+    result, comp, ev = await _reader_vs_competitor(
+        lambda: _resolver_result(engine, shots[0]), competitor,
+        form="after_snapshot",
+    )
+    assert comp.status_code == 201, comp.text
+    assert ev.snapshot_established.is_set()
+    assert ev.competitor_committed.is_set()
+    assert result.visual_continuity_ready is True  # BEFORE holds
+    assert result.visual_reference_pack_hash == (
+        before.visual_reference_pack_hash
+    )
+
+    after = await _resolver_result(engine, shots[0])
+    assert after.visual_continuity_ready is False  # AFTER binds scarred
+    codes = {i["error_code"] for i in after.issues}
+    assert codes == {"VISUAL_REALIZATION_REQUIRED"}
+
+
+async def test_race_feature_transition_before_first_read_rebinds(
+    client, factory, engine,
+):
+    """Form A (M7 feature dimension): the "scarred" transition commits
+    before the resolver's first pinned SELECT → the read observes the
+    complete AFTER binding (scarred, missing realization)."""
+    pid = await _seed_project(factory)
+    f, anchor_id, shots = await _feature_facet_race_fixture(
+        client, factory, engine, pid
+    )
+    feat_id = f["feature_id"]
+
+    async def competitor():
+        return await client.post(
+            f"/continuity-features/{feat_id}/transitions",
+            json={"anchor_type": "shot", "anchor_id": shots[0],
+                  "boundary": "start", "operation": "set",
+                  "value": "scarred"},
+        )
+
+    result, comp, ev = await _reader_vs_competitor(
+        lambda: _resolver_result(engine, shots[0]), competitor,
+        form="before_first_read",
+    )
+    assert comp.status_code == 201, comp.text
+    assert ev.competitor_committed.is_set()
+    assert result.visual_continuity_ready is False  # AFTER
+    codes = {i["error_code"] for i in result.issues}
+    assert codes == {"VISUAL_REALIZATION_REQUIRED"}
+
+
 # --- §82.1 parked-on-lock races ----------------------------------------------------
 
 
@@ -699,7 +951,7 @@ SCALE_FEATURES = 4                   # ContinuityFeatures on 2 characters
 SCALE_FEATURE_VALUES = 3             # enum transitions across the timeline
 SCALE_BULK_OPTIONAL_FACETS = 60      # direct SQL, dependency entities
 SCALE_BULK_NOISE_ANCHORS = 120       # direct SQL, historical revisions
-SCALE_BULK_SCHEMA4_REVISIONS = 200   # direct SQL history, never re-captured
+SCALE_BULK_SCHEMA4_CAPTURES = 25     # REAL service captures (legal §54–56)
 
 
 async def _scale_target_fixture(client, factory, engine, pid):
@@ -895,7 +1147,8 @@ async def _scale_target_fixture(client, factory, engine, pid):
         captured = await revision_svc.capture_revision(s, target)
     return {
         "target": target, "entities": entities, "features": features,
-        "captured": captured, "anchors": anchors,
+        "captured": captured, "anchors": anchors, "assets": assets,
+        "seq": seq,
     }
 
 
@@ -1054,11 +1307,56 @@ async def test_scale_bulk_wiring_disclosed_invariants(
     fix = await _scale_target_fixture(client, factory, engine, pid)
     target = fix["target"]
     entities = fix["entities"]
+    assets = fix["assets"]
+
+    # REAL schema-4 history (§54–56 legality — no synthetic snapshots):
+    # dedicated bulk Shots, each semantically wired to entity 0 (whose
+    # every required facet is approved) and captured through the
+    # production capture service.
+    from soloring.api.schemas.shots import ShotCreate
+    from soloring.domain import revisions as revision_svc
+    from soloring.domain import shots as shot_svc
+
+    r = await client.post(
+        f"/sequences/{fix['seq']}/scenes", json={"title": "C-bulk"}
+    )
+    scene_bulk = r.json()["id"]
+    capture_shots = []
+    for _ in range(SCALE_BULK_SCHEMA4_CAPTURES):
+        async with factory() as s:
+            capture_shots.append((await shot_svc.create_shot(
+                s, pid, ShotCreate(subject="bulk capture"))).id)
+    await client.put(
+        f"/scenes/{scene_bulk}/shots", json={"shot_ids": capture_shots}
+    )
+    for cs in capture_shots:
+        await _depend(client, cs, [entities[0]["id"]])
+    for cs in capture_shots:
+        async with factory() as s:
+            rev = await revision_svc.capture_revision(s, cs)
+        async with engine.connect() as conn:
+            sv = (await conn.execute(
+                text("SELECT snapshot_json FROM shot_revisions "
+                     "WHERE id = :r"),
+                {"r": rev.id if hasattr(rev, "id") else rev},
+            )).scalar()
+        assert json.loads(sv)["schema_version"] == 4
+
+    # Asset blob identities for the production-built noise snapshots.
+    blob_of: dict[str, str] = {}
+    async with engine.connect() as conn:
+        for aid in assets:
+            blob_of[aid] = (await conn.execute(
+                text("SELECT blob_hash FROM assets WHERE id = :a"),
+                {"a": aid},
+            )).scalar_one()
 
     now = "2026-01-01T00:00:00.000Z"
     async with engine.begin() as conn:
-        # ~2,500 total Shots (service already created 3).
-        bulk_shots = SCALE_TOTAL_SHOTS - 3
+        # ~2,500 total Shots (3 fixture + 25 capture shots are real).
+        bulk_shots = (
+            SCALE_TOTAL_SHOTS - 3 - SCALE_BULK_SCHEMA4_CAPTURES
+        )
         shot_rows = [
             {
                 "id": str(_uuid.uuid4()),
@@ -1169,32 +1467,59 @@ async def test_scale_bulk_wiring_disclosed_invariants(
             facet_rows,
         )
 
-        # Noise anchors bound to HISTORICAL revisions (never applicable
-        # to the target's approved revisions), each with one structurally
-        # valid revision row (never approved — integrity never invoked).
+        # Noise anchors bound to HISTORICAL revisions (never applicable to
+        # the target's approved revisions), each with a revision built by
+        # the PRODUCTION canonical builders — one primary item, real
+        # Asset/Blob provenance, exact snapshot↔hash↔item-rows agreement
+        # (§26–28 invariants hold for every direct-SQL row; never
+        # approved, so authority integrity is never invoked).
+        from soloring.visual.canonical import (
+            AnchorBinding,
+            WorkingItem,
+            build_revision_snapshot,
+            revision_snapshot_bytes,
+        )
+
         noise_anchors = []
+        noise_items = []
         for k in range(SCALE_BULK_NOISE_ANCHORS):
             # Injective pairing: k and k + |facets| share the facet but
             # take different historical revisions — the partial unique
             # index on (visual_facet_id, entity_revision_id) stays clean.
             hist = hist_revs[(k // len(facet_rows)) % len(hist_revs)]
             facet = facet_rows[k % len(facet_rows)]
-            snap = {"schema_version": 1, "binding": {
-                "visual_facet_id": facet["id"],
-                "facet_key": facet["facet_key"],
-                "target_kind": "entity",
-            }, "items": []}
-            snap_bytes = json.dumps(
-                snap, sort_keys=True, separators=(",", ":")
-            ).encode("utf-8")
+            asset_id = assets[k % len(assets)]
+            binding = AnchorBinding(
+                visual_facet_id=facet["id"],
+                facet_key=facet["facet_key"],
+                target_kind="entity",
+                entity_id=facet["entity_id"],
+                feature_id=None,
+                entity_revision_id=hist["id"],
+                feature_value_hash=None,
+                feature_value_json=None,
+                visual_context_entity_revision_id=None,
+            )
+            items = [WorkingItem(
+                asset_id=asset_id, blob_hash=blob_of[asset_id],
+                role="primary", view_key=None, position=0,
+            )]
+            snapshot = build_revision_snapshot(binding, items)
+            snap_json, snap_hash = revision_snapshot_bytes(snapshot)
+            revision_id = str(_uuid.uuid4())
             noise_anchors.append({
                 "id": str(_uuid.uuid4()),
                 "visual_facet_id": facet["id"],
                 "entity_revision_id": hist["id"],
-                "revision_id": str(_uuid.uuid4()),
-                "snapshot_json": snap_bytes.decode("utf-8"),
-                "snapshot_hash": hashlib.sha256(snap_bytes).hexdigest(),
+                "revision_id": revision_id,
+                "snapshot_json": snap_json,
+                "snapshot_hash": snap_hash,
                 "created_at": now, "updated_at": now,
+            })
+            noise_items.append({
+                "revision_id": revision_id,
+                "asset_id": asset_id,
+                "blob_hash": blob_of[asset_id],
             })
         await conn.execute(
             text(
@@ -1220,30 +1545,14 @@ async def test_scale_bulk_wiring_disclosed_invariants(
             ),
             noise_anchors,
         )
-
-        # Bulk schema-4 history rows (minimal valid snapshots, unique
-        # hashes; never re-captured so reuse integrity never fires).
-        rev_rows = []
-        for k in range(SCALE_BULK_SCHEMA4_REVISIONS):
-            snap = {"schema_version": 4, "k": k}
-            snap_bytes = json.dumps(
-                snap, sort_keys=True, separators=(",", ":")
-            ).encode("utf-8")
-            rev_rows.append({
-                "id": str(_uuid.uuid4()),
-                "shot_id": shot_rows[k]["id"],
-                "snapshot_json": snap_bytes.decode("utf-8"),
-                "snapshot_hash": hashlib.sha256(snap_bytes).hexdigest(),
-                "created_at": now,
-            })
         await conn.execute(
             text(
-                "INSERT INTO shot_revisions (id, shot_id, revision_number,"
-                " snapshot_json, snapshot_hash, created_at) VALUES "
-                "(:id, :shot_id, 1, :snapshot_json, :snapshot_hash, "
-                ":created_at)"
+                "INSERT INTO visual_anchor_revision_items "
+                "(visual_anchor_revision_id, position, asset_id, "
+                "blob_hash, role, view_key) VALUES (:revision_id, 0, "
+                ":asset_id, :blob_hash, 'primary', NULL)"
             ),
-            rev_rows,
+            noise_items,
         )
 
     # The production resolver performs the actual applicability work

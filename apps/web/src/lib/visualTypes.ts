@@ -69,6 +69,11 @@ export interface FacetStatus {
   primary_asset_id: string | null;
   item_count: number;
   issue: { error_code: string; [k: string]: unknown } | null;
+  /** §72 current semantic/design state the facet binds to. */
+  entity_revision_id: string | null;
+  feature_value_hash: string | null;
+  feature_value_json: string | null;
+  visual_context_entity_revision_id: string | null;
 }
 
 export interface VisualContinuityState {
@@ -98,7 +103,11 @@ export interface CapturedVisualAnchor {
   captured_visual_anchor_revision_id: string;
   captured_revision_number: number | null;
   captured_snapshot_hash: string;
-  /** Current authority, clearly distinct from the captured authority. */
+  /** The CURRENTLY APPLICABLE state-specific realization for this Shot
+   * (resolved against current semantic state — §73, r2-gate B6); NOT
+   * the captured historical anchor. */
+  current_applicable_anchor_id: string | null;
+  /** Current authority over that applicable realization. */
   current_approved_revision_id: string | null;
   current_approved_revision_number: number | null;
   target_kind: string;

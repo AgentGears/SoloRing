@@ -240,6 +240,44 @@ describe("VisualIdentityPanel authoring (M8 §69–70)", () => {
     });
   });
 
+  it("creates a FEATURE realization via the owning entity's context (§69, r2-gate B6)", async () => {
+    const featureFacet: VisualFacet = {
+      ...FACET,
+      id: "facet-f2",
+      target_kind: "feature",
+      entity_id: null,
+      feature_id: "feat-1",
+    };
+    const { container } = render(
+      <VisualIdentityPanel
+        {...panelProps({ facets: [featureFacet], anchorsByFacet: {} })}
+      />,
+    );
+    // Pick the realization value first — the button enables ONLY then.
+    const valueSelect = container.querySelector(
+      "select[aria-label='feature value to realize']",
+    ) as HTMLSelectElement;
+    expect(valueSelect).not.toBeNull();
+    const button = [...container.querySelectorAll("button")].find(
+      (b) => b.textContent === "Create realization for current state",
+    )!;
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(valueSelect, { target: { value: "scarred" } });
+    expect((button as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(button);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("/api/visual-facets/facet-f2/anchors");
+    expect(init.method).toBe("POST");
+    // The context is the OWNING entity's approved revision — derived
+    // through featuresByEntity, since feature facets carry entity_id
+    // = null (the r2 code left this button disabled by construction).
+    expect(JSON.parse(init.body as string)).toEqual({
+      value: "scarred",
+      visual_context_entity_revision_id: "rev-1",
+    });
+  });
+
   it("renders anchors with approved/unapproved state", () => {
     const { container } = render(
       <VisualIdentityPanel {...panelProps()} />,
@@ -688,11 +726,15 @@ describe("VisualContinuityPanel (M8 §72, pure display)", () => {
       primary_asset_id: null,
       item_count: 0,
       issue: null,
+      entity_revision_id: "rev-1",
+      feature_value_hash: null,
+      feature_value_json: null,
+      visual_context_entity_revision_id: null,
       ...over,
     };
   }
 
-  it("renders approved rows with primary Asset + reference count", () => {
+  it("renders approved rows with semantic state, anchor, primary Asset, and reference count", () => {
     const { container } = render(
       <VisualContinuityPanel
         state={state({
@@ -712,6 +754,10 @@ describe("VisualContinuityPanel (M8 §72, pure display)", () => {
               resolved: "not_applicable",
               visual_anchor_id: null,
               approved_revision_id: null,
+              entity_revision_id: null,
+              feature_value_json: '"scarred"',
+              feature_value_hash: "vh".repeat(32),
+              visual_context_entity_revision_id: "rev-1",
             }),
           ],
         })}
@@ -719,8 +765,12 @@ describe("VisualContinuityPanel (M8 §72, pure display)", () => {
       />,
     );
     expect(container.textContent).toContain("Eva / face");
+    expect(container.textContent).toContain("state: revision rev-1…");
+    expect(container.textContent).toContain("anchor a1…");
     expect(container.textContent).toContain("asset-9".slice(0, 8));
     expect(container.textContent).toContain("3 references");
+    expect(container.textContent).toContain("value scarred @ rev-1…");
+    expect(container.textContent).toContain("no matching anchor");
     expect(container.textContent).toContain("not applicable");
     expect(container.querySelector(".hash")).not.toBeNull();
   });
@@ -788,7 +838,7 @@ describe("VisualContinuityPanel (M8 §72, pure display)", () => {
 describe("VisualProvenanceList (M8 §73, pure display)", () => {
   afterEach(cleanup);
 
-  it("separates captured authority from current approval", () => {
+  it("separates captured authority from current authority, with Blob identity", () => {
     const revisions = [
       { id: "sr-1", revision_number: 4, created_at: "2026-01-01" },
     ] as Parameters<typeof VisualProvenanceList>[0]["revisions"];
@@ -814,6 +864,7 @@ describe("VisualProvenanceList (M8 §73, pure display)", () => {
               captured_visual_anchor_revision_id: "var-1",
               captured_revision_number: 3,
               captured_snapshot_hash: "s".repeat(64),
+              current_applicable_anchor_id: "anchor-2",
               current_approved_revision_id: "var-2",
               current_approved_revision_number: 5,
               target_kind: "entity",
@@ -841,9 +892,15 @@ describe("VisualProvenanceList (M8 §73, pure display)", () => {
       <VisualProvenanceList revisions={revisions} continuity={continuity} />,
     );
     expect(container.textContent).toContain("VisualAnchorRevision: 3");
-    expect(container.textContent).toContain("current approved");
+    expect(container.textContent).toContain("currently applicable");
+    expect(container.textContent).toContain("changed since capture");
     expect(container.textContent).toContain("revision 5");
     expect(container.textContent).toContain("1 captured reference");
+    // §73: captured Asset AND Blob identity stay visible.
+    expect(container.textContent).toContain("asset-1".slice(0, 8));
+    expect(container.textContent).toContain(
+      "b".repeat(64).slice(0, 8),
+    );
   });
 
   it("renders the empty-history case honestly", () => {

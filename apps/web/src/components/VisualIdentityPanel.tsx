@@ -523,6 +523,17 @@ function FacetRow({
   const entity = facet.entity_id
     ? entities.find((e) => e.id === facet.entity_id)
     : undefined;
+  // §69: a FEATURE facet's visual context is its OWNING entity — derived
+  // through the feature, because feature facets carry entity_id = null.
+  const ownerEntity = facet.feature_id
+    ? entities.find((e) =>
+        (featuresByEntity[e.id] ?? []).some(
+          (fw) => fw.id === facet.feature_id,
+        ),
+      )
+    : undefined;
+  const contextEntity = entity ?? ownerEntity;
+  const contextRevision = contextEntity?.approved_revision_id ?? null;
   const features = facet.entity_id
     ? featuresByEntity[facet.entity_id] ?? []
     : [];
@@ -574,7 +585,9 @@ function FacetRow({
 
   /** §69: create a realization for the current EntityRevision / current
    * Feature value — the server derives and validates the exact state
-   * binding; nothing is captured or approved here. */
+   * binding; nothing is captured or approved here. Feature facets take
+   * their visual context from the OWNING entity (feature facets carry
+   * entity_id = null). */
   async function createRealization() {
     if (busy) return;
     setBusy(true);
@@ -590,14 +603,14 @@ function FacetRow({
           entity_revision_id: entity.approved_revision_id,
         });
       } else {
-        if (!entity?.approved_revision_id || !createValue) {
+        if (!contextRevision || !createValue) {
           throw new Error(
-            "Pick a feature value (the entity needs an approved revision).",
+            "Pick a feature value (the owning entity needs an approved revision).",
           );
         }
         await createVisualAnchor(facet.id, {
           value: createValue,
-          visual_context_entity_revision_id: entity.approved_revision_id,
+          visual_context_entity_revision_id: contextRevision,
         });
       }
       setCreateValue("");
@@ -645,7 +658,7 @@ function FacetRow({
               busy ||
               (facet.target_kind === "entity"
                 ? !entity?.approved_revision_id
-                : !entity?.approved_revision_id || !createValue)
+                : !contextRevision || !createValue)
             }
           >
             Create realization for current state

@@ -36,10 +36,14 @@ _TERMINAL = ("succeeded", "failed", "interrupted", "cancelled")
     status_code=202,
 )
 async def create_generation(
-    shot_id: str, session: AsyncSession = Depends(get_session)
+    shot_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
 ) -> GenerationSummary:
     generation = await generation_service.create_generation_request(
-        session, shot_id, settings=get_settings()
+        session, shot_id,
+        settings=getattr(request.app.state, 'settings', None)
+        or get_settings(),
     )
     return generation
 

@@ -145,7 +145,9 @@ async def create_generation_request(
 
     # Resolve ordered references + capture/reuse the immutable revision.
     refs = await shot_svc.snapshot_references(session, shot_id)
-    revision = await revision_svc.capture_revision(session, shot_id)
+    revision = await revision_svc.capture_revision(
+        session, shot_id, settings=settings
+    )
 
     # Deterministic input mapping from the CAPTURED revision snapshot
     # (`template` already holds the captured-bytes workflow for comfy).

@@ -41,12 +41,19 @@ async def resolve_visual_readiness(
     m7_issues: list[dict],
     resolved_deps,
     feature_states,
+    *,
+    blob_store=None,
 ) -> VisualResolutionResult:
-    """The composed resolver entry used by capture + inspection (§44)."""
+    """The composed resolver entry used by capture + inspection (§44).
+
+    ``blob_store`` is the physical-bytes authority (r2-gate B2): HTTP
+    callers pass the running app's store; omission falls back to the
+    process-level Settings singleton."""
     if not semantic_ready:
         return blocked_by_semantics(shot_id, m7_issues)
     return await resolve_visual_reference_pack_async(
-        shot_id, (resolved_deps, feature_states), conn=conn
+        shot_id, (resolved_deps, feature_states), conn=conn,
+        blob_store=blob_store,
     )
 
 

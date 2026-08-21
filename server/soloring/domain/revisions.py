@@ -25,13 +25,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from soloring.db.models import Shot, ShotRevision
 from soloring.domain.canonical import canonical_hash, canonical_json_str
 from soloring.domain.ids import new_uuid
-from soloring.domain.shots import _load_active, _reference_refs
+from soloring.domain.shots import (
+    _load_active,
+    _reference_refs,
+    _visual_blob_store,
+)
 from soloring.errors import ErrorCode, internal_invariant, not_found
 
 MAX_REVISION_ATTEMPTS = 5
 
 
-async def _snapshot_one_read(session: AsyncSession, shot_id: str):
+async def _snapshot_one_read(
+    session: AsyncSession, shot_id: str, *, settings=None
+):
     """Shot + references + resolved semantic dependencies + effective M7
     Feature state from ONE SQLite read snapshot (audit F2; M6 §55; M7B §9).
 
@@ -113,6 +119,7 @@ async def _snapshot_one_read(session: AsyncSession, shot_id: str):
                 m7_projection["continuity_state_ready"],
                 m7_projection["readiness_issues"],
                 resolved, outcome.states,
+                blob_store=_visual_blob_store(settings),
             )
             blocker = visual_first_blocker(visual_result)
             if blocker is not None:
@@ -466,7 +473,9 @@ async def _persist_revision_fenced(
     raise internal_invariant("Revision capture exhausted retries.")
 
 
-async def capture_revision(session: AsyncSession, shot_id: str) -> ShotRevision:
+async def capture_revision(
+    session: AsyncSession, shot_id: str, *, settings=None
+) -> ShotRevision:
     """Capture/reuse the immutable ShotRevision (schema 1 | 2 | 3).
 
     Zero dependencies → the EXACT v1 form with NULL continuity columns.
@@ -476,14 +485,15 @@ async def capture_revision(session: AsyncSession, shot_id: str) -> ShotRevision:
     (M7C §4 + M7D §8.3). In every case the snapshot bytes, the spec bytes,
     and ALL immutable child rows derive from the SAME in-memory value
     captured by the one consistent read (M7C §9.1 + M7D §9). Persistence
-    is the fenced unit above.
+    is the fenced unit above. ``settings`` is the RUNNING APP's Settings
+    when supplied by the HTTP path (r2-gate B2).
     """
     from soloring.continuity.snapshots import (
         build_capturable_snapshot,
         continuity_spec_bytes,
     )
 
-    read = await _snapshot_one_read(session, shot_id)
+    read = await _snapshot_one_read(session, shot_id, settings=settings)
     shot, refs, resolved = read[0], read[1], read[2]
     feature_states, relation_states, visual_result = read[3], read[4], read[5]
     visual_pack = (

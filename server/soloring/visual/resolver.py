@@ -54,10 +54,17 @@ class FacetStatus:
     resolved: str  # 'approved' | 'missing' | 'unapproved' | 'not_applicable'
     visual_anchor_id: str | None = None
     approved_revision_id: str | None = None
-    # §72 row payload: primary Asset, reference count, blocking issue.
+    # §72 row payload: primary Asset, reference count, blocking issue,
+    # and the CURRENT semantic/design state the facet binds to (the
+    # resolved EntityRevision for entity facets; the effective value +
+    # visual-context revision for feature facets).
     primary_asset_id: str | None = None
     item_count: int = 0
     issue: dict | None = None
+    entity_revision_id: str | None = None
+    feature_value_hash: str | None = None
+    feature_value_json: str | None = None
+    visual_context_entity_revision_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -221,14 +228,15 @@ async def _batch_fetch_revisions(
 async def _batch_fetch_assets(
     conn: AsyncConnection, asset_ids: list[str]
 ) -> dict[str, dict]:
-    """§64.7: ONE query for every referenced Asset (id -> project_id)."""
+    """§64.7: ONE query for every referenced Asset (id -> project/blob)."""
     if not asset_ids:
         return {}
     ph = ", ".join(f":a{i}" for i in range(len(asset_ids)))
     rows = (
         await conn.execute(
             text(
-                f"SELECT id, project_id FROM assets WHERE id IN ({ph})"
+                "SELECT id, project_id, blob_hash FROM assets "
+                f"WHERE id IN ({ph})"
             ),
             {f"a{i}": a for i, a in enumerate(asset_ids)},
         )
@@ -328,6 +336,13 @@ def _verify_approved_revision_inmemory(
             raise internal_invariant(
                 f"VisualAnchorRevision {revision_id} references Asset "
                 f"{it['asset_id']} outside the owning Project."
+            )
+        if asset["blob_hash"] != it["blob_hash"]:
+            raise internal_invariant(
+                f"VisualAnchorRevision {revision_id} item references Blob "
+                f"{it['blob_hash']}, but Asset {it['asset_id']} now points "
+                f"at Blob {asset['blob_hash']} — corrupted Asset→Blob "
+                "provenance."
             )
         if it["blob_hash"] not in registered_blobs:
             raise internal_invariant(
@@ -438,11 +453,18 @@ async def resolve_visual_reference_pack_async(
     semantic_resolution,
     *,
     conn: AsyncConnection,
+    blob_store=None,
 ) -> VisualResolutionResult:
     """§42 resolver. ``semantic_resolution`` is the already-pinned M7
     result: (resolved_deps, feature_states). The caller has already
     verified M7 readiness — this function NEVER resolves partial visual
-    state from unresolved semantics (§52.1 is enforced by the caller)."""
+    state from unresolved semantics (§52.1 is enforced by the caller).
+
+    ``blob_store`` is the physical-bytes authority. HTTP entry points
+    pass the RUNNING APP's store (built from request.app.state.settings
+    — r2-gate B2); non-HTTP service callers may omit it, in which case
+    the process-level Settings singleton applies.
+    """
     resolved_deps = semantic_resolution[0]  # list[ResolvedDependency]
     feature_states = semantic_resolution[1]  # tuple[EffectiveFeatureState]
 
@@ -513,18 +535,34 @@ async def resolve_visual_reference_pack_async(
         for it in rows
     })
     registered_blobs = await _batch_fetch_blobs(conn, referenced_blobs)
-    from soloring.assets.blob_store import BlobStore
-    from soloring.settings import get_settings
+    if blob_store is None:
+        from soloring.assets.blob_store import BlobStore
+        from soloring.settings import get_settings
 
-    store = BlobStore(get_settings())
+        blob_store = BlobStore(get_settings())
     live_blob_files = {
-        h for h in referenced_blobs if store.path_for_hash(h).is_file()
+        h for h in referenced_blobs if blob_store.path_for_hash(h).is_file()
     }
 
     approved: list[ResolvedAnchor] = []
+    feature_state_by_id = {s.feature_id: s for s in feature_states}
     for f in facets:
         fid = f["id"]
         policy = effective_policy[fid]
+        # §72: the CURRENT semantic/design state this facet binds to.
+        semantic: dict = {}
+        if f["target_kind"] == "entity":
+            semantic["entity_revision_id"] = entity_rev_by_entity.get(
+                f["entity_id"]
+            )
+        else:
+            fstate = feature_state_by_id.get(f["feature_id"])
+            if fstate is not None:
+                semantic["feature_value_hash"] = fstate.value_hash
+                semantic["feature_value_json"] = fstate.value_json
+                semantic["visual_context_entity_revision_id"] = (
+                    entity_rev_by_entity.get(fstate.entity_id)
+                )
         if f["target_kind"] == "feature":
             owner, vhash = feature_ctx.get(f["feature_id"], (None, None))
             if vhash is None:  # feature absent/cleared (§10)
@@ -533,6 +571,7 @@ async def resolve_visual_reference_pack_async(
                     target_kind="feature", entity_id=None,
                     feature_id=f["feature_id"],
                     requirement="not_applicable", resolved="not_applicable",
+                    **semantic,
                 ))
                 continue
             if policy == "not_applicable":
@@ -541,6 +580,7 @@ async def resolve_visual_reference_pack_async(
                     target_kind="feature", entity_id=None,
                     feature_id=f["feature_id"],
                     requirement="not_applicable", resolved="not_applicable",
+                    **semantic,
                 ))
                 continue
 
@@ -556,14 +596,14 @@ async def resolve_visual_reference_pack_async(
                     visual_facet_id=fid, facet_key=f["facet_key"],
                     target_kind=f["target_kind"], entity_id=f["entity_id"],
                     feature_id=f["feature_id"], requirement=policy,
-                    resolved="missing", issue=issue,
+                    resolved="missing", issue=issue, **semantic,
                 ))
             else:
                 statuses.append(FacetStatus(
                     visual_facet_id=fid, facet_key=f["facet_key"],
                     target_kind=f["target_kind"], entity_id=f["entity_id"],
                     feature_id=f["feature_id"], requirement=policy,
-                    resolved="missing",
+                    resolved="missing", **semantic,
                 ))
             continue
         if a["approved_revision_id"] is None:
@@ -581,7 +621,7 @@ async def resolve_visual_reference_pack_async(
                 target_kind=f["target_kind"], entity_id=f["entity_id"],
                 feature_id=f["feature_id"], requirement=policy,
                 resolved="unapproved", visual_anchor_id=a["id"],
-                issue=issue if policy == "required" else None,
+                issue=issue if policy == "required" else None, **semantic,
             ))
             continue
 
@@ -619,6 +659,7 @@ async def resolve_visual_reference_pack_async(
             resolved="approved", visual_anchor_id=a["id"],
             approved_revision_id=a["approved_revision_id"],
             primary_asset_id=primary_asset, item_count=len(items),
+            **semantic,
         ))
 
     ready = not issues

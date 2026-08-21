@@ -542,3 +542,89 @@ async def test_resolver_fails_closed_on_item_row_tamper(
     with pytest.raises(SoloRingError) as ei:
         await _resolver_result(engine, shots[0])
     assert ei.value.code == "INTERNAL_INVARIANT_VIOLATION"
+
+
+async def test_resolver_fails_closed_on_asset_blob_pointer_corruption(
+    client, factory, engine,
+):
+    """r2-gate B2: §48 must cross-check assets.blob_hash == captured
+    item blob_hash — a corrupted Asset→Blob pointer must not pass."""
+    pid = await _seed_project(factory)
+    eva, rev1, assets, anchor_id, shots = (
+        await _approved_single_anchor_fixture(client, factory, engine, pid)
+    )
+    from tests.conftest import seed_reference_asset
+
+    _other_aid, other_bh = await seed_reference_asset(engine, pid)
+    async with engine.begin() as conn:
+        await conn.execute(
+            text("UPDATE assets SET blob_hash = :h WHERE id = :a"),
+            {"h": other_bh, "a": assets[0]},
+        )
+    from soloring.errors import SoloRingError
+
+    with pytest.raises(SoloRingError) as ei:
+        await _resolver_result(engine, shots[0])
+    assert ei.value.code == "INTERNAL_INVARIANT_VIOLATION"
+    assert "Asset→Blob" in ei.value.message
+
+
+async def test_visual_continuity_uses_app_settings_blob_authority(
+    client, factory, engine, settings, tmp_path,
+):
+    """r2-gate B2: the resolver's physical-bytes authority is the
+    RUNNING APP's settings (request.app.state.settings), not the process
+    singleton — with the singleton POISONED at a wrong storage root, the
+    app-configured root still validates (the r2 fallback would 500)."""
+    import soloring.settings as settings_mod
+    from soloring.assets.blob_store import BlobStore
+    from soloring.settings import Settings
+
+    pid = await _seed_project(factory)
+    eva, rev1 = await _entity_with_revision(client, factory, pid)
+    f = await _facet(client, pid, "entity", entity_id=eva["id"],
+                     facet_key="face")
+    r = await client.post(
+        f"/visual-facets/{f['id']}/anchors", json={"entity_revision_id": rev1}
+    )
+    anchor_id = r.json()["id"]
+
+    # Bytes live ONLY under the app's (test-settings) storage root.
+    aid, bh = await seed_reference_asset(engine, pid)
+    app_path = BlobStore(settings).path_for_hash(bh)
+    app_path.parent.mkdir(parents=True, exist_ok=True)
+    app_path.write_bytes(b"app-authority-" + bh.encode())
+
+    # The whole approval chain runs through HTTP (app authority).
+    await client.put(
+        f"/visual-anchors/{anchor_id}/items",
+        json={"items": [
+            {"asset_id": aid, "role": "primary", "view_key": "front"},
+        ]},
+    )
+    rr = await client.post(f"/visual-anchors/{anchor_id}/revisions")
+    assert rr.status_code == 201, rr.text
+    rr = await client.post(
+        f"/visual-anchor-revisions/{rr.json()['id']}/approve",
+        json={"expected_approved_revision_id": None},
+    )
+    assert rr.status_code == 200, rr.text
+
+    seq, scene, shots = await _topology(client, factory, pid)
+    await _depend(client, shots[0], [eva["id"]])
+
+    # Poison the process singleton at a DIFFERENT root with no bytes:
+    # the endpoint must still resolve via request.app.state.settings.
+    wrong = Settings(data_dir=tmp_path / "wrong-root")
+    wrong_path = BlobStore(wrong).path_for_hash(bh)
+    assert wrong_path != app_path
+    previous = settings_mod._settings
+    settings_mod._settings = wrong
+    try:
+        rr = await client.get(f"/shots/{shots[0]}/visual-continuity")
+    finally:
+        settings_mod._settings = previous
+    assert rr.status_code == 200, rr.text
+    body = rr.json()
+    assert body["visual_continuity_ready"] is True
+    assert body["visual_reference_pack_hash"]
