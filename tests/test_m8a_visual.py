@@ -312,9 +312,13 @@ async def test_facet_delete_guards(client, factory):
     await client.patch(
         f"/visual-facets/{f['id']}", json={"requirement": "optional"}
     )
-    e2, rev2 = await _entity_with_revision(
-        client, factory, pid, name="Temp"
+    # A second revision of the FACET'S OWN entity (r3-gate B: a
+    # different Entity's revision is no longer a legal binding).
+    r = await client.post(
+        f"/entities/{eva['id']}/revisions",
+        json={"spec": {"description": "second"}},
     )
+    rev2 = r.json()["id"]
     r = await client.post(
         f"/visual-facets/{f['id']}/anchors",
         json={"entity_revision_id": rev2},
@@ -589,5 +593,62 @@ async def test_m7_regression_semantic_surface_untouched(client, factory):
             "subject_entity_id": eva["id"], "predicate_id": p["id"],
             "object_entity_id": bag["id"],
         },
+    )
+    assert r.status_code == 201, r.text
+
+
+async def test_anchor_rejects_same_project_wrong_entity_revision(
+    client, factory, engine,
+):
+    """r3-gate B: §13/§68 — an EntityRevision of a DIFFERENT Entity (same
+    Project) is a wrong-EntityRevision target: 409
+    VISUAL_ANCHOR_TARGET_INVALID, never an accepted binding."""
+    pid = await _seed_project(factory)
+    eva, rev1 = await _entity_with_revision(client, factory, pid)
+    alice, alice_rev = await _entity_with_revision(
+        client, factory, pid, name="Alice"
+    )
+    f = await _facet(client, pid, "entity", entity_id=eva["id"],
+                     facet_key="face")
+    r = await client.post(
+        f"/visual-facets/{f['id']}/anchors",
+        json={"entity_revision_id": alice_rev},
+    )
+    assert r.status_code == 409, r.text
+    body = r.json()
+    assert body["error_code"] == "VISUAL_ANCHOR_TARGET_INVALID"
+    assert "does not belong to" in body["message"]
+
+
+async def test_feature_anchor_rejects_wrong_owner_context_revision(
+    client, factory, engine,
+):
+    """r3-gate B: §13/§68 — a feature anchor's visual-context
+    EntityRevision must belong to the Entity OWNING the ContinuityFeature;
+    a same-Project revision of another Entity is rejected 409."""
+    pid = await _seed_project(factory)
+    eva, rev1 = await _entity_with_revision(client, factory, pid)
+    alice, alice_rev = await _entity_with_revision(
+        client, factory, pid, name="Alice"
+    )
+    feat = await _feature(client, eva["id"])
+    f = await _facet(
+        client, pid, "feature", feature_id=feat["id"], facet_key="cut",
+    )
+    r = await client.post(
+        f"/visual-facets/{f['id']}/anchors",
+        json={"value": "fresh",
+              "visual_context_entity_revision_id": alice_rev},
+    )
+    assert r.status_code == 409, r.text
+    body = r.json()
+    assert body["error_code"] == "VISUAL_ANCHOR_TARGET_INVALID"
+    assert "owner of" in body["message"]
+
+    # Positive control: the OWNING entity's revision is accepted.
+    r = await client.post(
+        f"/visual-facets/{f['id']}/anchors",
+        json={"value": "fresh",
+              "visual_context_entity_revision_id": rev1},
     )
     assert r.status_code == 201, r.text

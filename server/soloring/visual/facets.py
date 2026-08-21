@@ -19,7 +19,12 @@ from soloring.continuity.entities import _translate_op_error
 from soloring.continuity.values import canonicalize_value
 from soloring.domain.ids import is_uuid, new_uuid
 from soloring.domain.normalize import normalize_optional_creative
-from soloring.errors import ErrorCode, SoloRingError, validation_error
+from soloring.errors import (
+    ErrorCode,
+    SoloRingError,
+    internal_invariant,
+    validation_error,
+)
 
 _FACET_KEY_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
 
@@ -564,8 +569,8 @@ async def create_anchor(
             facet = (
                 await conn.execute(
                     text(
-                        "SELECT id, project_id, target_kind, feature_id "
-                        "FROM visual_facets WHERE id = :fid "
+                        "SELECT id, project_id, target_kind, entity_id, "
+                        "feature_id FROM visual_facets WHERE id = :fid "
                         "AND deleted_at IS NULL"
                     ),
                     {"fid": facet_id},
@@ -613,6 +618,15 @@ async def create_anchor(
                     raise _anchor_target_invalid(
                         f"EntityRevision {er} belongs to another Project."
                     )
+                # §13/§68: the revision must be OF THE FACET'S ENTITY —
+                # a same-Project revision of a different Entity is a
+                # wrong-EntityRevision target, not a legal binding.
+                if rev.entity_id != facet.entity_id:
+                    raise _anchor_target_invalid(
+                        f"EntityRevision {er} does not belong to "
+                        f"Entity {facet.entity_id} — the facet's own "
+                        "target."
+                    )
                 entity_revision_id = er
             else:
                 if payload.entity_revision_id is not None or (
@@ -637,7 +651,7 @@ async def create_anchor(
                 ctx_rev = (
                     await conn.execute(
                         text(
-                            "SELECT ce.project_id AS p "
+                            "SELECT ce.project_id AS p, ce.id AS entity_id "
                             "FROM entity_revisions er "
                             "JOIN creative_entities ce "
                             "ON ce.id = er.entity_id "
@@ -655,6 +669,30 @@ async def create_anchor(
                     raise _anchor_target_invalid(
                         f"Visual-context EntityRevision {ctx} belongs to "
                         "another Project."
+                    )
+                # §13/§68: the visual context must be a revision of the
+                # Entity OWNING the ContinuityFeature — a same-Project
+                # revision of any other Entity is a wrong visual-context
+                # target.
+                feature_owner = (
+                    await conn.execute(
+                        text(
+                            "SELECT entity_id FROM continuity_features "
+                            "WHERE id = :fid AND deleted_at IS NULL"
+                        ),
+                        {"fid": facet.feature_id},
+                    )
+                ).scalar_one_or_none()
+                if feature_owner is None:
+                    raise internal_invariant(
+                        f"VisualFacet {facet_id} targets a missing "
+                        "ContinuityFeature."
+                    )
+                if ctx_rev.entity_id != feature_owner:
+                    raise _anchor_target_invalid(
+                        f"Visual-context EntityRevision {ctx} does not "
+                        f"belong to Entity {feature_owner}, the owner of "
+                        "the facet's ContinuityFeature."
                     )
                 try:
                     feature_value_json, feature_value_hash = (

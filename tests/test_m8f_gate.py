@@ -1482,12 +1482,25 @@ async def test_scale_bulk_wiring_disclosed_invariants(
 
         noise_anchors = []
         noise_items = []
+        # r3-gate B4: every noise anchor binds a historical revision OF
+        # ITS FACET'S OWN ENTITY — legal (if unreachable) state. The
+        # per-facet counter picks each of the entity's historical
+        # revisions in turn, keeping (facet, revision) pairs injective
+        # against the partial unique index.
+        hists_by_entity: dict[str, list] = {}
+        for h in hist_revs:
+            hists_by_entity.setdefault(h["entity_id"], []).append(h)
+        anchor_count_per_facet: dict[str, int] = {}
         for k in range(SCALE_BULK_NOISE_ANCHORS):
-            # Injective pairing: k and k + |facets| share the facet but
-            # take different historical revisions — the partial unique
-            # index on (visual_facet_id, entity_revision_id) stays clean.
-            hist = hist_revs[(k // len(facet_rows)) % len(hist_revs)]
             facet = facet_rows[k % len(facet_rows)]
+            candidates = hists_by_entity[facet["entity_id"]]
+            hist = candidates[
+                anchor_count_per_facet.setdefault(facet["id"], 0)
+                % len(candidates)
+            ]
+            anchor_count_per_facet[facet["id"]] = (
+                anchor_count_per_facet.get(facet["id"], 0) + 1
+            )
             asset_id = assets[k % len(assets)]
             binding = AnchorBinding(
                 visual_facet_id=facet["id"],
@@ -1572,7 +1585,19 @@ async def test_scale_bulk_wiring_disclosed_invariants(
             text("SELECT COUNT(*) FROM shots WHERE project_id = :p"),
             {"p": pid},
         )).scalar()
+        # Legality proof (r3-gate B4): every noise anchor's historical
+        # revision belongs to the facet's OWN entity.
+        bad_bindings = (await conn.execute(
+            text(
+                "SELECT COUNT(*) FROM visual_anchors va "
+                "JOIN visual_facets vf ON vf.id = va.visual_facet_id "
+                "JOIN entity_revisions er ON er.id = "
+                "va.entity_revision_id "
+                "WHERE er.entity_id != vf.entity_id"
+            ),
+        )).scalar()
     assert total_shots == SCALE_TOTAL_SHOTS
+    assert bad_bindings == 0
     print(
         f"\n[§66 bulk evidence] resolver queries={queries} "
         f"wall={wall * 1000:.1f}ms total_shots={total_shots}"

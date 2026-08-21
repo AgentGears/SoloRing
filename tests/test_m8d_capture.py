@@ -437,3 +437,56 @@ async def test_visual_provenance_current_follows_applicable_state(
     assert row["current_applicable_anchor_id"] is None
     assert row["current_approved_revision_id"] is None
     assert row["current_approved_revision_number"] is None
+
+
+async def test_visual_provenance_current_obeys_not_applicable(
+    client, factory, engine,
+):
+    """r3-gate B6: the §73 "current authority" fields consume the
+    CANONICAL resolver — a not_applicable value policy suppresses current
+    applicability even though the exact matching anchor stays approved.
+    The captured display is unaffected."""
+    pid = await _seed_project(factory)
+    eva, rev1 = await _entity_with_revision(client, factory, pid)
+    feat = await _feature(client, eva["id"])
+    assets = await _assets(engine, pid, 1)
+    f = await _facet(
+        client, pid, "feature", feature_id=feat["id"], facet_key="cut",
+    )
+    r = await client.post(
+        f"/visual-facets/{f['id']}/anchors",
+        json={"value": "fresh",
+              "visual_context_entity_revision_id": rev1},
+    )
+    await _approve_anchor(client, r.json()["id"], assets, ["front"])
+    seq, scene, shots = await _topology(client, factory, pid)
+    await _depend(client, shots[0], [eva["id"]])
+    await client.post(
+        f"/continuity-features/{feat['id']}/transitions",
+        json={"anchor_type": "scene", "anchor_id": scene,
+              "boundary": "start", "operation": "set", "value": "fresh"},
+    )
+    captured = await _capture(factory, shots[0])
+
+    body = (await client.get(
+        f"/shot-revisions/{captured.id}/continuity"
+    )).json()
+    row = body["visual"]["anchors"][0]
+    assert row["current_applicable_anchor_id"] is not None
+
+    # fresh → not_applicable: canonical resolution says no current
+    # authority, while the matching anchor itself stays approved.
+    await client.put(
+        f"/visual-facets/{f['id']}/value-policies",
+        json={"policies": [{"value": "fresh",
+                            "policy": "not_applicable"}]},
+    )
+
+    body = (await client.get(
+        f"/shot-revisions/{captured.id}/continuity"
+    )).json()
+    row = body["visual"]["anchors"][0]
+    assert row["captured_visual_anchor_revision_id"]  # captured intact
+    assert row["current_applicable_anchor_id"] is None
+    assert row["current_approved_revision_id"] is None
+    assert row["current_approved_revision_number"] is None

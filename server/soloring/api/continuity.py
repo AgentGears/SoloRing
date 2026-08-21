@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Request, status
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -110,12 +110,15 @@ async def get_semantic_dependencies(
     ]
 
 
-async def _revision_continuity(session: AsyncSession, revision_id: str) -> dict:
+async def _revision_continuity(
+    session: AsyncSession, revision_id: str, *, settings=None
+) -> dict:
     """The historical continuity projection of one ShotRevision (§63).
 
     Legacy v1 revisions mean 'no semantic dependency snapshot' by definition
     (M6-F14): schema nulls and an empty dependency list — never a
-    reconstruction from current Story World state.
+    reconstruction from current Story World state. ``settings`` is the
+    RUNNING APP's Settings when supplied by the HTTP path (r2-gate B2).
     """
     from soloring.errors import ErrorCode, not_found
     from soloring.domain.ids import is_uuid
@@ -452,20 +455,31 @@ async def _revision_continuity(session: AsyncSession, revision_id: str) -> dict:
             })
 
         # §73: "current" means the CURRENTLY APPLICABLE state-specific
-        # realization for this Shot — resolved against the CURRENT
-        # semantic state (r2-gate B6), never the captured historical
-        # anchor row. After an EntityRevision/feature-value change the
-        # old captured anchor is NOT reported as current.
-        current_by_facet: dict[str, dict | None] = {}
+        # realization for this Shot — computed by the ONE canonical M8
+        # resolver (r3-gate B6: applicability obeys requirement AND
+        # value policies, incl. not_applicable), never a second partial
+        # matching implementation and never the captured historical
+        # anchor row.
+        current_status_by_facet: dict = {}
         rev_numbers: dict[str, int] = {}
         if vrows:
+            from soloring.assets.blob_store import BlobStore
             from soloring.continuity.snapshots import (
                 resolve_working_dependencies,
             )
             from soloring.continuity.state import (
+                readiness_projection,
                 resolve_effective_feature_state,
+                resolve_effective_relation_state,
+            )
+            from soloring.settings import get_settings
+            from soloring.visual.resolver import (
+                resolve_visual_reference_pack_async,
             )
 
+            blob_store = BlobStore(
+                settings if settings is not None else get_settings()
+            )
             async with session.bind.connect() as conn:
                 await conn.exec_driver_sql("BEGIN")
                 try:
@@ -475,28 +489,25 @@ async def _revision_continuity(session: AsyncSession, revision_id: str) -> dict:
                     outcome = await resolve_effective_feature_state(
                         conn, rev["shot_id"]
                     )
-                    facet_ids = sorted(
-                        {r["visual_facet_id"] for r in vrows}
-                    )
-                    facet_ph = ", ".join(
-                        f":vf{i}" for i in range(len(facet_ids))
-                    )
-                    cur_anchors = (
-                        await conn.execute(
-                            text(
-                                "SELECT id, visual_facet_id, "
-                                "entity_revision_id, feature_value_hash, "
-                                "visual_context_entity_revision_id, "
-                                "approved_revision_id FROM visual_anchors "
-                                "WHERE deleted_at IS NULL AND "
-                                f"visual_facet_id IN ({facet_ph})"
-                            ),
-                            {
-                                f"vf{i}": fid
-                                for i, fid in enumerate(facet_ids)
-                            },
+                    relation_outcome = (
+                        await resolve_effective_relation_state(
+                            conn, rev["shot_id"]
                         )
-                    ).mappings().all()
+                    )
+                    projection = readiness_projection(
+                        outcome, relation_outcome
+                    )
+                    if projection["continuity_state_ready"]:
+                        current = await resolve_visual_reference_pack_async(
+                            rev["shot_id"], (deps, outcome.states),
+                            conn=conn, blob_store=blob_store,
+                        )
+                        current_status_by_facet = {
+                            st.visual_facet_id: st
+                            for st in current.facet_statuses
+                        }
+                    # M7 not ready → current applicability is honestly
+                    # unresolvable; the captured display is unaffected.
                     await conn.commit()
                 except Exception:
                     import contextlib as _cl
@@ -504,43 +515,10 @@ async def _revision_continuity(session: AsyncSession, revision_id: str) -> dict:
                     with _cl.suppress(Exception):
                         await conn.rollback()
                     raise
-            entity_rev_by_entity = {
-                d.entity_id: d.entity_revision_id for d in deps
-            }
-            value_hash_by_feature = {
-                st.feature_id: st.value_hash for st in outcome.states
-            }
-            owner_by_feature = {
-                st.feature_id: st.entity_id for st in outcome.states
-            }
-            for row in vrows:
-                applicable = None
-                for ca in cur_anchors:
-                    if ca["visual_facet_id"] != row["visual_facet_id"]:
-                        continue
-                    if row["target_kind"] == "entity":
-                        if ca["entity_revision_id"] == (
-                            entity_rev_by_entity.get(row["entity_id"])
-                        ):
-                            applicable = dict(ca)
-                            break
-                    else:
-                        ctx = entity_rev_by_entity.get(
-                            owner_by_feature.get(row["feature_id"])
-                        )
-                        if (
-                            ca["feature_value_hash"]
-                            == value_hash_by_feature.get(row["feature_id"])
-                            and ca["visual_context_entity_revision_id"]
-                            == ctx
-                        ):
-                            applicable = dict(ca)
-                            break
-                current_by_facet[row["visual_facet_id"]] = applicable
             approved_ids = {
-                ca["approved_revision_id"]
-                for ca in current_by_facet.values()
-                if ca is not None and ca["approved_revision_id"]
+                st.approved_revision_id
+                for st in current_status_by_facet.values()
+                if st.resolved == "approved" and st.approved_revision_id
             }
             if approved_ids:
                 ph = ", ".join(f":cr{i}" for i in range(len(approved_ids)))
@@ -573,27 +551,27 @@ async def _revision_continuity(session: AsyncSession, revision_id: str) -> dict:
                         r["visual_anchor_snapshot_hash"]
                     ),
                     "current_applicable_anchor_id": (
-                        current_by_facet[r["visual_facet_id"]]["id"]
-                        if current_by_facet.get(r["visual_facet_id"])
+                        st.visual_anchor_id
+                        if (st := current_status_by_facet.get(
+                            r["visual_facet_id"]
+                        )) is not None
+                        and st.resolved == "approved"
                         else None
                     ),
                     "current_approved_revision_id": (
-                        current_by_facet[r["visual_facet_id"]][
-                            "approved_revision_id"
-                        ]
-                        if current_by_facet.get(r["visual_facet_id"])
+                        st.approved_revision_id
+                        if (st := current_status_by_facet.get(
+                            r["visual_facet_id"]
+                        )) is not None
+                        and st.resolved == "approved"
                         else None
                     ),
                     "current_approved_revision_number": (
-                        rev_numbers.get(
-                            current_by_facet[r["visual_facet_id"]][
-                                "approved_revision_id"
-                            ]
-                        )
-                        if current_by_facet.get(r["visual_facet_id"])
-                        and current_by_facet[r["visual_facet_id"]][
-                            "approved_revision_id"
-                        ]
+                        rev_numbers.get(st.approved_revision_id)
+                        if (st := current_status_by_facet.get(
+                            r["visual_facet_id"]
+                        )) is not None
+                        and st.resolved == "approved"
                         else None
                     ),
                     "target_kind": r["target_kind"],
@@ -627,14 +605,21 @@ async def _revision_continuity(session: AsyncSession, revision_id: str) -> dict:
 
 @router.get("/shot-revisions/{revision_id}/continuity")
 async def shot_revision_continuity(
-    revision_id: str, session: AsyncSession = Depends(get_session)
+    revision_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
 ) -> dict:
-    return await _revision_continuity(session, revision_id)
+    return await _revision_continuity(
+        session, revision_id,
+        settings=getattr(request.app.state, "settings", None),
+    )
 
 
 @router.get("/generations/{generation_id}/continuity")
 async def generation_continuity(
-    generation_id: str, session: AsyncSession = Depends(get_session)
+    generation_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
 ) -> dict:
     """Traverse Generation -> historical ShotRevision -> continuity graph.
 
@@ -660,7 +645,10 @@ async def generation_continuity(
             ErrorCode.GENERATION_NOT_FOUND,
             f"Generation {generation_id} not found.",
         )
-    projection = await _revision_continuity(session, revision_id)
+    projection = await _revision_continuity(
+        session, revision_id,
+        settings=getattr(request.app.state, "settings", None),
+    )
     projection["generation_id"] = generation_id
     return projection
 
