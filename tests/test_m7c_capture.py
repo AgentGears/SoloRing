@@ -516,9 +516,13 @@ async def test_structural_singularity_both_paths_invoke_builder(
     calls = []
     original = snaps.build_capturable_snapshot
 
-    def spy(shot, refs, resolved, feature_states=(), relation_states=()):
+    def spy(shot, refs, resolved, feature_states=(), relation_states=(),
+            visual_pack=None):
         calls.append(len(feature_states))
-        return original(shot, refs, resolved, feature_states, relation_states)
+        return original(
+            shot, refs, resolved, feature_states, relation_states,
+            visual_pack,
+        )
 
     monkeypatch.setattr(snaps, "build_capturable_snapshot", spy)
     # Patch the consumed symbol in the working-hash wrapper too (it calls
@@ -526,11 +530,11 @@ async def test_structural_singularity_both_paths_invoke_builder(
     monkeypatch.setattr(
         snaps, "effective_working_snapshot_hash",
         lambda shot, refs, resolved, feature_states=(),
-        relation_states=(): (
+        relation_states=(), visual_pack=None: (
             __import__("soloring.domain.canonical",
                        fromlist=["canonical_hash"]).canonical_hash(
                 spy(shot, refs, resolved, feature_states,
-                    relation_states)[0])
+                    relation_states, visual_pack)[0])
         ),
     )
 
@@ -590,11 +594,14 @@ def test_ast_no_second_builder_or_generation_resolution():
                     )
 
 
-def test_no_migration_changed_and_head_is_0008():
+def test_migration_files_and_head_is_0009():
+    """M7C itself added no migration (0008 was M7A's); the head advanced
+    to 0009 only with M8A's visual-identity migration."""
     versions = BASE_DIR / "server" / "alembic" / "versions"
     files = sorted(p.name for p in versions.glob("*.py"))
-    assert files[-1] == "0008_narrative_continuity_state.py"
-    assert len(files) == 8
+    assert files[-2] == "0008_narrative_continuity_state.py"
+    assert files[-1] == "0009_m8_visual_identity.py"
+    assert len(files) == 9
 
 
 # --- Reuse integrity fail-closed ----------------------------------------------------------------
@@ -757,7 +764,7 @@ async def test_capture_read_to_write_handoff_boundary(client, factory, engine):
                 TransitionPatch(operation="set", value="healing"),
             )
 
-    async def read_wrap(session, shot_id):
+    async def read_wrap(session, shot_id, **kwargs):
         result = await original_read(session, shot_id)
         if "competitor" not in state:
             AsyncConnection.exec_driver_sql = wrapped_exec
@@ -820,7 +827,7 @@ async def test_true_concurrent_different_schema3_captures_both_persist(
         async with factory() as s2:
             return await revision_svc.capture_revision(s2, shots[0])
 
-    async def read_wrap(session, shot_id):
+    async def read_wrap(session, shot_id, **kwargs):
         result = await original_read(session, shot_id)  # state A (fresh)
         if "ran" not in state:
             state["ran"] = True

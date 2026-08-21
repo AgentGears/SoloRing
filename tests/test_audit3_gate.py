@@ -378,7 +378,7 @@ async def test_create_generation_survives_revision_rollback(
         real_capture = revisions_mod.capture_revision
         forced = {"done": False}
 
-        async def colliding_capture(session, shot_id_):
+        async def colliding_capture(session, shot_id_, **kwargs):
             if not forced["done"]:
                 forced["done"] = True
                 await session.rollback()  # expire pre-loaded ORM state

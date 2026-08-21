@@ -69,6 +69,16 @@ from soloring.continuity.models import (  # noqa: E402,F401
     VehicleRevisionSpec,
 )
 from soloring.narrative.models import Scene, Sequence  # noqa: E402,F401
+from soloring.visual.models import (  # noqa: E402,F401
+    ShotRevisionVisualAnchor,
+    ShotRevisionVisualAnchorItem,
+    VisualAnchor,
+    VisualAnchorItem,
+    VisualAnchorRevision,
+    VisualAnchorRevisionItem,
+    VisualFacet,
+    VisualFacetValuePolicy,
+)
 
 __all__ = [
     "WorkerLease",

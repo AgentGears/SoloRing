@@ -7,6 +7,8 @@ import Link from "next/link";
 
 import ApprovedTakePanel from "@/components/ApprovedTakePanel";
 import ContinuityStatePanel from "@/components/ContinuityStatePanel";
+import VisualContinuityPanel from "@/components/VisualContinuityPanel";
+import VisualProvenanceList from "@/components/VisualProvenanceList";
 import ReferencePanel from "@/components/ReferencePanel";
 import { SemanticDependenciesPanel } from "@/components/SemanticDependenciesPanel";
 import RevisionProvenanceList from "@/components/RevisionProvenanceList";
@@ -20,9 +22,12 @@ import {
   serverGetReferences,
   serverGetRevisionContinuity,
   serverGetShot,
+  serverGetVisualContinuity,
   serverListAssets,
   serverListRevisions,
   serverListTakes,
+  serverListVisualAnchors,
+  serverListVisualFacets,
 } from "@/lib/api.server";
 import { serverListEntities, serverListSemanticDependencies } from "@/lib/api.server";
 import type {
@@ -56,6 +61,13 @@ export default async function ShotPage({
   let notReadyCode: string | null = null;
   let notReadyIssues: ReadinessIssue[] = [];
   let continuityLoadError: { code: string; message: string } | null = null;
+  let visualState: import("@/lib/visualTypes").VisualContinuityState | null =
+    null;
+  let visualFacets: import("@/lib/visualTypes").VisualFacet[] = [];
+  let visualAnchorsByFacet: Record<
+    string,
+    import("@/lib/visualTypes").VisualAnchor[]
+  > = {};
   let provenance: Record<
     string,
     import("@/lib/types").RevisionContinuity | ApiError | null
@@ -106,6 +118,26 @@ export default async function ShotPage({
     // Historical provenance errors surface VISIBLY (fail-closed integrity
     // responses are never silently nulled); null only for a response that
     // legitimately could not be attempted.
+    try {
+      visualState = await serverGetVisualContinuity(id);
+    } catch {
+      // Honest failure: the composed endpoint raised a non-semantic
+      // error; the panel renders the unresolved state.
+      visualState = null;
+    }
+    // §71 promotion targets: the Shot's Project facets + realizations.
+    try {
+      visualFacets = await serverListVisualFacets(shot!.project_id);
+      const perFacet = await Promise.all(
+        visualFacets.map((vf) => serverListVisualAnchors(vf.id)),
+      );
+      visualAnchorsByFacet = Object.fromEntries(
+        visualFacets.map((vf, i) => [vf.id, perFacet[i]]),
+      );
+    } catch {
+      visualFacets = [];
+      visualAnchorsByFacet = {};
+    }
     provenance = Object.fromEntries(
       await Promise.all(
         revisions.map(async (r) => {
@@ -174,7 +206,14 @@ export default async function ShotPage({
       />
 
       <h2>Takes</h2>
-      <TakesPanel shotId={shot!.id} initialTakes={takes} />
+      <TakesPanel
+        shotId={shot!.id}
+        initialTakes={takes}
+        visualTargets={{
+          facets: visualFacets,
+          anchorsByFacet: visualAnchorsByFacet,
+        }}
+      />
 
       <h2>Revision history</h2>
       <RevisionList revisions={revisions} />
@@ -187,6 +226,17 @@ export default async function ShotPage({
           entities.map((e) => [e.id, e.name]),
         )}
       />
+
+      <h2>Visual continuity</h2>
+      <VisualContinuityPanel
+        state={visualState}
+        entityNames={Object.fromEntries(
+          entities.map((e) => [e.id, e.name]),
+        )}
+      />
+
+      <h2>Visual references at capture</h2>
+      <VisualProvenanceList revisions={revisions} continuity={provenance} />
 
       <h2>Current continuity state</h2>
       <ContinuityStatePanel

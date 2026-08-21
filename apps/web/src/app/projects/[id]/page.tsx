@@ -3,6 +3,7 @@
 import Link from "next/link";
 
 import { ProjectContinuityPanel } from "@/components/ProjectContinuityPanel";
+import { VisualIdentityPanel } from "@/components/VisualIdentityPanel";
 import { ShotCreateForm, ShotDeleteButton } from "@/components/ShotActions";
 import { NarrativePanel } from "@/components/NarrativePanel";
 import { StoryWorldPanel } from "@/components/StoryWorldPanel";
@@ -10,6 +11,7 @@ import { asApiError, type ApiError } from "@/lib/api.shared";
 import {
   serverGetProject,
   serverListAssets,
+  serverListContinuityFeatures,
   serverListEntities,
   serverListPredicates,
   serverListRelationTransitions,
@@ -17,6 +19,8 @@ import {
   serverListScenes,
   serverListSequences,
   serverListShots,
+  serverListVisualAnchors,
+  serverListVisualFacets,
 } from "@/lib/api.server";
 import type {
   Asset,
@@ -69,11 +73,20 @@ export default async function ProjectPage({
   let predicates: ContinuityPredicate[] = [];
   let relations: ContinuityRelation[] = [];
   let transitionsByRelation: Record<string, RelationTransition[]> = {};
+  let visualFacets: import("@/lib/visualTypes").VisualFacet[] = [];
+  let anchorsByFacet: Record<
+    string,
+    import("@/lib/visualTypes").VisualAnchor[]
+  > = {};
+  let featuresByEntity: Record<
+    string,
+    import("@/lib/types").ContinuityFeature[]
+  > = {};
   let loadError: ApiError | null = null;
 
   try {
     project = await serverGetProject(id);
-    [shots, assets, entities, sequences, predicates, relations] =
+    [shots, assets, entities, sequences, predicates, relations, visualFacets] =
       await Promise.all([
         serverListShots(id),
         serverListAssets(id),
@@ -81,7 +94,21 @@ export default async function ProjectPage({
         serverListSequences(id),
         serverListPredicates(id),
         serverListRelations(id),
+        serverListVisualFacets(id),
       ]);
+    const anchorsByFacetList = await Promise.all(
+      visualFacets.map((vf) => serverListVisualAnchors(vf.id)),
+    );
+    anchorsByFacet = Object.fromEntries(
+      visualFacets.map((vf, i) => [vf.id, anchorsByFacetList[i]]),
+    );
+    // §69 feature facets author against the owning entity's features.
+    const featuresPerEntity = await Promise.all(
+      entities.map((e) => serverListContinuityFeatures(e.id)),
+    );
+    featuresByEntity = Object.fromEntries(
+      entities.map((e, i) => [e.id, featuresPerEntity[i]]),
+    );
     scenes = (
       await Promise.all(
         sequences.map((s) => serverListScenes(s.id)),
@@ -166,6 +193,16 @@ export default async function ProjectPage({
 
       <h2>Story World</h2>
       <StoryWorldPanel projectId={id} entities={entities} />
+
+      <h2>Visual Identity</h2>
+      <VisualIdentityPanel
+        projectId={id}
+        facets={visualFacets}
+        anchorsByFacet={anchorsByFacet}
+        entities={entities}
+        featuresByEntity={featuresByEntity}
+        assets={assets}
+      />
 
       <h2>Continuity relations</h2>
       <ProjectContinuityPanel

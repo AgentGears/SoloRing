@@ -29,6 +29,28 @@ def settings(tmp_data_dir: Path) -> Settings:
     return Settings(data_dir=tmp_data_dir)
 
 
+@pytest.fixture(autouse=True)
+def _settings_singleton_pinned(tmp_path: Path):
+    """Pin the process Settings singleton to the TEST's storage root for
+    the duration of each test (r2-gate B2).
+
+    The pinned Settings names ``tmp_path / "data"`` — the exact root the
+    ``settings`` fixture would use — WITHOUT creating anything, so tests
+    that build their own directory tree keep working. Whenever a test
+    also requests ``settings``/``engine``/``client``, the singleton and
+    ``request.app.state.settings`` name the SAME authority, which is
+    exactly what production guarantees when configured explicitly.
+    Tests proving the app authority wins over a divergent singleton
+    poison ``soloring.settings._settings`` locally.
+    """
+    import soloring.settings as settings_mod
+
+    previous = settings_mod._settings
+    settings_mod._settings = Settings(data_dir=tmp_path / "data")
+    yield
+    settings_mod._settings = previous
+
+
 @pytest.fixture
 async def engine(settings: Settings):
     """A real SoloRing engine (with PRAGMAs) over a fresh temp DB + schema."""

@@ -525,7 +525,7 @@ def test_0008_downgrade_refuses_schema_v3_json(tmp_path, monkeypatch):
     con.commit()
     con.close()
 
-    with pytest.raises(RuntimeError, match="schema_version"):
+    with pytest.raises(RuntimeError, match="schema_version|schema-4"):
         command.downgrade(cfg, "0007_active_narrative_uniqueness")
     con = sq.connect(str(db_file))
     try:
@@ -589,7 +589,7 @@ def test_0008_downgrade_refuses_missing_schema_version(tmp_path, monkeypatch):
     con.commit()
     con.close()
 
-    with pytest.raises(RuntimeError, match="schema_version"):
+    with pytest.raises(RuntimeError, match="schema_version|schema-4"):
         command.downgrade(cfg, "0007_active_narrative_uniqueness")
 
 # --- M7A re-gate regressions (blockers 1–4) ---------------------------------------

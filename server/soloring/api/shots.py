@@ -28,8 +28,11 @@ async def _shot_read(request: Request, shot_id: str) -> ShotRead:
     but never participates in the hash.
     """
     engine: AsyncEngine = request.app.state.engine
-    shot, refs, differs, resolved, effective_hash, readiness = (
-        await shots.read_shot_detail(engine, shot_id)
+    shot, refs, differs, resolved, effective_hash, readiness, visual = (
+        await shots.read_shot_detail(
+            engine, shot_id,
+            settings=getattr(request.app.state, "settings", None),
+        )
     )
     return ShotRead(
         **dict(shot),
@@ -37,6 +40,17 @@ async def _shot_read(request: Request, shot_id: str) -> ShotRead:
         working_state_differs_from_approved=differs,
         continuity_state_ready=readiness["continuity_state_ready"],
         readiness_issues=readiness["readiness_issues"],
+        visual_continuity_ready=(
+            # read_shot_detail ALWAYS returns a composed §52 result; this
+            # guard only keeps an impossible None from fabricating ready.
+            visual.visual_continuity_ready if visual is not None else False
+        ),
+        visual_reference_pack_hash=(
+            visual.visual_reference_pack_hash if visual is not None else None
+        ),
+        visual_continuity_issues=(
+            list(visual.issues) if visual is not None else []
+        ),
         semantic_dependencies=[
             SemanticDependencyItem(
                 entity_id=d.entity_id,

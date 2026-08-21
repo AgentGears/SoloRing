@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Request, status
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -110,12 +110,15 @@ async def get_semantic_dependencies(
     ]
 
 
-async def _revision_continuity(session: AsyncSession, revision_id: str) -> dict:
+async def _revision_continuity(
+    session: AsyncSession, revision_id: str, *, settings=None
+) -> dict:
     """The historical continuity projection of one ShotRevision (§63).
 
     Legacy v1 revisions mean 'no semantic dependency snapshot' by definition
     (M6-F14): schema nulls and an empty dependency list — never a
-    reconstruction from current Story World state.
+    reconstruction from current Story World state. ``settings`` is the
+    RUNNING APP's Settings when supplied by the HTTP path (r2-gate B2).
     """
     from soloring.errors import ErrorCode, not_found
     from soloring.domain.ids import is_uuid
@@ -127,7 +130,7 @@ async def _revision_continuity(session: AsyncSession, revision_id: str) -> dict:
     rev = (
         await session.execute(
             text(
-                "SELECT id, snapshot_hash, continuity_spec_json, "
+                "SELECT id, shot_id, snapshot_hash, continuity_spec_json, "
                 "continuity_spec_hash FROM shot_revisions WHERE id = :rid"
             ),
             {"rid": revision_id},
@@ -393,7 +396,198 @@ async def _revision_continuity(session: AsyncSession, revision_id: str) -> dict:
         )
     ).scalar_one_or_none()
     if snap_row is not None:
-        schema_version = _json.loads(snap_row).get("schema_version")
+        snapshot = _json.loads(snap_row)
+        schema_version = snapshot.get("schema_version")
+
+    # M8 §73: captured visual authority, strictly separated from current
+    # approval. The captured side reads ONLY immutable provenance (§57);
+    # the current side is presented as contrast, never as execution input.
+    visual_provenance: dict | None = None
+    if schema_version == 4:
+        pack_hash = None
+        visual_block = (snapshot or {}).get("visual") or {}
+        if isinstance(visual_block, dict):
+            pack_hash = visual_block.get("visual_reference_pack_hash")
+        vrows = (
+            await session.execute(
+                text(
+                    "SELECT srva.position, srva.visual_facet_id, "
+                    "srva.facet_key, srva.visual_anchor_id, "
+                    "srva.visual_anchor_revision_id, "
+                    "srva.visual_anchor_snapshot_hash, srva.target_kind, "
+                    "srva.entity_id, srva.entity_revision_id, "
+                    "srva.feature_id, srva.feature_value_hash, "
+                    "srva.feature_value_json, "
+                    "srva.visual_context_entity_revision_id, "
+                    "var.revision_number AS "
+                    "captured_revision_number "
+                    "FROM shot_revision_visual_anchors srva "
+                    "LEFT JOIN visual_anchor_revisions var "
+                    "ON var.id = srva.visual_anchor_revision_id "
+                    "WHERE srva.shot_revision_id = :rid "
+                    "ORDER BY srva.position"
+                ),
+                {"rid": revision_id},
+            )
+        ).mappings().all()
+        irows = (
+            await session.execute(
+                text(
+                    "SELECT anchor_position, item_position, asset_id, "
+                    "blob_hash, role, view_key FROM "
+                    "shot_revision_visual_anchor_items "
+                    "WHERE shot_revision_id = :rid "
+                    "ORDER BY anchor_position, item_position"
+                ),
+                {"rid": revision_id},
+            )
+        ).mappings().all()
+        items_by_anchor_pos: dict[int, list[dict]] = {}
+        for it in irows:
+            items_by_anchor_pos.setdefault(
+                it["anchor_position"], []
+            ).append({
+                "asset_id": it["asset_id"],
+                "blob_hash": it["blob_hash"],
+                "role": it["role"],
+                "view_key": it["view_key"],
+                "position": it["item_position"],
+            })
+
+        # §73: "current" means the CURRENTLY APPLICABLE state-specific
+        # realization for this Shot — computed by the ONE canonical M8
+        # resolver (r3-gate B6: applicability obeys requirement AND
+        # value policies, incl. not_applicable), never a second partial
+        # matching implementation and never the captured historical
+        # anchor row.
+        current_status_by_facet: dict = {}
+        rev_numbers: dict[str, int] = {}
+        if vrows:
+            from soloring.assets.blob_store import BlobStore
+            from soloring.continuity.snapshots import (
+                resolve_working_dependencies,
+            )
+            from soloring.continuity.state import (
+                readiness_projection,
+                resolve_effective_feature_state,
+                resolve_effective_relation_state,
+            )
+            from soloring.settings import get_settings
+            from soloring.visual.resolver import (
+                resolve_visual_reference_pack_async,
+            )
+
+            blob_store = BlobStore(
+                settings if settings is not None else get_settings()
+            )
+            async with session.bind.connect() as conn:
+                await conn.exec_driver_sql("BEGIN")
+                try:
+                    deps = await resolve_working_dependencies(
+                        conn, rev["shot_id"]
+                    )
+                    outcome = await resolve_effective_feature_state(
+                        conn, rev["shot_id"]
+                    )
+                    relation_outcome = (
+                        await resolve_effective_relation_state(
+                            conn, rev["shot_id"]
+                        )
+                    )
+                    projection = readiness_projection(
+                        outcome, relation_outcome
+                    )
+                    if projection["continuity_state_ready"]:
+                        current = await resolve_visual_reference_pack_async(
+                            rev["shot_id"], (deps, outcome.states),
+                            conn=conn, blob_store=blob_store,
+                        )
+                        current_status_by_facet = {
+                            st.visual_facet_id: st
+                            for st in current.facet_statuses
+                        }
+                    # M7 not ready → current applicability is honestly
+                    # unresolvable; the captured display is unaffected.
+                    await conn.commit()
+                except Exception:
+                    import contextlib as _cl
+
+                    with _cl.suppress(Exception):
+                        await conn.rollback()
+                    raise
+            approved_ids = {
+                st.approved_revision_id
+                for st in current_status_by_facet.values()
+                if st.resolved == "approved" and st.approved_revision_id
+            }
+            if approved_ids:
+                ph = ", ".join(f":cr{i}" for i in range(len(approved_ids)))
+                num_rows = (
+                    await session.execute(
+                        text(
+                            "SELECT id, revision_number FROM "
+                            f"visual_anchor_revisions WHERE id IN ({ph})"
+                        ),
+                        {f"cr{i}": rid for i, rid in enumerate(approved_ids)},
+                    )
+                ).all()
+                rev_numbers = {r[0]: r[1] for r in num_rows}
+
+        visual_provenance = {
+            "visual_reference_pack_hash": pack_hash,
+            "anchors": [
+                {
+                    "position": r["position"],
+                    "visual_facet_id": r["visual_facet_id"],
+                    "facet_key": r["facet_key"],
+                    "visual_anchor_id": r["visual_anchor_id"],
+                    "captured_visual_anchor_revision_id": (
+                        r["visual_anchor_revision_id"]
+                    ),
+                    "captured_revision_number": (
+                        r["captured_revision_number"]
+                    ),
+                    "captured_snapshot_hash": (
+                        r["visual_anchor_snapshot_hash"]
+                    ),
+                    "current_applicable_anchor_id": (
+                        st.visual_anchor_id
+                        if (st := current_status_by_facet.get(
+                            r["visual_facet_id"]
+                        )) is not None
+                        and st.resolved == "approved"
+                        else None
+                    ),
+                    "current_approved_revision_id": (
+                        st.approved_revision_id
+                        if (st := current_status_by_facet.get(
+                            r["visual_facet_id"]
+                        )) is not None
+                        and st.resolved == "approved"
+                        else None
+                    ),
+                    "current_approved_revision_number": (
+                        rev_numbers.get(st.approved_revision_id)
+                        if (st := current_status_by_facet.get(
+                            r["visual_facet_id"]
+                        )) is not None
+                        and st.resolved == "approved"
+                        else None
+                    ),
+                    "target_kind": r["target_kind"],
+                    "entity_id": r["entity_id"],
+                    "entity_revision_id": r["entity_revision_id"],
+                    "feature_id": r["feature_id"],
+                    "feature_value_hash": r["feature_value_hash"],
+                    "feature_value_json": r["feature_value_json"],
+                    "visual_context_entity_revision_id": (
+                        r["visual_context_entity_revision_id"]
+                    ),
+                    "items": items_by_anchor_pos.get(r["position"], []),
+                }
+                for r in vrows
+            ],
+        }
 
     return {
         "shot_revision_id": rev["id"],
@@ -405,19 +599,27 @@ async def _revision_continuity(session: AsyncSession, revision_id: str) -> dict:
         "feature_states": feature_states,
         "relations": relations,
         "source_transition_audit": transition_audit,
+        "visual": visual_provenance,
     }
 
 
 @router.get("/shot-revisions/{revision_id}/continuity")
 async def shot_revision_continuity(
-    revision_id: str, session: AsyncSession = Depends(get_session)
+    revision_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
 ) -> dict:
-    return await _revision_continuity(session, revision_id)
+    return await _revision_continuity(
+        session, revision_id,
+        settings=getattr(request.app.state, "settings", None),
+    )
 
 
 @router.get("/generations/{generation_id}/continuity")
 async def generation_continuity(
-    generation_id: str, session: AsyncSession = Depends(get_session)
+    generation_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
 ) -> dict:
     """Traverse Generation -> historical ShotRevision -> continuity graph.
 
@@ -443,7 +645,10 @@ async def generation_continuity(
             ErrorCode.GENERATION_NOT_FOUND,
             f"Generation {generation_id} not found.",
         )
-    projection = await _revision_continuity(session, revision_id)
+    projection = await _revision_continuity(
+        session, revision_id,
+        settings=getattr(request.app.state, "settings", None),
+    )
     projection["generation_id"] = generation_id
     return projection
 

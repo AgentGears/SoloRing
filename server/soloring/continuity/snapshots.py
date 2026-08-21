@@ -197,7 +197,7 @@ def relation_state_spec_entry(state) -> dict:
 
 def build_capturable_snapshot(
     shot, refs, resolved: list[ResolvedDependency], feature_states=(),
-    relation_states=(),
+    relation_states=(), visual_pack=None,
 ) -> tuple[dict, dict | None]:
     """(snapshot value, continuity spec or None) from ONE captured value.
 
@@ -209,35 +209,71 @@ def build_capturable_snapshot(
           (features AND relations)   → exact schema 2 + spec 1
         one or more effective Feature states
         OR relation states           → schema 3 + spec 2
+        any non-empty approved visual
+        pack                          → schema 4 over the exact lower base
 
-    There is no empty schema-3 representation (M6-F14 extended by M7D
-    §8.3): states that all clear — features AND relations alike — keep
-    the exact schema-2 form. An endpoint-incomplete Shot never reaches
-    this builder at all (the read unit raises first)."""
+    There is no empty schema-3/4 representation (M6-F14 extended by M7D
+    §8.3 and M8 §54–55): states that all clear keep the exact lower
+    schema; the zero-deps/non-empty-visual cell is unreachable by
+    construction. An endpoint-incomplete or visually-unready Shot never
+    reaches this builder at all (the read unit raises first)."""
     deps = sort_resolved(resolved)
     states = sort_feature_states(feature_states)
     relations = sort_relation_states(relation_states)
     if not deps:
+        # M8 §54: the zero-deps/non-empty-visual cell is UNREACHABLE by
+        # construction; a pack here is an internal invariant, never a
+        # representable schema.
+        if visual_pack:
+            from soloring.errors import internal_invariant
+
+            raise internal_invariant(
+                "Visual reference pack supplied for a zero-dependency "
+                "shot — the M8 schema lattice declares this cell "
+                "unreachable."
+            )
         return build_snapshot(shot, refs), None
     v1 = build_snapshot(shot, refs)
     if not states and not relations:
         spec = build_continuity_spec(deps)
+        if not visual_pack:
+            return (
+                {
+                    "schema_version": 2,
+                    "intent": v1["intent"],
+                    "references": v1["references"],
+                    "continuity": spec,
+                },
+                spec,
+            )
         return (
             {
-                "schema_version": 2,
+                "schema_version": 4,
+                "intent": v1["intent"],
+                "references": v1["references"],
+                "continuity": spec,
+                "visual_reference_pack": visual_pack,
+            },
+            spec,
+        )
+    spec = build_continuity_spec_v2(deps, states, relations)
+    if not visual_pack:
+        return (
+            {
+                "schema_version": 3,
                 "intent": v1["intent"],
                 "references": v1["references"],
                 "continuity": spec,
             },
             spec,
         )
-    spec = build_continuity_spec_v2(deps, states, relations)
     return (
         {
-            "schema_version": 3,
+            "schema_version": 4,
             "intent": v1["intent"],
             "references": v1["references"],
             "continuity": spec,
+            "visual_reference_pack": visual_pack,
         },
         spec,
     )
@@ -245,7 +281,7 @@ def build_capturable_snapshot(
 
 def effective_working_snapshot_hash(
     shot, refs, resolved: list[ResolvedDependency], feature_states=(),
-    relation_states=(),
+    relation_states=(), visual_pack=None,
 ) -> str:
     """The Shot's effective working hash (M6-F15 + M7C §10.4 + M7D §10.2).
 
@@ -254,7 +290,7 @@ def effective_working_snapshot_hash(
     mutation. Delegates to THE builder — never a second hash
     implementation."""
     snapshot, _ = build_capturable_snapshot(
-        shot, refs, resolved, feature_states, relation_states
+        shot, refs, resolved, feature_states, relation_states, visual_pack
     )
     return canonical_hash(snapshot)
 

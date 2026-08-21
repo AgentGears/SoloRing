@@ -270,7 +270,19 @@ _DETAIL_COLUMNS = (
 )
 
 
-async def read_shot_detail(engine: AsyncEngine, shot_id: str):
+def _visual_blob_store(settings=None):
+    """Physical-bytes authority for the visual resolver (r2-gate B2):
+    the RUNNING APP's Settings when supplied, else the process
+    singleton."""
+    from soloring.assets.blob_store import BlobStore
+    from soloring.settings import get_settings
+
+    if settings is not None:
+        return BlobStore(settings)
+    return BlobStore(get_settings())
+
+
+async def read_shot_detail(engine: AsyncEngine, shot_id: str, *, settings=None):
     """One bounded consistent read unit (M2 §3.2, §47; M6C §48).
 
     Explicit BEGIN on one checked-out connection so the shot row, its
@@ -328,10 +340,25 @@ async def read_shot_detail(engine: AsyncEngine, shot_id: str):
                 conn, shot_id
             )
             readiness = readiness_projection(outcome, relation_outcome)
+            # M8 §52: visual resolution only after semantic readiness, on
+            # the same pinned snapshot (one coherent unit). When M7 is not
+            # ready the composed result projects blocked (§52.1) — M7
+            # blockers surface through visual_continuity_issues and the
+            # visual flag is false; NULL-as-ready is never fabricated.
+            from soloring.visual.readiness import resolve_visual_readiness
+
+            visual_result = await resolve_visual_readiness(
+                conn, shot_id,
+                readiness["continuity_state_ready"],
+                readiness["readiness_issues"],
+                resolved, outcome.states,
+                blob_store=_visual_blob_store(settings),
+            )
             if readiness["continuity_state_ready"]:
                 effective_hash = effective_working_snapshot_hash(
                     shot, refs, resolved, outcome.states,
                     relation_outcome.relation_states,
+                    visual_result.pack,
                 )
                 differs = await canon.differs_from_approved(
                     conn, shot, refs, effective_hash
@@ -343,7 +370,10 @@ async def read_shot_detail(engine: AsyncEngine, shot_id: str):
                 effective_hash = None
                 differs = None
             await conn.commit()
-            return shot, refs, differs, resolved, effective_hash, readiness
+            return (
+                shot, refs, differs, resolved, effective_hash, readiness,
+                visual_result,
+            )
         except Exception:
             with contextlib.suppress(Exception):
                 await conn.rollback()
