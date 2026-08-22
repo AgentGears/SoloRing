@@ -263,7 +263,7 @@ export default async function ShotPage({
         return (
           <div key={t.id}>
             <h3>Generation {t.generation_id.slice(0, 8)}…</h3>
-            <GenerationRealizationInspector generation={gr} />
+            <GenerationRealizationInspector generation={gr} currentEnvironment={realizationState?.environment ?? null} />
           </div>
         );
       })}

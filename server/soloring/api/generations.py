@@ -96,6 +96,10 @@ def _project_m9(summary: GenerationSummary, spec_json: str | None) -> None:
     profile = realization.get("profile") or {}
     model = spec.get("model") or {}
     summary.workflow_spec_schema_version = 2
+    summary.manifest_hash = getattr(generation, "manifest_hash", None)
+    summary.workflow_template_hash = getattr(
+        generation, "workflow_template_hash", None
+    )
     summary.realization_profile_id = profile.get("id")
     summary.realization_profile_version = profile.get("version")
     summary.realization_profile_hash = profile.get("hash")

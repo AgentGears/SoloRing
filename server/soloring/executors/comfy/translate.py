@@ -133,7 +133,10 @@ def build_comfy_prompt(
         by_slot[slot] = m
 
     for key, decl in manifest.inputs.items():
-        if decl.source_role is None:
+        if (
+            getattr(decl, "source_role", None) is None
+            and not getattr(decl, "is_realization_input", False)
+        ):
             continue  # the prompt input: handled below, not a reference input
         declared_keys.add(key)
         what = f"input {key!r}"

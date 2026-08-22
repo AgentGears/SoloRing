@@ -17,7 +17,6 @@ from soloring.domain.ids import is_uuid
 from soloring.errors import ErrorCode, not_found
 from soloring.realization.authority import build_captured_authority
 from soloring.realization.compiler import compile_realization
-from soloring.realization.packages import capture_current_package
 
 router = APIRouter(tags=["realization"])
 
@@ -36,8 +35,14 @@ async def get_realization_readiness(
     if not is_uuid(shot_id):
         raise not_found(ErrorCode.SHOT_NOT_FOUND, f"Shot {shot_id} not found.")
 
-    # Stage 0: coherent package capture preempts everything (§11.1).
-    package = await capture_current_package(settings)
+    # §11.1 Stage 0: RAW byte capture preempts everything (r1-gate B1);
+    # semantic package validation runs only after the M7/M8 gates below.
+    from soloring.realization.packages import (
+        capture_current_release,
+        validate_package,
+    )
+
+    release = await capture_current_release(settings)
 
     from soloring.continuity.snapshots import resolve_working_dependencies
     from soloring.continuity.state import (
@@ -84,20 +89,6 @@ async def get_realization_readiness(
                 await conn.rollback()
             raise
 
-    base = {
-        "shot_id": shot_id,
-        "package": package.release.release_identity(),
-        "model": {
-            "id": package.profile.model.id,
-            "version": package.profile.model.version,
-        },
-        "profile": {
-            "id": package.profile.profile_id,
-            "version": package.profile.profile_version,
-            "hash": package.release.realization_profile_hash,
-        },
-    }
-
     issues: list[dict] = []
     for m7 in projection["readiness_issues"]:
         issues.append({**m7, "layer": "m7"})
@@ -105,6 +96,14 @@ async def get_realization_readiness(
         for m8 in visual.issues:
             issues.append({**m8, "layer": "m8"})
 
+    base = {
+        "shot_id": shot_id,
+        "package": release.release_identity(),
+        "model": None,
+        "profile": None,
+    }
+
+    # §11.1 step 3 (after M7/M8): semantic package validation.
     if not projection["continuity_state_ready"] or (
         not visual.visual_continuity_ready
     ):
@@ -113,10 +112,59 @@ async def get_realization_readiness(
             "ready": False,
             "visual_reference_pack_hash": None,
             "issues": issues,
-            "channels": _channel_rows(package, {}),
+            "channels": [],
             "facet_statuses": [],
             "omitted_optional": [],
+            "environment": _environment_status(settings),
         }
+
+    package = validate_package(release)
+    if not package.is_schema2:
+        # §63.2 lattice (r1-gate B3): a schema-1 package with non-empty
+        # authority is REALIZATION_PROFILE_REQUIRED; empty authority is
+        # legal legacy with no realization content.
+        authority_nonempty = bool((visual.pack or {}).get("anchors"))
+        base["model"] = None
+        base["profile"] = None
+        if authority_nonempty:
+            return {
+                **base,
+                "ready": False,
+                "visual_reference_pack_hash": None,
+                "issues": [{
+                    "error_code": "REALIZATION_PROFILE_REQUIRED",
+                    "layer": "m9",
+                    "message": (
+                        "The captured M8 visual authority is non-empty but "
+                        "the selected workflow package is schema 1 (no M9 "
+                        "realization contract)."
+                    ),
+                }],
+                "channels": [],
+                "facet_statuses": [],
+                "omitted_optional": [],
+                "environment": _environment_status(settings),
+            }
+        return {
+            **base,
+            "ready": True,
+            "visual_reference_pack_hash": None,
+            "issues": [],
+            "channels": [],
+            "facet_statuses": [],
+            "omitted_optional": [],
+            "environment": _environment_status(settings),
+        }
+
+    base["model"] = {
+        "id": package.profile.model.id,
+        "version": package.profile.model.version,
+    }
+    base["profile"] = {
+        "id": package.profile.profile_id,
+        "version": package.profile.profile_version,
+        "hash": package.release.realization_profile_hash,
+    }
 
     # Same capture-shaped authority value as historical reconstruction
     # (§10.2): pack + requirement map from the SAME coherent read.
@@ -138,6 +186,7 @@ async def get_realization_readiness(
             "channels": _channel_rows(package, {}),
             "facet_statuses": [],
             "omitted_optional": [],
+            "environment": _environment_status(settings),
         }
 
     result = compile_realization(
@@ -171,7 +220,58 @@ async def get_realization_readiness(
             }
             for o in result.omitted_optional
         ],
+        "environment": _environment_status(settings),
     }
+
+
+def _environment_status(settings) -> dict:
+    """§36.1/§44: the executor/runtime-environment compatibility state,
+    SEPARATELY labeled from realization readiness. Cheap checks only —
+    attestation presence + fingerprint compatibility + root
+    configuration; model BYTES stay per-submission verifications
+    (§6.4.1), never a readiness probe."""
+    from soloring.realization.model_roots import (
+        ModelIncompatible,
+        ROOT_KEYS,
+        root_for_key,
+    )
+    from soloring.realization.runtime import load_live_attestation
+
+    env: dict = {
+        "attestation": "unavailable",
+        "runtime_compatible": False,
+        "model_roots_configured": {k: False for k in ROOT_KEYS},
+        "note": (
+            "environment observation only — never M9 semantic readiness; "
+            "model bytes are hash-verified on every submission attempt"
+        ),
+    }
+    try:
+        attestation = load_live_attestation(settings)
+        env["attestation"] = "present"
+        from soloring.workflows.manifest import parse_fingerprint_lazy
+
+        fp = parse_fingerprint_lazy(settings)
+        if fp is None:
+            env["runtime_compatible"] = True  # no schema-2 requirement
+        else:
+            from soloring.realization.runtime import (
+                check_runtime_compatibility,
+            )
+
+            check_runtime_compatibility(fp, attestation)
+            env["runtime_compatible"] = True
+    except ModelIncompatible as exc:
+        env["attestation_detail"] = str(exc)
+    except Exception:
+        pass
+    for key in ROOT_KEYS:
+        try:
+            root_for_key(settings, key)
+            env["model_roots_configured"][key] = True
+        except ModelIncompatible:
+            env["model_roots_configured"][key] = False
+    return env
 
 
 def _preview_blob_store(settings):
@@ -212,11 +312,12 @@ def _facet_status_rows(authority, result, package) -> list[dict]:
     if result.spec:
         for channel in result.spec["channels"]:
             for b in channel["bindings"]:
-                selected[b["visual_facet_id"]] = {
+                entry = selected.setdefault(b["visual_facet_id"], {
                     "channel": channel["channel"],
                     "input_key": channel["input_key"],
-                    "binding": b,
-                }
+                    "bindings": [],
+                })
+                entry["bindings"].append(b)
     issue_by_facet: dict[str, dict] = {}
     channel_issue: dict[str, dict] = {}
     for issue in result.issues:
@@ -245,12 +346,19 @@ def _facet_status_rows(authority, result, package) -> list[dict]:
         }
         if facet.visual_facet_id in selected:
             entry = selected[facet.visual_facet_id]
-            b = entry["binding"]
+            # r1-gate B3: EVERY binding's item is exposed, ordered by
+            # binding_position — a multi-item facet shows all its items,
+            # never only the last.
+            ordered_items = [
+                b["item"] for b in sorted(
+                    entry["bindings"], key=lambda b: b["binding_position"]
+                )
+            ]
             row.update({
                 "status": "selected",
                 "channel": entry["channel"],
                 "input_key": entry["input_key"],
-                "selected_items": [b["item"]],
+                "selected_items": ordered_items,
                 "reason": None,
                 "issue_code": None,
             })

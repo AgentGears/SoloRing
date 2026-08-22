@@ -53,6 +53,26 @@ def check_runtime_compatibility(
         _fail("custom-node whitelist differs from the captured requirement")
 
 
+def verify_attested_process_live(attestation, settings) -> None:
+    """§26.2 (B4): the attested process must STILL be the process serving
+    the configured executor origin — the M5B stale-attestation defense
+    (pid + process-start fingerprint vs the port listener). Failure is
+    EXECUTION_MODEL_INCOMPATIBLE: the attested runtime is not the live
+    one."""
+    from urllib.parse import urlparse
+
+    from soloring.executors.comfy.capability_record import verify_live_process
+
+    base = getattr(settings, "comfy_base_url", None) or ""
+    port = urlparse(base).port or (443 if "https" in base else 80)
+    if not verify_live_process(attestation, port=port):
+        raise ModelIncompatible(
+            "The attested deployment process is not the live process "
+            f"serving {base or 'the configured executor origin'}; stale "
+            "attestation."
+        )
+
+
 def load_live_attestation(settings):
     """Load the live v4 deployment attestation; for schema-2 execution an
     unavailable/invalid attestation is EXECUTION_MODEL_INCOMPATIBLE."""
@@ -128,8 +148,13 @@ def validate_schema2_historical_state(
     for key in expected:
         expected[key].sort()
 
+    # §19: legacy shot_reference rows on OTHER input keys legally coexist
+    # with realization rows; only the realization projection is compared.
+    realization_keys = set(expected)
     actual: dict[str, list[tuple[int, str, str, str]]] = {}
     for row in input_rows:
+        if row.input_key not in realization_keys:
+            continue
         actual.setdefault(row.input_key, []).append(
             (row.position, row.asset_id, row.blob_hash, row.reference_role)
         )

@@ -97,6 +97,21 @@ def _read_descriptor(package_path: Path) -> dict:
     if not isinstance(doc, dict):
         raise PackageIntegrity("workflow-package.json is not an object")
     schema = doc.get("schema_version")
+    allowed_fields = {
+        "schema_version", "workflow_id", "workflow_version",
+        "manifest_hash", "workflow_template_hash",
+    }
+    if schema == 2:
+        allowed_fields |= {
+            "realization_profile_hash",
+            "execution_model_fingerprint_hash",
+        }
+    unknown = set(doc) - allowed_fields
+    if unknown:
+        raise PackageIntegrity(
+            f"workflow-package.json carries unknown fields "
+            f"{sorted(unknown)}; the descriptor field set is closed"
+        )
     if schema not in (1, 2):
         raise PackageIntegrity("descriptor schema_version must be 1 or 2")
     for field in ("workflow_id", "workflow_version", "manifest_hash",
@@ -143,6 +158,12 @@ async def capture_release(
             return await asyncio.to_thread(path.read_bytes)
         except FileNotFoundError as exc:
             raise PackageIntegrity(f"{what} bytes are missing") from exc
+        except OSError as exc:
+            # Unreadable/locked artifact bytes are capture-integrity
+            # failures in the exact vocabulary (r1-gate B1).
+            raise PackageIntegrity(
+                f"{what} bytes are unreadable: {exc}"
+            ) from exc
 
     manifest_bytes = await _read(manifest_path, "manifest")
     template_bytes = await _read(template_path, "template")
@@ -362,19 +383,31 @@ def _validate_profile_manifest_bijection(    profile: RealizationProfileDocument
             )
 
 
-async def capture_current_package(settings) -> ValidatedPackage:
-    """Capture + validate the ONE currently configured schema-2 release
-    in memory (§34/§56: existing single-package selection). Raises the
-    exact Stage-0 / validation errors; placement is the caller's
-    decision (readiness preview never places)."""
+def current_package_dir(settings) -> Path:
     from soloring.workflows.manifest import WORKFLOW_DIR_V4
 
-    d = settings.workflow_package_dir or WORKFLOW_DIR_V4
-    release = await capture_release(
+    return settings.workflow_package_dir or WORKFLOW_DIR_V4
+
+
+async def capture_current_release(settings) -> CapturedPackageRelease:
+    """§11.1 Stage 0 ONLY (r1-gate B1): coherent RAW BYTE capture of the
+    one configured release — descriptor D1/D2 stability + declared-hash
+    equality. NO semantic parsing/validation happens here; package
+    semantics are evaluated only after the M7/M8 predecessor gates."""
+    d = current_package_dir(settings)
+    return await capture_release(
         d / "workflow-package.json",
         d / "manifest.json",
         d / "workflow.json",
         d / "realization-profile.json",
         d / "execution-model-fingerprint.json",
     )
+
+
+async def capture_current_package(settings) -> ValidatedPackage:
+    """Capture + validate the one configured release in one call for
+    callers with NO predecessor-gate ordering (M9A fixtures). The
+    creation pipeline uses capture_current_release + validate_package
+    separately to honor §11.1's frozen ordering."""
+    release = await capture_current_release(settings)
     return validate_package(release)

@@ -473,38 +473,18 @@ async def _persist_revision_fenced(
     raise internal_invariant("Revision capture exhausted retries.")
 
 
-async def capture_revision_with_state(
+
+
+
+async def capture_revision_with_visual(
     session: AsyncSession, shot_id: str, *, settings=None
 ):
-    """Capture/reuse the ShotRevision AND return the visual resolution of
-    the SAME coherent read (M9 §10: the per-facet requirement map rides
-    with the capture read; historical reconstruction never re-reads
-    current requirement policy)."""
-    holder = {}
-
-    original = _snapshot_one_read
-
-    async def capturing_read(s, sid, **kwargs):
-        result = await original(s, sid, **kwargs)
-        holder["visual"] = result[5]
-        return result
-
-    import soloring.domain.revisions as self_mod
-
-    self_mod._snapshot_one_read = capturing_read
-    try:
-        revision = await capture_revision(
-            session, shot_id, settings=settings
-        )
-    finally:
-        self_mod._snapshot_one_read = original
-    return revision, holder.get("visual")
-
-
-async def capture_revision(
-    session: AsyncSession, shot_id: str, *, settings=None
-) -> ShotRevision:
-    """Capture/reuse the immutable ShotRevision (schema 1 | 2 | 3).
+    """Capture/reuse the immutable ShotRevision (schema 1 | 2 | 3) AND
+    return the visual resolution of the SAME coherent read (M9 §10: the
+    per-facet requirement map rides with the capture read; historical
+    reconstruction never re-reads current requirement policy). No
+    module-global patching (r1-gate B2): the state flows through the
+    return value only.
 
     Zero dependencies → the EXACT v1 form with NULL continuity columns.
     Dependencies + zero effective Feature states AND zero effective
@@ -544,6 +524,16 @@ async def capture_revision(
     )
     revision = await session.get(ShotRevision, revision_id)
     assert revision is not None
+    return revision, visual_result
+
+
+async def capture_revision(
+    session: AsyncSession, shot_id: str, *, settings=None
+) -> ShotRevision:
+    """Backward-compatible wrapper discarding the visual state."""
+    revision, _visual = await capture_revision_with_visual(
+        session, shot_id, settings=settings
+    )
     return revision
 
 

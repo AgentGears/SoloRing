@@ -360,8 +360,15 @@ async def test_worker_model_byte_drift_blocks_before_submission(
         return _StubCap()
 
     monkeypatch.setattr(pipeline, "resolve_capability", _cap)
-    # Satisfy the attestation gate with a fixture attestation record.
     _write_fixture_attestation(settings)
+    import soloring.realization.runtime as runtime_mod
+
+    def _alive(att, settings):
+        return None
+
+    monkeypatch.setattr(
+        runtime_mod, "verify_attested_process_live", _alive
+    )
     from soloring.realization.model_roots import ModelIncompatible
 
     client_stub = _RecordingClient()
@@ -397,6 +404,14 @@ async def test_worker_schema2_validation_passes_to_translation(
 
     monkeypatch.setattr(pipeline, "resolve_capability", _cap)
     _write_fixture_attestation(settings)
+    import soloring.realization.runtime as runtime_mod
+
+    def _alive(att, settings):
+        return None
+
+    monkeypatch.setattr(
+        runtime_mod, "verify_attested_process_live", _alive
+    )
 
     reached = {"materialize": False}
 
@@ -451,3 +466,48 @@ def _write_fixture_attestation(settings):
             "launched_at": "2026-01-01T00:00:00Z",
         },
     }))
+
+
+async def test_attestation_liveness_failure_is_incompatible(
+    client, factory, engine, settings, tmp_path, monkeypatch,
+):
+    from soloring.realization.model_roots import ModelIncompatible
+    from soloring.realization.runtime import verify_attested_process_live
+
+    gid, _pkg, _roots = await _m9_generation(
+        client, factory, engine, settings, tmp_path
+    )
+    await _claim(engine, gid)
+    import soloring.worker.comfy_pipeline as pipeline
+
+    async def _cap(*a, **k):
+        return _StubCap()
+
+    monkeypatch.setattr(pipeline, "resolve_capability", _cap)
+    _write_fixture_attestation(settings)
+    import soloring.realization.runtime as runtime_mod
+
+    recorded = {}
+
+    def _dead(att, st):
+        recorded["att"] = att
+        return None  # verify_live_process returned False path
+
+    # Simulate the stale-attestation verdict.
+    import soloring.executors.comfy.capability_record as cap_rec
+
+    monkeypatch.setattr(cap_rec, "verify_live_process", lambda a, port=8188: False)
+    client_stub = _RecordingClient()
+    result = await pipeline.drive_comfy_generation(
+        engine, settings, "w-m9d", gid, "attempt-liveness", client_stub,
+    )
+    assert result == "failed"
+    async with engine.connect() as conn:
+        row = (await conn.execute(
+            text("SELECT error_code, error_message FROM generations "
+                 "WHERE id = :g"),
+            {"g": gid},
+        )).one()
+    assert row.error_code == "EXECUTION_MODEL_INCOMPATIBLE"
+    assert "live process" in (row.error_message or "")
+    assert client_stub.submissions == 0

@@ -422,9 +422,13 @@ async def _drive(
                 cross_validate_fingerprint_template(
                     fingerprint, template_graph
                 )
-                check_runtime_compatibility(
-                    fingerprint, load_live_attestation(settings)
+                from soloring.realization.runtime import (
+                    verify_attested_process_live,
                 )
+
+                _attestation = load_live_attestation(settings)
+                check_runtime_compatibility(fingerprint, _attestation)
+                verify_attested_process_live(_attestation, settings)
                 verify_live_model_bytes(
                     settings,
                     [

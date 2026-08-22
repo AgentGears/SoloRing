@@ -115,17 +115,52 @@ async def create_generation_request(
         # CAPTURE RELEASE BYTES FIRST (M9 frozen plan §22): the four-
         # artifact descriptor-coherent release — no DB session work has
         # happened yet, so no transaction is open during file I/O.
-        from soloring.realization.packages import capture_current_package
+        from soloring.realization.packages import (
+            capture_current_release,
+            validate_package,
+        )
         from soloring.workflows.artifact_store import WorkflowArtifactStore
 
-        package = await capture_current_package(settings)
-        await WorkflowArtifactStore(settings).place_release(package.release)
+        # §11.1 Stage 0 (r1-gate B1): RAW BYTE capture only — coherent
+        # descriptor-bound buffers placed content-addressed. Semantic
+        # package validation runs AFTER the M7/M8 predecessor gates
+        # below, per the frozen ordering.
+        release = await capture_current_release(settings)
+        await WorkflowArtifactStore(settings).place_release(release)
+        package = None
+        template = None
+    else:
+        release = None
+        package = None
+        template = load_workflow()
 
-        # EVERYTHING downstream derives from the EXACT captured bytes and
-        # their captured hashes (audit F9): a second mutable installed read
-        # could straddle an installation switch and persist a Generation
-        # whose recorded artifacts were never captured. Schema-2 releases
-        # additionally bind profile + ExecutionModelFingerprint (§6.2).
+    # Validate the Shot, then use the PRIMITIVE shot_id everywhere below.
+    # capture_revision() owns rollback semantics (collision retry rolls the
+    # session back, expiring previously loaded ORM instances); dereferencing
+    # a pre-helper ORM object after that is a MissingGreenlet/DetachedInstance
+    # failure under concurrency (third re-gate P3-5).
+    await shot_svc.get_shot(session, shot_id)
+
+    # Resolve ordered references + capture/reuse the immutable revision.
+    # M7/M8 blockers raise HERE — strictly BEFORE any semantic package
+    # validation (frozen §11.1 ordering; r1-gate B1).
+    refs = await shot_svc.snapshot_references(session, shot_id)
+    revision, visual_result = await (
+        revision_svc.capture_revision_with_visual(
+            session, shot_id, settings=settings
+        )
+    )
+
+    if release is not None:
+        # §11.1 step 3 — NOW the captured package semantics are parsed
+        # and cross-validated (after M7/M8, before M9 compilation).
+        # EVERYTHING downstream derives from the EXACT captured bytes
+        # and their captured hashes (audit F9): a second mutable
+        # installed read could straddle an installation switch and
+        # persist a Generation whose recorded artifacts were never
+        # captured. Schema-2 releases additionally bind profile +
+        # ExecutionModelFingerprint (§6.2).
+        package = validate_package(release)
         if package.is_schema2:
             template = build_template_v2(
                 package.manifest_v2,
@@ -137,15 +172,14 @@ async def create_generation_request(
                 build_template,
                 parse_manifest,
             )
+            from soloring.executors.comfy.bindings import (
+                validate_manifest_template_bindings,
+            )
 
             manifest_doc = parse_manifest(
                 package.release.manifest_bytes.decode("utf-8")
             )
             # Bad executor bindings never queue a Generation (audit F10).
-            from soloring.executors.comfy.bindings import (
-                validate_manifest_template_bindings,
-            )
-
             validate_manifest_template_bindings(
                 manifest_doc, package.template_graph
             )
@@ -153,21 +187,6 @@ async def create_generation_request(
                 manifest_doc, package.release.manifest_hash,
                 package.release.workflow_template_hash,
             )
-    else:
-        template = load_workflow()
-
-    # Validate the Shot, then use the PRIMITIVE shot_id everywhere below.
-    # capture_revision() owns rollback semantics (collision retry rolls the
-    # session back, expiring previously loaded ORM instances); dereferencing
-    # a pre-helper ORM object after that is a MissingGreenlet/DetachedInstance
-    # failure under concurrency (third re-gate P3-5).
-    await shot_svc.get_shot(session, shot_id)
-
-    # Resolve ordered references + capture/reuse the immutable revision.
-    refs = await shot_svc.snapshot_references(session, shot_id)
-    revision, visual_result = await revision_svc.capture_revision_with_state(
-        session, shot_id, settings=settings
-    )
 
     # Deterministic input mapping from the CAPTURED revision snapshot
     # (`template` already holds the captured-bytes workflow for comfy).

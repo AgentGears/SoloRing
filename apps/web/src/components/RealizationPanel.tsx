@@ -2,8 +2,8 @@
  * M9 §36.1/§36.2 — Shot realization panel (pure display, server-fed).
  * Current inspection is NOT a reservation; the evaluated package hashes
  * make staleness inspectable. M8 readiness, M9 realization readiness,
- * and executor/runtime compatibility are separate concepts — never
- * collapsed. No M8 mutation controls exist here (§36.4).
+ * and executor/runtime-environment compatibility are separate concepts —
+ * never collapsed. No M8 mutation controls exist here (§36.4).
  */
 
 import type {
@@ -63,7 +63,7 @@ export default function RealizationPanel({
   }
   const m7 = state.issues.some((i) => i.layer === "m7");
   const m8 = state.issues.some((i) => i.layer === "m8");
-  const m9 = state.issues.some((i) => i.layer === "m9");
+  const env = state.environment;
   return (
     <section>
       <div className="meta">
@@ -146,6 +146,19 @@ export default function RealizationPanel({
           ) : (
             "(none)"
           )}
+        </div>
+      ) : null}
+
+      {env ? (
+        <div className="meta">
+          Environment compatibility (separate from realization):{" "}
+          attestation {env.attestation}
+          {env.attestation_detail ? ` — ${env.attestation_detail}` : ""} ·
+          runtime {env.runtime_compatible ? "compatible" : "incompatible"}{" "}
+          · model roots{" "}
+          {Object.entries(env.model_roots_configured)
+            .map(([k, v]) => `${k}:${v ? "configured" : "unset"}`)
+            .join(", ")}. {env.note}
         </div>
       ) : null}
     </section>

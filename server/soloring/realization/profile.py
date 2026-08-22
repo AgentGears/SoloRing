@@ -98,8 +98,9 @@ def _validate_semantics(doc: RealizationProfileDocument) -> None:
     ):
         if not _norm(value):
             raise ProfileError(f"RealizationProfile {label} is empty.")
-    if not doc.channels:
-        raise ProfileError("RealizationProfile declares no channels.")
+    # Zero channels is a legal schema-1 shape: a package whose manifest
+    # declares no realization inputs satisfies the §7.5 bijection
+    # vacuously (the v2+empty-authority legacy lattice, §16.3).
 
     seen_input_keys: dict[str, str] = {}
     for channel_key, channel in doc.channels.items():

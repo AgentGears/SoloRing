@@ -404,7 +404,7 @@ async def test_schema1_descriptor_cannot_claim_m9_artifacts(tmp_path):
         ).hexdigest(),
         "realization_profile_hash": "0" * 64,
     }))
-    with pytest.raises(PackageIntegrity, match="cannot claim M9"):
+    with pytest.raises(PackageIntegrity, match="cannot claim M9|field set is closed"):
         await capture_release(
             d / "workflow-package.json", d / "manifest.json",
             d / "workflow.json",

@@ -365,6 +365,25 @@ class ManifestInputDefV2(_Strict):
     cardinality: int | None = Field(default=None, ge=1)
     source: ShotReferenceSource | RealizationChannelSource | None = None
 
+    @property
+    def source_role(self) -> str | None:
+        """Translator compatibility bridge (§8): schema-2 documents have
+        no ``source_role`` FIELD — no dual form exists. This computed
+        property exposes the discriminated ``shot_reference`` role to the
+        unchanged schema-1 translator so legacy binding semantics are
+        preserved exactly; realization-channel inputs present as None,
+        the same legacy view as the prompt input."""
+        if isinstance(self.source, ShotReferenceSource):
+            return self.source.role
+        return None
+
+    @property
+    def is_realization_input(self) -> bool:
+        """B4 bridge: realization-channel inputs are reference-bearing
+        inputs the translator must declare (they receive materialized
+        bytes), unlike the prompt input."""
+        return isinstance(self.source, RealizationChannelSource)
+
 
 class ManifestDocumentV2(_Strict):
     schema_version: str
@@ -469,3 +488,34 @@ def build_template_v2(
         is_schema2=True,
         realization_input_keys=tuple(realization_keys),
     )
+
+
+def parse_fingerprint_lazy(settings):
+    """Environment observation helper (M9 §36.1): the CURRENT configured
+    package's ExecutionModelFingerprint, or None when the package is
+    schema 1 / fingerprint unavailable. Informational only — never
+    historical identity."""
+    import json as _json
+
+    from soloring.realization.fingerprint import (
+        FingerprintError,
+        parse_fingerprint,
+    )
+    from soloring.realization.packages import current_package_dir
+
+    d = current_package_dir(settings)
+    try:
+        descriptor = _json.loads(
+            (d / "workflow-package.json").read_text()
+        )
+        if descriptor.get("schema_version") != 2:
+            return None
+        fp_bytes = (d / "execution-model-fingerprint.json").read_bytes()
+        if (
+            hashlib.sha256(fp_bytes).hexdigest()
+            != descriptor.get("execution_model_fingerprint_hash")
+        ):
+            return None
+        return parse_fingerprint(fp_bytes.decode("utf-8"))
+    except (OSError, ValueError, FingerprintError):
+        return None

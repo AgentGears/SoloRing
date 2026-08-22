@@ -38,6 +38,8 @@ class GenerationSummary(BaseModel):
     realization_profile_version: int | None = None
     realization_profile_hash: str | None = None
     visual_reference_pack_hash: str | None = None
+    manifest_hash: str | None = None
+    workflow_template_hash: str | None = None
     realization_summary: dict | None = None
 
 

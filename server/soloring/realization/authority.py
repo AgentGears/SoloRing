@@ -70,6 +70,13 @@ def build_captured_authority(
                 "requirement value from the same coherent read."
             )
         target = anchor["target"]
+        # §7.3 (B2): the M8 pack encodes feature anchors as kind
+        # "feature"; the M9 rule selector vocabulary is "feature_value".
+        # Normalized ONCE here — the one adapter boundary — so captured
+        # Feature authority matches exact feature_value rules.
+        target_kind = target["kind"]
+        if target_kind == "feature":
+            target_kind = "feature_value"
         items = tuple(
             CapturedItem(
                 asset_id=it["asset_id"],
@@ -86,7 +93,7 @@ def build_captured_authority(
             visual_facet_id=fid,
             facet_key=anchor["facet_key"],
             requirement=requirement,
-            target_kind=target["kind"],
+            target_kind=target_kind,
             entity_id=target.get("entity_id"),
             entity_revision_id=target.get("entity_revision_id"),
             feature_id=target.get("feature_id"),

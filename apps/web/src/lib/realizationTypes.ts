@@ -36,6 +36,14 @@ export interface RealizationChannelRow {
   active: boolean;
 }
 
+export interface EnvironmentStatus {
+  attestation: string;
+  attestation_detail?: string;
+  runtime_compatible: boolean;
+  model_roots_configured: Record<string, boolean>;
+  note: string;
+}
+
 export interface RealizationReadiness {
   shot_id: string;
   ready: boolean;
@@ -60,6 +68,7 @@ export interface RealizationReadiness {
     facet_key: string;
     reason: string;
   }[];
+  environment?: EnvironmentStatus | null;
 }
 
 export interface RealizationSummaryBinding {
@@ -79,6 +88,8 @@ export interface GenerationRealization {
   realization_profile_version: number | null;
   realization_profile_hash: string | null;
   visual_reference_pack_hash: string | null;
+  manifest_hash: string | null;
+  workflow_template_hash: string | null;
   realization_summary: {
     channels: {
       channel: string;

@@ -274,6 +274,8 @@ describe("GenerationRealizationInspector (M9 §36.3)", () => {
     realization_profile_version: 1,
     realization_profile_hash: "p".repeat(64),
     visual_reference_pack_hash: "a".repeat(64),
+    manifest_hash: "m".repeat(64),
+    workflow_template_hash: "t".repeat(64),
     realization_summary: {
       channels: [
         {
@@ -320,6 +322,8 @@ describe("GenerationRealizationInspector (M9 §36.3)", () => {
           realization_profile_version: null,
           realization_profile_hash: null,
           visual_reference_pack_hash: null,
+          manifest_hash: null,
+          workflow_template_hash: null,
           realization_summary: null,
         }}
       />,

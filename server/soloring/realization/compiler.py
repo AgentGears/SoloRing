@@ -234,13 +234,19 @@ class _Compiler:
                     })
                     continue
                 # Optional-only channel below minimum: omit ALL its
-                # optional facets; leave the channel inactive.
-                for facet, _it in bindings:
-                    omitted.append(OmittedOptional(
-                        facet.visual_facet_id, facet.target_kind,
-                        facet.facet_key, "channel_minimum_unmet",
-                    ))
-                    facet_channel.pop(facet.visual_facet_id, None)
+                # optional facets — ONE omission per FACET, never per
+                # binding (B2) — and leave the channel inactive.
+                rolled_back = {
+                    facet.visual_facet_id for facet, _it in bindings
+                }
+                for fid in rolled_back:
+                    facet_channel.pop(fid, None)
+                for facet in ordered:
+                    if facet.visual_facet_id in rolled_back:
+                        omitted.append(OmittedOptional(
+                            facet.visual_facet_id, facet.target_kind,
+                            facet.facet_key, "channel_minimum_unmet",
+                        ))
                 allocated[key] = []
 
         ordered_omitted = tuple(sorted(

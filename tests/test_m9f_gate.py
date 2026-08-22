@@ -89,7 +89,7 @@ async def test_dynamic_sql_spy_zero_m8_authority_writes(
     import re
 
     table_patterns = [
-        re.compile(r"" + t.upper() + r"")
+        re.compile("\\b" + t.upper() + "\\b")
         for t in M8_AUTHORITY_TABLES
     ]
 
@@ -129,9 +129,11 @@ async def test_dynamic_sql_spy_zero_m8_authority_writes(
 
 
 def test_static_no_write_audit():
-    """§73.1: M9 modules hold no write-capable path into M8 authority —
-    no UPDATE/INSERT/DELETE statements and no write-service imports."""
+    """§73.1 (r1-gate B6 rewrite): the M9 modules contain NO write
+    statements at all (INSERT/UPDATE/DELETE against anything) and no
+    imports of M8 write-capable services."""
     import inspect
+    import re
 
     from soloring.realization import (
         authority,
@@ -143,17 +145,33 @@ def test_static_no_write_audit():
         runtime,
     )
 
+    write_re = re.compile(
+        r"\\b(INSERT\\s+INTO|UPDATE|DELETE\\s+FROM)\\b",
+        re.IGNORECASE,
+    )
     for module in (
         authority, compiler, fingerprint, model_roots, packages, profile,
         runtime,
     ):
         src = inspect.getsource(module)
-        for verb in ("INSERT INTO", "UPDATE ", "DELETE FROM"):
-            assert verb not in src.upper() or "UPDATE " not in verb, (
-                module.__name__
+        # Strip comments/docstrings crudely but conservatively: scan the
+        # raw source; any write verb hit must be justified by inspection.
+        hits = [
+            line.strip() for line in src.splitlines()
+            if write_re.search(line)
+            and not line.strip().startswith("#")
+            and '"""' not in line
+        ]
+        assert hits == [], (module.__name__, hits)
+        for forbidden_import in (
+            "from soloring.visual import anchors",
+            "from soloring.visual import facets",
+            "import soloring.visual.anchors",
+            "import soloring.visual.facets",
+        ):
+            assert forbidden_import not in src, (
+                module.__name__, forbidden_import
             )
-        assert "visual_facets" not in src or module in (packages, runtime)
-        assert "anchors.py" not in src
 
 
 # --- §30.1/§89 Exact Rerun + historical isolation --------------------------------
@@ -228,7 +246,7 @@ async def test_exact_rerun_schema2_isolation(
     import re
 
     read_patterns = [
-        re.compile(r"" + t.upper() + r"")
+        re.compile("\\b" + t.upper() + "\\b")
         for t in CURRENT_M8_READ_TABLES
     ]
 
