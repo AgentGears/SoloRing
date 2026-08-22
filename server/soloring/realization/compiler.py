@@ -81,6 +81,9 @@ class FacetOutcome:
     channel: str | None = None
     input_key: str | None = None
     eligible_items: tuple = ()
+    # §34: binding_position per selected item (tentative §15 order) —
+    # populated for chosen outcomes even when the compile is blocked.
+    binding_positions: tuple = ()
     reason: str | None = None
     issue_code: str | None = None
 
@@ -94,6 +97,7 @@ class RealizationResult:
     omitted_optional: tuple[OmittedOptional, ...] = ()
     issues: tuple[dict, ...] = ()
     facet_outcomes: tuple[FacetOutcome, ...] = ()
+    channel_usage: dict = field(default_factory=dict)
 
     def first_issue_code(self) -> str | None:
         return self.issues[0]["error_code"] if self.issues else None
@@ -309,7 +313,8 @@ class _Compiler:
                             _record(FacetOutcome(
                                 facet.visual_facet_id, facet.facet_key,
                                 facet.target_kind, "required",
-                                "required_blocked", issue_code=code,
+                                "required_blocked", key,
+                                channel.input_key, issue_code=code,
                             ))
                     continue
                 # Optional-only channel below minimum: omit ALL its
@@ -338,6 +343,35 @@ class _Compiler:
             omitted, key=lambda o: order_index[o.visual_facet_id]
         ))
 
+        # §34 (r3-gate B3): binding positions for chosen facets derive
+        # from the tentative allocation in §15 order — populated even
+        # when a blocker elsewhere prevents spec emission.
+        positions_by_facet: dict = {}
+        usage_by_channel: dict = {}
+        for channel_key in sorted(self.profile.channels):
+            bindings = allocated[channel_key]
+            if not bindings:
+                usage_by_channel[channel_key] = 0
+                continue
+            usage_by_channel[channel_key] = len(bindings)
+            for position, (facet, item) in enumerate(
+                self._ordered_bindings(bindings)
+            ):
+                positions_by_facet.setdefault(
+                    facet.visual_facet_id, {}
+                )[position] = None
+        for fid, outcome in list(outcome_by_facet.items()):
+            if outcome.status != "selected":
+                continue
+            pos = tuple(sorted(positions_by_facet.get(fid, {})))
+            outcome_by_facet[fid] = FacetOutcome(
+                outcome.visual_facet_id, outcome.facet_key,
+                outcome.target_kind, outcome.requirement, outcome.status,
+                outcome.channel, outcome.input_key,
+                outcome.eligible_items, pos, outcome.reason,
+                outcome.issue_code,
+            )
+
         ordered_outcomes = tuple(
             outcome_by_facet[f.visual_facet_id] for f in ordered
             if f.visual_facet_id in outcome_by_facet
@@ -352,6 +386,7 @@ class _Compiler:
                 omitted_optional=ordered_omitted,
                 issues=tuple(issues),
                 facet_outcomes=ordered_outcomes,
+                channel_usage=usage_by_channel,
             )
 
         # Step 13: profile parameter overrides (profile-owned, FINAL).
@@ -369,6 +404,7 @@ class _Compiler:
             parameter_overrides=overrides,
             omitted_optional=ordered_omitted,
             facet_outcomes=ordered_outcomes,
+            channel_usage=usage_by_channel,
         )
 
     # --- helpers -----------------------------------------------------------

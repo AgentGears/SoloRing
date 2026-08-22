@@ -308,11 +308,10 @@ def _preview_blob_store(settings):
 
 
 def _channel_usage(result) -> dict[str, int]:
-    usage: dict[str, int] = {}
-    if result.spec:
-        for channel in result.spec["channels"]:
-            usage[channel["channel"]] = len(channel["bindings"])
-    return usage
+    """r3-gate B3: usage derives from the per-facet INSPECTION
+    projection — populated on blocked compilations too — so selected
+    facets and channel usage never disagree."""
+    return dict(getattr(result, "channel_usage", {}) or {})
 
 
 def _channel_rows(package, usage: dict[str, int]) -> list[dict]:
@@ -354,8 +353,12 @@ def _facet_status_rows(authority, result, package) -> list[dict]:
                     "role": it.role,
                     "view_key": it.view_key,
                     "source_position": it.position,
+                    "binding_position": (
+                        outcome.binding_positions[i]
+                        if i < len(outcome.binding_positions) else None
+                    ),
                 }
-                for it in outcome.eligible_items
+                for i, it in enumerate(outcome.eligible_items)
             ],
             "reason": outcome.reason,
             "issue_code": outcome.issue_code,
