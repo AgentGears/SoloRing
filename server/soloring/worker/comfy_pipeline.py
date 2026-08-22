@@ -363,6 +363,16 @@ async def _drive(
             )
             template_graph = json.loads(template_bytes.decode("utf-8"))
             if spec.get("schema_version") == 2:
+                from soloring.domain.canonical import (
+                    canonical_hash as _spec_hash,
+                )
+                from soloring.errors import internal_invariant
+
+                if _spec_hash(spec) != generation.workflow_spec_hash:
+                    raise internal_invariant(
+                        "Stored schema-2 workflow spec bytes disagree with "
+                        "the persisted workflow_spec_hash."
+                    )
                 # M9 §26/§51: schema-2 historical validation — the v2
                 # manifest, captured profile, and ExecutionModelFingerprint
                 # are retrieved by CAPTURED hash and cross-validated; the
