@@ -115,7 +115,7 @@ async def get_realization_readiness(
             "channels": [],
             "facet_statuses": [],
             "omitted_optional": [],
-            "environment": _environment_status(settings),
+            "environment": _environment_status(settings, release),
         }
 
     package = validate_package(release)
@@ -143,7 +143,7 @@ async def get_realization_readiness(
                 "channels": [],
                 "facet_statuses": [],
                 "omitted_optional": [],
-                "environment": _environment_status(settings),
+                "environment": _environment_status(settings, release),
             }
         return {
             **base,
@@ -153,7 +153,7 @@ async def get_realization_readiness(
             "channels": [],
             "facet_statuses": [],
             "omitted_optional": [],
-            "environment": _environment_status(settings),
+            "environment": _environment_status(settings, release),
         }
 
     base["model"] = {
@@ -186,7 +186,7 @@ async def get_realization_readiness(
             "channels": _channel_rows(package, {}),
             "facet_statuses": [],
             "omitted_optional": [],
-            "environment": _environment_status(settings),
+            "environment": _environment_status(settings, release),
         }
 
     result = compile_realization(
@@ -199,9 +199,29 @@ async def get_realization_readiness(
         ),
     )
 
+    # §36.1: profile-owned parameter overrides + the FINAL resolved
+    # values (manifest defaults, then profile-last per §9).
+    from soloring.workflows.manifest import (
+        build_template_v2 as _btl,
+        resolve_parameters as _resolve,
+    )
+
+    _template = _btl(
+        package.manifest_v2,
+        package.release.manifest_hash,
+        package.release.workflow_template_hash,
+    )
+    _final = _resolve(_template)
+    for _name, _value in result.parameter_overrides.items():
+        _final[_name] = _value
+
     return {
         **base,
         "ready": result.ready,
+        "parameters": {
+            "overrides": dict(result.parameter_overrides),
+            "final": _final,
+        },
         "visual_reference_pack_hash": (
             result.spec["visual_reference_pack_hash"] if result.spec
             else authority.visual_reference_pack_hash
@@ -220,16 +240,18 @@ async def get_realization_readiness(
             }
             for o in result.omitted_optional
         ],
-        "environment": _environment_status(settings),
+        "environment": _environment_status(settings, release),
     }
 
 
-def _environment_status(settings) -> dict:
+def _environment_status(settings, release=None) -> dict:
     """§36.1/§44: the executor/runtime-environment compatibility state,
     SEPARATELY labeled from realization readiness. Cheap checks only —
     attestation presence + fingerprint compatibility + root
     configuration; model BYTES stay per-submission verifications
-    (§6.4.1), never a readiness probe."""
+    (§6.4.1), never a readiness probe. r2-gate B5: the fingerprint
+    evaluated is the COHERENTLY CAPTURED preview release's (when
+    supplied) — never a re-read of the installed package selection."""
     from soloring.realization.model_roots import (
         ModelIncompatible,
         ROOT_KEYS,
@@ -249,9 +271,14 @@ def _environment_status(settings) -> dict:
     try:
         attestation = load_live_attestation(settings)
         env["attestation"] = "present"
-        from soloring.workflows.manifest import parse_fingerprint_lazy
+        fp = None
+        if release is not None and release.fingerprint_bytes is not None:
+            # The coherently captured preview fingerprint.
+            from soloring.realization.fingerprint import parse_fingerprint
 
-        fp = parse_fingerprint_lazy(settings)
+            fp = parse_fingerprint(
+                release.fingerprint_bytes.decode("utf-8")
+            )
         if fp is None:
             env["runtime_compatible"] = True  # no schema-2 requirement
         else:
@@ -305,90 +332,32 @@ def _channel_rows(package, usage: dict[str, int]) -> list[dict]:
 
 
 def _facet_status_rows(authority, result, package) -> list[dict]:
-    """§34 facet_statuses: one row per applicable captured facet in
-    canonical order; selected rows carry the server-selected items;
-    blocked required rows carry the exact blocking code."""
-    selected: dict[str, dict] = {}
-    if result.spec:
-        for channel in result.spec["channels"]:
-            for b in channel["bindings"]:
-                entry = selected.setdefault(b["visual_facet_id"], {
-                    "channel": channel["channel"],
-                    "input_key": channel["input_key"],
-                    "bindings": [],
-                })
-                entry["bindings"].append(b)
-    issue_by_facet: dict[str, dict] = {}
-    channel_issue: dict[str, dict] = {}
-    for issue in result.issues:
-        if issue.get("visual_facet_id"):
-            issue_by_facet[issue["visual_facet_id"]] = issue
-        elif issue.get("channel"):
-            channel_issue[issue["channel"]] = issue
-    omitted_by_facet = {
-        o.visual_facet_id: o for o in result.omitted_optional
-    }
-    # Channel of a min-blocked facet for issue attribution.
-    channel_of_facet = {
-        b["visual_facet_id"]: c["channel"]
-        for c in (result.spec or {}).get("channels", [])
-        for b in c["bindings"]
-    }
-
+    """§34 facet_statuses (r2-gate B3): derived from the compiler's
+    per-facet INSPECTION projection (facet_outcomes), which is populated
+    on NOT-READY results too — a blocked compile honestly reports the
+    OTHER supported facets instead of corrupting them to
+    required_blocked. No partial RealizationSpec is fabricated."""
     rows = []
-    first_code = result.first_issue_code()
-    for facet in authority.facets:
-        row = {
-            "visual_facet_id": facet.visual_facet_id,
-            "target_kind": facet.target_kind,
-            "facet_key": facet.facet_key,
-            "requirement": facet.requirement,
-        }
-        if facet.visual_facet_id in selected:
-            entry = selected[facet.visual_facet_id]
-            # r1-gate B3: EVERY binding's item is exposed, ordered by
-            # binding_position — a multi-item facet shows all its items,
-            # never only the last.
-            ordered_items = [
-                b["item"] for b in sorted(
-                    entry["bindings"], key=lambda b: b["binding_position"]
-                )
-            ]
-            row.update({
-                "status": "selected",
-                "channel": entry["channel"],
-                "input_key": entry["input_key"],
-                "selected_items": ordered_items,
-                "reason": None,
-                "issue_code": None,
-            })
-        elif facet.requirement == "required":
-            issue = issue_by_facet.get(facet.visual_facet_id)
-            if issue is None and channel_issue:
-                # Attribute channel-level blockers to the required facets
-                # allocated to that channel (§12.3 fires post-allocation).
-                for ckey, ci in channel_issue.items():
-                    if channel_of_facet.get(facet.visual_facet_id) == ckey:
-                        issue = ci
-                        break
-            code = issue["error_code"] if issue else first_code
-            row.update({
-                "status": "required_blocked",
-                "channel": None,
-                "input_key": None,
-                "selected_items": [],
-                "reason": None,
-                "issue_code": code,
-            })
-        else:
-            o = omitted_by_facet.get(facet.visual_facet_id)
-            row.update({
-                "status": "optional_omitted",
-                "channel": None,
-                "input_key": None,
-                "selected_items": [],
-                "reason": o.reason if o else "no_matching_rule",
-                "issue_code": None,
-            })
-        rows.append(row)
+    for outcome in result.facet_outcomes:
+        rows.append({
+            "visual_facet_id": outcome.visual_facet_id,
+            "target_kind": outcome.target_kind,
+            "facet_key": outcome.facet_key,
+            "requirement": outcome.requirement,
+            "status": outcome.status,
+            "channel": outcome.channel,
+            "input_key": outcome.input_key,
+            "selected_items": [
+                {
+                    "asset_id": it.asset_id,
+                    "blob_hash": it.blob_hash,
+                    "role": it.role,
+                    "view_key": it.view_key,
+                    "source_position": it.position,
+                }
+                for it in outcome.eligible_items
+            ],
+            "reason": outcome.reason,
+            "issue_code": outcome.issue_code,
+        })
     return rows

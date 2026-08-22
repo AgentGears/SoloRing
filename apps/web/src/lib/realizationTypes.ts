@@ -59,6 +59,7 @@ export interface RealizationReadiness {
   model: { id: string; version: string } | null;
   profile: { id: string; version: number; hash: string } | null;
   visual_reference_pack_hash: string | null;
+  parameters?: { overrides: Record<string, unknown>; final: Record<string, unknown> } | null;
   issues: RealizationIssue[];
   channels: RealizationChannelRow[];
   facet_statuses: RealizationSelectedFacetRow[];
@@ -103,4 +104,5 @@ export interface GenerationRealization {
     parameter_overrides: Record<string, unknown>;
     execution_model_fingerprint_hash: string | null;
   } | null;
+  final_parameters?: Record<string, unknown> | null;
 }

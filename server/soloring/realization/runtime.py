@@ -61,9 +61,22 @@ def verify_attested_process_live(attestation, settings) -> None:
     one."""
     from urllib.parse import urlparse
 
-    from soloring.executors.comfy.capability_record import verify_live_process
+    from soloring.executors.comfy.capability_record import (
+        normalize_origin,
+        verify_live_process,
+    )
 
     base = getattr(settings, "comfy_base_url", None) or ""
+    # r2-gate B4: the ATTESTED ORIGIN must be the CONFIGURED origin —
+    # normalized equality (127.0.0.1 vs localhost are distinct targets),
+    # exactly like the client's own final-verification rule. A live
+    # process on the right port under a different attested origin is
+    # not the attested executor.
+    if normalize_origin(base) != normalize_origin(attestation.executor_origin):
+        raise ModelIncompatible(
+            f"The attested executor origin {attestation.executor_origin} "
+            f"is not the configured executor origin {base}."
+        )
     port = urlparse(base).port or (443 if "https" in base else 80)
     if not verify_live_process(attestation, port=port):
         raise ModelIncompatible(

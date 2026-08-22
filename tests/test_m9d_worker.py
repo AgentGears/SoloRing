@@ -496,6 +496,7 @@ async def test_attestation_liveness_failure_is_incompatible(
     # Simulate the stale-attestation verdict.
     import soloring.executors.comfy.capability_record as cap_rec
 
+    settings.comfy_base_url = "http://127.0.0.1:8188"
     monkeypatch.setattr(cap_rec, "verify_live_process", lambda a, port=8188: False)
     client_stub = _RecordingClient()
     result = await pipeline.drive_comfy_generation(

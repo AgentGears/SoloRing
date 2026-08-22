@@ -40,6 +40,7 @@ class GenerationSummary(BaseModel):
     visual_reference_pack_hash: str | None = None
     manifest_hash: str | None = None
     workflow_template_hash: str | None = None
+    final_parameters: dict | None = None
     realization_summary: dict | None = None
 
 

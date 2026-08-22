@@ -146,9 +146,17 @@ def test_static_no_write_audit():
     )
 
     write_re = re.compile(
-        r"\\b(INSERT\\s+INTO|UPDATE|DELETE\\s+FROM)\\b",
+        r"\b(INSERT\s+INTO|UPDATE\s+[^()\n]*\bSET\b|DELETE\s+FROM)",
         re.IGNORECASE,
     )
+    # Self-proof (r2-gate B6): the regex MUST match real write verbs —
+    # an over-escaped pattern matched nothing and the audit was vacuous.
+    assert write_re.search("INSERT INTO visual_facets VALUES (1)")
+    assert write_re.search("UPDATE assets SET x = 1")
+    assert write_re.search('text("UPDATE assets SET blob_hash = :h")')
+    assert write_re.search("DELETE FROM blobs WHERE hash = 'y'")
+    assert not write_re.search("SELECT * FROM shots")
+    assert not write_re.search("digest.update(chunk)")  # sha256, not SQL
     for module in (
         authority, compiler, fingerprint, model_roots, packages, profile,
         runtime,

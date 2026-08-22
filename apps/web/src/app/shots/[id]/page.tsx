@@ -263,7 +263,25 @@ export default async function ShotPage({
         return (
           <div key={t.id}>
             <h3>Generation {t.generation_id.slice(0, 8)}…</h3>
-            <GenerationRealizationInspector generation={gr} currentEnvironment={realizationState?.environment ?? null} />
+            <GenerationRealizationInspector
+              generation={gr}
+              currentEnvironment={realizationState?.environment ?? null}
+              currentPackage={
+                realizationState
+                  ? {
+                      workflow_id: realizationState.package.workflow_id,
+                      workflow_version:
+                        realizationState.package.workflow_version,
+                      profile_id: realizationState.profile?.id ?? null,
+                      profile_version:
+                        realizationState.profile?.version ?? null,
+                      model_id: realizationState.model?.id ?? null,
+                      model_version:
+                        realizationState.model?.version ?? null,
+                    }
+                  : null
+              }
+            />
           </div>
         );
       })}

@@ -149,6 +149,20 @@ export default function RealizationPanel({
         </div>
       ) : null}
 
+      {state.parameters &&
+      Object.keys(state.parameters.final).length > 0 ? (
+        <div className="meta">
+          Profile parameter overrides:{" "}
+          {Object.entries(state.parameters.overrides)
+            .map(([k, v]) => `${k}=${String(v)}`)
+            .join(", ") || "(none)"}{" "}
+          · final resolved:{" "}
+          {Object.entries(state.parameters.final)
+            .map(([k, v]) => `${k}=${String(v)}`)
+            .join(", ")}
+        </div>
+      ) : null}
+
       {env ? (
         <div className="meta">
           Environment compatibility (separate from realization):{" "}

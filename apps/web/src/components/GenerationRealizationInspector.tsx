@@ -19,9 +19,18 @@ function short(id: string | null): string {
 export default function GenerationRealizationInspector({
   generation,
   currentEnvironment = null,
+  currentPackage = null,
 }: {
   generation: GenerationRealization;
   currentEnvironment?: EnvironmentStatus | null;
+  currentPackage?: {
+    workflow_id: string;
+    workflow_version: number;
+    profile_id: string | null;
+    profile_version: number | null;
+    model_id: string | null;
+    model_version: string | null;
+  } | null;
 }) {
   const summary = generation.realization_summary;
   if (generation.workflow_spec_schema_version !== 2 || summary === null) {
@@ -85,7 +94,52 @@ export default function GenerationRealizationInspector({
             .join(", ")}
         </div>
       ) : null}
+      <div className="meta">
+        Final captured parameters:{" "}
+        {generation.final_parameters &&
+        Object.keys(generation.final_parameters).length > 0
+          ? Object.entries(generation.final_parameters)
+              .map(([k, v]) => `${k}=${String(v)}`)
+              .join(", ")
+          : "(none captured)"}
+      </div>
+      <CurrentPackageStatus currentPackage={currentPackage} />
       <CurrentEnvironmentStatus environment={currentEnvironment} />
+    </div>
+  );
+}
+
+function CurrentPackageStatus({
+  currentPackage,
+}: {
+  currentPackage: {
+    workflow_id: string;
+    workflow_version: number;
+    profile_id: string | null;
+    profile_version: number | null;
+    model_id: string | null;
+    model_version: string | null;
+  } | null;
+}) {
+  if (currentPackage === null) {
+    return (
+      <div className="meta">
+        Current package/profile/model status: unavailable (informational
+        only).
+      </div>
+    );
+  }
+  return (
+    <div className="meta">
+      Current installed (informational, NOT what this Generation used):
+      package {currentPackage.workflow_id} v
+      {currentPackage.workflow_version}
+      {currentPackage.profile_id
+        ? ` · profile ${currentPackage.profile_id} v${currentPackage.profile_version}`
+        : " · no profile"}
+      {currentPackage.model_id
+        ? ` · model ${currentPackage.model_id} ${currentPackage.model_version ?? ""}`
+        : " · no model"}
     </div>
   );
 }

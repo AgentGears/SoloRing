@@ -57,8 +57,14 @@ def resolve_model_file(settings: Settings, root_key: str, declared_name: str) ->
 
     validate_declared_name(declared_name)
     root = root_for_key(settings, root_key)
-    resolved_root = root.resolve()
-    candidate = (root / declared_name).resolve()
+    try:
+        resolved_root = root.resolve()
+        candidate = (root / declared_name).resolve()
+    except OSError as exc:
+        raise ModelIncompatible(
+            f"Configured model root for {root_key!r} cannot be resolved: "
+            f"{exc}"
+        ) from exc
     if candidate != resolved_root and resolved_root not in candidate.parents:
         raise ModelIncompatible(
             f"Resolved model path {candidate} escapes the configured root "
@@ -70,14 +76,21 @@ def resolve_model_file(settings: Settings, root_key: str, declared_name: str) ->
 def hash_file_streaming(path: Path, chunk_bytes: int = 8 << 20) -> str:
     """Streaming SHA-256 (§6.4.1): always content-hashed; callers may
     dedupe per submission attempt only — there is deliberately no
-    persistent metadata-keyed cache."""
+    persistent metadata-keyed cache. Unreadable bytes are live-environment
+    incompatibilities (r2-gate B1), never raw OSError."""
     digest = hashlib.sha256()
-    with open(path, "rb") as fh:
-        while True:
-            chunk = fh.read(chunk_bytes)
-            if not chunk:
-                break
-            digest.update(chunk)
+    try:
+        with open(path, "rb") as fh:
+            while True:
+                chunk = fh.read(chunk_bytes)
+                if not chunk:
+                    break
+                digest.update(chunk)
+    except OSError as exc:
+        raise ModelIncompatible(
+            f"Required model file {path.name} cannot be read for "
+            f"verification: {exc}"
+        ) from exc
     return digest.hexdigest()
 
 
@@ -96,6 +109,11 @@ def verify_live_model_bytes(
     resolved: dict[str, str] = {}
     for entry_key, root_key, declared_name, expected in entries:
         path = resolve_model_file(settings, root_key, declared_name)
+        if not path.is_file():
+            raise ModelIncompatible(
+                f"Required model file {declared_name!r} under root "
+                f"{root_key!r} is missing at {path}."
+            )
         if not path.is_file():
             raise ModelIncompatible(
                 f"Required model file {declared_name!r} under root "

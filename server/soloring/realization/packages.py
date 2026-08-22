@@ -90,6 +90,13 @@ def _read_descriptor(package_path: Path) -> dict:
         raw = package_path.read_bytes()
     except FileNotFoundError as exc:
         raise PackageIntegrity("workflow-package.json is missing") from exc
+    except OSError as exc:
+        # Locked/permission-denied descriptor bytes are capture-integrity
+        # failures in the exact vocabulary (r2-gate B1), never raw
+        # exceptions.
+        raise PackageIntegrity(
+            f"workflow-package.json is unreadable: {exc}"
+        ) from exc
     try:
         doc = json.loads(raw)
     except ValueError as exc:

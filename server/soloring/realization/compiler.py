@@ -67,6 +67,25 @@ class OmittedOptional:
 
 
 @dataclass(frozen=True)
+class FacetOutcome:
+    """§34 inspection projection for ONE facet (r2-gate B3): derived
+    from the deterministic allocation itself, populated on NOT-READY
+    results too, so a blocked compile still reports which OTHER facets
+    were supported — without fabricating any partial RealizationSpec."""
+
+    visual_facet_id: str
+    facet_key: str
+    target_kind: str
+    requirement: str
+    status: str  # 'selected' | 'required_blocked' | 'optional_omitted'
+    channel: str | None = None
+    input_key: str | None = None
+    eligible_items: tuple = ()
+    reason: str | None = None
+    issue_code: str | None = None
+
+
+@dataclass(frozen=True)
 class RealizationResult:
     ready: bool
     spec: dict | None
@@ -74,6 +93,7 @@ class RealizationResult:
     parameter_overrides: dict = field(default_factory=dict)
     omitted_optional: tuple[OmittedOptional, ...] = ()
     issues: tuple[dict, ...] = ()
+    facet_outcomes: tuple[FacetOutcome, ...] = ()
 
     def first_issue_code(self) -> str | None:
         return self.issues[0]["error_code"] if self.issues else None
@@ -120,6 +140,10 @@ class _Compiler:
         issues: list[dict] = []
         allocated: dict[str, list] = {k: [] for k in self.profile.channels}
         facet_channel: dict[str, str] = {}
+        outcome_by_facet: dict = {}
+
+        def _record(outcome) -> None:
+            outcome_by_facet[outcome.visual_facet_id] = outcome
 
         # Steps 5–9: required facets in canonical order; blockers are
         # COLLECTED (the facet is not allocated), never truncated.
@@ -137,6 +161,12 @@ class _Compiler:
                         f"({facet.target_kind}) has no exact profile rule."
                     ),
                 })
+                _record(FacetOutcome(
+                    facet.visual_facet_id, facet.facet_key,
+                    facet.target_kind, "required",
+                    "required_blocked",
+                    issue_code=ErrorCode.REALIZATION_REQUIRED_FACET_UNSUPPORTED,
+                ))
                 continue
             channel = self.profile.channels[rule.channel]
             eligible = [
@@ -154,6 +184,12 @@ class _Compiler:
                         f"allowed by channel {rule.channel!r}."
                     ),
                 })
+                _record(FacetOutcome(
+                    facet.visual_facet_id, facet.facet_key,
+                    facet.target_kind, "required",
+                    "required_blocked",
+                    issue_code=ErrorCode.REALIZATION_REQUIRED_FACET_UNSUPPORTED,
+                ))
                 continue
             if (
                 len(allocated[rule.channel]) + len(eligible)
@@ -170,9 +206,21 @@ class _Compiler:
                         f"{channel.max_items}."
                     ),
                 })
+                _record(FacetOutcome(
+                    facet.visual_facet_id, facet.facet_key,
+                    facet.target_kind, "required",
+                    "required_blocked",
+                    issue_code=ErrorCode.REALIZATION_CAPACITY_EXCEEDED,
+                ))
                 continue
             allocated[rule.channel].extend((facet, it) for it in eligible)
             facet_channel[facet.visual_facet_id] = rule.channel
+            _record(FacetOutcome(
+                facet.visual_facet_id, facet.facet_key, facet.target_kind,
+                "required", "selected", rule.channel,
+                self.profile.channels[rule.channel].input_key,
+                tuple(eligible),
+            ))
 
         # Steps 10–11: optional facets in canonical order with the closed
         # whole-facet omission reasons (audited even when required
@@ -185,6 +233,11 @@ class _Compiler:
                     facet.visual_facet_id, facet.target_kind,
                     facet.facet_key, "no_matching_rule",
                 ))
+                _record(FacetOutcome(
+                    facet.visual_facet_id, facet.facet_key,
+                    facet.target_kind, "optional", "optional_omitted",
+                    reason="no_matching_rule",
+                ))
                 continue
             channel = self.profile.channels[rule.channel]
             eligible = [
@@ -195,6 +248,11 @@ class _Compiler:
                     facet.visual_facet_id, facet.target_kind,
                     facet.facet_key, "no_allowed_items",
                 ))
+                _record(FacetOutcome(
+                    facet.visual_facet_id, facet.facet_key,
+                    facet.target_kind, "optional", "optional_omitted",
+                    reason="no_allowed_items",
+                ))
                 continue
             if (
                 len(allocated[rule.channel]) + len(eligible)
@@ -204,9 +262,20 @@ class _Compiler:
                     facet.visual_facet_id, facet.target_kind,
                     facet.facet_key, "capacity_exceeded",
                 ))
+                _record(FacetOutcome(
+                    facet.visual_facet_id, facet.facet_key,
+                    facet.target_kind, "optional", "optional_omitted",
+                    reason="capacity_exceeded",
+                ))
                 continue
             allocated[rule.channel].extend((facet, it) for it in eligible)
             facet_channel[facet.visual_facet_id] = rule.channel
+            _record(FacetOutcome(
+                facet.visual_facet_id, facet.facet_key, facet.target_kind,
+                "optional", "selected", rule.channel,
+                self.profile.channels[rule.channel].input_key,
+                tuple(eligible),
+            ))
 
         # Step 12 (§12.3): channel minimum, evaluated ONCE on the final
         # tentative allocation; no heuristic rerun. Only meaningful when
@@ -222,16 +291,26 @@ class _Compiler:
                 if not bindings or len(bindings) >= channel.min_items:
                     continue  # inactive-or-satisfied
                 if key in required_channels:
+                    code = ErrorCode.REALIZATION_CHANNEL_MINIMUM_UNMET
                     issues.append({
-                        "error_code": (
-                            ErrorCode.REALIZATION_CHANNEL_MINIMUM_UNMET
-                        ),
+                        "error_code": code,
                         "channel": key,
                         "message": (
                             f"Channel {key!r} contains required authority "
                             f"but ends below min_items {channel.min_items}."
                         ),
                     })
+                    for facet in ordered:
+                        if (
+                            facet.requirement == "required"
+                            and facet_channel.get(facet.visual_facet_id)
+                            == key
+                        ):
+                            _record(FacetOutcome(
+                                facet.visual_facet_id, facet.facet_key,
+                                facet.target_kind, "required",
+                                "required_blocked", issue_code=code,
+                            ))
                     continue
                 # Optional-only channel below minimum: omit ALL its
                 # optional facets — ONE omission per FACET, never per
@@ -247,20 +326,32 @@ class _Compiler:
                             facet.visual_facet_id, facet.target_kind,
                             facet.facet_key, "channel_minimum_unmet",
                         ))
+                        _record(FacetOutcome(
+                            facet.visual_facet_id, facet.facet_key,
+                            facet.target_kind, "optional",
+                            "optional_omitted",
+                            reason="channel_minimum_unmet",
+                        ))
                 allocated[key] = []
 
         ordered_omitted = tuple(sorted(
             omitted, key=lambda o: order_index[o.visual_facet_id]
         ))
 
+        ordered_outcomes = tuple(
+            outcome_by_facet[f.visual_facet_id] for f in ordered
+            if f.visual_facet_id in outcome_by_facet
+        )
         if issues:
-            # No partial spec/hash is fabricated (§21).
+            # No partial spec/hash is fabricated (§21) — but the honest
+            # per-facet inspection projection IS returned (§34/B3).
             return RealizationResult(
                 ready=False,
                 spec=None,
                 inputs=(),
                 omitted_optional=ordered_omitted,
                 issues=tuple(issues),
+                facet_outcomes=ordered_outcomes,
             )
 
         # Step 13: profile parameter overrides (profile-owned, FINAL).
@@ -277,6 +368,7 @@ class _Compiler:
             inputs=inputs,
             parameter_overrides=overrides,
             omitted_optional=ordered_omitted,
+            facet_outcomes=ordered_outcomes,
         )
 
     # --- helpers -----------------------------------------------------------
@@ -449,7 +541,10 @@ class _Compiler:
 
     def _project_inputs(self, allocated) -> tuple:
         projections = []
-        for channel_key, bindings in allocated.items():
+        # §15 channel order (lexicographic) — the same order the spec
+        # emits, so the §18.1 cross-validation compares like-for-like.
+        for channel_key in sorted(allocated):
+            bindings = allocated[channel_key]
             if not bindings:
                 continue
             channel = self.profile.channels[channel_key]

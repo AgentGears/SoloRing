@@ -67,19 +67,28 @@ async def get_generation(
     summary = GenerationSummary.model_validate(generation)
     # workflow_spec_json is a DEFERRED column; load it explicitly inside
     # the session context rather than triggering lazy IO.
-    spec_json = (
+    row = (
         await session.execute(
             _text(
-                "SELECT workflow_spec_json FROM generations WHERE id = :g"
+                "SELECT workflow_spec_json, manifest_hash, "
+                "workflow_template_hash FROM generations WHERE id = :g"
             ),
             {"g": generation_id},
         )
-    ).scalar()
-    _project_m9(summary, spec_json)
+    ).one()
+    _project_m9(
+        summary, row.workflow_spec_json, row.manifest_hash,
+        row.workflow_template_hash,
+    )
     return summary
 
 
-def _project_m9(summary: GenerationSummary, spec_json: str | None) -> None:
+def _project_m9(
+    summary: GenerationSummary,
+    spec_json: str | None,
+    manifest_hash: str | None = None,
+    workflow_template_hash: str | None = None,
+) -> None:
     """§35: additive M9 projection from the CAPTURED spec bytes — never
     current profile/package/M8 state (§74)."""
     import json as _json
@@ -96,10 +105,9 @@ def _project_m9(summary: GenerationSummary, spec_json: str | None) -> None:
     profile = realization.get("profile") or {}
     model = spec.get("model") or {}
     summary.workflow_spec_schema_version = 2
-    summary.manifest_hash = getattr(generation, "manifest_hash", None)
-    summary.workflow_template_hash = getattr(
-        generation, "workflow_template_hash", None
-    )
+    summary.manifest_hash = manifest_hash
+    summary.workflow_template_hash = workflow_template_hash
+    summary.final_parameters = dict(spec.get("parameters") or {})
     summary.realization_profile_id = profile.get("id")
     summary.realization_profile_version = profile.get("version")
     summary.realization_profile_hash = profile.get("hash")
