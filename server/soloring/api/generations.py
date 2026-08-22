@@ -59,21 +59,35 @@ async def list_generations(
 async def get_generation(
     generation_id: str, session: AsyncSession = Depends(get_session)
 ) -> GenerationSummary:
+    from sqlalchemy import text as _text
+
     generation = await generation_service.get_generation_or_404(
         session, generation_id
     )
     summary = GenerationSummary.model_validate(generation)
-    _project_m9(summary, generation)
+    # workflow_spec_json is a DEFERRED column; load it explicitly inside
+    # the session context rather than triggering lazy IO.
+    spec_json = (
+        await session.execute(
+            _text(
+                "SELECT workflow_spec_json FROM generations WHERE id = :g"
+            ),
+            {"g": generation_id},
+        )
+    ).scalar()
+    _project_m9(summary, spec_json)
     return summary
 
 
-def _project_m9(summary: GenerationSummary, generation) -> None:
+def _project_m9(summary: GenerationSummary, spec_json: str | None) -> None:
     """§35: additive M9 projection from the CAPTURED spec bytes — never
     current profile/package/M8 state (§74)."""
     import json as _json
 
+    if spec_json is None:
+        return
     try:
-        spec = _json.loads(generation.workflow_spec_json)
+        spec = _json.loads(spec_json)
     except (TypeError, ValueError):
         return
     if not isinstance(spec, dict) or spec.get("schema_version") != 2:
