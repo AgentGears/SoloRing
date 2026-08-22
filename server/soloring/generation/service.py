@@ -21,7 +21,12 @@ from soloring.domain import shots as shot_svc
 from soloring.domain.canonical import canonical_hash, canonical_json_str
 from soloring.domain.prompt import PROMPT_COMPILER_VERSION, compile_prompt
 from soloring.domain.shot_intent import ShotIntent
-from soloring.errors import ErrorCode, not_found
+from soloring.errors import (
+    ErrorCode,
+    SoloRingError,
+    internal_invariant,
+    not_found,
+)
 from soloring.generation import repository as repo
 from soloring.generation.drafts import GenerationDraft
 from soloring.generation.enums import GenerationOperation
@@ -29,9 +34,15 @@ from soloring.generation.input_mapping import (
     GenerationInputRule,
     resolve_generation_inputs,
 )
-from soloring.workflows.manifest import WorkflowTemplate, check_cardinality, load_workflow
+from soloring.workflows.manifest import (
+    WorkflowTemplate,
+    build_template_v2,
+    check_cardinality,
+    load_workflow,
+)
 
 LOGICAL_WORKFLOW_SCHEMA_VERSION = 1
+LOGICAL_WORKFLOW_SCHEMA_VERSION_2 = 2
 
 
 def build_workflow_spec(
@@ -101,39 +112,26 @@ async def create_generation_request(
     executor = settings.executor
 
     if executor == "comfy":
-        # Coherent capture of the installed release FIRST — no DB session
-        # work has happened yet, so no transaction is open during file I/O.
-        from soloring.executors.comfy.bindings import (
-            validate_manifest_template_bindings,
+        # CAPTURE RELEASE BYTES FIRST (M9 frozen plan §22): the four-
+        # artifact descriptor-coherent release — no DB session work has
+        # happened yet, so no transaction is open during file I/O.
+        from soloring.realization.packages import (
+            capture_current_release,
+            validate_package,
         )
         from soloring.workflows.artifact_store import WorkflowArtifactStore
-        from soloring.workflows.manifest import (
-            WORKFLOW_DIR,
-            build_template,
-            parse_manifest,
-        )
 
-        package = WORKFLOW_DIR / "workflow-package.json"
-        artifact_store = WorkflowArtifactStore(settings)
-        captured = await artifact_store.capture_package(
-            package, WORKFLOW_DIR / "manifest.json",
-            WORKFLOW_DIR / "workflow.json",
-        )
-        await artifact_store.place_captured(captured)
-
-        # EVERYTHING downstream derives from the EXACT captured bytes and
-        # their captured hashes (audit F9): a second mutable installed read
-        # could straddle an installation switch and persist a Generation
-        # whose recorded artifacts were never captured.
-        manifest_doc = parse_manifest(captured.manifest_bytes.decode("utf-8"))
-        template_graph = json.loads(captured.template_bytes.decode("utf-8"))
-        # Bad executor bindings never queue a Generation (audit F10).
-        validate_manifest_template_bindings(manifest_doc, template_graph)
-        template = build_template(
-            manifest_doc, captured.manifest_hash,
-            captured.workflow_template_hash,
-        )
+        # §11.1 Stage 0 (r1-gate B1): RAW BYTE capture only — coherent
+        # descriptor-bound buffers placed content-addressed. Semantic
+        # package validation runs AFTER the M7/M8 predecessor gates
+        # below, per the frozen ordering.
+        release = await capture_current_release(settings)
+        await WorkflowArtifactStore(settings).place_release(release)
+        package = None
+        template = None
     else:
+        release = None
+        package = None
         template = load_workflow()
 
     # Validate the Shot, then use the PRIMITIVE shot_id everywhere below.
@@ -144,10 +142,51 @@ async def create_generation_request(
     await shot_svc.get_shot(session, shot_id)
 
     # Resolve ordered references + capture/reuse the immutable revision.
+    # M7/M8 blockers raise HERE — strictly BEFORE any semantic package
+    # validation (frozen §11.1 ordering; r1-gate B1).
     refs = await shot_svc.snapshot_references(session, shot_id)
-    revision = await revision_svc.capture_revision(
-        session, shot_id, settings=settings
+    revision, visual_result = await (
+        revision_svc.capture_revision_with_visual(
+            session, shot_id, settings=settings
+        )
     )
+
+    if release is not None:
+        # §11.1 step 3 — NOW the captured package semantics are parsed
+        # and cross-validated (after M7/M8, before M9 compilation).
+        # EVERYTHING downstream derives from the EXACT captured bytes
+        # and their captured hashes (audit F9): a second mutable
+        # installed read could straddle an installation switch and
+        # persist a Generation whose recorded artifacts were never
+        # captured. Schema-2 releases additionally bind profile +
+        # ExecutionModelFingerprint (§6.2).
+        package = validate_package(release)
+        if package.is_schema2:
+            template = build_template_v2(
+                package.manifest_v2,
+                package.release.manifest_hash,
+                package.release.workflow_template_hash,
+            )
+        else:
+            from soloring.workflows.manifest import (
+                build_template,
+                parse_manifest,
+            )
+            from soloring.executors.comfy.bindings import (
+                validate_manifest_template_bindings,
+            )
+
+            manifest_doc = parse_manifest(
+                package.release.manifest_bytes.decode("utf-8")
+            )
+            # Bad executor bindings never queue a Generation (audit F10).
+            validate_manifest_template_bindings(
+                manifest_doc, package.template_graph
+            )
+            template = build_template(
+                manifest_doc, package.release.manifest_hash,
+                package.release.workflow_template_hash,
+            )
 
     # Deterministic input mapping from the CAPTURED revision snapshot
     # (`template` already holds the captured-bytes workflow for comfy).
@@ -155,8 +194,103 @@ async def create_generation_request(
     rules = [
         GenerationInputRule(input_key=i.input_key, source_role=i.source_role)
         for i in template.reference_inputs
+        if i.source_role is not None
     ]
-    inputs = resolve_generation_inputs(snapshot, rules)
+    legacy_inputs = resolve_generation_inputs(snapshot, rules)
+
+    # ---- M9 §22: compile + assemble (comfy schema-2 releases only) ----
+    realization_spec = None
+    realization_inputs = []
+    model = None
+    model_version = None
+    profile_overrides: dict = {}
+    authority_nonempty = bool(
+        (snapshot.get("visual_reference_pack") or {}).get("anchors")
+    )
+    if executor == "comfy" and not getattr(template, "is_schema2", False):
+        # §11.3: non-empty captured M8 authority may never be silently
+        # ignored — a schema-1 package is insufficient.
+        if authority_nonempty:
+            raise SoloRingError(
+                ErrorCode.REALIZATION_PROFILE_REQUIRED,
+                "The captured M8 visual authority is non-empty but the "
+                "selected workflow package is schema 1 (no M9 realization "
+                "contract).",
+                status_code=409,
+            )
+    if getattr(template, "is_schema2", False):
+        release = package.release
+        if not authority_nonempty:
+            # §11.2/§16.3: empty effective M8 authority → exact spec v1
+            # legacy path; profile/fingerprint are not Generation
+            # dependencies.
+            pass
+        else:
+            from soloring.realization.authority import (
+                reconstruct_authority,
+            )
+            from soloring.realization.compiler import compile_realization
+
+            requirement_map = {
+                st.visual_facet_id: st.requirement
+                for st in (visual_result.facet_statuses or ())
+            }
+            async with session.bind.connect() as conn:
+                await conn.exec_driver_sql("BEGIN")
+                try:
+                    authority = await reconstruct_authority(
+                        conn, revision.id, requirement_map
+                    )
+                    await conn.commit()
+                except Exception:
+                    import contextlib as _cl
+
+                    with _cl.suppress(Exception):
+                        await conn.rollback()
+                    raise
+            result = compile_realization(
+                captured_visual_authority=authority,
+                profile=package.profile,
+                manifest=package.manifest_v2,
+                profile_hash=release.realization_profile_hash,
+                execution_model_fingerprint_hash=(
+                    release.execution_model_fingerprint_hash
+                ),
+            )
+            if not result.ready:
+                first = result.issues[0]
+                raise SoloRingError(
+                    first["error_code"], first["message"], status_code=409
+                )
+            realization_spec = result.spec
+            profile_overrides = dict(result.parameter_overrides)
+            from soloring.generation.input_mapping import (
+                ResolvedGenerationInput,
+            )
+
+            realization_inputs = [
+                ResolvedGenerationInput(
+                    input_key=p.input_key,
+                    position=p.position,
+                    asset_id=p.asset_id,
+                    blob_hash=p.blob_hash,
+                    reference_role=p.reference_role,
+                )
+                for p in result.inputs
+            ]
+            model = package.profile.model.id
+            model_version = package.profile.model.version
+
+    # §19: source classes stay disjoint by input_key; combined
+    # cardinality is assembly-layer validation only.
+    legacy_keys = {i.input_key for i in legacy_inputs}
+    realization_keys = {i.input_key for i in realization_inputs}
+    overlap = legacy_keys & realization_keys
+    if overlap:
+        raise internal_invariant(
+            f"Legacy and realization inputs collide on {sorted(overlap)}."
+        )
+    inputs = legacy_inputs + realization_inputs
 
     # Cardinality validation (v0.1 §36: no reference silently ignored).
     counts: dict[str, int] = {}
@@ -171,7 +305,29 @@ async def create_generation_request(
     from soloring.workflows.manifest import resolve_parameters
 
     parameters = resolve_parameters(template)  # strict, resolved at capture
+    # §9: profile overrides are FINAL for the keys they own.
+    for name, value in profile_overrides.items():
+        parameters[name] = value
+    if realization_spec is not None:
+        for name, value in realization_spec["parameter_overrides"].items():
+            if parameters.get(name) != value:
+                raise internal_invariant(
+                    "RealizationSpec parameter overrides disagree with "
+                    "final captured parameters."
+                )
     spec = build_workflow_spec(template, inputs, compiled_prompt, parameters)
+    if realization_spec is not None:
+        # §16.2: schema 2 preserves all schema-1 fields and adds model +
+        # realization; no empty schema-2 is ever emitted (§16.1).
+        spec["schema_version"] = LOGICAL_WORKFLOW_SCHEMA_VERSION_2
+        spec["model"] = {
+            "id": model,
+            "version": model_version,
+            "execution_model_fingerprint_hash": (
+                package.release.execution_model_fingerprint_hash
+            ),
+        }
+        spec["realization"] = realization_spec
     spec_json = canonical_json_str(spec)
     spec_hash = canonical_hash(spec)
 
@@ -184,8 +340,8 @@ async def create_generation_request(
         workflow_version=template.workflow_version,
         workflow_template_hash=template.workflow_template_hash,
         manifest_hash=template.manifest_hash,
-        model=None,
-        model_version=None,
+        model=model,
+        model_version=model_version,
         compiled_prompt=compiled_prompt,
         negative_prompt=None,
         prompt_compiler_version=PROMPT_COMPILER_VERSION,

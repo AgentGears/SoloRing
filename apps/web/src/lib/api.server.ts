@@ -203,3 +203,19 @@ export async function serverGetVisualContinuity(
     `${apiOrigin()}/shots/${shotId}/visual-continuity`,
   );
 }
+
+export async function serverGetRealizationReadiness(
+  shotId: string,
+): Promise<import("./realizationTypes").RealizationReadiness> {
+  return fetchJson<import("./realizationTypes").RealizationReadiness>(
+    `${apiOrigin()}/shots/${shotId}/realization-readiness`,
+  );
+}
+
+export async function serverGetGenerationRealization(
+  generationId: string,
+): Promise<import("./realizationTypes").GenerationRealization> {
+  return fetchJson<import("./realizationTypes").GenerationRealization>(
+    `${apiOrigin()}/generations/${generationId}`,
+  );
+}

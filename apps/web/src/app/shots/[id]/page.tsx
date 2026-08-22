@@ -7,6 +7,8 @@ import Link from "next/link";
 
 import ApprovedTakePanel from "@/components/ApprovedTakePanel";
 import ContinuityStatePanel from "@/components/ContinuityStatePanel";
+import GenerationRealizationInspector from "@/components/GenerationRealizationInspector";
+import RealizationPanel from "@/components/RealizationPanel";
 import VisualContinuityPanel from "@/components/VisualContinuityPanel";
 import VisualProvenanceList from "@/components/VisualProvenanceList";
 import ReferencePanel from "@/components/ReferencePanel";
@@ -19,6 +21,8 @@ import WorkingStatePanel from "@/components/WorkingStatePanel";
 import { asApiError, type ApiError } from "@/lib/api.shared";
 import {
   serverGetContinuityState,
+  serverGetGenerationRealization,
+  serverGetRealizationReadiness,
   serverGetReferences,
   serverGetRevisionContinuity,
   serverGetShot,
@@ -63,6 +67,12 @@ export default async function ShotPage({
   let continuityLoadError: { code: string; message: string } | null = null;
   let visualState: import("@/lib/visualTypes").VisualContinuityState | null =
     null;
+  let realizationState: import("@/lib/realizationTypes").RealizationReadiness | null =
+    null;
+  let generationRealizations: Record<
+    string,
+    import("@/lib/realizationTypes").GenerationRealization | null
+  > = {};
   let visualFacets: import("@/lib/visualTypes").VisualFacet[] = [];
   let visualAnchorsByFacet: Record<
     string,
@@ -125,6 +135,24 @@ export default async function ShotPage({
       // error; the panel renders the unresolved state.
       visualState = null;
     }
+    // M9 §34/§36: current realization inspection + per-Generation
+    // captured realization (server-fed; failures render honestly).
+    try {
+      realizationState = await serverGetRealizationReadiness(id);
+    } catch {
+      realizationState = null;
+    }
+    generationRealizations = Object.fromEntries(
+      await Promise.all(
+        takes.map((t) => t.generation_id).map(async (gid) => {
+          try {
+            return [gid, await serverGetGenerationRealization(gid)] as const;
+          } catch {
+            return [gid, null] as const;
+          }
+        }),
+      ),
+    );
     // §71 promotion targets: the Shot's Project facets + realizations.
     try {
       visualFacets = await serverListVisualFacets(shot!.project_id);
@@ -226,6 +254,37 @@ export default async function ShotPage({
           entities.map((e) => [e.id, e.name]),
         )}
       />
+
+      <h2>Realization</h2>
+      <RealizationPanel state={realizationState} />
+      {takes.map((t) => {
+        const gr = generationRealizations[t.generation_id];
+        if (!gr) return null;
+        return (
+          <div key={t.id}>
+            <h3>Generation {t.generation_id.slice(0, 8)}…</h3>
+            <GenerationRealizationInspector
+              generation={gr}
+              currentEnvironment={realizationState?.environment ?? null}
+              currentPackage={
+                realizationState
+                  ? {
+                      workflow_id: realizationState.package.workflow_id,
+                      workflow_version:
+                        realizationState.package.workflow_version,
+                      profile_id: realizationState.profile?.id ?? null,
+                      profile_version:
+                        realizationState.profile?.version ?? null,
+                      model_id: realizationState.model?.id ?? null,
+                      model_version:
+                        realizationState.model?.version ?? null,
+                    }
+                  : null
+              }
+            />
+          </div>
+        );
+      })}
 
       <h2>Visual continuity</h2>
       <VisualContinuityPanel

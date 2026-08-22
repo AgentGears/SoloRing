@@ -30,6 +30,18 @@ class GenerationSummary(BaseModel):
     started_at: str | None
     completed_at: str | None
     executor_job_id: str | None
+    model: str | None = None
+    model_version: str | None = None
+    # M9 §35 additive projections (from workflow_spec_json when present).
+    workflow_spec_schema_version: int | None = None
+    realization_profile_id: str | None = None
+    realization_profile_version: int | None = None
+    realization_profile_hash: str | None = None
+    visual_reference_pack_hash: str | None = None
+    manifest_hash: str | None = None
+    workflow_template_hash: str | None = None
+    final_parameters: dict | None = None
+    realization_summary: dict | None = None
 
 
 class TakeRead(BaseModel):

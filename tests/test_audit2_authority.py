@@ -66,7 +66,12 @@ async def _seed(client, factory, engine, settings, executor="fake",
 
     settings.executor = executor
     if executor == "comfy":
-        monkey = wf  # caller handles WORKFLOW_DIR patching
+        # M9: the current release advanced to schema 2 (hunyuan_i2v_v4);
+        # these are LEGACY comfy-contract tests, so pin the published v1
+        # package explicitly via the §56 selection override.
+        from soloring.workflows.manifest import WORKFLOW_DIR
+
+        settings.workflow_package_dir = WORKFLOW_DIR
     saved = generations_api.get_settings
     generations_api.get_settings = lambda: settings
     try:

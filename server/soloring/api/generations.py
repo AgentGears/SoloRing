@@ -59,7 +59,86 @@ async def list_generations(
 async def get_generation(
     generation_id: str, session: AsyncSession = Depends(get_session)
 ) -> GenerationSummary:
-    return await generation_service.get_generation_or_404(session, generation_id)
+    from sqlalchemy import text as _text
+
+    generation = await generation_service.get_generation_or_404(
+        session, generation_id
+    )
+    summary = GenerationSummary.model_validate(generation)
+    # workflow_spec_json is a DEFERRED column; load it explicitly inside
+    # the session context rather than triggering lazy IO.
+    row = (
+        await session.execute(
+            _text(
+                "SELECT workflow_spec_json, manifest_hash, "
+                "workflow_template_hash FROM generations WHERE id = :g"
+            ),
+            {"g": generation_id},
+        )
+    ).one()
+    _project_m9(
+        summary, row.workflow_spec_json, row.manifest_hash,
+        row.workflow_template_hash,
+    )
+    return summary
+
+
+def _project_m9(
+    summary: GenerationSummary,
+    spec_json: str | None,
+    manifest_hash: str | None = None,
+    workflow_template_hash: str | None = None,
+) -> None:
+    """§35: additive M9 projection from the CAPTURED spec bytes — never
+    current profile/package/M8 state (§74)."""
+    import json as _json
+
+    if spec_json is None:
+        return
+    try:
+        spec = _json.loads(spec_json)
+    except (TypeError, ValueError):
+        return
+    if not isinstance(spec, dict) or spec.get("schema_version") != 2:
+        return
+    realization = spec.get("realization") or {}
+    profile = realization.get("profile") or {}
+    model = spec.get("model") or {}
+    summary.workflow_spec_schema_version = 2
+    summary.manifest_hash = manifest_hash
+    summary.workflow_template_hash = workflow_template_hash
+    summary.final_parameters = dict(spec.get("parameters") or {})
+    summary.realization_profile_id = profile.get("id")
+    summary.realization_profile_version = profile.get("version")
+    summary.realization_profile_hash = profile.get("hash")
+    summary.visual_reference_pack_hash = realization.get(
+        "visual_reference_pack_hash"
+    )
+    summary.realization_summary = {
+        "channels": [
+            {
+                "channel": c.get("channel"),
+                "input_key": c.get("input_key"),
+                "bindings": [
+                    {
+                        "facet_key": b.get("facet_key"),
+                        "required": b.get("required"),
+                        "asset_id": (b.get("item") or {}).get("asset_id"),
+                        "blob_hash": (b.get("item") or {}).get("blob_hash"),
+                        "role": (b.get("item") or {}).get("role"),
+                        "view_key": (b.get("item") or {}).get("view_key"),
+                    }
+                    for b in c.get("bindings", [])
+                ],
+            }
+            for c in realization.get("channels", [])
+        ],
+        "omitted_optional": realization.get("omitted_optional", []),
+        "parameter_overrides": realization.get("parameter_overrides", {}),
+        "execution_model_fingerprint_hash": model.get(
+            "execution_model_fingerprint_hash"
+        ),
+    }
 
 
 async def _observe(factory: async_sessionmaker[AsyncSession], generation_id: str):

@@ -404,10 +404,21 @@ async def _revision_continuity(
     # the current side is presented as contrast, never as execution input.
     visual_provenance: dict | None = None
     if schema_version == 4:
+        # The schema-4 snapshot stores the pack VALUE inline; the captured
+        # pack hash is the canonical hash of those bytes (M9 r1 fix: the
+        # previous key lookup always returned None).
         pack_hash = None
         visual_block = (snapshot or {}).get("visual") or {}
-        if isinstance(visual_block, dict):
-            pack_hash = visual_block.get("visual_reference_pack_hash")
+        if isinstance(visual_block, dict) and isinstance(
+            visual_block.get("visual_reference_pack"), dict
+        ):
+            from soloring.domain.canonical import (
+                canonical_hash as _canonical_hash,
+            )
+
+            pack_hash = _canonical_hash(
+                visual_block["visual_reference_pack"]
+            )
         vrows = (
             await session.execute(
                 text(

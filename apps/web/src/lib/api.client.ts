@@ -724,3 +724,13 @@ export async function listValuePolicies(
     `${BASE}/visual-facets/${facetId}/value-policies`,
   );
 }
+
+// --- Realization (M9) ------------------------------------------------------------
+
+export async function getRealizationReadiness(
+  shotId: string,
+): Promise<import("./realizationTypes").RealizationReadiness> {
+  return fetchJson<import("./realizationTypes").RealizationReadiness>(
+    `${BASE}/shots/${shotId}/realization-readiness`,
+  );
+}

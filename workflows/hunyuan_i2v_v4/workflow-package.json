@@ -1,0 +1,9 @@
+{
+  "schema_version": 2,
+  "workflow_id": "hunyuan_i2v",
+  "workflow_version": 4,
+  "manifest_hash": "0cb9e00875347af274d146c96846bcd9a4d81150541ac78893f735178b0bdfe3",
+  "workflow_template_hash": "c7ee0fb9a6c430623f086b0df242ffcd6aefe1b3a3f44eec0d2cd8197aed6b3f",
+  "realization_profile_hash": "ebf35077d8da2fa7d6495e7d1b277fff93efdf0bff5948e46b7e3a5ea44c1641",
+  "execution_model_fingerprint_hash": "c23a99e1e560b02e40eae39099c164aefda451ea02654129bd929f640a2fb03b"
+}

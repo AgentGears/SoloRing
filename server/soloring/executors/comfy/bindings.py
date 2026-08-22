@@ -83,3 +83,23 @@ def validate_manifest_template_bindings(
         what = "manifest seed"
         inputs = _node_inputs(template, seed_decl.node, what)
         _require_field(inputs, seed_decl.field, seed_decl.node, what)
+
+
+def validate_manifest_template_bindings_v2(manifest, template: dict) -> None:
+    """Manifest schema 2 (M9 §8): identical structural exactness — every
+    declared input/parameter/output binding resolves against the captured
+    graph with no heuristic substitute search."""
+    for key, decl in manifest.inputs.items():
+        what = f"manifest input {key!r}"
+        inputs = _node_inputs(template, decl.node, what)
+        _require_field(inputs, decl.field, decl.node, what)
+    for name, decl in manifest.parameters.items():
+        what = f"manifest parameter {name!r}"
+        inputs = _node_inputs(template, decl.node, what)
+        _require_field(inputs, decl.field, decl.node, what)
+    for name, decl in manifest.outputs.items():
+        what = f"manifest output {name!r}"
+        if not isinstance(decl.node, str) or not decl.node:
+            raise BindingInvalid(f"{what}: manifest declares no node binding")
+        if not isinstance(template.get(decl.node), dict):
+            raise BindingInvalid(f"{what}: template has no node {decl.node!r}")

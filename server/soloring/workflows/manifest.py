@@ -39,6 +39,9 @@ from soloring.settings import BASE_DIR
 
 # The single v0.1 workflow directory (plan §4).
 WORKFLOW_DIR = BASE_DIR / "workflows" / "hunyuan_i2v_v1"
+# M9: the current schema-2 release (frozen plan §77.11). The published
+# v1/v3 package remains on disk as the golden legacy fixture.
+WORKFLOW_DIR_V4 = BASE_DIR / "workflows" / "hunyuan_i2v_v4"
 
 MANIFEST_SCHEMA_VERSION = "1"
 PARAM_TYPES = ("int", "float", "string", "bool")
@@ -138,6 +141,10 @@ class WorkflowTemplate:
     reference_inputs: tuple[WorkflowInputDef, ...]
     parameters: tuple[ParameterDef, ...]
     outputs: tuple[ExpectedOutput, ...]
+    # M9 schema-2 surface (§8/§16.3): realization-backed input keys and
+    # the schema marker. Defaults keep every legacy template schema-1.
+    is_schema2: bool = False
+    realization_input_keys: tuple[str, ...] = ()
 
 
 def _hash_file(path: Path) -> str:
@@ -331,3 +338,184 @@ def check_cardinality(
                 f"{inp.cardinality}, resolved {got}.",
                 code=_EC.WORKFLOW_INPUT_CARDINALITY_INVALID,
             )
+
+
+# --- Manifest schema 2 (M9 frozen plan §8) -----------------------------------
+# Discriminated `source` object per logical input: legacy ShotReference
+# inputs (shot_reference) and M9 realization inputs (realization_channel).
+# Schema 2 REJECTS legacy `source_role` — no dual form exists. Schema 1
+# continues to interpret `source_role` byte-for-byte as before.
+
+
+class ShotReferenceSource(_Strict):
+    kind: Literal["shot_reference"]
+    role: str
+
+
+class RealizationChannelSource(_Strict):
+    kind: Literal["realization_channel"]
+    channel: str
+
+
+class ManifestInputDefV2(_Strict):
+    node: str | None = None
+    field: str | None = None
+    kind: str | None = None
+    required: bool = False
+    cardinality: int | None = Field(default=None, ge=1)
+    source: ShotReferenceSource | RealizationChannelSource | None = None
+
+    @property
+    def source_role(self) -> str | None:
+        """Translator compatibility bridge (§8): schema-2 documents have
+        no ``source_role`` FIELD — no dual form exists. This computed
+        property exposes the discriminated ``shot_reference`` role to the
+        unchanged schema-1 translator so legacy binding semantics are
+        preserved exactly; realization-channel inputs present as None,
+        the same legacy view as the prompt input."""
+        if isinstance(self.source, ShotReferenceSource):
+            return self.source.role
+        return None
+
+    @property
+    def is_realization_input(self) -> bool:
+        """B4 bridge: realization-channel inputs are reference-bearing
+        inputs the translator must declare (they receive materialized
+        bytes), unlike the prompt input."""
+        return isinstance(self.source, RealizationChannelSource)
+
+
+class ManifestDocumentV2(_Strict):
+    schema_version: str
+    workflow_id: str
+    version: int = Field(ge=1)
+    inputs: dict[str, ManifestInputDefV2] = Field(default_factory=dict)
+    parameters: dict[str, ManifestParameterDef] = Field(default_factory=dict)
+    outputs: dict[str, ManifestOutputDef] = Field(default_factory=dict)
+
+
+MANIFEST_SCHEMA_VERSION_2 = "2"
+
+
+def parse_manifest_v2(raw: str | dict) -> ManifestDocumentV2:
+    """Strict parse of a schema-2 manifest (§8 rules)."""
+    from soloring.domain.normalize import is_valid_role
+
+    try:
+        doc = raw if isinstance(raw, dict) else json.loads(raw)
+    except ValueError as exc:
+        raise WorkflowError(f"Invalid workflow manifest: {exc}") from exc
+    # Schema 2 must reject legacy source_role in ANY input (no dual form).
+    if isinstance(doc, dict):
+        for key, decl in (doc.get("inputs") or {}).items():
+            if isinstance(decl, dict) and "source_role" in decl:
+                raise WorkflowError(
+                    f"Manifest schema 2 input {key!r} uses legacy "
+                    "'source_role'; schema 2 requires the discriminated "
+                    "'source' object and no dual form exists."
+                )
+    try:
+        parsed = ManifestDocumentV2.model_validate(doc)
+    except ValidationError as exc:
+        raise WorkflowError(f"Invalid workflow manifest: {exc}") from exc
+    if parsed.schema_version != MANIFEST_SCHEMA_VERSION_2:
+        raise WorkflowError(
+            f"Manifest schema_version must be {MANIFEST_SCHEMA_VERSION_2!r}."
+        )
+    for key, decl in parsed.inputs.items():
+        if isinstance(decl.source, ShotReferenceSource):
+            if not is_valid_role(decl.source.role):
+                raise WorkflowError(
+                    f"Manifest input {key!r} shot_reference role "
+                    f"{decl.source.role!r} is not a valid predecessor "
+                    "ShotReference role."
+                )
+    return parsed
+
+
+def build_template_v2(
+    doc: ManifestDocumentV2, manifest_hash: str, template_hash: str
+) -> WorkflowTemplate:
+    """Schema-2 template value object: byte inputs of BOTH source classes
+    (shot_reference + realization_channel) participate in cardinality;
+    realization keys are marked so legacy mapping skips them (§19)."""
+    from soloring.realization.profile import TARGET_KINDS  # noqa: F401
+
+    ref_inputs: list[WorkflowInputDef] = []
+    realization_keys: list[str] = []
+    for key, decl in doc.inputs.items():
+        source = decl.source
+        if source is None:
+            continue
+        if isinstance(source, ShotReferenceSource):
+            ref_inputs.append(WorkflowInputDef(
+                input_key=key, source_role=source.role,
+                required=decl.required, cardinality=decl.cardinality,
+            ))
+        else:
+            ref_inputs.append(WorkflowInputDef(
+                input_key=key, source_role=None,
+                required=decl.required, cardinality=decl.cardinality,
+            ))
+            realization_keys.append(key)
+    return WorkflowTemplate(
+        workflow_id=doc.workflow_id,
+        workflow_version=doc.version,
+        manifest_schema_version=doc.schema_version,
+        manifest_hash=manifest_hash,
+        workflow_template_hash=template_hash,
+        reference_inputs=tuple(ref_inputs),
+        parameters=tuple(
+            ParameterDef(
+                name=name, type=decl.type, default=decl.default,
+                min=decl.min, max=decl.max,
+                enum=tuple(decl.enum) if decl.enum is not None else None,
+            )
+            for name, decl in doc.parameters.items()
+        ),
+        outputs=tuple(
+            ExpectedOutput(
+                name=name, kind=decl.kind,
+                expected_count=decl.expected_count,
+                accepted_media_types=(
+                    tuple(decl.accepted_media_types)
+                    if decl.accepted_media_types is not None
+                    else None
+                ),
+            )
+            for name, decl in doc.outputs.items()
+        ),
+        is_schema2=True,
+        realization_input_keys=tuple(realization_keys),
+    )
+
+
+def parse_fingerprint_lazy(settings):
+    """Environment observation helper (M9 §36.1): the CURRENT configured
+    package's ExecutionModelFingerprint, or None when the package is
+    schema 1 / fingerprint unavailable. Informational only — never
+    historical identity."""
+    import json as _json
+
+    from soloring.realization.fingerprint import (
+        FingerprintError,
+        parse_fingerprint,
+    )
+    from soloring.realization.packages import current_package_dir
+
+    d = current_package_dir(settings)
+    try:
+        descriptor = _json.loads(
+            (d / "workflow-package.json").read_text()
+        )
+        if descriptor.get("schema_version") != 2:
+            return None
+        fp_bytes = (d / "execution-model-fingerprint.json").read_bytes()
+        if (
+            hashlib.sha256(fp_bytes).hexdigest()
+            != descriptor.get("execution_model_fingerprint_hash")
+        ):
+            return None
+        return parse_fingerprint(fp_bytes.decode("utf-8"))
+    except (OSError, ValueError, FingerprintError):
+        return None
