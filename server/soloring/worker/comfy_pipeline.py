@@ -361,17 +361,102 @@ async def _drive(
             template_bytes = await artifact_store.get_template(
                 generation.workflow_template_hash
             )
-            manifest = parse_manifest(manifest_bytes.decode("utf-8"))
             template_graph = json.loads(template_bytes.decode("utf-8"))
-            # Corruption/parser-drift defense (audit F10): the historical
-            # pair is re-validated before translation consumes it.
-            validate_manifest_template_bindings(manifest, template_graph)
+            if spec.get("schema_version") == 2:
+                # M9 §26/§51: schema-2 historical validation — the v2
+                # manifest, captured profile, and ExecutionModelFingerprint
+                # are retrieved by CAPTURED hash and cross-validated; the
+                # live attestation + live model bytes are verified on
+                # EVERY submission attempt (§6.4.1). Current installed
+                # package/profile/M8 state is never consulted.
+                from soloring.executors.comfy.bindings import (
+                    validate_manifest_template_bindings_v2,
+                )
+                from soloring.realization.fingerprint import (
+                    cross_validate_fingerprint_template,
+                    parse_fingerprint,
+                )
+                from soloring.realization.profile import parse_profile
+                from soloring.realization.runtime import (
+                    check_runtime_compatibility,
+                    load_live_attestation,
+                    validate_schema2_historical_state,
+                )
+                from soloring.realization.model_roots import (
+                    verify_live_model_bytes,
+                )
+                from soloring.workflows.manifest import parse_manifest_v2
+
+                manifest = parse_manifest_v2(
+                    manifest_bytes.decode("utf-8")
+                )
+                validate_manifest_template_bindings_v2(
+                    manifest, template_graph
+                )
+                profile = parse_profile(
+                    (
+                        await artifact_store.get_profile(
+                            spec["realization"]["profile"]["hash"]
+                        )
+                    ).decode("utf-8")
+                )
+                fingerprint = parse_fingerprint(
+                    (
+                        await artifact_store.get_fingerprint(
+                            spec["model"][
+                                "execution_model_fingerprint_hash"
+                            ]
+                        )
+                    ).decode("utf-8")
+                )
+                cross_validate_fingerprint_template(
+                    fingerprint, template_graph
+                )
+                check_runtime_compatibility(
+                    fingerprint, load_live_attestation(settings)
+                )
+                verify_live_model_bytes(
+                    settings,
+                    [
+                        (
+                            a.artifact_key,
+                            a.storage_root_key,
+                            a.declared_name,
+                            a.sha256,
+                        )
+                        for a in fingerprint.artifacts
+                    ],
+                )
+                schema2_pending = {
+                    "profile": profile,
+                    "fingerprint": fingerprint,
+                }
+            else:
+                manifest = parse_manifest(manifest_bytes.decode("utf-8"))
+                schema2_pending = None
+                # Corruption/parser-drift defense (audit F10): the
+                # historical pair is re-validated before translation
+                # consumes it.
+                validate_manifest_template_bindings(manifest, template_graph)
 
             # 2) Materialize captured inputs (attempt namespace; streamed;
             # verified).
             async with factory() as session:
                 input_rows = await list_generation_inputs(
                     session, generation_id
+                )
+            if schema2_pending is not None:
+                from soloring.realization.runtime import (
+                    validate_schema2_historical_state as _validate,
+                )
+
+                _validate(
+                    spec=spec,
+                    generation_model=generation.model,
+                    generation_model_version=generation.model_version,
+                    profile=schema2_pending["profile"],
+                    fingerprint=schema2_pending["fingerprint"],
+                    input_rows=input_rows,
                 )
             captured = [
                 CapturedInput(
