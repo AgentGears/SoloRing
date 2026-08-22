@@ -39,6 +39,9 @@ from soloring.settings import BASE_DIR
 
 # The single v0.1 workflow directory (plan §4).
 WORKFLOW_DIR = BASE_DIR / "workflows" / "hunyuan_i2v_v1"
+# M9: the current schema-2 release (frozen plan §77.11). The published
+# v1/v3 package remains on disk as the golden legacy fixture.
+WORKFLOW_DIR_V4 = BASE_DIR / "workflows" / "hunyuan_i2v_v4"
 
 MANIFEST_SCHEMA_VERSION = "1"
 PARAM_TYPES = ("int", "float", "string", "bool")

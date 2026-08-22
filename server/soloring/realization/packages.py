@@ -300,8 +300,7 @@ def validate_package(release: CapturedPackageRelease) -> ValidatedPackage:
     )
 
 
-def _validate_profile_manifest_bijection(
-    profile: RealizationProfileDocument, manifest: ManifestDocumentV2
+def _validate_profile_manifest_bijection(    profile: RealizationProfileDocument, manifest: ManifestDocumentV2
 ) -> None:
     from soloring.errors import ErrorCode
 
@@ -365,3 +364,20 @@ def _validate_profile_manifest_bijection(
                 f"Profile parameter override {name!r} is not a manifest "
                 "parameter."
             )
+
+
+async def capture_current_package(settings) -> ValidatedPackage:
+    """Capture + validate the ONE currently configured schema-2 release
+    in memory (§34/§56: existing single-package selection). Raises the
+    exact Stage-0 / validation errors; placement is the caller's
+    decision (readiness preview never places)."""
+    from soloring.workflows.manifest import WORKFLOW_DIR_V4
+
+    release = await capture_release(
+        WORKFLOW_DIR_V4 / "workflow-package.json",
+        WORKFLOW_DIR_V4 / "manifest.json",
+        WORKFLOW_DIR_V4 / "workflow.json",
+        WORKFLOW_DIR_V4 / "realization-profile.json",
+        WORKFLOW_DIR_V4 / "execution-model-fingerprint.json",
+    )
+    return validate_package(release)

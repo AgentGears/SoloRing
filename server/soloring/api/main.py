@@ -22,6 +22,7 @@ from soloring.api.generations import router as generations_router
 from soloring.api.projects import router as projects_router
 from soloring.api.sequences import router as narrative_router
 from soloring.api.references import router as references_router
+from soloring.api.realization import router as realization_router
 from soloring.api.revisions import router as revisions_router
 from soloring.api.shots import router as shots_router
 from soloring.api.takes import router as takes_router
@@ -72,6 +73,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(entities_router)
     app.include_router(narrative_router)
     app.include_router(continuity_router)
+    app.include_router(realization_router)
     app.include_router(assets_router)
     app.include_router(blobs_router)
     app.include_router(generations_router)
