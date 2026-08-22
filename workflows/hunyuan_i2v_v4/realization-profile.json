@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "profile_id": "hunyuan-i2v-single-reference",
+  "profile_version": 1,
+  "workflow_id": "hunyuan_i2v",
+  "workflow_version": 4,
+  "model": {
+    "id": "hunyuan-video-i2v",
+    "version": "q4_k_m-720p-llava"
+  },
+  "channels": {
+    "hero_reference": {
+      "input_key": "reference_image",
+      "min_items": 1,
+      "max_items": 1,
+      "allowed_roles": ["primary"]
+    }
+  },
+  "rules": [
+    {
+      "target_kind": "entity",
+      "facet_key": "identity",
+      "channel": "hero_reference"
+    }
+  ],
+  "parameter_overrides": {}
+}

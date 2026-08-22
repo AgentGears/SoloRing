@@ -1,0 +1,5 @@
+video_vae: hunyuan_video_vae_bf16.safetensors root=vae bytes=492984198 sha256=e8f8553275406d84ccf22e7a47601650d8f98bdb8aa9ccfdd6506b57a9701aed (0.4s)
+llava_vision: llava_llama3_vision.safetensors root=clip_vision bytes=649022376 sha256=7d0f89bf7860815f3a994b9bdae8ebe3a29c161825d03ca9262cb13b0c973aa6 (0.6s)
+video_unet: hunyuan-video-i2v-720p-Q4_K_M.gguf root=unet bytes=7883680512 sha256=1c1490eadf67083066da4ec338dd7a76b40eb2f8d313b01c2e0c6ed3b5ae5a6d (7.1s)
+clip_l: clip_l.safetensors root=clip bytes=246144152 sha256=660c6f5b1abae9dc498ac2d21e1347d2abdb0cf6c0c0c8576cd796491d9a6cdd (0.2s)
+llava_text_encoder: llava_llama3_fp8_scaled.safetensors root=clip bytes=9091392483 sha256=2f0c3ad255c282cead3f078753af37d19099cafcfc8265bbbd511f133e7af250 (8.2s)

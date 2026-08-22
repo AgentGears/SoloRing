@@ -331,3 +331,77 @@ def check_cardinality(
                 f"{inp.cardinality}, resolved {got}.",
                 code=_EC.WORKFLOW_INPUT_CARDINALITY_INVALID,
             )
+
+
+# --- Manifest schema 2 (M9 frozen plan §8) -----------------------------------
+# Discriminated `source` object per logical input: legacy ShotReference
+# inputs (shot_reference) and M9 realization inputs (realization_channel).
+# Schema 2 REJECTS legacy `source_role` — no dual form exists. Schema 1
+# continues to interpret `source_role` byte-for-byte as before.
+
+
+class ShotReferenceSource(_Strict):
+    kind: Literal["shot_reference"]
+    role: str
+
+
+class RealizationChannelSource(_Strict):
+    kind: Literal["realization_channel"]
+    channel: str
+
+
+class ManifestInputDefV2(_Strict):
+    node: str | None = None
+    field: str | None = None
+    kind: str | None = None
+    required: bool = False
+    cardinality: int | None = Field(default=None, ge=1)
+    source: ShotReferenceSource | RealizationChannelSource | None = None
+
+
+class ManifestDocumentV2(_Strict):
+    schema_version: str
+    workflow_id: str
+    version: int = Field(ge=1)
+    inputs: dict[str, ManifestInputDefV2] = Field(default_factory=dict)
+    parameters: dict[str, ManifestParameterDef] = Field(default_factory=dict)
+    outputs: dict[str, ManifestOutputDef] = Field(default_factory=dict)
+
+
+MANIFEST_SCHEMA_VERSION_2 = "2"
+
+
+def parse_manifest_v2(raw: str | dict) -> ManifestDocumentV2:
+    """Strict parse of a schema-2 manifest (§8 rules)."""
+    from soloring.domain.normalize import is_valid_role
+
+    try:
+        doc = raw if isinstance(raw, dict) else json.loads(raw)
+    except ValueError as exc:
+        raise WorkflowError(f"Invalid workflow manifest: {exc}") from exc
+    # Schema 2 must reject legacy source_role in ANY input (no dual form).
+    if isinstance(doc, dict):
+        for key, decl in (doc.get("inputs") or {}).items():
+            if isinstance(decl, dict) and "source_role" in decl:
+                raise WorkflowError(
+                    f"Manifest schema 2 input {key!r} uses legacy "
+                    "'source_role'; schema 2 requires the discriminated "
+                    "'source' object and no dual form exists."
+                )
+    try:
+        parsed = ManifestDocumentV2.model_validate(doc)
+    except ValidationError as exc:
+        raise WorkflowError(f"Invalid workflow manifest: {exc}") from exc
+    if parsed.schema_version != MANIFEST_SCHEMA_VERSION_2:
+        raise WorkflowError(
+            f"Manifest schema_version must be {MANIFEST_SCHEMA_VERSION_2!r}."
+        )
+    for key, decl in parsed.inputs.items():
+        if isinstance(decl.source, ShotReferenceSource):
+            if not is_valid_role(decl.source.role):
+                raise WorkflowError(
+                    f"Manifest input {key!r} shot_reference role "
+                    f"{decl.source.role!r} is not a valid predecessor "
+                    "ShotReference role."
+                )
+    return parsed

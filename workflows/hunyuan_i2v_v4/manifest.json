@@ -1,0 +1,51 @@
+{
+  "schema_version": "2",
+  "version": 4,
+  "workflow_id": "hunyuan_i2v",
+  "inputs": {
+    "reference_image": {
+      "node": "4",
+      "field": "image",
+      "kind": "image",
+      "required": true,
+      "cardinality": 1,
+      "source": {
+        "kind": "realization_channel",
+        "channel": "hero_reference"
+      }
+    },
+    "prompt": {
+      "node": "12",
+      "field": "prompt",
+      "kind": "string",
+      "required": true
+    }
+  },
+  "parameters": {
+    "steps": {
+      "node": "31",
+      "field": "steps",
+      "type": "int",
+      "default": 30,
+      "min": 1,
+      "max": 100
+    },
+    "cfg": {
+      "node": "31",
+      "field": "cfg",
+      "type": "float",
+      "default": 1.0,
+      "min": 1.0,
+      "max": 30.0
+    }
+  },
+  "outputs": {
+    "video": {
+      "node": "15",
+      "field": "images",
+      "kind": "video",
+      "expected_count": 1,
+      "accepted_media_types": null
+    }
+  }
+}

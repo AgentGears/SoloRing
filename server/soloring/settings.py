@@ -82,6 +82,18 @@ class Settings(BaseSettings):
     # default for the pinned deployment: see docs/EXECUTOR_PROFILE.md.
     comfy_observation_poll_seconds: float = Field(default=1.0, gt=0.0)
 
+    # --- Live Comfy model-root adapter (M9 frozen plan §6.4) -----------------
+    # Closed mapping from ExecutionModelFingerprint storage_root_key to the
+    # ABSOLUTE loader search root of the characterized Comfy deployment.
+    # Worker/deployment configuration ONLY — never captured historical
+    # identity. Empirically pinned for this deployment: the clip key maps to
+    # models/text_encoders (NOT models/clip, a placeholder dir here);
+    # ComfyUI 0.33 registers text_encoders as a DualCLIP loader root.
+    comfy_model_root_unet: Path | None = None
+    comfy_model_root_vae: Path | None = None
+    comfy_model_root_clip: Path | None = None
+    comfy_model_root_clip_vision: Path | None = None
+
     @model_validator(mode="after")
     def _derive_storage_and_validate_timing(self) -> "Settings":
         # data_dir is the root; derive sub-dirs when not explicitly provided.

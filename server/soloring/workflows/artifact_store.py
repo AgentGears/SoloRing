@@ -54,6 +54,14 @@ class ArtifactMissing(SoloRingError):
             {
                 "manifests": ErrorCode.WORKFLOW_MANIFEST_MISSING,
                 "templates": ErrorCode.COMFY_TEMPLATE_MISSING,
+                # M9 §23: missing historical profile/fingerprint bytes are
+                # historical corruption, never a capture/readiness issue.
+                "realization_profiles": (
+                    ErrorCode.INTERNAL_INVARIANT_VIOLATION
+                ),
+                "execution_model_fingerprints": (
+                    ErrorCode.INTERNAL_INVARIANT_VIOLATION
+                ),
             }[kind],
             f"Historical workflow {kind} {content_hash} is missing from the "
             "artifact store.",
@@ -67,6 +75,12 @@ class ArtifactIntegrity(SoloRingError):
             {
                 "manifests": ErrorCode.WORKFLOW_MANIFEST_INTEGRITY,
                 "templates": ErrorCode.COMFY_TEMPLATE_INTEGRITY,
+                "realization_profiles": (
+                    ErrorCode.INTERNAL_INVARIANT_VIOLATION
+                ),
+                "execution_model_fingerprints": (
+                    ErrorCode.INTERNAL_INVARIANT_VIOLATION
+                ),
             }[kind],
             f"Historical workflow {kind} {content_hash} failed integrity "
             "verification.",
@@ -286,6 +300,25 @@ class WorkflowArtifactStore:
         await self.place("manifests", captured.manifest_hash, captured.manifest_bytes)
         await self.place("templates", captured.workflow_template_hash, captured.template_bytes)
 
+    async def place_release(self, release) -> None:
+        """Place all four artifacts of a captured schema-2 release (M9
+        §65); schema-1 releases place the legacy pair only."""
+        await self.place("manifests", release.manifest_hash, release.manifest_bytes)
+        await self.place(
+            "templates", release.workflow_template_hash, release.template_bytes
+        )
+        if release.schema_version == 2:
+            await self.place(
+                "realization_profiles",
+                release.realization_profile_hash,
+                release.profile_bytes,
+            )
+            await self.place(
+                "execution_model_fingerprints",
+                release.execution_model_fingerprint_hash,
+                release.fingerprint_bytes,
+            )
+
     # --- historical retrieval ------------------------------------------------
 
     async def get_manifest(self, manifest_hash: str) -> bytes:
@@ -293,6 +326,19 @@ class WorkflowArtifactStore:
 
     async def get_template(self, workflow_template_hash: str) -> bytes:
         return await self._get_verified("templates", workflow_template_hash)
+
+    async def get_profile(self, realization_profile_hash: str) -> bytes:
+        return await self._get_verified(
+            "realization_profiles", realization_profile_hash
+        )
+
+    async def get_fingerprint(
+        self, execution_model_fingerprint_hash: str
+    ) -> bytes:
+        return await self._get_verified(
+            "execution_model_fingerprints",
+            execution_model_fingerprint_hash,
+        )
 
     async def _get_verified(self, kind: str, content_hash: str) -> bytes:
         _validate_hash(content_hash, kind)
