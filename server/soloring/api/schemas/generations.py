@@ -30,6 +30,8 @@ class GenerationSummary(BaseModel):
     started_at: str | None
     completed_at: str | None
     executor_job_id: str | None
+    model: str | None = None
+    model_version: str | None = None
 
 
 class TakeRead(BaseModel):

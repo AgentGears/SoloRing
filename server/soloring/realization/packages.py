@@ -160,10 +160,6 @@ async def capture_release(
 
     profile_bytes = fingerprint_bytes = None
     if d1["schema_version"] == 2:
-        if profile_path is None or fingerprint_path is None:
-            raise PackageIntegrity(
-                "schema-2 capture requires profile and fingerprint sources"
-            )
         profile_bytes = await _read(
             profile_path, "realization-profile"
         )
@@ -373,11 +369,12 @@ async def capture_current_package(settings) -> ValidatedPackage:
     decision (readiness preview never places)."""
     from soloring.workflows.manifest import WORKFLOW_DIR_V4
 
+    d = settings.workflow_package_dir or WORKFLOW_DIR_V4
     release = await capture_release(
-        WORKFLOW_DIR_V4 / "workflow-package.json",
-        WORKFLOW_DIR_V4 / "manifest.json",
-        WORKFLOW_DIR_V4 / "workflow.json",
-        WORKFLOW_DIR_V4 / "realization-profile.json",
-        WORKFLOW_DIR_V4 / "execution-model-fingerprint.json",
+        d / "workflow-package.json",
+        d / "manifest.json",
+        d / "workflow.json",
+        d / "realization-profile.json",
+        d / "execution-model-fingerprint.json",
     )
     return validate_package(release)

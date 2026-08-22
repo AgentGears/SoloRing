@@ -90,6 +90,11 @@ async def _seed(client, factory, engine, settings, monkeypatch) -> str:
     from soloring.domain.ids import new_uuid
 
     settings.executor = "comfy"
+    # M9: legacy comfy-contract tests pin the published v1 package (the
+    # current release advanced to schema-2 hunyuan_i2v_v4; §56 override).
+    from soloring.workflows.manifest import WORKFLOW_DIR as _V1
+
+    settings.workflow_package_dir = _V1
     saved = generations_api.get_settings
     generations_api.get_settings = lambda: settings
     try:

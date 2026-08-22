@@ -94,6 +94,19 @@ class Settings(BaseSettings):
     comfy_model_root_clip: Path | None = None
     comfy_model_root_clip_vision: Path | None = None
 
+    # --- Workflow package selection (M9 §56/§58) -----------------
+    # The ONE configured workflow package directory. None = the
+    # advanced schema-2 current release (hunyuan_i2v_v4, §77.11).
+    workflow_package_dir: Path | None = None
+
+    # --- Workflow package selection (M9 §56/§58) -------------------------------
+    # The ONE configured workflow package directory. None = the advanced
+    # schema-2 current release (hunyuan_i2v_v4, frozen plan §77.11).
+    # Explicit override exists for deployment variants and legacy
+    # contract fixtures; the server still derives/validates everything
+    # from captured bytes.
+    workflow_package_dir: Path | None = None
+
     @model_validator(mode="after")
     def _derive_storage_and_validate_timing(self) -> "Settings":
         # data_dir is the root; derive sub-dirs when not explicitly provided.

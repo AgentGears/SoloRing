@@ -141,6 +141,10 @@ class WorkflowTemplate:
     reference_inputs: tuple[WorkflowInputDef, ...]
     parameters: tuple[ParameterDef, ...]
     outputs: tuple[ExpectedOutput, ...]
+    # M9 schema-2 surface (§8/§16.3): realization-backed input keys and
+    # the schema marker. Defaults keep every legacy template schema-1.
+    is_schema2: bool = False
+    realization_input_keys: tuple[str, ...] = ()
 
 
 def _hash_file(path: Path) -> str:
@@ -408,3 +412,60 @@ def parse_manifest_v2(raw: str | dict) -> ManifestDocumentV2:
                     "ShotReference role."
                 )
     return parsed
+
+
+def build_template_v2(
+    doc: ManifestDocumentV2, manifest_hash: str, template_hash: str
+) -> WorkflowTemplate:
+    """Schema-2 template value object: byte inputs of BOTH source classes
+    (shot_reference + realization_channel) participate in cardinality;
+    realization keys are marked so legacy mapping skips them (§19)."""
+    from soloring.realization.profile import TARGET_KINDS  # noqa: F401
+
+    ref_inputs: list[WorkflowInputDef] = []
+    realization_keys: list[str] = []
+    for key, decl in doc.inputs.items():
+        source = decl.source
+        if source is None:
+            continue
+        if isinstance(source, ShotReferenceSource):
+            ref_inputs.append(WorkflowInputDef(
+                input_key=key, source_role=source.role,
+                required=decl.required, cardinality=decl.cardinality,
+            ))
+        else:
+            ref_inputs.append(WorkflowInputDef(
+                input_key=key, source_role=None,
+                required=decl.required, cardinality=decl.cardinality,
+            ))
+            realization_keys.append(key)
+    return WorkflowTemplate(
+        workflow_id=doc.workflow_id,
+        workflow_version=doc.version,
+        manifest_schema_version=doc.schema_version,
+        manifest_hash=manifest_hash,
+        workflow_template_hash=template_hash,
+        reference_inputs=tuple(ref_inputs),
+        parameters=tuple(
+            ParameterDef(
+                name=name, type=decl.type, default=decl.default,
+                min=decl.min, max=decl.max,
+                enum=tuple(decl.enum) if decl.enum is not None else None,
+            )
+            for name, decl in doc.parameters.items()
+        ),
+        outputs=tuple(
+            ExpectedOutput(
+                name=name, kind=decl.kind,
+                expected_count=decl.expected_count,
+                accepted_media_types=(
+                    tuple(decl.accepted_media_types)
+                    if decl.accepted_media_types is not None
+                    else None
+                ),
+            )
+            for name, decl in doc.outputs.items()
+        ),
+        is_schema2=True,
+        realization_input_keys=tuple(realization_keys),
+    )
