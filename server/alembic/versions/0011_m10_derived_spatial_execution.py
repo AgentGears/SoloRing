@@ -63,25 +63,19 @@ def upgrade() -> None:
         sa.Column("created_at", sa.Text(), nullable=False),
         sa.CheckConstraint("spec_schema_version = 1", name="ck_dsa_spec_schema"),
         sa.CheckConstraint("length(spec_hash) = 64", name="ck_dsa_spec_hash_len"),
-        sa.CheckConstraint("spatial_continuity_schema_version = 1",
-                           name="ck_dsa_continuity_schema"),
-        sa.CheckConstraint("length(spatial_continuity_hash) = 64",
-                           name="ck_dsa_continuity_hash_len"),
+        sa.CheckConstraint("spatial_continuity_schema_version = 1", name="ck_dsa_continuity_schema"),
+        sa.CheckConstraint("length(spatial_continuity_hash) = 64", name="ck_dsa_continuity_hash_len"),
         sa.CheckConstraint("artifact_schema_version > 0", name="ck_dsa_artifact_schema"),
-        sa.CheckConstraint("length(runtime_fingerprint_hash) = 64",
-                           name="ck_dsa_fp_hash_len"),
+        sa.CheckConstraint("length(runtime_fingerprint_hash) = 64", name="ck_dsa_fp_hash_len"),
         sa.CheckConstraint("determinism_class = 'D0'", name="ck_dsa_d0_only"),
         sa.CheckConstraint("length(blob_hash) = 64", name="ck_dsa_blob_hash_len"),
-        sa.ForeignKeyConstraint(["project_id"], ["projects.id"],
-                                name="fk_dsa_project", ondelete="RESTRICT"),
-        sa.ForeignKeyConstraint(["blob_hash"], ["blobs.hash"],
-                                name="fk_dsa_blob", ondelete="RESTRICT"),
-        sa.UniqueConstraint("project_id", "spec_hash", "runtime_fingerprint_hash",
-                            name="uq_dsa_project_spec_runtime"),
+        sa.ForeignKeyConstraint(["project_id"], ["projects.id"], name="fk_dsa_project", ondelete="RESTRICT"),
+        sa.ForeignKeyConstraint(["blob_hash"], ["blobs.hash"], name="fk_dsa_blob", ondelete="RESTRICT"),
+        sa.UniqueConstraint("project_id", "spec_hash", "runtime_fingerprint_hash", name="uq_dsa_project_spec_runtime"),
         sa.UniqueConstraint("id", "blob_hash", name="uq_dsa_id_blob"),
     )
-    op.create_index("ix_dsa_project_continuity", "derived_spatial_artifacts",
-                    ["project_id", "spatial_continuity_hash"])
+    op.create_index("ix_dsa_spec_runtime", "derived_spatial_artifacts", ["spec_hash", "runtime_fingerprint_hash"])
+    op.create_index("ix_dsa_project_continuity", "derived_spatial_artifacts", ["project_id", "spatial_continuity_hash"])
     op.create_index("ix_dsa_blob", "derived_spatial_artifacts", ["blob_hash"])
 
     op.create_table(
@@ -94,19 +88,12 @@ def upgrade() -> None:
         sa.Column("blob_hash", sa.Text(), nullable=False),
         sa.CheckConstraint("position >= 0", name="ck_gdsi_position"),
         sa.CheckConstraint("length(blob_hash) = 64", name="ck_gdsi_blob_hash_len"),
-        sa.ForeignKeyConstraint(["generation_id"], ["generations.id"],
-                                name="fk_gdsi_generation", ondelete="RESTRICT"),
-        sa.ForeignKeyConstraint(
-            ["derived_spatial_artifact_id", "blob_hash"],
-            ["derived_spatial_artifacts.id", "derived_spatial_artifacts.blob_hash"],
-            name="fk_gdsi_artifact", ondelete="RESTRICT"),
-        sa.ForeignKeyConstraint(["blob_hash"], ["blobs.hash"],
-                                name="fk_gdsi_blob", ondelete="RESTRICT"),
-        sa.UniqueConstraint("generation_id", "artifact_role", "position",
-                            name="uq_gdsi_gen_role_position"),
+        sa.ForeignKeyConstraint(["generation_id"], ["generations.id"], name="fk_gdsi_generation", ondelete="RESTRICT"),
+        sa.ForeignKeyConstraint(["derived_spatial_artifact_id", "blob_hash"], ["derived_spatial_artifacts.id", "derived_spatial_artifacts.blob_hash"], name="fk_gdsi_artifact", ondelete="RESTRICT"),
+        sa.ForeignKeyConstraint(["blob_hash"], ["blobs.hash"], name="fk_gdsi_blob", ondelete="RESTRICT"),
+        sa.UniqueConstraint("generation_id", "artifact_role", "position", name="uq_gdsi_gen_role_position"),
     )
-    op.create_index("ix_gdsi_artifact", "generation_derived_spatial_inputs",
-                    ["derived_spatial_artifact_id"])
+    op.create_index("ix_gdsi_artifact", "generation_derived_spatial_inputs", ["derived_spatial_artifact_id"])
     op.create_index("ix_gdsi_blob", "generation_derived_spatial_inputs", ["blob_hash"])
 
 
