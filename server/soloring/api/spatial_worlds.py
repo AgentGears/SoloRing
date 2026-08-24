@@ -247,16 +247,32 @@ async def world_workspace(world_id: str,
         ":w AND deleted_at IS NULL ORDER BY key, id"),
         {"w": world_id})).mappings().all()
     # M10C: active SpatialTracks of this world (canonical entity order) —
-    # server-owned staging authoring projection (M10C plan §10.1).
+    # server-owned staging authoring projection (M10C plan §10.1/§10.2),
+    # with each track's active transitions (stable coordinate order).
     tracks = (await session.execute(_t(
         "SELECT id, entity_id, requirement FROM spatial_tracks "
         "WHERE spatial_world_id = :w AND deleted_at IS NULL "
         "ORDER BY entity_id, id"), {"w": world_id})).mappings().all()
+    transitions = (await session.execute(_t(
+        "SELECT tr.spatial_track_id, tr.id, tr.anchor_type, tr.anchor_id, "
+        "tr.boundary, tr.operation, tr.x_mm, tr.y_mm, tr.z_mm, "
+        "tr.yaw_udeg, tr.pitch_udeg, tr.roll_udeg "
+        "FROM spatial_transitions tr "
+        "JOIN spatial_tracks tk ON tk.id = tr.spatial_track_id "
+        "WHERE tk.spatial_world_id = :w AND tr.deleted_at IS NULL "
+        "AND tk.deleted_at IS NULL "
+        "ORDER BY tr.spatial_track_id, tr.anchor_type, tr.anchor_id, "
+        "tr.boundary, tr.id"), {"w": world_id})).mappings().all()
+    by_track: dict[str, list[dict]] = {}
+    for t in transitions:
+        by_track.setdefault(t["spatial_track_id"], []).append(dict(t))
+    out_tracks = [{**dict(t), "transitions": by_track.get(t["id"], [])}
+                  for t in tracks]
     return {
         "world": dict(world),
         "stable_frames": [dict(f) for f in stable_frames],
         "stable_axes": [dict(a) for a in stable_axes],
-        "tracks": [dict(t) for t in tracks],
+        "tracks": out_tracks,
         "states": out_states,
     }
 
