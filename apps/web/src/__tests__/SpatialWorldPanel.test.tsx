@@ -26,12 +26,17 @@ function body(approved: string | null) {
       id: "s1", location_entity_revision_id: "r1",
       approved_revision_id: approved,
       working_snapshot_hash: "f".repeat(64),
-      frames: [{
-        spatial_frame_id: "f1", frame_key: "front-desk",
-        bound_entity_id: null,
-        x_mm: 0, y_mm: 0, z_mm: 4200,
-        yaw_udeg: 0, pitch_udeg: 0, roll_udeg: 0,
-        half_x_mm: 2200, half_y_mm: 600, half_z_mm: 550 }],
+      frames: [
+        { spatial_frame_id: "f1", frame_key: "front-desk",
+          bound_entity_id: null,
+          x_mm: 0, y_mm: 0, z_mm: 4200,
+          yaw_udeg: 0, pitch_udeg: 0, roll_udeg: 0,
+          half_x_mm: 2200, half_y_mm: 600, half_z_mm: 550 },
+        { spatial_frame_id: "f2", frame_key: "sofa",
+          bound_entity_id: null,
+          x_mm: 900, y_mm: -300, z_mm: -1500,
+          yaw_udeg: 0, pitch_udeg: 0, roll_udeg: 0,
+          half_x_mm: 350, half_y_mm: 250, half_z_mm: 150 }],
       axes: [],
       revisions: [
         { id: "rev1", revision_number: 1, snapshot_hash: "a".repeat(64),
@@ -147,6 +152,39 @@ test("axis authoring: create -> bind endpoints -> working axes",
           body: JSON.stringify({ a_frame_id: "f1", b_frame_id: "f2" }) }));
       expect(container.textContent).toContain("ax:");
     });
+  } finally {
+    global.fetch = original;
+  }
+});
+
+test("axis endpoint selectors list ONLY state-member frames", async () => {
+  // stable_frames includes f3 which is NOT a member of states[0];
+  // the endpoint selectors must not offer it (backend would reject)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const workspace: any = body(null);
+  workspace.stable_frames.push(
+    { id: "f3", key: "unmembered", name: "U",
+      parent_spatial_frame_id: null, bound_entity_id: null });
+  const original = global.fetch;
+  const fetchMock = vi.fn(async () =>
+    new Response(JSON.stringify(workspace), { status: 200 }));
+  global.fetch = fetchMock as unknown as typeof fetch;
+  try {
+    const { container } = render(<SpatialWorldPanel worldId="w1" />);
+    await waitFor(() => {
+      expect(container.textContent).toContain("Working membership");
+    });
+    // selects: [0] membership (stable), [1] endpoint A, [2] endpoint B
+    const selects = Array.from(container.querySelectorAll("select"));
+    const endpointOptions = Array.from(
+      selects[1].querySelectorAll("option")).map((o) => o.value);
+    expect(endpointOptions).toContain("f1");
+    expect(endpointOptions).toContain("f2");
+    expect(endpointOptions).not.toContain("f3");
+    // the membership selector (stable identities) DOES offer f3
+    const memberOptions = Array.from(
+      selects[0].querySelectorAll("option")).map((o) => o.value);
+    expect(memberOptions).toContain("f3");
   } finally {
     global.fetch = original;
   }

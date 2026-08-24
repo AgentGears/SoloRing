@@ -271,22 +271,28 @@ export function SpatialWorldPanel({ worldId }: { worldId: string }) {
           </div>
 
           <h4>Author axis</h4>
+          <div className="meta">
+            Endpoints must already be included in this state (endpoints
+            list only member frames).
+          </div>
           <div className="row">
             <input placeholder="axis key" value={axisKey}
                    onChange={(e) => setAxisKey(e.target.value)} />
             <select value={axisA} onChange={(e) => setAxisA(e.target.value)}>
               <option value="">endpoint A…</option>
-              {data.stable_frames.map((f) => (
-                <option key={f.id} value={f.id}>
-                  {f.key}
+              {st.frames.map((f) => (
+                <option key={f.spatial_frame_id}
+                        value={f.spatial_frame_id}>
+                  {f.frame_key}
                 </option>
               ))}
             </select>
             <select value={axisB} onChange={(e) => setAxisB(e.target.value)}>
               <option value="">endpoint B…</option>
-              {data.stable_frames.map((f) => (
-                <option key={f.id} value={f.id}>
-                  {f.key}
+              {st.frames.map((f) => (
+                <option key={f.spatial_frame_id}
+                        value={f.spatial_frame_id}>
+                  {f.frame_key}
                 </option>
               ))}
             </select>
