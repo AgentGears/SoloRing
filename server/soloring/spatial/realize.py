@@ -88,36 +88,41 @@ def _entity_spec(continuity_hash: str, staging_entry: dict) -> dict:
 def compose_spatial_realization(
     continuity_pack: dict,
     *,
-    entity_layers: int = 2,
     realization_profile_hash: str = "0" * 64,
 ) -> SpatialRealizationOutput:
-    """Materialize the complete captured spatial authority into D0 control
-    artifacts for the production package. entity_layers caps at the frozen
-    capacity (1 world + N entity, N <= 2; whole-item atomic — no silent
-    truncation: requesting more entities than capacity raises)."""
+    """Materialize the COMPLETE captured spatial authority into D0 control
+    artifacts for the production package.
+
+    Whole-item atomic (frozen §74/§108): every staged entity in the
+    captured pack is realized. The frozen capacity is 3 total streams =
+    1 world + at most 2 entity layers; a captured pack with more than two
+    staged entities fails BEFORE any materialization — there is no
+    caller-controlled truncation parameter in production (closure review
+    P0-1).
+    """
     from soloring.spatial.production_package import (
         boxdepth_runtime_fingerprint,
     )
 
     staging = continuity_pack["staging"]
-    n_entity = min(entity_layers, len(staging))
-    if entity_layers > pins.MAX_CONTROL_STREAMS - 1:
+    if len(staging) > pins.MAX_CONTROL_STREAMS - 1:
         raise ValueError(
-            "entity_layers exceeds frozen capacity: at most "
-            f"{pins.MAX_CONTROL_STREAMS - 1} entity streams, "
-            f"requested {entity_layers}")
+            "captured staging exceeds frozen capacity: at most "
+            f"{pins.MAX_CONTROL_STREAMS - 1} staged entities, captured "
+            f"{len(staging)}; the whole item fails rather than dropping "
+            "authority")
 
     continuity_hash = canonical_hash(continuity_pack)
 
     specs = [_world_spec(continuity_hash)]
-    for entry in staging[:n_entity]:
+    for entry in staging:
         specs.append(_entity_spec(continuity_hash, entry))
 
     # D0 materialization per role: world composite + entity-only layers
     world_pack = {**continuity_pack,
                   "staging": []}  # world-only view
     role_packs = [world_pack]
-    for entry in staging[:n_entity]:
+    for entry in staging:
         solo = {**continuity_pack,
                 "spatial_world": {**continuity_pack["spatial_world"],
                                   "world_snapshot": {

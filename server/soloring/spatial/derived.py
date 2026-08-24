@@ -80,7 +80,7 @@ class DerivedSpatialArtifactSpec(_Strict):
 class MaterializerIdentity(_Strict):
     algorithm_id: str; algorithm_version: str; implementation_sha256: str = Field(pattern=_SHA)
 class MaterializerRuntime(_Strict):
-    python: str; numpy: str; platform_contract: str
+    python: str; numpy: str; pillow_png_encoder: str; platform_contract: str
 class ExternalRuntimeComponent(_Strict):
     kind: str; name: str; version_or_commit: str; sha256: str | None = Field(default=None, pattern=_SHA)
 class MaterializerRuntimeFingerprint(_Strict):

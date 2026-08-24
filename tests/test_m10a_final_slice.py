@@ -9,6 +9,7 @@ import pytest
 from soloring.spatial import boxdepth, production_package as pk
 from soloring.spatial import production_pins as pins
 from soloring.spatial.realize import compose_spatial_realization
+from soloring.spatial.schemas import parse_continuity_pack  # noqa: F811
 from soloring.spatial.schemas import parse_continuity_pack
 
 
@@ -130,7 +131,7 @@ def test_reference_hash_matches_certified():
 
 def test_d0_repeatability_x3():
     pack = _lobby_pack()
-    outs = [compose_spatial_realization(pack, entity_layers=2)
+    outs = [compose_spatial_realization(pack)
             for _ in range(3)]
     for other in outs[1:]:
         assert other.artifact_digests == outs[0].artifact_digests
@@ -140,7 +141,7 @@ def test_d0_repeatability_x3():
 
 def test_layers_render_nonempty():
     pack = _lobby_pack()
-    out = compose_spatial_realization(pack, entity_layers=2)
+    out = compose_spatial_realization(pack)
     # world layer must contain actual geometry (desk visible)
     depth = boxdepth.materialize_depth_mm(
         {**pack, "staging": []})
@@ -160,23 +161,23 @@ def test_role_correct_differentials():
     """Facts flow to the right layer: staging -> entity layers; world ->
     world layer; camera -> all layers (all-visible fixture)."""
     pack = _lobby_pack()
-    out = compose_spatial_realization(pack, entity_layers=2)
+    out = compose_spatial_realization(pack)
 
     moved = copy.deepcopy(pack)
     moved["staging"][0]["transform"]["translation_mm"][0] += 1
-    outm = compose_spatial_realization(moved, entity_layers=2)
+    outm = compose_spatial_realization(moved)
     assert outm.artifact_digests[1] != out.artifact_digests[1]  # own layer
     assert outm.artifact_digests[2] == out.artifact_digests[2]  # other layer
 
     extent = copy.deepcopy(pack)
     extent["spatial_world"]["world_snapshot"]["frames"][1][
         "half_extents_mm"][0] += 1
-    oute = compose_spatial_realization(extent, entity_layers=2)
+    oute = compose_spatial_realization(extent)
     assert oute.artifact_digests[0] != out.artifact_digests[0]  # world layer
 
     focal = copy.deepcopy(pack)
     focal["shot_plan"]["camera"]["focal_length_um"] += 1
-    outf = compose_spatial_realization(focal, entity_layers=2)
+    outf = compose_spatial_realization(focal)
     assert all(a != b for a, b in zip(outf.artifact_digests,
                                       out.artifact_digests))
 
@@ -185,7 +186,7 @@ def test_offscreen_entity_layer_is_deterministic_background():
     pack = _lobby_pack()
     far = copy.deepcopy(pack)
     far["staging"][0]["transform"]["translation_mm"] = [50000, 0, -50000]
-    out = compose_spatial_realization(far, entity_layers=2)
+    out = compose_spatial_realization(far)
     solo1 = boxdepth.materialize({**far,
                                   "spatial_world": {
                                       **far["spatial_world"],
@@ -199,12 +200,44 @@ def test_offscreen_entity_layer_is_deterministic_background():
 
 # ----------------------------------------------------------- capacity -----
 
-def test_capacity_enforced_whole_item():
+def test_capacity_enforced_whole_item_from_captured_pack():
+    """P0-1 regression: the entity set is DERIVED from the captured pack.
+    A three-entity captured pack fails through the normal production call;
+    there is no caller truncation parameter."""
     pack = _lobby_pack()
+    third = {
+        "spatial_track_id": "t3", "entity_id": "e3",
+        "entity_revision_id": "er3", "requirement": "optional",
+        "transform": {"translation_mm": [100, 0, -2800],
+                      "rotation_udeg": [0, 0, 0]},
+        "source_transition": {"spatial_transition_id": "x3",
+                              "anchor_type": "shot", "anchor_id": "s1",
+                              "boundary": "start"}}
+    from soloring.spatial.schemas import parse_continuity_pack
+    overflowing = parse_continuity_pack({
+        **pack, "staging": [*pack["staging"], third]})
     with pytest.raises(ValueError, match="capacity"):
-        compose_spatial_realization(pack, entity_layers=3)
-    out = compose_spatial_realization(pack, entity_layers=2)
-    assert len(out.specs) == 3  # 1 world + 2 entity = frozen cap
+        compose_spatial_realization(overflowing)  # default production call
+
+
+def test_staging_cardinality_zero_one_two_complete():
+    """0/1/2 staged entities produce EXACTLY the complete set: world +
+    one layer per staged entity."""
+    import copy
+    from soloring.spatial.schemas import parse_continuity_pack
+    base = _lobby_pack()
+    for n in (0, 1, 2):
+        trimmed = parse_continuity_pack({
+            **base, "staging": base["staging"][:n]})
+        out = compose_spatial_realization(trimmed)
+        assert len(out.specs) == 1 + n
+        assert len(out.frames) == 1 + n
+        assert len(out.artifact_digests) == 1 + n
+        roles = [a["artifact_role"] for a in
+                 out.spatial_realization_block["derived_artifacts"]]
+        assert roles == (["spatial.world_depth"] if n == 0 else
+                         ["spatial.world_depth"] +
+                         ["spatial.entity_depth"] * n)
 
 
 # ------------------------------------------------------ package documents -
@@ -241,12 +274,16 @@ def test_runtime_fingerprint_carries_implementation_identity():
     assert fp["materializer"]["algorithm_id"] == pins.BOXDEPTH_ALGORITHM_ID
     assert len(fp["materializer"]["implementation_sha256"]) == 64
     assert fp["runtime"]["numpy"]
-    assert fp["external_components"] == []
+    assert fp["runtime"]["pillow_png_encoder"]  # P0-2: encoder identity
+    png = [c for c in fp["external_components"]
+           if c["kind"] == "png_encoder"]
+    assert png and png[0]["name"] == "Pillow"
+    assert png[0]["version_or_commit"] == fp["runtime"]["pillow_png_encoder"]
 
 
 def test_spec_v3_block_from_realization():
     pack = _lobby_pack()
-    out = compose_spatial_realization(pack, entity_layers=2)
+    out = compose_spatial_realization(pack)
     from soloring.spatial.spec3 import validate_spec_v3, compose_workflow_spec_v3
     spec = compose_workflow_spec_v3(
         {"prompt": "p"},
@@ -261,7 +298,7 @@ def test_spec_v3_block_from_realization():
 
 def test_output_contract_pins_frozen_grammar():
     pack = _lobby_pack()
-    out = compose_spatial_realization(pack, entity_layers=0)
+    out = compose_spatial_realization(parse_continuity_pack({**pack, "staging": []}))
     oc = out.specs[0]["output_contract"]
     assert oc["width"] == 832 and oc["height"] == 480
     assert oc["frame_count"] == 17

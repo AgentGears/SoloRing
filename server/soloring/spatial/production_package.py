@@ -232,7 +232,8 @@ def boxdepth_runtime_fingerprint() -> dict:
     return pins.production_runtime_fingerprint(
         implementation_sha256=boxdepth_implementation_sha256(),
         python_version=sys.version.split()[0],
-        numpy_version=__import__("numpy").__version__)
+        numpy_version=__import__("numpy").__version__,
+        pillow_version=__import__("PIL").__version__)
 
 
 __all__ = [

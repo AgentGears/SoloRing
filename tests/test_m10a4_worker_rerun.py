@@ -72,6 +72,7 @@ def _fp_json() -> str:
                          "algorithm_version": "1.0.0",
                          "implementation_sha256": "c" * 64},
         "runtime": {"python": "3.12", "numpy": "2.5",
+                    "pillow_png_encoder": "12.3.0",
                     "platform_contract": "win-cpu"},
         "external_components": [],
     }

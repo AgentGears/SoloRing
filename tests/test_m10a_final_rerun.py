@@ -28,7 +28,8 @@ async def _full_schema3_generation(factory, engine, settings):
     ids = await _seed_spatial_generation(factory, engine, settings)
     from tests.test_m10a_final_slice import _lobby_pack
     pack = _lobby_pack()
-    out = compose_spatial_realization(pack, entity_layers=0)
+    from soloring.spatial.schemas import parse_continuity_pack as _pcp
+    out = compose_spatial_realization(_pcp({**pack, "staging": []}))
     # align the block's continuity/blob identity with the seeded history
     block = {**out.spatial_realization_block,
              "spatial_continuity_hash": ids["continuity"]}

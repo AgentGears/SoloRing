@@ -77,9 +77,15 @@ PROXY_POLICY_ID = "box-standin-v1"
 
 def production_runtime_fingerprint(implementation_sha256: str,
                                    python_version: str,
-                                   numpy_version: str) -> dict:
+                                   numpy_version: str,
+                                   pillow_version: str) -> dict:
     """The frozen materializer runtime fingerprint shape (§104/M10A-1
-    contract section 3): implementation hash + exact python/numpy."""
+    contract section 3 + closure review P0-2): implementation hash +
+    exact python/numpy/Pillow identities. The D0 artifact bytes are the
+    ENCODED PNG bytes, so the PNG encoder (Pillow) is a material
+    determinative runtime dependency — same spec + same fingerprint must
+    imply same encoded Blob bytes, which requires the encoder identity
+    inside the fingerprint."""
     return {
         "schema_version": 1,
         "materializer": {
@@ -90,9 +96,21 @@ def production_runtime_fingerprint(implementation_sha256: str,
         "runtime": {
             "python": python_version,
             "numpy": numpy_version,
+            "pillow_png_encoder": pillow_version,
             "platform_contract": "win-cpu-d0",
         },
-        "external_components": [],
+        "external_components": [
+            {
+                "kind": "png_encoder",
+                "name": "Pillow",
+                "version_or_commit": pillow_version,
+                # wheel identity is the installed package version; the
+                # sha is null because the immutable PyPI sdist/wheel hash
+                # is not available in-process — version identity is the
+                # exact pinnable identity for this dependency
+                "sha256": None,
+            },
+        ],
     }
 
 
