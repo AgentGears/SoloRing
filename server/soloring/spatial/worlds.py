@@ -694,17 +694,30 @@ __all__ = [
 # Stable Frame/Axis identity PATCH + Axis delete (P0-3): keys immutable
 # --------------------------------------------------------------------------
 
+class _Unset:
+    """PATCH sentinel distinguishing omitted (leave unchanged) from an
+    explicit null (clear) for nullable identity fields."""
+
+
+UNSET = _Unset()
+
+
 async def patch_frame(session: AsyncSession, frame_id: str, *,
                       name: str | None = None,
-                      parent_spatial_frame_id: str | None = None,
-                      bound_entity_id: str | None = None) -> None:
-    """PATCH the stable frame identity (§10.1): name mutable; parent
-    mutable with same-world + acyclicity + not-self rules; bound Entity
-    mutable with same-Project. key is immutable and not patchable."""
+                      parent_spatial_frame_id=UNSET,
+                      bound_entity_id=UNSET) -> None:
+    """PATCH the stable frame identity (§10.1). key is immutable.
+
+    Frozen integrity rules (M10B re-gate P0-3):
+    * parent PATCH requires the prospective parent to be a member of
+      EVERY state that already includes this child frame;
+    * bound-Entity PATCH (change OR clear) is rejected while ANY state
+      membership exists — the operator removes memberships first,
+      changes the binding, then re-adds with exact EntityRevisions;
+    * omitted fields are left unchanged; explicit null clears the
+      nullable parent/bound fields.
+    """
     sets, params = [], {"f": frame_id}
-    if parent_spatial_frame_id is not None or bound_entity_id is not None:
-        # identity-touching patch: validate under the fence
-        pass
     async with session.bind.connect() as conn:
         try:
             await conn.exec_driver_sql("BEGIN IMMEDIATE")
@@ -716,38 +729,77 @@ async def patch_frame(session: AsyncSession, frame_id: str, *,
                 raise _err(ErrorCode.SPATIAL_FRAME_INVALID,
                            "Frame not found or deleted.", 404)
             world_id = frame["spatial_world_id"]
-            if parent_spatial_frame_id is not None:
-                if parent_spatial_frame_id == frame_id:
-                    raise _err(ErrorCode.SPATIAL_FRAME_INVALID,
-                               "Frame cannot be its own parent.")
-                parent = (await conn.execute(text(
-                    "SELECT spatial_world_id FROM spatial_frames "
-                    "WHERE id = :p AND deleted_at IS NULL"),
-                    {"p": parent_spatial_frame_id})).first()
-                if parent is None:
-                    raise _err(ErrorCode.SPATIAL_FRAME_INVALID,
-                               "Parent frame not found.", 404)
-                if parent[0] != world_id:
-                    raise _err(ErrorCode.SPATIAL_FRAME_INVALID,
-                               "Parent belongs to a different world.")
+
+            if parent_spatial_frame_id is not UNSET:
+                if parent_spatial_frame_id is not None:
+                    if parent_spatial_frame_id == frame_id:
+                        raise _err(ErrorCode.SPATIAL_FRAME_INVALID,
+                                   "Frame cannot be its own parent.")
+                    parent = (await conn.execute(text(
+                        "SELECT spatial_world_id FROM spatial_frames "
+                        "WHERE id = :p AND deleted_at IS NULL"),
+                        {"p": parent_spatial_frame_id})).first()
+                    if parent is None:
+                        raise _err(ErrorCode.SPATIAL_FRAME_INVALID,
+                                   "Parent frame not found.", 404)
+                    if parent[0] != world_id:
+                        raise _err(ErrorCode.SPATIAL_FRAME_INVALID,
+                                   "Parent belongs to a different world.")
+                    # every state including this child must also include
+                    # the prospective parent (§10.2 remains true)
+                    violating = (await conn.execute(text(
+                        "SELECT m.spatial_world_state_id FROM "
+                        "spatial_world_state_frames m WHERE "
+                        "m.spatial_frame_id = :f AND NOT EXISTS ("
+                        " SELECT 1 FROM spatial_world_state_frames pm "
+                        " WHERE pm.spatial_world_state_id = "
+                        "   m.spatial_world_state_id "
+                        " AND pm.spatial_frame_id = :p)"),
+                        {"f": frame_id,
+                         "p": parent_spatial_frame_id})).scalars().all()
+                    if violating:
+                        raise _err(
+                            ErrorCode.SPATIAL_FRAME_INVALID,
+                            f"Parent change rejected: state(s) "
+                            f"{[v[:8] for v in violating]} include this "
+                            "child but not the prospective parent; remove "
+                            "memberships first.", 409)
+                    params["pf"] = parent_spatial_frame_id
+                else:
+                    params["pf"] = None  # explicit clear
                 sets.append("parent_spatial_frame_id = :pf")
-                params["pf"] = parent_spatial_frame_id
-            if bound_entity_id is not None:
-                world = (await conn.execute(text(
-                    "SELECT project_id FROM spatial_worlds WHERE id = :w"),
-                    {"w": world_id})).first()
-                be = (await conn.execute(text(
-                    "SELECT project_id FROM creative_entities WHERE id = :e"
-                    " AND deleted_at IS NULL"),
-                    {"e": bound_entity_id})).first()
-                if be is None:
-                    raise _err(ErrorCode.SPATIAL_FRAME_INVALID,
-                               "Bound Entity not found/inactive.", 404)
-                if be[0] != world[0]:
-                    raise _err(ErrorCode.SPATIAL_FRAME_INVALID,
-                               "Bound Entity belongs to another Project.")
+
+            if bound_entity_id is not UNSET:
+                member = (await conn.execute(text(
+                    "SELECT spatial_world_state_id FROM "
+                    "spatial_world_state_frames WHERE spatial_frame_id = :f"
+                ), {"f": frame_id})).first()
+                if member is not None:
+                    raise _err(
+                        ErrorCode.SPATIAL_FRAME_INVALID,
+                        "Bound-Entity change rejected while state "
+                        "memberships exist; remove memberships first, "
+                        "then re-add with exact EntityRevisions.", 409)
+                if bound_entity_id is not None:
+                    world = (await conn.execute(text(
+                        "SELECT project_id FROM spatial_worlds "
+                        "WHERE id = :w"), {"w": world_id})).first()
+                    be = (await conn.execute(text(
+                        "SELECT project_id FROM creative_entities WHERE "
+                        "id = :e AND deleted_at IS NULL"),
+                        {"e": bound_entity_id})).first()
+                    if be is None:
+                        raise _err(ErrorCode.SPATIAL_FRAME_INVALID,
+                                   "Bound Entity not found/inactive.", 404)
+                    if be[0] != world[0]:
+                        raise _err(ErrorCode.SPATIAL_FRAME_INVALID,
+                                   "Bound Entity belongs to another "
+                                   "Project.")
+                    params["be"] = bound_entity_id
+                else:
+                    params["be"] = None  # explicit unbind
                 sets.append("bound_entity_id = :be")
-                params["be"] = bound_entity_id
+
             if name is not None:
                 params["n"] = _norm_text(name, "SpatialFrame.name")
                 sets.append("name = :n")

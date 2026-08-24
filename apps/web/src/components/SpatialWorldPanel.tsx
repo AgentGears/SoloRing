@@ -30,6 +30,20 @@ interface StateFrameRow {
   half_z_mm: number | null;
 }
 
+interface StableFrame {
+  id: string;
+  key: string;
+  name: string;
+  parent_spatial_frame_id: string | null;
+  bound_entity_id: string | null;
+}
+
+interface StableAxis {
+  id: string;
+  key: string;
+  name: string;
+}
+
 interface WorldWorkspaceData {
   world: {
     id: string;
@@ -38,6 +52,8 @@ interface WorldWorkspaceData {
     requirement: string;
     location_entity_id: string;
   };
+  stable_frames: StableFrame[];
+  stable_axes: StableAxis[];
   states: Array<{
     id: string;
     location_entity_revision_id: string;
@@ -60,7 +76,7 @@ interface WorldWorkspaceData {
 }
 
 async function api(
-  path: string, method: string, body?: unknown): Promise<void> {
+  path: string, method: string, body?: unknown): Promise<unknown> {
   const res = await fetch(path, {
     method,
     headers: body ? { "Content-Type": "application/json" } : undefined,
@@ -70,6 +86,8 @@ async function api(
     const err = await res.json().catch(() => null);
     throw new Error(err?.message ?? `${method} ${path} failed (${res.status})`);
   }
+  if (method === "POST") return res.json();
+  return null;
 }
 
 const num = (v: string) => Number.parseInt(v, 10) || 0;
@@ -207,19 +225,21 @@ export function SpatialWorldPanel({ worldId }: { worldId: string }) {
                    onChange={(e) => setFrameName(e.target.value)} />
             <button disabled={busy || !frameKey || !frameName}
                     onClick={() => void act(async () => {
-                      await api(`/api/spatial-worlds/${worldId}/frames`,
-                                "POST",
-                                { key: frameKey, name: frameName });
+                      const created = await api(
+                        `/api/spatial-worlds/${worldId}/frames`,
+                        "POST", { key: frameKey, name: frameName });
                       setFrameKey(""); setFrameName("");
+                      setMemberFrame(
+                        (created as { id: string } | null)?.id ?? "");
                     })}>Create frame</button>
           </div>
           <div className="row">
             <select value={memberFrame}
                     onChange={(e) => setMemberFrame(e.target.value)}>
               <option value="">select frame…</option>
-              {st.frames.map((f) => (
-                <option key={f.spatial_frame_id} value={f.spatial_frame_id}>
-                  {f.frame_key}
+              {data.stable_frames.map((f) => (
+                <option key={f.id} value={f.id}>
+                  {f.key}
                 </option>
               ))}
             </select>
@@ -256,38 +276,29 @@ export function SpatialWorldPanel({ worldId }: { worldId: string }) {
                    onChange={(e) => setAxisKey(e.target.value)} />
             <select value={axisA} onChange={(e) => setAxisA(e.target.value)}>
               <option value="">endpoint A…</option>
-              {st.frames.map((f) => (
-                <option key={f.spatial_frame_id} value={f.spatial_frame_id}>
-                  {f.frame_key}
+              {data.stable_frames.map((f) => (
+                <option key={f.id} value={f.id}>
+                  {f.key}
                 </option>
               ))}
             </select>
             <select value={axisB} onChange={(e) => setAxisB(e.target.value)}>
               <option value="">endpoint B…</option>
-              {st.frames.map((f) => (
-                <option key={f.spatial_frame_id} value={f.spatial_frame_id}>
-                  {f.frame_key}
+              {data.stable_frames.map((f) => (
+                <option key={f.id} value={f.id}>
+                  {f.key}
                 </option>
               ))}
             </select>
             <button
               disabled={busy || !axisKey || !axisA || !axisB || axisA === axisB}
               onClick={() => void act(async () => {
-                await api(`/api/spatial-worlds/${worldId}/axes`, "POST",
-                          { key: axisKey, name: axisKey });
-                // the new axis id comes back but PUT needs it; simplest
-                // correct order: create then re-list then put
-                const res = await fetch(
-                  `/api/spatial-worlds/${worldId}/workspace`);
-                const wd = await res.json();
-                const stNow = (wd.states as typeof data.states)
-                  .find((s) => s.id === st.id);
-                const created = stNow?.axes.find(
-                  (a) => a.axis_key === axisKey);
-                if (!created) throw new Error("axis creation race");
+                const created = await api(
+                  `/api/spatial-worlds/${worldId}/axes`, "POST",
+                  { key: axisKey, name: axisKey }) as { id: string };
                 await api(
                   `/api/spatial-world-states/${st.id}/axes/` +
-                  `${created.spatial_axis_id}`,
+                  `${created.id}`,
                   "PUT",
                   { a_frame_id: axisA, b_frame_id: axisB });
                 setAxisKey(""); setAxisA(""); setAxisB("");

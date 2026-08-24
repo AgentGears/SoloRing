@@ -228,38 +228,61 @@ async def world_workspace(world_id: str,
             "location_entity_revision_id":
                 st["location_entity_revision_id"],
             "approved_revision_id": st["approved_revision_id"],
-            "working_snapshot_hash": await _working_hash(
-                session, st["id"]),
+            "working_snapshot_hash": await _working_hash(session,
+                                                        st["id"]),
             "frames": [dict(f) for f in frames],
             "axes": [dict(a) for a in axes],
             "revisions": [dict(r) for r in revisions],
         })
-    return {"world": dict(world), "states": out_states}
+    # Stable world-level identities (ALL active frames/axes) so the
+    # editor can select a newly created identity for its FIRST
+    # membership/binding (M10B re-gate P0-4) — separate collections
+    # from the per-state membership rows above.
+    stable_frames = (await session.execute(_t(
+        "SELECT id, key, name, parent_spatial_frame_id, bound_entity_id "
+        "FROM spatial_frames WHERE spatial_world_id = :w AND deleted_at "
+        "IS NULL ORDER BY key, id"), {"w": world_id})).mappings().all()
+    stable_axes = (await session.execute(_t(
+        "SELECT id, key, name FROM spatial_axes WHERE spatial_world_id = "
+        ":w AND deleted_at IS NULL ORDER BY key, id"),
+        {"w": world_id})).mappings().all()
+    return {
+        "world": dict(world),
+        "stable_frames": [dict(f) for f in stable_frames],
+        "stable_axes": [dict(a) for a in stable_axes],
+        "states": out_states,
+    }
 
 
 async def _working_hash(session: AsyncSession,
                         state_id: str) -> str | None:
     """Server-computed canonical hash of the CURRENT working state (the
-    §12 candidate), so the UI's working-vs-approved comparison is real."""
+    §12 candidate), so the UI's working-vs-approved comparison is real.
+
+    Fail-closed: only the legit 'state does not exist' case projects
+    null. Invariant/corruption failures from the authority builder
+    PROPAGATE (M10 error discipline — no except-Exception swallows)."""
     from soloring.domain.canonical import canonical_hash
+    from soloring.errors import SoloRingError as _SoloRingError
     from soloring.spatial import revisions as _rev
 
     async with session.bind.connect() as conn:
         try:
             candidate = await _rev._load_candidate(conn, state_id)
-        except Exception:
-            return None
-    try:
-        return canonical_hash(_rev._build_canonical(candidate))
-    except Exception:
-        return None
+        except _SoloRingError as exc:
+            if "not found" in exc.message.lower():
+                return None  # state absent: honest null
+            raise  # invariant/corruption: propagate
+    return canonical_hash(_rev._build_canonical(candidate))
 
 
 class FramePatch(BaseModel):
+    """Omitted fields are unchanged; explicit null clears the nullable
+    identity fields (parent/bound)."""
     model_config = ConfigDict(extra="forbid")
     name: str | None = None
-    parent_spatial_frame_id: str | None = None
-    bound_entity_id: str | None = None
+    parent_spatial_frame_id: str | None | None = None
+    bound_entity_id: str | None | None = None
 
 
 class AxisPatch(BaseModel):
@@ -272,8 +295,12 @@ async def patch_frame(frame_id: str, body: FramePatch,
                       session: AsyncSession = Depends(get_session)):
     await svc.patch_frame(
         session, frame_id, name=body.name,
-        parent_spatial_frame_id=body.parent_spatial_frame_id,
-        bound_entity_id=body.bound_entity_id)
+        parent_spatial_frame_id=(
+            svc.UNSET if "parent_spatial_frame_id" not in
+            body.model_fields_set else body.parent_spatial_frame_id),
+        bound_entity_id=(
+            svc.UNSET if "bound_entity_id" not in
+            body.model_fields_set else body.bound_entity_id))
     return None
 
 

@@ -49,11 +49,23 @@ async def _load_candidate(conn, state_id: str) -> dict:
         "SELECT m.spatial_frame_id, f.key AS frame_key, "
         "f.parent_spatial_frame_id, m.bound_entity_id, "
         "m.bound_entity_revision_id, m.x_mm, m.y_mm, m.z_mm, m.yaw_udeg, "
-        "m.pitch_udeg, m.roll_udeg, m.half_x_mm, m.half_y_mm, m.half_z_mm "
+        "m.pitch_udeg, m.roll_udeg, m.half_x_mm, m.half_y_mm, m.half_z_mm, "
+        "f.bound_entity_id AS stable_bound_entity_id "
         "FROM spatial_world_state_frames m JOIN spatial_frames f "
         "ON f.id = m.spatial_frame_id "
         "WHERE m.spatial_world_state_id = :s"),
         {"s": state_id})).mappings().all()
+    # Defensive authority cross-check (M10B re-gate P0-3): a membership
+    # row whose bound entity disagrees with the stable frame binding is
+    # an authority split, not a capturable state — fail closed.
+    for f in frames:
+        if (f["bound_entity_id"] or None) != (
+                f["stable_bound_entity_id"] or None):
+            raise internal_invariant(
+                f"State membership for frame {f['frame_key']!r} is bound "
+                f"to entity {f['bound_entity_id']} while the stable frame "
+                f"is bound to {f['stable_bound_entity_id']}; stable/state "
+                "authority split — refusing capture.")
     axes = (await conn.execute(text(
         "SELECT sa.spatial_axis_id, a.key AS axis_key, sa.a_frame_id, "
         "sa.b_frame_id FROM spatial_world_state_axes sa "
