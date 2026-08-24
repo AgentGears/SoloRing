@@ -22,6 +22,8 @@ function body(approved: string | null) {
         parent_spatial_frame_id: null, bound_entity_id: null },
     ],
     stable_axes: [],
+    tracks: [],
+    narrative: { entities: [], sequences: [], scenes: [], shots: [] },
     states: [{
       id: "s1", location_entity_revision_id: "r1",
       approved_revision_id: approved,
@@ -88,7 +90,8 @@ test("frame authoring: create -> select -> set value -> membership",
     fireEvent.click(createBtn);
     // create returned f9 and selected it for membership
     await waitFor(() => {
-      const sel = container.querySelector("select")!;
+      const sel = container.querySelector(
+        'select[aria-label="membership frame"]')!;
       expect((sel as HTMLSelectElement).value).toBe("f9");
     });
     // fill value and PUT
@@ -138,9 +141,12 @@ test("axis authoring: create -> bind endpoints -> working axes",
     const keyInput = container.querySelector(
       'input[placeholder="axis key"]')!;
     fireEvent.change(keyInput, { target: { value: "ax" } });
-    const selects = Array.from(container.querySelectorAll("select"));
-    fireEvent.change(selects[1], { target: { value: "f1" } });
-    fireEvent.change(selects[2], { target: { value: "f2" } });
+    const selA = container.querySelector(
+      'select[aria-label="axis endpoint a"]')!;
+    const selB = container.querySelector(
+      'select[aria-label="axis endpoint b"]')!;
+    fireEvent.change(selA, { target: { value: "f1" } });
+    fireEvent.change(selB, { target: { value: "f2" } });
     const bindBtn = Array.from(container.querySelectorAll("button"))
       .find((b) => b.textContent === "Create + bind axis")!;
     fireEvent.click(bindBtn);
@@ -174,21 +180,22 @@ test("axis endpoint selectors list ONLY state-member frames", async () => {
     await waitFor(() => {
       expect(container.textContent).toContain("Working membership");
     });
-    // selects: [0] membership (stable), [1] endpoint A, [2] endpoint B
-    const selects = Array.from(container.querySelectorAll("select"));
-    const endpointA = Array.from(
-      selects[1].querySelectorAll("option")).map((o) => o.value);
-    const endpointB = Array.from(
-      selects[2].querySelectorAll("option")).map((o) => o.value);
+    const endpointA = Array.from(container.querySelectorAll(
+      'select[aria-label="axis endpoint a"] option'))
+      .map((o) => (o as HTMLOptionElement).value);
+    const endpointB = Array.from(container.querySelectorAll(
+      'select[aria-label="axis endpoint b"] option'))
+      .map((o) => (o as HTMLOptionElement).value);
     for (const options of [endpointA, endpointB]) {
       expect(options).toContain("f1");
       expect(options).toContain("f2");
       expect(options).not.toContain("f3");
     }
     // the membership selector (stable identities) DOES offer f3
-    const memberOptions = Array.from(
-      selects[0].querySelectorAll("option")).map((o) => o.value);
-    expect(memberOptions).toContain("f3");
+    const membership = Array.from(container.querySelectorAll(
+      'select[aria-label="membership frame"] option'))
+      .map((o) => (o as HTMLOptionElement).value);
+    expect(membership).toContain("f3");
   } finally {
     global.fetch = original;
   }

@@ -190,8 +190,9 @@ async def world_workspace(world_id: str,
     revision history, and approval pointers. UI never recomputes."""
     from sqlalchemy import text as _t
     world = (await session.execute(_t(
-        "SELECT id, key, name, requirement, location_entity_id "
-        "FROM spatial_worlds WHERE id = :w AND deleted_at IS NULL"),
+        "SELECT id, project_id, key, name, requirement, "
+        "location_entity_id FROM spatial_worlds "
+        "WHERE id = :w AND deleted_at IS NULL"),
         {"w": world_id})).mappings().one_or_none()
     if world is None:
         raise SoloRingError(ErrorCode.SPATIAL_WORLD_INVALID,
@@ -268,11 +269,39 @@ async def world_workspace(world_id: str,
         by_track.setdefault(t["spatial_track_id"], []).append(dict(t))
     out_tracks = [{**dict(t), "transitions": by_track.get(t["id"], [])}
                   for t in tracks]
+    # M10C §10.2: server-fed narrative identities + project Entities for
+    # anchor/track pickers — the client never assigns narrative ranks.
+    pid = world["project_id"]
+    entities = (await session.execute(_t(
+        "SELECT id, kind, name FROM creative_entities "
+        "WHERE project_id = :p AND deleted_at IS NULL ORDER BY name, id"),
+        {"p": pid})).mappings().all()
+    sequences = (await session.execute(_t(
+        "SELECT id, title, position FROM sequences "
+        "WHERE project_id = :p AND deleted_at IS NULL ORDER BY position"),
+        {"p": pid})).mappings().all()
+    scenes = (await session.execute(_t(
+        "SELECT sc.id, sc.sequence_id, sc.title, sc.position FROM "
+        "scenes sc JOIN sequences sq ON sq.id = sc.sequence_id "
+        "WHERE sq.project_id = :p AND sc.deleted_at IS NULL "
+        "AND sq.deleted_at IS NULL ORDER BY sq.position, sc.position"),
+        {"p": pid})).mappings().all()
+    shots = (await session.execute(_t(
+        "SELECT id, title, subject, scene_id FROM shots "
+        "WHERE project_id = :p AND deleted_at IS NULL "
+        "ORDER BY shot_number"), {"p": pid})).mappings().all()
     return {
-        "world": dict(world),
+        "world": {k: v for k, v in dict(world).items()
+                  if k != "project_id"},
         "stable_frames": [dict(f) for f in stable_frames],
         "stable_axes": [dict(a) for a in stable_axes],
         "tracks": out_tracks,
+        "narrative": {
+            "entities": [dict(e) for e in entities],
+            "sequences": [dict(s) for s in sequences],
+            "scenes": [dict(c) for c in scenes],
+            "shots": [dict(s) for s in shots],
+        },
         "states": out_states,
     }
 

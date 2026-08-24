@@ -1,12 +1,14 @@
 /**
- * M10B §50 — Spatial World workspace: form/table world EDITOR.
+ * M10B §50 + M10C §10 — Spatial World workspace: form/table EDITOR.
  *
- * Server-owned authority throughout (§89): every mutation is an
- * explicit server action (frame authoring, membership values, axis
- * authoring, capture, approve, unapprove); the panel renders the
- * server-computed canonical WORKING hash beside the approved revision
- * hash so working-vs-approved is mechanically visible. No client-side
- * transform/hash/axis computation exists.
+ * Server-owned authority throughout: every mutation is an explicit
+ * server action (frames, membership values, axes, capture, approve,
+ * unapprove; M10C adds track requirement/delete, transition set/clear,
+ * staging preview). The panel renders the server-computed canonical
+ * WORKING hash beside the approved revision hash so working-vs-approved
+ * is mechanically visible. No client-side transform/hash/axis/rank
+ * computation exists. Narrative ranks are never computed here — anchor
+ * pickers are server-fed identities only (M10C §10.2).
  */
 
 "use client";
@@ -44,6 +46,38 @@ interface StableAxis {
   name: string;
 }
 
+interface TransitionRow {
+  id: string;
+  anchor_type: string;
+  anchor_id: string;
+  boundary: string;
+  operation: string;
+  x_mm: number | null;
+  y_mm: number | null;
+  z_mm: number | null;
+  yaw_udeg: number | null;
+  pitch_udeg: number | null;
+  roll_udeg: number | null;
+}
+
+interface TrackRow {
+  id: string;
+  entity_id: string;
+  requirement: string;
+  transitions: TransitionRow[];
+}
+
+interface NarrativeOptions {
+  entities: Array<{ id: string; kind: string; name: string }>;
+  sequences: Array<{ id: string; title: string | null; position: number }>;
+  scenes: Array<{
+    id: string; sequence_id: string; title: string | null;
+    position: number }>;
+  shots: Array<{
+    id: string; title: string | null; subject: string;
+    scene_id: string | null }>;
+}
+
 interface WorldWorkspaceData {
   world: {
     id: string;
@@ -54,6 +88,8 @@ interface WorldWorkspaceData {
   };
   stable_frames: StableFrame[];
   stable_axes: StableAxis[];
+  tracks: TrackRow[];
+  narrative: NarrativeOptions;
   states: Array<{
     id: string;
     location_entity_revision_id: string;
@@ -108,6 +144,15 @@ export function SpatialWorldPanel({ worldId }: { worldId: string }) {
   const [hx, setHx] = useState("");
   const [hy, setHy] = useState("");
   const [hz, setHz] = useState("");
+  const [trackEntity, setTrackEntity] = useState("");
+  const [trackReq, setTrackReq] = useState("optional");
+  const [trTrack, setTrTrack] = useState("");
+  const [trAnchorType, setTrAnchorType] = useState("shot");
+  const [trAnchorId, setTrAnchorId] = useState("");
+  const [trBoundary, setTrBoundary] = useState("start");
+  const [trOperation, setTrOperation] = useState("set");
+  const [trT, setTrT] = useState(["0", "0", "0"]);
+  const [trR, setTrR] = useState(["0", "0", "0"]);
 
   const load = useCallback(async () => {
     try {
@@ -156,6 +201,204 @@ export function SpatialWorldPanel({ worldId }: { worldId: string }) {
             ? "badge-error" : "badge-matches"}`}>
             {data.world.requirement}
           </span>
+        </div>
+      </div>
+
+      <div className="card">
+        <h3>Temporal staging tracks (M10C)</h3>
+        <div className="row">
+          <select value={trackEntity}
+                  onChange={(e) => setTrackEntity(e.target.value)}
+                  aria-label="track entity">
+            <option value="">select entity…</option>
+            {data.narrative.entities.map((e) => (
+              <option key={e.id} value={e.id}>
+                {e.name} ({e.kind})
+              </option>
+            ))}
+          </select>
+          <select value={trackReq}
+                  onChange={(e) => setTrackReq(e.target.value)}
+                  aria-label="track requirement">
+            <option value="required">required</option>
+            <option value="optional">optional</option>
+          </select>
+          <button disabled={busy || !trackEntity}
+                  onClick={() => void act(async () => {
+                    await api(
+                      `/api/spatial-worlds/${worldId}/tracks`, "POST",
+                      { entity_id: trackEntity, requirement: trackReq });
+                    setTrackEntity("");
+                  })}>Create track</button>
+        </div>
+        {data.tracks.length === 0 && (
+          <div className="meta">No active tracks in this world.</div>
+        )}
+        {data.tracks.map((t) => {
+          const ent = data.narrative.entities.find(
+            (e) => e.id === t.entity_id);
+          return (
+            <div key={t.id} className="card">
+              <div className="row">
+                <strong>{ent ? ent.name : "Entity"}{" "}
+                  <span className="meta">
+                    track {t.id.slice(0, 8)}…
+                  </span>
+                </strong>
+                <span className={`badge ${t.requirement === "required"
+                  ? "badge-error" : "badge-matches"}`}>
+                  {t.requirement}
+                </span>
+                <button disabled={busy}
+                        onClick={() => void act(async () => {
+                          await api(`/api/spatial-tracks/${t.id}`,
+                                    "PATCH",
+                                    { requirement: t.requirement ===
+                                      "required" ? "optional" :
+                                      "required" });
+                        })}>
+                  Make {t.requirement === "required" ? "optional"
+                                              : "required"}
+                </button>
+                <button disabled={busy}
+                        onClick={() => void act(async () => {
+                          await api(`/api/spatial-tracks/${t.id}`,
+                                    "DELETE");
+                        })}>Delete track</button>
+              </div>
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Anchor</th><th>Boundary</th><th>Op</th>
+                    <th>X/Y/Z mm</th><th>Yaw/Pitch/Roll µ°</th><th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {t.transitions.map((tr) => {
+                    const label = tr.anchor_type === "sequence"
+                      ? (data.narrative.sequences.find(
+                          (s) => s.id === tr.anchor_id)?.title ??
+                        tr.anchor_id.slice(0, 8))
+                      : tr.anchor_type === "scene"
+                        ? (data.narrative.scenes.find(
+                            (s) => s.id === tr.anchor_id)?.title ??
+                          tr.anchor_id.slice(0, 8))
+                        : (data.narrative.shots.find(
+                            (s) => s.id === tr.anchor_id)?.title ??
+                          tr.anchor_id.slice(0, 8));
+                    return (
+                      <tr key={tr.id}>
+                        <td>{tr.anchor_type}: {label}</td>
+                        <td>{tr.boundary}</td>
+                        <td>{tr.operation}</td>
+                        <td>{tr.operation === "set"
+                          ? `${tr.x_mm} / ${tr.y_mm} / ${tr.z_mm}` : "—"}</td>
+                        <td>{tr.operation === "set"
+                          ? `${tr.yaw_udeg} / ${tr.pitch_udeg} / ` +
+                            `${tr.roll_udeg}` : "—"}</td>
+                        <td>
+                          <button disabled={busy}
+                                  onClick={() => void act(async () => {
+                                    await api(
+                                      `/api/spatial-transitions/${tr.id}`,
+                                      "DELETE");
+                                  })}>Delete</button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {t.transitions.length === 0 && (
+                    <tr><td colSpan={6} className="meta">
+                      No active transitions
+                    </td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          );
+        })}
+        <h4>Author transition</h4>
+        <div className="row">
+          <select value={trTrack} aria-label="transition track"
+                  onChange={(e) => setTrTrack(e.target.value)}>
+            <option value="">track…</option>
+            {data.tracks.map((t) => (
+              <option key={t.id} value={t.id}>
+                {data.narrative.entities.find(
+                  (e) => e.id === t.entity_id)?.name ?? t.id.slice(0, 8)}
+              </option>
+            ))}
+          </select>
+          <select value={trAnchorType} aria-label="anchor type"
+                  onChange={(e) => {
+                    setTrAnchorType(e.target.value);
+                    setTrAnchorId("");
+                  }}>
+            <option value="sequence">sequence</option>
+            <option value="scene">scene</option>
+            <option value="shot">shot</option>
+          </select>
+          <select value={trAnchorId} aria-label="anchor"
+                  onChange={(e) => setTrAnchorId(e.target.value)}>
+            <option value="">anchor…</option>
+            {(trAnchorType === "sequence"
+              ? data.narrative.sequences.map((s) => [s.id,
+                  s.title ?? s.id.slice(0, 8)] as const)
+              : trAnchorType === "scene"
+                ? data.narrative.scenes.map((s) => [s.id,
+                    s.title ?? s.id.slice(0, 8)] as const)
+                : data.narrative.shots.map((s) => [s.id,
+                    s.title ?? s.subject.slice(0, 24)] as const)
+            ).map(([id, label]) => (
+              <option key={id} value={id}>{label}</option>
+            ))}
+          </select>
+          <select value={trBoundary} aria-label="boundary"
+                  onChange={(e) => setTrBoundary(e.target.value)}>
+            <option value="start">start</option>
+            <option value="end">end</option>
+          </select>
+          <select value={trOperation} aria-label="operation"
+                  onChange={(e) => setTrOperation(e.target.value)}>
+            <option value="set">set</option>
+            <option value="clear">clear</option>
+          </select>
+          {trOperation === "set" && (
+            <>
+              {(["x", "y", "z"] as const).map((k, i) => (
+                <input key={k} placeholder={`${k} mm`}
+                       aria-label={`translation ${k}`}
+                       value={trT[i]}
+                       onChange={(e) => setTrT(
+                         trT.map((v, j) => j === i ? e.target.value : v)
+                       )} />
+              ))}
+              {(["yaw", "pitch", "roll"] as const).map((k, i) => (
+                <input key={k} placeholder={`${k} µ°`}
+                       aria-label={`rotation ${k}`}
+                       value={trR[i]}
+                       onChange={(e) => setTrR(
+                         trR.map((v, j) => j === i ? e.target.value : v)
+                       )} />
+              ))}
+            </>
+          )}
+          <button
+            disabled={busy || !trTrack || !trAnchorId ||
+              (trOperation === "set" &&
+               (trT.some((v) => v === "") || trR.some((v) => v === "")))}
+            onClick={() => void act(async () => {
+              await api(`/api/spatial-tracks/${trTrack}/transitions`,
+                        "POST",
+                        { anchor_type: trAnchorType,
+                          anchor_id: trAnchorId,
+                          boundary: trBoundary,
+                          operation: trOperation,
+                          ...(trOperation === "set" ? {
+                            translation_mm: trT.map(num),
+                            rotation_udeg: trR.map(num),
+                          } : {}) });
+            })}>Add transition</button>
         </div>
       </div>
 
@@ -234,7 +477,7 @@ export function SpatialWorldPanel({ worldId }: { worldId: string }) {
                     })}>Create frame</button>
           </div>
           <div className="row">
-            <select value={memberFrame}
+            <select value={memberFrame} aria-label="membership frame"
                     onChange={(e) => setMemberFrame(e.target.value)}>
               <option value="">select frame…</option>
               {data.stable_frames.map((f) => (
@@ -278,7 +521,8 @@ export function SpatialWorldPanel({ worldId }: { worldId: string }) {
           <div className="row">
             <input placeholder="axis key" value={axisKey}
                    onChange={(e) => setAxisKey(e.target.value)} />
-            <select value={axisA} onChange={(e) => setAxisA(e.target.value)}>
+            <select value={axisA} aria-label="axis endpoint a"
+                    onChange={(e) => setAxisA(e.target.value)}>
               <option value="">endpoint A…</option>
               {st.frames.map((f) => (
                 <option key={f.spatial_frame_id}
@@ -287,7 +531,8 @@ export function SpatialWorldPanel({ worldId }: { worldId: string }) {
                 </option>
               ))}
             </select>
-            <select value={axisB} onChange={(e) => setAxisB(e.target.value)}>
+            <select value={axisB} aria-label="axis endpoint b"
+                    onChange={(e) => setAxisB(e.target.value)}>
               <option value="">endpoint B…</option>
               {st.frames.map((f) => (
                 <option key={f.spatial_frame_id}
