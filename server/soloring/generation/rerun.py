@@ -92,6 +92,22 @@ WHERE generation_id = :gid
 ORDER BY input_key, position
 """
 
+# M10 §113/§2.6: Exact Rerun copies derived spatial sibling rows verbatim
+# inside the SAME BEGIN IMMEDIATE unit as the Generation and ordinary inputs.
+_DERIVED_INPUT_SELECT = """
+SELECT input_key, position, artifact_role, derived_spatial_artifact_id, blob_hash
+FROM generation_derived_spatial_inputs
+WHERE generation_id = :gid
+ORDER BY position
+"""
+
+_DERIVED_INPUT_INSERT = """
+INSERT INTO generation_derived_spatial_inputs
+    (generation_id, input_key, position, artifact_role,
+     derived_spatial_artifact_id, blob_hash)
+VALUES (:gid, :ik, :pos, :role, :aid, :bh)
+"""
+
 
 def _active_error(source_id: str, status: str) -> SoloRingError:
     return SoloRingError(
@@ -141,6 +157,12 @@ async def _create_rerun_fenced(
                 await conn.execute(text(_INPUT_SELECT), {"gid": source_generation_id})
             ).mappings().all()
 
+            derived_inputs = (
+                await conn.execute(
+                    text(_DERIVED_INPUT_SELECT), {"gid": source_generation_id}
+                )
+            ).mappings().all()
+
             draft = GenerationDraft(
                 shot_id=src["shot_id"],
                 shot_revision_id=src["shot_revision_id"],
@@ -184,6 +206,18 @@ async def _create_rerun_fenced(
                     position=row["position"],
                     asset_id=row["asset_id"],
                     blob_hash=row["blob_hash"],
+                )
+            for row in derived_inputs:
+                await conn.execute(
+                    text(_DERIVED_INPUT_INSERT),
+                    {
+                        "gid": generation_id,
+                        "ik": row["input_key"],
+                        "pos": row["position"],
+                        "role": row["artifact_role"],
+                        "aid": row["derived_spatial_artifact_id"],
+                        "bh": row["blob_hash"],
+                    },
                 )
             await conn.exec_driver_sql("COMMIT")
             return generation_id

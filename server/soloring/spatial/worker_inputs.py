@@ -1,0 +1,162 @@
+"""Worker-side historical derived-spatial input transport (frozen r3 §48).
+
+Loads the captured sibling derived-input rows for a Generation and verifies
+them entirely from HISTORICAL state: captured rows, derived provenance,
+canonical spec/runtime bytes, Blob DB identity, and physical Blob bytes.
+Never reads current M10 authority. Fails closed on missing/corrupt bytes;
+never rematerializes. The verified Blob is handed to the normal executor
+input path through an execution-local adapter that does not widen the
+published M5 CapturedInput seam (§2.4).
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any
+
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from soloring.assets.blob_store import BlobStore
+from soloring.errors import ErrorCode, SoloRingError
+from soloring.spatial import error_codes as ec
+from soloring.spatial.blob_integrity import blob_integrity_status
+from soloring.spatial.derived import parse_derived_spec
+from soloring.spatial.package3 import resolve_derived_binding
+
+_CURRENT_M10_TABLES = (
+    "spatial_worlds", "spatial_world_states", "spatial_frames",
+    "spatial_world_state_frames", "spatial_axes", "spatial_world_state_axes",
+    "spatial_tracks", "spatial_transitions", "shot_spatial_plans",
+)
+
+
+@dataclass(frozen=True)
+class VerifiedDerivedInput:
+    """One verified historical derived input bound to an exact node/field."""
+
+    input_key: str
+    position: int
+    artifact_role: str
+    node: str
+    field: str
+    blob_hash: str
+    local_path: str
+
+
+def _fail(code: str, message: str, status: int = 500) -> SoloRingError:
+    return SoloRingError(code, message, status_code=status)
+
+
+async def load_verified_derived_inputs(
+    session: AsyncSession,
+    store: BlobStore,
+    *,
+    generation_id: str,
+    workflow_spec: dict,
+    manifest_v3: dict,
+) -> list[VerifiedDerivedInput]:
+    """Load + verify the derived sibling rows for one historical Generation.
+
+    workflow_spec is the CAPTURED spec (schema 3); manifest_v3 the CAPTURED
+    schema-3 manifest document. Every row must cross-check against the
+    captured spatial_continuity_hash and the exact manifest binding.
+    """
+    captured_hash = (workflow_spec.get("spatial_realization") or {}).get(
+        "spatial_continuity_hash")
+    if not captured_hash:
+        raise _fail(ec.DERIVED_SPATIAL_PROVENANCE_MISMATCH,
+                    "Captured workflow-spec has no spatial_continuity_hash.")
+
+    rows = (await session.execute(text(
+        "SELECT gdsi.input_key, gdsi.position, gdsi.artifact_role, "
+        "       gdsi.derived_spatial_artifact_id, gdsi.blob_hash "
+        "FROM generation_derived_spatial_inputs gdsi "
+        "WHERE gdsi.generation_id = :gid ORDER BY gdsi.position"),
+        {"gid": generation_id})).mappings().all()
+
+    srsw = (await session.execute(text(
+        "SELECT srsw.spatial_continuity_hash "
+        "FROM generations g "
+        "JOIN shot_revision_spatial_worlds srsw "
+        "  ON srsw.shot_revision_id = g.shot_revision_id "
+        "WHERE g.id = :gid"), {"gid": generation_id})).first()
+    if srsw is None or srsw[0] != captured_hash:
+        raise _fail(ec.DERIVED_SPATIAL_PROVENANCE_MISMATCH,
+                    "Captured spatial authority hash disagrees with the "
+                    "Generation's ShotRevision spatial history.")
+
+    verified: list[VerifiedDerivedInput] = []
+    for row in rows:
+        art = (await session.execute(text(
+            "SELECT project_id, spec_json, spec_hash, "
+            "       spatial_continuity_hash, artifact_kind, algorithm_id, "
+            "       algorithm_version, runtime_fingerprint_json, "
+            "       runtime_fingerprint_hash, determinism_class, blob_hash "
+            "FROM derived_spatial_artifacts WHERE id = :aid"),
+            {"aid": row["derived_spatial_artifact_id"]})).mappings().one_or_none()
+        if art is None:
+            raise _fail(ec.DERIVED_SPATIAL_PROVENANCE_MISMATCH,
+                        f"Derived provenance row missing for {row['input_key']}.")
+        # canonical spec bytes/hash re-verification (never trust DB hashes)
+        try:
+            spec = parse_derived_spec(art["spec_json"])
+        except SoloRingError as exc:
+            raise _fail(ec.DERIVED_SPATIAL_PROVENANCE_MISMATCH,
+                        f"Stored spec bytes fail canonical validation: "
+                        f"{exc.message}") from exc
+        if spec.source.spatial_continuity_hash != art["spatial_continuity_hash"] \
+                or art["spatial_continuity_hash"] != captured_hash:
+            raise _fail(ec.DERIVED_SPATIAL_PROVENANCE_MISMATCH,
+                        "Derived provenance source hash disagrees with the "
+                        "captured spatial authority.")
+        if art["blob_hash"] != row["blob_hash"]:
+            raise _fail(ec.DERIVED_SPATIAL_PROVENANCE_MISMATCH,
+                        "Derived input Blob identity disagrees with provenance.")
+        if art["determinism_class"] != "D0":
+            raise _fail(ec.DERIVED_SPATIAL_PROVENANCE_MISMATCH,
+                        "Historical determinism class must be D0.")
+
+        # exact manifest binding (no graph heuristics)
+        input_key, node, field = resolve_derived_binding(
+            manifest_v3, row["artifact_role"], row["position"])
+        if input_key != row["input_key"]:
+            raise _fail(ec.DERIVED_SPATIAL_BINDING_INVALID,
+                        f"Captured input_key {row['input_key']!r} disagrees "
+                        f"with the manifest binding {input_key!r}.")
+
+        # Blob DB identity + physical bytes
+        blob_row = (await session.execute(
+            text("SELECT hash FROM blobs WHERE hash = :h"),
+            {"h": row["blob_hash"]})).first()
+        if blob_row is None:
+            raise _fail(ec.DERIVED_SPATIAL_BLOB_MISSING,
+                        f"Historical derived Blob {row['blob_hash']} has no "
+                        "Blob row.")
+        status = await blob_integrity_status(store, row["blob_hash"])
+        if status == "missing":
+            raise _fail(ec.DERIVED_SPATIAL_BLOB_MISSING,
+                        f"Physical derived Blob bytes missing for "
+                        f"{row['input_key']}.")
+        if status != "valid":
+            raise _fail(ec.DERIVED_SPATIAL_BLOB_CORRUPT,
+                        f"Physical derived Blob bytes corrupt for "
+                        f"{row['input_key']}.")
+
+        verified.append(VerifiedDerivedInput(
+            input_key=row["input_key"], position=row["position"],
+            artifact_role=row["artifact_role"], node=node, field=field,
+            blob_hash=row["blob_hash"],
+            local_path=str(store.path_for_hash(row["blob_hash"])),
+        ))
+    return verified
+
+
+def current_m10_table_names() -> tuple[str, ...]:
+    """Forbidden current-authority table names for the read spy."""
+    return _CURRENT_M10_TABLES
+
+
+__all__ = [
+    "VerifiedDerivedInput", "load_verified_derived_inputs",
+    "current_m10_table_names",
+]
