@@ -79,8 +79,15 @@ class DerivedSpatialArtifactSpec(_Strict):
     def _valid(self): _nonempty(self.artifact_kind,"artifact_kind"); return self
 class MaterializerIdentity(_Strict):
     algorithm_id: str; algorithm_version: str; implementation_sha256: str = Field(pattern=_SHA)
+class EncoderIdentity(_Strict):
+    pillow_release: str; pillow_native_module: str
+    pillow_native_module_sha256: str = Field(pattern=_SHA)
+    python_implementation: str; python_abi_tag: str; platform: str
+    zlib_compile_version: str; zlib_runtime_version: str
 class MaterializerRuntime(_Strict):
-    python: str; numpy: str; pillow_png_encoder: str; platform_contract: str
+    python: str; numpy: str; pillow_png_encoder: str
+    encoder_identity: EncoderIdentity
+    platform_contract: str
 class ExternalRuntimeComponent(_Strict):
     kind: str; name: str; version_or_commit: str; sha256: str | None = Field(default=None, pattern=_SHA)
 class MaterializerRuntimeFingerprint(_Strict):

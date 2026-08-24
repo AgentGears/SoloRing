@@ -9,7 +9,6 @@ import pytest
 from soloring.spatial import boxdepth, production_package as pk
 from soloring.spatial import production_pins as pins
 from soloring.spatial.realize import compose_spatial_realization
-from soloring.spatial.schemas import parse_continuity_pack  # noqa: F811
 from soloring.spatial.schemas import parse_continuity_pack
 
 
@@ -117,14 +116,20 @@ def test_certified_pins_exact():
 
 
 def test_reference_hash_matches_certified():
-    """The port's algorithm identity matches the certified reference."""
+    """LOCAL EVIDENCE-MACHINE assertion: on the machine holding the
+    certified evidence tree, live re-hash the certified reference
+    implementation. Portable suites SKIP explicitly — this test never
+    silently passes on machines without the evidence mount (the certified
+    digest itself is separately pinned by test_certified_pins_exact,
+    which always runs)."""
     from pathlib import Path
     reference = Path(
         r"C:\AI\M10A1-evidence\scripts\boxdepth_materializer.py")
-    if reference.exists():
-        import hashlib
-        actual = hashlib.sha256(reference.read_bytes()).hexdigest()
-        assert actual == pins.CERTIFIED_REFERENCE_BOXDEPTH_SHA256
+    if not reference.exists():
+        pytest.skip("certified evidence tree not mounted on this machine")
+    import hashlib
+    actual = hashlib.sha256(reference.read_bytes()).hexdigest()
+    assert actual == pins.CERTIFIED_REFERENCE_BOXDEPTH_SHA256
 
 
 # ------------------------------------------------------ D0 determinism ----
@@ -307,3 +312,53 @@ def test_output_contract_pins_frozen_grammar():
     assert oc["encoding"] == "png-l-mode-8bit"
     proj = out.specs[0]["derivation"]["parameters"]["projection"]
     assert proj["background"] == 255 and proj["mode"] == "L"
+
+
+# --------------------------------------------- P0-2 r2: encoder identity ---
+
+def test_encoder_identity_covers_loaded_binary_and_zlib():
+    ident = pins.encoder_runtime_identity()
+    assert ident["pillow_native_module"].startswith("_imaging")
+    assert len(ident["pillow_native_module_sha256"]) == 64
+    assert ident["python_implementation"] == "cpython"
+    assert ident["platform"]
+    assert ident["zlib_compile_version"] and ident["zlib_runtime_version"]
+
+
+def test_encoder_identity_change_changes_fingerprint_hash():
+    """The frozen invariant's sensitivity control: a different encoder
+    binary (e.g. another ABI wheel under the same release string) must
+    produce a DIFFERENT runtime_fingerprint_hash."""
+    import copy
+    from soloring.domain.canonical import canonical_hash
+    from soloring.spatial import production_package as ppkg
+
+    fp = ppkg.boxdepth_runtime_fingerprint()
+    h1 = canonical_hash(fp)
+
+    # same Pillow release string, different native encoder binary
+    swapped = copy.deepcopy(fp)
+    swapped["runtime"]["encoder_identity"]["pillow_native_module"] = (
+        "_imaging.cp311-win_amd64.pyd")
+    swapped["runtime"]["encoder_identity"]["pillow_native_module_sha256"] = (
+        "e" * 64)
+    swapped["external_components"][0]["sha256"] = "e" * 64
+    assert canonical_hash(swapped) != h1
+
+    # same release + same binary hash, different linked zlib
+    swapped2 = copy.deepcopy(fp)
+    swapped2["runtime"]["encoder_identity"]["zlib_runtime_version"] = "1.4.0"
+    assert canonical_hash(swapped2) != h1
+
+    # byte-identical identity reproduces the hash (D0 stability)
+    assert canonical_hash(copy.deepcopy(fp)) == h1
+
+
+def test_production_fingerprint_carries_native_sha_not_null():
+    from soloring.spatial import production_package as ppkg
+    fp = ppkg.boxdepth_runtime_fingerprint()
+    png = fp["external_components"][0]
+    assert png["sha256"] == (
+        fp["runtime"]["encoder_identity"]["pillow_native_module_sha256"])
+    assert png["sha256"] != "" and png["sha256"] is not None
+    assert len(png["sha256"]) == 64

@@ -72,7 +72,7 @@ def _fp_json() -> str:
                          "algorithm_version": "1.0.0",
                          "implementation_sha256": "c" * 64},
         "runtime": {"python": "3.12", "numpy": "2.5",
-                    "pillow_png_encoder": "12.3.0",
+                    "pillow_png_encoder": "12.3.0", "encoder_identity":{"pillow_release":"10.0.0","pillow_native_module":"_imaging.cp312-win_amd64.pyd","pillow_native_module_sha256":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","python_implementation":"cpython","python_abi_tag":"","platform":"win-amd64","zlib_compile_version":"1.3.1","zlib_runtime_version":"1.3.1"},
                     "platform_contract": "win-cpu"},
         "external_components": [],
     }

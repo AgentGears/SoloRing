@@ -75,17 +75,53 @@ PROXY_DEFAULT_ENTITY_HALF_EXTENTS_MM = (200, 700, 200)  # Eva-class standin
 PROXY_POLICY_ID = "box-standin-v1"
 
 
+def encoder_runtime_identity() -> dict:
+    """Identity of the ACTUAL loaded byte-producing PNG encoder stack.
+
+    A PyPI release version alone is NOT encoder identity: one Pillow
+    release ships many wheels (interpreter/ABI/platform variants, each
+    with its own hash), and the PNG writer compresses through a linked
+    zlib whose build is below the Pillow.__version__ string. The
+    defensible identity is the loaded native encoder module's bytes plus
+    the interpreter/ABI/arch it was built for, plus the in-process zlib
+    build identities (Pillow wheels link zlib statically into _imaging
+    on Windows — covered by the module hash — while the process-level
+    zlib versions cover dynamically linked builds).
+    """
+    import hashlib
+    import sys
+    import sysconfig
+    import zlib
+    from pathlib import Path
+
+    import PIL
+    import PIL._imaging
+
+    native = Path(PIL._imaging.__file__)
+    return {
+        "pillow_release": PIL.__version__,
+        "pillow_native_module": native.name,
+        "pillow_native_module_sha256": hashlib.sha256(
+            native.read_bytes()).hexdigest(),
+        "python_implementation": sys.implementation.name,
+        "python_abi_tag": sysconfig.get_config_var("SOABI") or "",
+        "platform": sysconfig.get_platform(),
+        "zlib_compile_version": zlib.ZLIB_VERSION,
+        "zlib_runtime_version": zlib.ZLIB_RUNTIME_VERSION,
+    }
+
+
 def production_runtime_fingerprint(implementation_sha256: str,
                                    python_version: str,
                                    numpy_version: str,
-                                   pillow_version: str) -> dict:
+                                   pillow_version: str,
+                                   encoder_identity: dict) -> dict:
     """The frozen materializer runtime fingerprint shape (§104/M10A-1
-    contract section 3 + closure review P0-2): implementation hash +
-    exact python/numpy/Pillow identities. The D0 artifact bytes are the
-    ENCODED PNG bytes, so the PNG encoder (Pillow) is a material
-    determinative runtime dependency — same spec + same fingerprint must
-    imply same encoded Blob bytes, which requires the encoder identity
-    inside the fingerprint."""
+    contract section 3 + closure reviews P0-2/r2): implementation hash +
+    exact python/numpy + the full loaded-encoder identity. The D0
+    artifact bytes are the ENCODED PNG bytes, so the actual encoder
+    binary (Pillow native module + ABI + linked zlib), not merely the
+    release string, is the determinative dependency."""
     return {
         "schema_version": 1,
         "materializer": {
@@ -97,6 +133,7 @@ def production_runtime_fingerprint(implementation_sha256: str,
             "python": python_version,
             "numpy": numpy_version,
             "pillow_png_encoder": pillow_version,
+            "encoder_identity": encoder_identity,
             "platform_contract": "win-cpu-d0",
         },
         "external_components": [
@@ -104,11 +141,10 @@ def production_runtime_fingerprint(implementation_sha256: str,
                 "kind": "png_encoder",
                 "name": "Pillow",
                 "version_or_commit": pillow_version,
-                # wheel identity is the installed package version; the
-                # sha is null because the immutable PyPI sdist/wheel hash
-                # is not available in-process — version identity is the
-                # exact pinnable identity for this dependency
-                "sha256": None,
+                # the pinnable byte identity: the LOADED native encoder
+                # module — distinguishes ABI/platform wheels and their
+                # statically linked compression under one release string
+                "sha256": encoder_identity["pillow_native_module_sha256"],
             },
         ],
     }
