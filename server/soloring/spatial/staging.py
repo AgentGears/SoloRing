@@ -285,7 +285,74 @@ async def resolve_effective_staging(
         states=tuple(winners), absent=tuple(absent))
 
 
+async def preview_staging(session, *, spatial_world_id: str,
+                          shot_id: str) -> dict:
+    """The public staging-preview composition owner (M10C plan §10.3).
+
+    ONE checked-out connection and ONE coherent read transaction for the
+    whole composition: Shot verification → exact semantic dependency +
+    EntityRevision resolution (continuity authority, fail-closed) →
+    staging subresolver on the same connection → response projection.
+    Never two sessions (§10.3 forbidden hybrid).
+    """
+    from soloring.continuity.snapshots import resolve_working_dependencies
+
+    engine = session.bind
+    async with engine.connect() as conn:
+        await conn.exec_driver_sql("BEGIN")
+        try:
+            # Shot verification — this first read pins the snapshot
+            shot = (await conn.execute(text(
+                "SELECT project_id, deleted_at, scene_id, title FROM "
+                "shots WHERE id = :sid"), {"sid": shot_id})).first()
+            if shot is None or shot.deleted_at is not None:
+                raise _shot_not_found(shot_id)
+            # exact semantic inputs from the SAME snapshot; inherits the
+            # semantic layer's fail-closed behavior for unresolvable rows
+            deps = await resolve_working_dependencies(conn, shot_id)
+            revisions = {d.entity_id: d.entity_revision_id for d in deps}
+            outcome = await resolve_effective_staging(
+                conn, shot_id=shot_id,
+                spatial_world_id=spatial_world_id,
+                resolved_entity_revisions=revisions)
+            if revisions:
+                n_ph = ", ".join(f":n{i}" for i in range(len(revisions)))
+                n_params = {f"n{i}": e for i, e in
+                            enumerate(revisions.keys())}
+                names = {r["id"]: r["name"] for r in (
+                    await conn.execute(text(
+                        f"SELECT id, name FROM creative_entities "
+                        f"WHERE id IN ({n_ph})"), n_params)
+                ).mappings().all()}
+            else:
+                names = {}
+            await conn.exec_driver_sql("COMMIT")
+        except Exception:
+            import contextlib
+            with contextlib.suppress(Exception):
+                await conn.exec_driver_sql("ROLLBACK")
+            raise
+    return {
+        "shot_id": shot_id,
+        "spatial_world_id": spatial_world_id,
+        "assigned": outcome.assigned,
+        "relevant_transition_data": outcome.relevant_transition_data,
+        "narrative_context_required":
+            (not outcome.assigned) and outcome.relevant_transition_data,
+        "states": [
+            {**s.projection(), "entity_name": names.get(s.entity_id)}
+            for s in outcome.states],
+        "absent": [
+            {"spatial_track_id": a.spatial_track_id,
+             "entity_id": a.entity_id,
+             "entity_name": names.get(a.entity_id),
+             "entity_revision_id": a.entity_revision_id,
+             "requirement": a.requirement, "reason": a.reason}
+            for a in outcome.absent],
+    }
+
+
 __all__ = ["resolve_effective_staging", "EffectiveSpatialTrackState",
            "AbsentSpatialTrack", "StagingResolutionOutcome",
            "canonical_staging_bytes", "require_track_states",
-           "narrative_context_required"]
+           "narrative_context_required", "preview_staging"]

@@ -105,3 +105,14 @@ async def delete_transition(transition_id: str,
                             session: AsyncSession = Depends(get_session)):
     await tsvc.delete_transition(session, transition_id)
     return None
+
+
+@router.get("/spatial-worlds/{world_id}/staging")
+async def staging_preview(world_id: str, shot_id: str,
+                          session: AsyncSession = Depends(get_session)):
+    """Current effective staging for this world at the target Shot —
+    strictly an authoring/inspection projection (M10C plan §10.4/§10.5);
+    NOT the final M10 spatial-continuity contract."""
+    from soloring.spatial import staging as staging_svc
+    return await staging_svc.preview_staging(
+        session, spatial_world_id=world_id, shot_id=shot_id)
