@@ -79,6 +79,11 @@ def build_spatial_realization_block(
             v = a[field]
             if not isinstance(v, str) or len(v) != 64:
                 raise _bad(f"derived artifact {field} must be 64-hex sha256.")
+        if not isinstance(a["derived_spatial_artifact_id"], str) or not a[
+                "derived_spatial_artifact_id"]:
+            raise _bad("derived artifact identity must be a non-empty string "
+                       "(the persisted id placeholder is legal at compose "
+                       "time; the worker cross-checks the persisted row).")
     omissions = list(advisory_omissions or [])
     return {
         "schema_version": SPATIAL_REALIZATION_SCHEMA_VERSION,

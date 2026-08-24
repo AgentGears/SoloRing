@@ -396,7 +396,17 @@ def parse_continuity_pack(raw: Any) -> dict:
         staging.append(st)
     staging.sort(key=lambda s: (s["entity_id"], s["spatial_track_id"]))
 
-    parse_shot_plan(doc["shot_plan"], duration_ms=None)
+    # The pack is byte-level canonical authority; Shot-duration cross-checks
+    # belong to the readiness resolver (§20.5), so validate the plan's own
+    # internal grammar with its maximal legal duration (the last keyframe).
+    plan = doc["shot_plan"]
+    times = [k["time_ms"] for k in plan["camera"]["keyframes"]]
+    duration = max(times) if times else 0
+    for entry in plan.get("blocking", []):
+        times.extend(k["time_ms"] for k in entry["keyframes"])
+        duration = max(duration, max(
+            k["time_ms"] for k in entry["keyframes"]))
+    parse_shot_plan(plan, duration_ms=duration if duration else None)
     return {**doc, "staging": staging}
 
 
