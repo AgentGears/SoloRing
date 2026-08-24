@@ -158,7 +158,8 @@ def _validate_runtime_requirements(reqs_raw: Any) -> None:
             if "expected" not in proof:
                 raise _bad(f"runtime_requirements.{key}.proof.expected is "
                            "required for template_node_field proofs.")
-            json.dumps(proof["expected"])  # must be JSON-domain
+            _validate_json_domain(proof["expected"],
+                                  f"runtime_requirements.{key}.proof.expected")
 
 
 def check_runtime_closure(profile_spatial: dict, *, fingerprint: dict | None,
@@ -221,25 +222,54 @@ def _closed_by_template(node_field: str, expected: object, template: dict) -> bo
 
 
 def _json_domain_equal(a: object, b: object) -> bool:
-    """Strict equality in the JSON domain: no bool/int confusion, no
-    int/float coercion across kinds, exact structure for composites."""
-    if isinstance(a, bool) != isinstance(b, bool):
+    """Type-exact structural equality in the JSON domain: bool never
+    equals int, int never equals float, composites match recursively."""
+    if type(a) is not type(b):
         return False
-    if isinstance(a, bool):
-        return a == b
-    if isinstance(a, (int, float)) and isinstance(b, (int, float)):
-        # JSON numbers: 1 == 1.0 in parsed Python but stay in-domain only
-        # when both sides are the same kind OR the values are exactly equal
-        # integers; the frozen contract wants exact canonical value match.
-        return a == b and (isinstance(a, int) == isinstance(b, int) or
-                           float(a).is_integer() and float(a) == float(b))
-    if isinstance(a, dict) and isinstance(b, dict):
+    if isinstance(a, dict):
         return a.keys() == b.keys() and all(
             _json_domain_equal(a[k], b[k]) for k in a)
-    if isinstance(a, list) and isinstance(b, list):
+    if isinstance(a, list):
         return len(a) == len(b) and all(
             _json_domain_equal(x, y) for x, y in zip(a, b))
-    return type(a) is type(b) and a == b
+    return a == b
+
+
+def _validate_json_domain(value: object, what: str) -> None:
+    """Strict JSON-domain validation for dict-callers, anchored on the ONE
+    canonical serializer: rejects NaN/Infinity and non-finite floats,
+    tuples and any non-JSON Python object, non-string keys, floats
+    entirely (runtime expected-values are int/str/bool/null/structure
+    only in this contract), and integers outside the JS-safe domain."""
+    from soloring.domain.canonical import canonical_json_bytes
+
+    try:
+        canonical_json_bytes(value)
+    except (TypeError, ValueError) as exc:
+        raise _bad(f"{what} is not a JSON-domain value: {exc}") from exc
+    stack: list[object] = [value]
+    while stack:
+        v = stack.pop()
+        if v is None or isinstance(v, (str, bool)):
+            continue
+        if isinstance(v, float):
+            raise _bad(f"{what} contains a float; runtime closure "
+                       "expected-values are int/str/bool/null/structure "
+                       "only.")
+        if isinstance(v, int):
+            if not (-(2 ** 53) + 1 <= v <= 2 ** 53 - 1):
+                raise _bad(f"{what} integer outside the JavaScript-safe "
+                           "domain.")
+            continue
+        if isinstance(v, dict):
+            if any(not isinstance(k, str) for k in v):
+                raise _bad(f"{what} has non-string keys.")
+            stack.extend(v.values())
+        elif isinstance(v, list):
+            stack.extend(v)
+        else:
+            raise _bad(f"{what} contains a non-JSON value of type "
+                       f"{type(v).__name__}.")
 
 
 # --------------------------------------------------------------------------
