@@ -20,7 +20,7 @@ from soloring.assets.blob_store import BlobStore
 from soloring.errors import ErrorCode, SoloRingError
 from soloring.spatial import error_codes as ec
 from soloring.spatial.blob_integrity import blob_integrity_status
-from soloring.spatial.derived import parse_derived_spec
+from soloring.spatial.derived import validate_derived_provenance_row
 from soloring.spatial.package3 import resolve_derived_binding
 
 _CURRENT_M10_TABLES = (
@@ -30,7 +30,7 @@ _CURRENT_M10_TABLES = (
 )
 
 
-@dataclass(frozen=True)
+@dataclass
 class VerifiedDerivedInput:
     """One verified historical derived input bound to an exact node/field."""
 
@@ -41,6 +41,7 @@ class VerifiedDerivedInput:
     field: str
     blob_hash: str
     local_path: str
+    execution_reference: str | None = None
 
 
 def _fail(code: str, message: str, status: int = 500) -> SoloRingError:
@@ -88,33 +89,34 @@ async def load_verified_derived_inputs(
     verified: list[VerifiedDerivedInput] = []
     for row in rows:
         art = (await session.execute(text(
-            "SELECT project_id, spec_json, spec_hash, "
-            "       spatial_continuity_hash, artifact_kind, algorithm_id, "
-            "       algorithm_version, runtime_fingerprint_json, "
-            "       runtime_fingerprint_hash, determinism_class, blob_hash "
+            "SELECT project_id, spec_schema_version, spec_json, spec_hash, "
+            "spatial_continuity_schema_version, spatial_continuity_hash, "
+            "artifact_kind, artifact_schema_version, algorithm_id, "
+            "algorithm_version, runtime_fingerprint_json, "
+            "runtime_fingerprint_hash, determinism_class, blob_hash, "
+            "media_type "
             "FROM derived_spatial_artifacts WHERE id = :aid"),
             {"aid": row["derived_spatial_artifact_id"]})).mappings().one_or_none()
         if art is None:
             raise _fail(ec.DERIVED_SPATIAL_PROVENANCE_MISMATCH,
                         f"Derived provenance row missing for {row['input_key']}.")
-        # canonical spec bytes/hash re-verification (never trust DB hashes)
+        # ONE complete provenance validator (canonical spec + runtime bytes
+        # and hashes, algorithm projection, D0, Blob identity) — the worker
+        # reuses it rather than carrying a weaker second interpretation
+        # (closure review blocker 4).
         try:
-            spec = parse_derived_spec(art["spec_json"])
+            validate_derived_provenance_row(art)
         except SoloRingError as exc:
             raise _fail(ec.DERIVED_SPATIAL_PROVENANCE_MISMATCH,
-                        f"Stored spec bytes fail canonical validation: "
-                        f"{exc.message}") from exc
-        if spec.source.spatial_continuity_hash != art["spatial_continuity_hash"] \
-                or art["spatial_continuity_hash"] != captured_hash:
+                        f"Historical derived provenance fails canonical "
+                        f"validation: {exc.message}") from exc
+        if art["spatial_continuity_hash"] != captured_hash:
             raise _fail(ec.DERIVED_SPATIAL_PROVENANCE_MISMATCH,
                         "Derived provenance source hash disagrees with the "
                         "captured spatial authority.")
         if art["blob_hash"] != row["blob_hash"]:
             raise _fail(ec.DERIVED_SPATIAL_PROVENANCE_MISMATCH,
                         "Derived input Blob identity disagrees with provenance.")
-        if art["determinism_class"] != "D0":
-            raise _fail(ec.DERIVED_SPATIAL_PROVENANCE_MISMATCH,
-                        "Historical determinism class must be D0.")
 
         # exact manifest binding (no graph heuristics)
         input_key, node, field = resolve_derived_binding(
@@ -156,7 +158,42 @@ def current_m10_table_names() -> tuple[str, ...]:
     return _CURRENT_M10_TABLES
 
 
+async def execute_schema3_derived_inputs(
+    session: AsyncSession,
+    store: BlobStore,
+    *,
+    generation_id: str,
+    workflow_spec: dict,
+    manifest_v3: dict,
+    client,
+) -> list[VerifiedDerivedInput]:
+    """Full worker schema-3 derived-input path: verify (this module) then
+    upload the EXACT retained historical Blob bytes to the executor's
+    attempt-scoped input namespace, recording the executor-local
+    reference for the manifest's exact node/field translation.
+
+    ``client`` is the worker's ClientUploader (upload(source_path=…,
+    filename=…, subfolder=…)); the bytes uploaded are read from the
+    verified physical Blob path.
+    """
+    from pathlib import Path as _Path
+
+    from soloring.executors.comfy.translate import comfy_input_reference
+
+    verified = await load_verified_derived_inputs(
+        session, store, generation_id=generation_id,
+        workflow_spec=workflow_spec, manifest_v3=manifest_v3)
+    for v in verified:
+        filename = f"{v.input_key}_{v.blob_hash[:16]}.bin"
+        subfolder = f"soloring-der-{generation_id[:8]}"
+        name, sub = await client.upload(
+            source_path=_Path(v.local_path), filename=filename,
+            subfolder=subfolder)
+        v.execution_reference = comfy_input_reference(name, sub)
+    return verified
+
+
 __all__ = [
     "VerifiedDerivedInput", "load_verified_derived_inputs",
-    "current_m10_table_names",
+    "execute_schema3_derived_inputs", "current_m10_table_names",
 ]

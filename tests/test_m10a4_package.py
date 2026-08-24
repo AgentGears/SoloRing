@@ -169,7 +169,8 @@ def test_closure_proven_by_template_node_field():
     prof = P.parse_profile_v2(_profile())
     prof["spatial"]["runtime_requirements"]["policy"] = {
         "kind": "template_policy", "name": "scheduler",
-        "proof": {"mode": "template_node_field", "value": "160/scheduler"},
+        "proof": {"mode": "template_node_field", "value": "160/scheduler",
+                  "expected": "unipc"},
     }
     template = {"160": {"class_type": "WanVideoSampler",
                         "inputs": {"scheduler": "unipc"}}}
@@ -179,11 +180,28 @@ def test_closure_proven_by_template_node_field():
     assert unproven == []
 
 
+def test_closure_wrong_value_fails():
+    """Field presence is NOT proof: the exact canonical value must match."""
+    prof = P.parse_profile_v2(_profile())
+    prof["spatial"]["runtime_requirements"]["policy"] = {
+        "kind": "template_policy", "name": "scheduler",
+        "proof": {"mode": "template_node_field", "value": "160/scheduler",
+                  "expected": "unipc"},
+    }
+    template = {"160": {"class_type": "WanVideoSampler",
+                        "inputs": {"scheduler": "euler"}}}  # wrong value
+    unproven = P.check_runtime_closure(prof["spatial"],
+                                       fingerprint=_fingerprint(),
+                                       template=template)
+    assert unproven == ["policy"]
+
+
 def test_closure_template_disagreement_fails():
     prof = P.parse_profile_v2(_profile())
     prof["spatial"]["runtime_requirements"]["policy"] = {
         "kind": "template_policy", "name": "scheduler",
-        "proof": {"mode": "template_node_field", "value": "160/scheduler"},
+        "proof": {"mode": "template_node_field", "value": "160/scheduler",
+                  "expected": "unipc"},
     }
     template = {"160": {"class_type": "WanVideoSampler",
                         "inputs": {"steps": 20}}}  # scheduler absent
@@ -207,6 +225,7 @@ def _model():
 def _sr(n=1):
     return W.build_spatial_realization_block(
         spatial_continuity_hash="c" * 64,
+        realization_profile_hash="b" * 64,
         derived_artifacts=[{
             "input_key": "world_depth", "position": 0,
             "artifact_role": "spatial.world_depth",
@@ -247,6 +266,7 @@ def test_v3_structured_bindings_rejected_initial():
     with pytest.raises(Exception, match="Path B"):
         W.build_spatial_realization_block(
             spatial_continuity_hash="c" * 64,
+            realization_profile_hash="b" * 64,
             derived_artifacts=[_sr()["derived_artifacts"][0]],
             structured_bindings=[{"role": "spatial.camera"}])
 

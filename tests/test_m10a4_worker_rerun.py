@@ -36,7 +36,9 @@ async def _mkblob(store: BlobStore, content: bytes) -> str:
 
 
 def _spec_json(blob_hash: str, continuity: str) -> str:
-    return json.dumps({
+    from soloring.domain.canonical import canonical_json_str
+    from soloring.spatial.derived import parse_derived_spec
+    spec = {
         "schema_version": 1,
         "artifact_kind": "boxdepth_control_video",
         "artifact_schema_version": 1,
@@ -54,11 +56,17 @@ def _spec_json(blob_hash: str, continuity: str) -> str:
                             "encoding": "npy-1.0", "width": 832,
                             "height": 480, "frame_count": 17,
                             "time_base_num": 1, "time_base_den": 17},
-    }, sort_keys=True, separators=(",", ":"))
+    }
+    # canonical bytes come from the frozen parser/model dump, never a
+    # hand-rolled second serializer
+    return canonical_json_str(
+        parse_derived_spec(spec).model_dump(mode="json", exclude_none=False))
 
 
 def _fp_json() -> str:
-    return json.dumps({
+    from soloring.domain.canonical import canonical_json_str
+    from soloring.spatial.derived import parse_runtime_fingerprint
+    fp = {
         "schema_version": 1,
         "materializer": {"algorithm_id": "soloring.boxdepth.rasterizer",
                          "algorithm_version": "1.0.0",
@@ -66,7 +74,10 @@ def _fp_json() -> str:
         "runtime": {"python": "3.12", "numpy": "2.5",
                     "platform_contract": "win-cpu"},
         "external_components": [],
-    }, sort_keys=True, separators=(",", ":"))
+    }
+    return canonical_json_str(
+        parse_runtime_fingerprint(fp).model_dump(mode="json",
+                                                 exclude_none=False))
 
 
 async def _seed_spatial_generation(factory, engine, settings, continuity="9" * 64):
@@ -196,6 +207,7 @@ def _spec(continuity):
         realization=None,
         spatial_realization=build_spatial_realization_block(
             spatial_continuity_hash=continuity,
+            realization_profile_hash=HEX,
             derived_artifacts=[{
                 "input_key": "world_depth", "position": 0,
                 "artifact_role": "spatial.world_depth",

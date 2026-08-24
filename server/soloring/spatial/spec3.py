@@ -29,6 +29,7 @@ def _bad(message: str) -> SoloRingError:
 def build_spatial_realization_block(
     *,
     spatial_continuity_hash: str,
+    realization_profile_hash: str,
     structured_bindings: list[dict] | None = None,
     derived_artifacts: list[dict] | None = None,
     advisory_omissions: list[str] | None = None,
@@ -37,11 +38,17 @@ def build_spatial_realization_block(
 
     structured_bindings is EMPTY in initial M10 (camera frozen to derived
     Path B). derived_artifacts reference immutable identities/hashes only —
-    binary bytes are never embedded.
+    binary bytes are never embedded. realization_profile_hash pins the
+    captured schema-2 profile artifact for hash-addressed retrieval
+    (frozen §2.5: schema-3 retains profile/fingerprint content-addressed
+    exactly as schema 2).
     """
     if not isinstance(spatial_continuity_hash, str) or len(
             spatial_continuity_hash) != 64:
         raise _bad("spatial_continuity_hash must be a 64-hex sha256.")
+    if not isinstance(realization_profile_hash, str) or len(
+            realization_profile_hash) != 64:
+        raise _bad("realization_profile_hash must be a 64-hex sha256.")
     bindings = list(structured_bindings or [])
     if bindings:
         raise _bad("Initial M10 camera execution is derived Path B; "
@@ -76,6 +83,7 @@ def build_spatial_realization_block(
     return {
         "schema_version": SPATIAL_REALIZATION_SCHEMA_VERSION,
         "spatial_continuity_hash": spatial_continuity_hash,
+        "realization_profile_hash": realization_profile_hash,
         "structured_bindings": bindings,
         "derived_artifacts": artifacts,
         "advisory_omissions": omissions,

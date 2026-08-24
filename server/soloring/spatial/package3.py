@@ -10,6 +10,7 @@ template. Descriptive-only profile text can never pass as a runtime pin.
 """
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from soloring.errors import ErrorCode, SoloRingError
@@ -61,6 +62,11 @@ def _exact_keys(doc: dict, allowed: set[str], what: str) -> None:
 # --------------------------------------------------------------------------
 
 def parse_profile_v2(raw: Any) -> dict:
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except ValueError as exc:
+            raise _bad(f"RealizationProfile v2 is not valid JSON: {exc}") from exc
     doc = _require_dict(raw, "RealizationProfile v2")
     _exact_keys(doc, {
         "schema_version", "profile_id", "profile_version", "workflow_id",
@@ -69,8 +75,22 @@ def parse_profile_v2(raw: Any) -> dict:
     }, "RealizationProfile v2")
     if doc["schema_version"] != PROFILE_SCHEMA_VERSION_2:
         raise _bad("RealizationProfile schema_version must be 2 for spatial.")
-    _require_str(doc["profile_id"], "profile_id")
-    _require_str(doc["workflow_id"], "workflow_id")
+
+    # Inherited M9 profile-1 portion is validated by the FROZEN M9 parser
+    # itself (strict unknown-field rejection, selector semantics, channel
+    # bijection, min<=max): delegate, never reimplement (blocker 5). The
+    # legacy parser pins schema_version==1, so validate the inherited
+    # fields through a schema-1 view and keep the v2 wrapper.
+    from soloring.realization.profile import (
+        ProfileError as _M9ProfileError,
+        parse_profile as _parse_m9_profile,
+    )
+    inherited = {k: v for k, v in doc.items() if k != "spatial"}
+    inherited["schema_version"] = 1
+    try:
+        _parse_m9_profile(inherited)
+    except _M9ProfileError as exc:
+        raise _bad(f"Inherited profile-1 portion invalid: {exc}") from exc
 
     spatial = _require_dict(doc["spatial"], "spatial")
     _exact_keys(spatial, {
@@ -124,13 +144,21 @@ def _validate_runtime_requirements(reqs_raw: Any) -> None:
         _require_str(req["kind"], f"runtime_requirements.{key}.kind")
         _require_str(req["name"], f"runtime_requirements.{key}.name")
         proof = _require_dict(req["proof"], f"runtime_requirements.{key}.proof")
-        _exact_keys(proof, {"mode", "value"},
+        _exact_keys(proof, {"mode", "value", "expected"},
                     f"runtime_requirements.{key}.proof")
         if proof["mode"] not in ("fingerprint_component", "template_node_field"):
             raise _bad(f"runtime_requirements.{key}.proof.mode must be "
                        "fingerprint_component or template_node_field — a "
                        "descriptive requirement cannot pass as a runtime pin.")
         _require_str(proof["value"], f"runtime_requirements.{key}.proof.value")
+        if proof["mode"] == "template_node_field":
+            # expected = the exact canonical JSON-domain value the captured
+            # template must carry at node/field; presence alone proves
+            # nothing (closure review blocker 1).
+            if "expected" not in proof:
+                raise _bad(f"runtime_requirements.{key}.proof.expected is "
+                           "required for template_node_field proofs.")
+            json.dumps(proof["expected"])  # must be JSON-domain
 
 
 def check_runtime_closure(profile_spatial: dict, *, fingerprint: dict | None,
@@ -141,7 +169,9 @@ def check_runtime_closure(profile_spatial: dict, *, fingerprint: dict | None,
       * proof.mode == fingerprint_component and the captured
         ExecutionModelFingerprint contains that exact component identity; or
       * proof.mode == template_node_field with value 'node/field' and the
-        captured template contains that exact node id and input field.
+        captured template carries that exact node id, input field, AND the
+        expected canonical value under strict JSON-domain equality — field
+        presence alone proves nothing (closure review blocker 1).
     """
     unproven: list[str] = []
     for key, req in profile_spatial["runtime_requirements"].items():
@@ -149,7 +179,8 @@ def check_runtime_closure(profile_spatial: dict, *, fingerprint: dict | None,
         if proof["mode"] == "fingerprint_component":
             proven = _closed_by_fingerprint(req, proof, fingerprint)
         else:
-            proven = _closed_by_template(proof["value"], template)
+            proven = _closed_by_template(proof["value"],
+                                         proof.get("expected"), template)
         if not proven:
             unproven.append(key)
     return unproven
@@ -172,7 +203,10 @@ def _closed_by_fingerprint(req: dict, proof: dict,
     return False
 
 
-def _closed_by_template(node_field: str, template: dict) -> bool:
+def _closed_by_template(node_field: str, expected: object, template: dict) -> bool:
+    """Exact node/field/VALUE proof: the captured template must carry the
+    expected canonical value at the declared node/field under strict
+    JSON-domain equality (int is never coerced to float, etc.)."""
     try:
         node_id, field = node_field.split("/", 1)
     except ValueError:
@@ -181,7 +215,31 @@ def _closed_by_template(node_field: str, template: dict) -> bool:
     if not isinstance(node, dict):
         return False
     inputs = node.get("inputs")
-    return isinstance(inputs, dict) and field in inputs
+    if not isinstance(inputs, dict) or field not in inputs:
+        return False
+    return _json_domain_equal(inputs[field], expected)
+
+
+def _json_domain_equal(a: object, b: object) -> bool:
+    """Strict equality in the JSON domain: no bool/int confusion, no
+    int/float coercion across kinds, exact structure for composites."""
+    if isinstance(a, bool) != isinstance(b, bool):
+        return False
+    if isinstance(a, bool):
+        return a == b
+    if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+        # JSON numbers: 1 == 1.0 in parsed Python but stay in-domain only
+        # when both sides are the same kind OR the values are exactly equal
+        # integers; the frozen contract wants exact canonical value match.
+        return a == b and (isinstance(a, int) == isinstance(b, int) or
+                           float(a).is_integer() and float(a) == float(b))
+    if isinstance(a, dict) and isinstance(b, dict):
+        return a.keys() == b.keys() and all(
+            _json_domain_equal(a[k], b[k]) for k in a)
+    if isinstance(a, list) and isinstance(b, list):
+        return len(a) == len(b) and all(
+            _json_domain_equal(x, y) for x, y in zip(a, b))
+    return type(a) is type(b) and a == b
 
 
 # --------------------------------------------------------------------------
@@ -189,6 +247,11 @@ def _closed_by_template(node_field: str, template: dict) -> bool:
 # --------------------------------------------------------------------------
 
 def parse_manifest_v3(raw: Any) -> dict:
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except ValueError as exc:
+            raise _bad(f"manifest v3 is not valid JSON: {exc}") from exc
     doc = _require_dict(raw, "manifest v3")
     _exact_keys(doc, {
         "schema_version", "version", "workflow_id", "inputs", "parameters",
@@ -196,7 +259,20 @@ def parse_manifest_v3(raw: Any) -> dict:
     }, "manifest v3")
     if doc["schema_version"] != MANIFEST_SCHEMA_VERSION_3:
         raise _bad("manifest schema_version must be 3.")
-    _require_str(doc["workflow_id"], "workflow_id")
+
+    # Inherited manifest-2 portion is validated by the FROZEN M9 schema-2
+    # parser (strict inputs/parameters/outputs, no dual source form):
+    # delegate, never reimplement (blocker 5).
+    from soloring.workflows.manifest import (
+        WorkflowError as _M9WorkflowError,
+        parse_manifest_v2 as _parse_m9_manifest_v2,
+    )
+    inherited = {k: v for k, v in doc.items() if k != "spatial_bindings"}
+    inherited["schema_version"] = "2"
+    try:
+        _parse_m9_manifest_v2(inherited)
+    except _M9WorkflowError as exc:
+        raise _bad(f"Inherited manifest-2 portion invalid: {exc}") from exc
 
     bindings_raw = _require_dict(doc["spatial_bindings"],
                                  "spatial_bindings")
@@ -276,6 +352,11 @@ DESCRIPTOR3_FIELDS = {
 
 
 def parse_descriptor_v3(raw: Any) -> dict:
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except ValueError as exc:
+            raise _bad(f"package descriptor v3 is not valid JSON: {exc}") from exc
     doc = _require_dict(raw, "package descriptor v3")
     _exact_keys(doc, DESCRIPTOR3_FIELDS, "package descriptor v3")
     if doc["schema_version"] != DESCRIPTOR_SCHEMA_VERSION_3:

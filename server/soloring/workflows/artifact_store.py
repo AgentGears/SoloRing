@@ -301,13 +301,15 @@ class WorkflowArtifactStore:
         await self.place("templates", captured.workflow_template_hash, captured.template_bytes)
 
     async def place_release(self, release) -> None:
-        """Place all four artifacts of a captured schema-2 release (M9
-        §65); schema-1 releases place the legacy pair only."""
+        """Place all four artifacts of a captured schema-2/3 release (M9
+        §65 + frozen r3 §2.5: schema-3 retains profile/fingerprint
+        content-addressed exactly as schema 2); schema-1 releases place
+        the legacy pair only."""
         await self.place("manifests", release.manifest_hash, release.manifest_bytes)
         await self.place(
             "templates", release.workflow_template_hash, release.template_bytes
         )
-        if release.schema_version == 2:
+        if release.schema_version in (2, 3):
             await self.place(
                 "realization_profiles",
                 release.realization_profile_hash,
