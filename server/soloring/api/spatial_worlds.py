@@ -246,10 +246,17 @@ async def world_workspace(world_id: str,
         "SELECT id, key, name FROM spatial_axes WHERE spatial_world_id = "
         ":w AND deleted_at IS NULL ORDER BY key, id"),
         {"w": world_id})).mappings().all()
+    # M10C: active SpatialTracks of this world (canonical entity order) —
+    # server-owned staging authoring projection (M10C plan §10.1).
+    tracks = (await session.execute(_t(
+        "SELECT id, entity_id, requirement FROM spatial_tracks "
+        "WHERE spatial_world_id = :w AND deleted_at IS NULL "
+        "ORDER BY entity_id, id"), {"w": world_id})).mappings().all()
     return {
         "world": dict(world),
         "stable_frames": [dict(f) for f in stable_frames],
         "stable_axes": [dict(a) for a in stable_axes],
+        "tracks": [dict(t) for t in tracks],
         "states": out_states,
     }
 
