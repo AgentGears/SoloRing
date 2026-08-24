@@ -176,11 +176,15 @@ test("axis endpoint selectors list ONLY state-member frames", async () => {
     });
     // selects: [0] membership (stable), [1] endpoint A, [2] endpoint B
     const selects = Array.from(container.querySelectorAll("select"));
-    const endpointOptions = Array.from(
+    const endpointA = Array.from(
       selects[1].querySelectorAll("option")).map((o) => o.value);
-    expect(endpointOptions).toContain("f1");
-    expect(endpointOptions).toContain("f2");
-    expect(endpointOptions).not.toContain("f3");
+    const endpointB = Array.from(
+      selects[2].querySelectorAll("option")).map((o) => o.value);
+    for (const options of [endpointA, endpointB]) {
+      expect(options).toContain("f1");
+      expect(options).toContain("f2");
+      expect(options).not.toContain("f3");
+    }
     // the membership selector (stable identities) DOES offer f3
     const memberOptions = Array.from(
       selects[0].querySelectorAll("option")).map((o) => o.value);
