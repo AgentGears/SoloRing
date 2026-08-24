@@ -1,13 +1,13 @@
 /**
- * M10B §50 — Spatial World workspace UI (render-level, house parity).
+ * M10B section 50 - Spatial World workspace UI (render + action level).
  *
- * Proves the working-vs-approved honesty labels (§89): the panel renders
- * the server-fed working membership, the immutable revision history, and
- * the approval badge state without any client-side recomputation.
+ * Assertions are GENUINELY awaited (house correction: await waitFor),
+ * covering the editor labels, the server-computed working hash, the
+ * authoring forms, and the unapprove action.
  */
 
-import { render, waitFor } from "@testing-library/react";
-import { expect, test } from "vitest";
+import { fireEvent, render, waitFor } from "@testing-library/react";
+import { expect, test, vi } from "vitest";
 import { SpatialWorldPanel } from "@/components/SpatialWorldPanel";
 
 function workspaceBody(approved: string | null) {
@@ -16,7 +16,8 @@ function workspaceBody(approved: string | null) {
              requirement: "required", location_entity_id: "e1" },
     states: [{
       id: "s1", location_entity_revision_id: "r1",
-      approved_revision_id: approved, working_snapshot_hash: null,
+      approved_revision_id: approved,
+      working_snapshot_hash: "f".repeat(64),
       frames: [{
         spatial_frame_id: "f1", frame_key: "front-desk",
         bound_entity_id: null,
@@ -33,35 +34,68 @@ function workspaceBody(approved: string | null) {
   };
 }
 
-function withFetch(body: unknown, fn: () => void) {
+function mockFetch(body: unknown) {
+  return vi.fn(async () =>
+    new Response(JSON.stringify(body), { status: 200 }));
+}
+
+test("renders working hash, history, labels, and authoring forms",
+     async () => {
+  const fetchMock = mockFetch(workspaceBody("rev1"));
   const original = global.fetch;
-  global.fetch = (async (): Promise<Response> =>
-    new Response(JSON.stringify(body), { status: 200 })) as typeof fetch;
+  global.fetch = fetchMock as unknown as typeof fetch;
   try {
-    fn();
+    const { container } = render(<SpatialWorldPanel worldId="w1" />);
+    await waitFor(() => {
+      expect(container.textContent).toContain("Working membership");
+      expect(container.textContent).toContain(
+        "Revision history (immutable)");
+      expect(container.textContent).toContain("front-desk");
+      expect(container.textContent).toContain("ffffffffffffffff");
+      expect(container.textContent).toContain("Approved");
+      expect(container.textContent).toContain("Author frame");
+      expect(container.textContent).toContain("Author axis");
+    });
   } finally {
     global.fetch = original;
   }
-}
-
-test("renders working membership, history, and approved badge", async () => {
-  withFetch(workspaceBody("rev1"), () => {
-    const { container } = render(<SpatialWorldPanel worldId="w1" />);
-    void waitFor(() => {
-      expect(container.textContent).toContain("Working membership");
-      expect(container.textContent).toContain("Revision history (immutable)");
-      expect(container.textContent).toContain("front-desk");
-      expect(container.textContent).toContain("Approved");
-    });
-  });
 });
 
-test("unapproved state shows the honest missing-approval badge", async () => {
-  withFetch(workspaceBody(null), () => {
+test("unapprove action fires the real DELETE", async () => {
+  const fetchMock = mockFetch(workspaceBody("rev1"));
+  const original = global.fetch;
+  global.fetch = fetchMock as unknown as typeof fetch;
+  try {
     const { container } = render(<SpatialWorldPanel worldId="w1" />);
-    void waitFor(() => {
+    await waitFor(() => {
+      expect(container.textContent).toContain("Working membership");
+    });
+    const unapprove = Array.from(
+      container.querySelectorAll("button"))
+      .find((b) => b.textContent === "Unapprove");
+    expect(unapprove).toBeTruthy();
+    fireEvent.click(unapprove!);
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/spatial-world-states/s1/approval",
+        expect.objectContaining({ method: "DELETE" }));
+    });
+  } finally {
+    global.fetch = original;
+  }
+});
+
+test("unapproved world shows the missing-approval badge", async () => {
+  const fetchMock = mockFetch(workspaceBody(null));
+  const original = global.fetch;
+  global.fetch = fetchMock as unknown as typeof fetch;
+  try {
+    const { container } = render(<SpatialWorldPanel worldId="w1" />);
+    await waitFor(() => {
       expect(container.textContent).toContain("No approved revision");
       expect(container.textContent).toContain("Working membership");
     });
-  });
+  } finally {
+    global.fetch = original;
+  }
 });

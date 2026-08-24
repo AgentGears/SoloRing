@@ -96,14 +96,25 @@ def _build_canonical(candidate: dict) -> dict:
     return S.parse_world_revision(doc)
 
 
-async def capture_revision(session: AsyncSession, state_id: str) -> dict:
-    """§12 two-phase capture. Returns revision identity; never partial."""
+async def capture_revision(session: AsyncSession, state_id: str, *,
+                           _after_freeze=None) -> dict:
+    """§12 two-phase capture. Returns revision identity; never partial.
+
+    _after_freeze is a TEST-ONLY seam (house race pattern): an async
+    callable invoked after the coherent candidate freeze and before the
+    fenced writer opens, letting a race driver run a REAL competing
+    service mutation inside the contested interleaving. Production calls
+    never pass it.
+    """
     # Phase 1: coherent read + freeze + canonicalize + hash
     async with session.bind.connect() as conn:
         candidate = await _load_candidate(conn, state_id)
     canonical = _build_canonical(candidate)
     snapshot_json = canonical_json_str(canonical)
     snapshot_hash = canonical_hash(canonical)
+
+    if _after_freeze is not None:
+        await _after_freeze()  # race seam: competitor runs HERE
 
     # Phase 2: fenced writer — re-read the SAME dependency set and re-hash
     async with session.bind.connect() as conn:
@@ -132,14 +143,11 @@ async def capture_revision(session: AsyncSession, state_id: str) -> dict:
                     raise internal_invariant(
                         "Stored revision bytes disagree with the converging "
                         "candidate; immutable history is corrupt.")
-                children = (await conn.execute(text(
-                    "SELECT COUNT(*) FROM spatial_world_revision_frames "
-                    "WHERE spatial_world_revision_id = :r"),
-                    {"r": existing["id"]})).scalar()
-                if children != len(canonical["frames"]):
-                    raise internal_invariant(
-                        "Stored revision child projection disagrees with "
-                        "the canonical snapshot.")
+                # §14-3: normalized children must EXACTLY project the
+                # canonical snapshot — every identity/value/position
+                # field, not merely the row count (closure P0-1).
+                await _verify_child_projection(conn, existing["id"],
+                                               canonical)
                 await conn.exec_driver_sql("COMMIT")
                 return {"id": existing["id"],
                         "revision_number": existing["revision_number"],
@@ -205,6 +213,61 @@ async def capture_revision(session: AsyncSession, state_id: str) -> dict:
 def _new_id() -> str:
     from soloring.domain.ids import new_uuid
     return new_uuid()
+
+
+async def _verify_child_projection(conn, revision_id: str,
+                                   canonical: dict) -> None:
+    """§14-3: stored frame/axis children must exactly project the
+    canonical snapshot — position, identity, key, parent, bound ids,
+    transform, extents, and axis endpoints — field for field."""
+    stored_frames = (await conn.execute(text(
+        "SELECT position, spatial_frame_id, frame_key, "
+        "parent_spatial_frame_id, bound_entity_id, "
+        "bound_entity_revision_id, x_mm, y_mm, z_mm, yaw_udeg, "
+        "pitch_udeg, roll_udeg, half_x_mm, half_y_mm, half_z_mm FROM "
+        "spatial_world_revision_frames WHERE spatial_world_revision_id = "
+        ":r ORDER BY position"), {"r": revision_id})).mappings().all()
+    expected_frames = [{
+        "position": i,
+        "spatial_frame_id": f["spatial_frame_id"],
+        "frame_key": f["frame_key"],
+        "parent_spatial_frame_id": f["parent_spatial_frame_id"],
+        "bound_entity_id": f["bound_entity_id"],
+        "bound_entity_revision_id": f["bound_entity_revision_id"],
+        "x_mm": f["transform"]["translation_mm"][0],
+        "y_mm": f["transform"]["translation_mm"][1],
+        "z_mm": f["transform"]["translation_mm"][2],
+        "yaw_udeg": f["transform"]["rotation_udeg"][0],
+        "pitch_udeg": f["transform"]["rotation_udeg"][1],
+        "roll_udeg": f["transform"]["rotation_udeg"][2],
+        "half_x_mm": (f["half_extents_mm"][0]
+                      if f["half_extents_mm"] else None),
+        "half_y_mm": (f["half_extents_mm"][1]
+                      if f["half_extents_mm"] else None),
+        "half_z_mm": (f["half_extents_mm"][2]
+                      if f["half_extents_mm"] else None),
+    } for i, f in enumerate(canonical["frames"])]
+    if [dict(r) for r in stored_frames] != expected_frames:
+        raise internal_invariant(
+            "Stored revision frame projection disagrees with the canonical "
+            "snapshot (field-exact comparison failed).")
+
+    stored_axes = (await conn.execute(text(
+        "SELECT position, spatial_axis_id, axis_key, a_frame_id, "
+        "b_frame_id FROM spatial_world_revision_axes WHERE "
+        "spatial_world_revision_id = :r ORDER BY position"),
+        {"r": revision_id})).mappings().all()
+    expected_axes = [{
+        "position": i,
+        "spatial_axis_id": a["spatial_axis_id"],
+        "axis_key": a["axis_key"],
+        "a_frame_id": a["a_frame_id"],
+        "b_frame_id": a["b_frame_id"],
+    } for i, a in enumerate(canonical["axes"])]
+    if [dict(r) for r in stored_axes] != expected_axes:
+        raise internal_invariant(
+            "Stored revision axis projection disagrees with the canonical "
+            "snapshot (field-exact comparison failed).")
 
 
 # --------------------------------------------------------------------------

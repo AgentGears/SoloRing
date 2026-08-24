@@ -1,11 +1,12 @@
 /**
- * M10B §50 — Spatial World workspace (form/table, server-owned state).
+ * M10B §50 — Spatial World workspace: form/table world EDITOR.
  *
- * Working vs Approved authority is ALWAYS visually distinct (§89): the
- * working membership table and the approved immutable revision render
- * under separate labeled sections; nothing client-side computes
- * transforms, hashes, or axis sides. Capture and approval are explicit
- * server actions.
+ * Server-owned authority throughout (§89): every mutation is an
+ * explicit server action (frame authoring, membership values, axis
+ * authoring, capture, approve, unapprove); the panel renders the
+ * server-computed canonical WORKING hash beside the approved revision
+ * hash so working-vs-approved is mechanically visible. No client-side
+ * transform/hash/axis computation exists.
  */
 
 "use client";
@@ -58,10 +59,37 @@ interface WorldWorkspaceData {
   }>;
 }
 
+async function api(
+  path: string, method: string, body?: unknown): Promise<void> {
+  const res = await fetch(path, {
+    method,
+    headers: body ? { "Content-Type": "application/json" } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => null);
+    throw new Error(err?.message ?? `${method} ${path} failed (${res.status})`);
+  }
+}
+
+const num = (v: string) => Number.parseInt(v, 10) || 0;
+
 export function SpatialWorldPanel({ worldId }: { worldId: string }) {
   const [data, setData] = useState<WorldWorkspaceData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [frameKey, setFrameKey] = useState("");
+  const [frameName, setFrameName] = useState("");
+  const [tx, setTx] = useState("0");
+  const [ty, setTy] = useState("0");
+  const [tz, setTz] = useState("0");
+  const [axisKey, setAxisKey] = useState("");
+  const [axisA, setAxisA] = useState("");
+  const [axisB, setAxisB] = useState("");
+  const [memberFrame, setMemberFrame] = useState("");
+  const [hx, setHx] = useState("");
+  const [hy, setHy] = useState("");
+  const [hz, setHz] = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -78,39 +106,10 @@ export function SpatialWorldPanel({ worldId }: { worldId: string }) {
     void load();
   }, [load]);
 
-  async function capture(stateId: string) {
+  async function act(fn: () => Promise<void>) {
     setBusy(true);
     try {
-      const res = await fetch(
-        `/api/spatial-world-states/${stateId}/revisions`,
-        { method: "POST" });
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        throw new Error(body?.message ?? `capture failed (${res.status})`);
-      }
-      await load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function approve(stateId: string, revisionId: string,
-                         expected: string | null) {
-    setBusy(true);
-    try {
-      const res = await fetch(
-        `/api/spatial-world-states/${stateId}/approval`,
-        { method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            revision_id: revisionId,
-            expected_approved_revision_id: expected }) });
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        throw new Error(body?.message ?? `approval failed (${res.status})`);
-      }
+      await fn();
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -127,6 +126,8 @@ export function SpatialWorldPanel({ worldId }: { worldId: string }) {
   }
   if (!data) return <div className="card">Loading spatial world…</div>;
 
+  const first = data.states[0];
+
   return (
     <div className="stack">
       <div className="card row">
@@ -139,19 +140,23 @@ export function SpatialWorldPanel({ worldId }: { worldId: string }) {
           </span>
         </div>
       </div>
+
       {data.states.map((st) => (
         <div key={st.id} className="card">
           <div className="row">
             <strong>State {st.id.slice(0, 8)}…</strong>
-            <span className="meta">
-              Location revision {st.location_entity_revision_id.slice(0, 8)}…
-            </span>
             <span className={`badge ${st.approved_revision_id
               ? "badge-matches" : "badge-error"}`}>
               {st.approved_revision_id
                 ? `Approved ${st.approved_revision_id.slice(0, 8)}…`
                 : "No approved revision"}
             </span>
+          </div>
+          <div className="meta">
+            Working hash:{" "}
+            <code>{st.working_snapshot_hash
+              ? st.working_snapshot_hash.slice(0, 16) + "…"
+              : "unavailable"}</code>
           </div>
 
           <h4>Working membership (mutable; not captured authority)</h4>
@@ -187,25 +192,135 @@ export function SpatialWorldPanel({ worldId }: { worldId: string }) {
                 {st.axes.map((a) => (
                   <li key={a.spatial_axis_id}>
                     {a.axis_key}: {a.a_frame_id.slice(0, 8)}… ↔{" "}
-                    {a.b_frame_id.slice(0,8)}…
+                    {a.b_frame_id.slice(0, 8)}…
                   </li>
                 ))}
               </ul>
             </>
           )}
 
+          <h4>Author frame</h4>
           <div className="row">
-            <button disabled={busy} onClick={() => void capture(st.id)}>
-              Capture revision
-            </button>
+            <input placeholder="frame key" value={frameKey}
+                   onChange={(e) => setFrameKey(e.target.value)} />
+            <input placeholder="name" value={frameName}
+                   onChange={(e) => setFrameName(e.target.value)} />
+            <button disabled={busy || !frameKey || !frameName}
+                    onClick={() => void act(async () => {
+                      await api(`/api/spatial-worlds/${worldId}/frames`,
+                                "POST",
+                                { key: frameKey, name: frameName });
+                      setFrameKey(""); setFrameName("");
+                    })}>Create frame</button>
+          </div>
+          <div className="row">
+            <select value={memberFrame}
+                    onChange={(e) => setMemberFrame(e.target.value)}>
+              <option value="">select frame…</option>
+              {st.frames.map((f) => (
+                <option key={f.spatial_frame_id} value={f.spatial_frame_id}>
+                  {f.frame_key}
+                </option>
+              ))}
+            </select>
+            <input placeholder="x mm" value={tx}
+                   onChange={(e) => setTx(e.target.value)} />
+            <input placeholder="y mm" value={ty}
+                   onChange={(e) => setTy(e.target.value)} />
+            <input placeholder="z mm" value={tz}
+                   onChange={(e) => setTz(e.target.value)} />
+            <input placeholder="half x (opt)" value={hx}
+                   onChange={(e) => setHx(e.target.value)} />
+            <input placeholder="half y (opt)" value={hy}
+                   onChange={(e) => setHy(e.target.value)} />
+            <input placeholder="half z (opt)" value={hz}
+                   onChange={(e) => setHz(e.target.value)} />
+            <button
+              disabled={busy || !memberFrame}
+              onClick={() => void act(async () => {
+                const halves = hx && hy && hz
+                  ? [num(hx), num(hy), num(hz)] : null;
+                await api(
+                  `/api/spatial-world-states/${st.id}/frames/` +
+                  `${memberFrame}`,
+                  "PUT",
+                  { translation_mm: [num(tx), num(ty), num(tz)],
+                    rotation_udeg: [0, 0, 0],
+                    half_extents_mm: halves });
+              })}>Set membership value</button>
+          </div>
+
+          <h4>Author axis</h4>
+          <div className="row">
+            <input placeholder="axis key" value={axisKey}
+                   onChange={(e) => setAxisKey(e.target.value)} />
+            <select value={axisA} onChange={(e) => setAxisA(e.target.value)}>
+              <option value="">endpoint A…</option>
+              {st.frames.map((f) => (
+                <option key={f.spatial_frame_id} value={f.spatial_frame_id}>
+                  {f.frame_key}
+                </option>
+              ))}
+            </select>
+            <select value={axisB} onChange={(e) => setAxisB(e.target.value)}>
+              <option value="">endpoint B…</option>
+              {st.frames.map((f) => (
+                <option key={f.spatial_frame_id} value={f.spatial_frame_id}>
+                  {f.frame_key}
+                </option>
+              ))}
+            </select>
+            <button
+              disabled={busy || !axisKey || !axisA || !axisB || axisA === axisB}
+              onClick={() => void act(async () => {
+                await api(`/api/spatial-worlds/${worldId}/axes`, "POST",
+                          { key: axisKey, name: axisKey });
+                // the new axis id comes back but PUT needs it; simplest
+                // correct order: create then re-list then put
+                const res = await fetch(
+                  `/api/spatial-worlds/${worldId}/workspace`);
+                const wd = await res.json();
+                const stNow = (wd.states as typeof data.states)
+                  .find((s) => s.id === st.id);
+                const created = stNow?.axes.find(
+                  (a) => a.axis_key === axisKey);
+                if (!created) throw new Error("axis creation race");
+                await api(
+                  `/api/spatial-world-states/${st.id}/axes/` +
+                  `${created.spatial_axis_id}`,
+                  "PUT",
+                  { a_frame_id: axisA, b_frame_id: axisB });
+                setAxisKey(""); setAxisA(""); setAxisB("");
+              })}>Create + bind axis</button>
+          </div>
+
+          <div className="row">
+            <button disabled={busy} onClick={() => void act(async () => {
+              await api(`/api/spatial-world-states/${st.id}/revisions`,
+                        "POST");
+            })}>Capture revision</button>
             {st.revisions.map((r) => (
               <button key={r.id} disabled={busy ||
                 st.approved_revision_id === r.id}
-                onClick={() => void approve(
-                  st.id, r.id, st.approved_revision_id)}>
-                Approve #{r.revision_number}
-              </button>
+                onClick={() => void act(async () => {
+                  await api(
+                    `/api/spatial-world-states/${st.id}/approval`,
+                    "PUT",
+                    { revision_id: r.id,
+                      expected_approved_revision_id:
+                        st.approved_revision_id });
+                })}>Approve #{r.revision_number}</button>
             ))}
+            {st.approved_revision_id && (
+              <button disabled={busy}
+                      onClick={() => void act(async () => {
+                        await api(
+                          `/api/spatial-world-states/${st.id}/approval`,
+                          "DELETE",
+                          { expected_approved_revision_id:
+                              st.approved_revision_id });
+                      })}>Unapprove</button>
+            )}
           </div>
 
           <h4>Revision history (immutable)</h4>
@@ -228,6 +343,9 @@ export function SpatialWorldPanel({ worldId }: { worldId: string }) {
           </table>
         </div>
       ))}
+      {first === undefined && (
+        <div className="card">No states for this world yet.</div>
+      )}
     </div>
   );
 }

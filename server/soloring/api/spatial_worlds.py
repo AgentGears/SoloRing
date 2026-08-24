@@ -4,6 +4,7 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict
 
 from soloring.api.deps import get_session
+from soloring.errors import ErrorCode, SoloRingError
 from soloring.spatial import revisions as rev_svc
 from soloring.spatial import worlds as svc
 
@@ -227,9 +228,71 @@ async def world_workspace(world_id: str,
             "location_entity_revision_id":
                 st["location_entity_revision_id"],
             "approved_revision_id": st["approved_revision_id"],
-            "working_snapshot_hash": None,
+            "working_snapshot_hash": await _working_hash(
+                session, st["id"]),
             "frames": [dict(f) for f in frames],
             "axes": [dict(a) for a in axes],
             "revisions": [dict(r) for r in revisions],
         })
     return {"world": dict(world), "states": out_states}
+
+
+async def _working_hash(session: AsyncSession,
+                        state_id: str) -> str | None:
+    """Server-computed canonical hash of the CURRENT working state (the
+    §12 candidate), so the UI's working-vs-approved comparison is real."""
+    from soloring.domain.canonical import canonical_hash
+    from soloring.spatial import revisions as _rev
+
+    async with session.bind.connect() as conn:
+        try:
+            candidate = await _rev._load_candidate(conn, state_id)
+        except Exception:
+            return None
+    try:
+        return canonical_hash(_rev._build_canonical(candidate))
+    except Exception:
+        return None
+
+
+class FramePatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str | None = None
+    parent_spatial_frame_id: str | None = None
+    bound_entity_id: str | None = None
+
+
+class AxisPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str | None = None
+
+
+@router.patch("/spatial-frames/{frame_id}", status_code=204)
+async def patch_frame(frame_id: str, body: FramePatch,
+                      session: AsyncSession = Depends(get_session)):
+    await svc.patch_frame(
+        session, frame_id, name=body.name,
+        parent_spatial_frame_id=body.parent_spatial_frame_id,
+        bound_entity_id=body.bound_entity_id)
+    return None
+
+
+@router.delete("/spatial-frames/{frame_id}", status_code=204)
+async def delete_frame(frame_id: str,
+                       session: AsyncSession = Depends(get_session)):
+    await svc.delete_frame(session, frame_id)
+    return None
+
+
+@router.patch("/spatial-axes/{axis_id}", status_code=204)
+async def patch_axis(axis_id: str, body: AxisPatch,
+                     session: AsyncSession = Depends(get_session)):
+    await svc.patch_axis(session, axis_id, name=body.name)
+    return None
+
+
+@router.delete("/spatial-axes/{axis_id}", status_code=204)
+async def delete_axis(axis_id: str,
+                      session: AsyncSession = Depends(get_session)):
+    await svc.delete_axis(session, axis_id)
+    return None

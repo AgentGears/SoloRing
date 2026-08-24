@@ -688,3 +688,146 @@ __all__ = [
     "create_frame", "delete_frame", "put_state_frame", "delete_state_frame",
     "create_axis", "put_state_axis", "delete_state_axis",
 ]
+
+
+# --------------------------------------------------------------------------
+# Stable Frame/Axis identity PATCH + Axis delete (P0-3): keys immutable
+# --------------------------------------------------------------------------
+
+async def patch_frame(session: AsyncSession, frame_id: str, *,
+                      name: str | None = None,
+                      parent_spatial_frame_id: str | None = None,
+                      bound_entity_id: str | None = None) -> None:
+    """PATCH the stable frame identity (§10.1): name mutable; parent
+    mutable with same-world + acyclicity + not-self rules; bound Entity
+    mutable with same-Project. key is immutable and not patchable."""
+    sets, params = [], {"f": frame_id}
+    if parent_spatial_frame_id is not None or bound_entity_id is not None:
+        # identity-touching patch: validate under the fence
+        pass
+    async with session.bind.connect() as conn:
+        try:
+            await conn.exec_driver_sql("BEGIN IMMEDIATE")
+            frame = (await conn.execute(text(
+                "SELECT spatial_world_id, key FROM spatial_frames "
+                "WHERE id = :f AND deleted_at IS NULL"),
+                {"f": frame_id})).mappings().one_or_none()
+            if frame is None:
+                raise _err(ErrorCode.SPATIAL_FRAME_INVALID,
+                           "Frame not found or deleted.", 404)
+            world_id = frame["spatial_world_id"]
+            if parent_spatial_frame_id is not None:
+                if parent_spatial_frame_id == frame_id:
+                    raise _err(ErrorCode.SPATIAL_FRAME_INVALID,
+                               "Frame cannot be its own parent.")
+                parent = (await conn.execute(text(
+                    "SELECT spatial_world_id FROM spatial_frames "
+                    "WHERE id = :p AND deleted_at IS NULL"),
+                    {"p": parent_spatial_frame_id})).first()
+                if parent is None:
+                    raise _err(ErrorCode.SPATIAL_FRAME_INVALID,
+                               "Parent frame not found.", 404)
+                if parent[0] != world_id:
+                    raise _err(ErrorCode.SPATIAL_FRAME_INVALID,
+                               "Parent belongs to a different world.")
+                sets.append("parent_spatial_frame_id = :pf")
+                params["pf"] = parent_spatial_frame_id
+            if bound_entity_id is not None:
+                world = (await conn.execute(text(
+                    "SELECT project_id FROM spatial_worlds WHERE id = :w"),
+                    {"w": world_id})).first()
+                be = (await conn.execute(text(
+                    "SELECT project_id FROM creative_entities WHERE id = :e"
+                    " AND deleted_at IS NULL"),
+                    {"e": bound_entity_id})).first()
+                if be is None:
+                    raise _err(ErrorCode.SPATIAL_FRAME_INVALID,
+                               "Bound Entity not found/inactive.", 404)
+                if be[0] != world[0]:
+                    raise _err(ErrorCode.SPATIAL_FRAME_INVALID,
+                               "Bound Entity belongs to another Project.")
+                sets.append("bound_entity_id = :be")
+                params["be"] = bound_entity_id
+            if name is not None:
+                params["n"] = _norm_text(name, "SpatialFrame.name")
+                sets.append("name = :n")
+            if not sets:
+                await conn.exec_driver_sql("COMMIT")
+                return
+            await conn.execute(text(
+                f"UPDATE spatial_frames SET {', '.join(sets)}, updated_at"
+                f" = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = :f"),
+                params)
+            # parent graph must remain acyclic after the change
+            await _assert_frame_cycle_free(conn, world_id)
+            await conn.exec_driver_sql("COMMIT")
+        except Exception as exc:
+            with contextlib.suppress(Exception):
+                await conn.exec_driver_sql("ROLLBACK")
+            if isinstance(exc, SoloRingError):
+                raise
+            raise _err(ErrorCode.INTERNAL_INVARIANT_VIOLATION,
+                       f"frame patch failed: {exc}", 500) from exc
+
+
+async def patch_axis(session: AsyncSession, axis_id: str, *,
+                     name: str | None = None) -> None:
+    """PATCH the stable axis identity (§11): name mutable; key immutable."""
+    if name is None:
+        return
+    name_v = _norm_text(name, "SpatialAxis.name")
+    async with session.bind.connect() as conn:
+        try:
+            await conn.exec_driver_sql("BEGIN IMMEDIATE")
+            exists = (await conn.execute(text(
+                "SELECT id FROM spatial_axes WHERE id = :a AND deleted_at "
+                "IS NULL"), {"a": axis_id})).first()
+            if exists is None:
+                raise _err(ErrorCode.SPATIAL_AXIS_INVALID,
+                           "Axis not found or deleted.", 404)
+            await conn.execute(text(
+                "UPDATE spatial_axes SET name = :n, updated_at = "
+                "strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = :a"),
+                {"n": name_v, "a": axis_id})
+            await conn.exec_driver_sql("COMMIT")
+        except Exception as exc:
+            with contextlib.suppress(Exception):
+                await conn.exec_driver_sql("ROLLBACK")
+            if isinstance(exc, SoloRingError):
+                raise
+            raise _err(ErrorCode.INTERNAL_INVARIANT_VIOLATION,
+                       f"axis patch failed: {exc}", 500) from exc
+
+
+async def delete_axis(session: AsyncSession, axis_id: str) -> None:
+    """Soft-delete a stable axis identity; blocked while any state-axis
+    membership exists (§57)."""
+    async with session.bind.connect() as conn:
+        try:
+            await conn.exec_driver_sql("BEGIN IMMEDIATE")
+            exists = (await conn.execute(text(
+                "SELECT id FROM spatial_axes WHERE id = :a"),
+                {"a": axis_id})).first()
+            if exists is None:
+                raise not_found(ErrorCode.SPATIAL_AXIS_INVALID,
+                                f"Axis {axis_id} not found.")
+            member = (await conn.execute(text(
+                "SELECT spatial_world_state_id FROM "
+                "spatial_world_state_axes WHERE spatial_axis_id = :a"),
+                {"a": axis_id})).first()
+            if member is not None:
+                raise _err(ErrorCode.SPATIAL_AXIS_INVALID,
+                           "Axis has state membership rows.", 409)
+            await conn.execute(text(
+                "UPDATE spatial_axes SET deleted_at = "
+                "strftime('%Y-%m-%dT%H:%M:%fZ','now'), updated_at = "
+                "strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = :a"),
+                {"a": axis_id})
+            await conn.exec_driver_sql("COMMIT")
+        except Exception as exc:
+            with contextlib.suppress(Exception):
+                await conn.exec_driver_sql("ROLLBACK")
+            if isinstance(exc, SoloRingError):
+                raise
+            raise _err(ErrorCode.INTERNAL_INVARIANT_VIOLATION,
+                       f"axis delete failed: {exc}", 500) from exc
