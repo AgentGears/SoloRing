@@ -197,7 +197,7 @@ def relation_state_spec_entry(state) -> dict:
 
 def build_capturable_snapshot(
     shot, refs, resolved: list[ResolvedDependency], feature_states=(),
-    relation_states=(), visual_pack=None,
+    relation_states=(), visual_pack=None, spatial_pack=None,
 ) -> tuple[dict, dict | None]:
     """(snapshot value, continuity spec or None) from ONE captured value.
 
@@ -224,64 +224,44 @@ def build_capturable_snapshot(
         # M8 §54: the zero-deps/non-empty-visual cell is UNREACHABLE by
         # construction; a pack here is an internal invariant, never a
         # representable schema.
-        if visual_pack:
+        if visual_pack or spatial_pack:
             from soloring.errors import internal_invariant
 
             raise internal_invariant(
-                "Visual reference pack supplied for a zero-dependency "
-                "shot — the M8 schema lattice declares this cell "
-                "unreachable."
+                "Visual/spatial authority pack supplied for a "
+                "zero-dependency shot — the schema lattice declares "
+                "this cell unreachable."
             )
         return build_snapshot(shot, refs), None
     v1 = build_snapshot(shot, refs)
     if not states and not relations:
         spec = build_continuity_spec(deps)
-        if not visual_pack:
-            return (
-                {
-                    "schema_version": 2,
-                    "intent": v1["intent"],
-                    "references": v1["references"],
-                    "continuity": spec,
-                },
-                spec,
-            )
-        return (
-            {
-                "schema_version": 4,
+        base = {"schema_version": 4 if visual_pack else 2,
                 "intent": v1["intent"],
                 "references": v1["references"],
-                "continuity": spec,
-                "visual_reference_pack": visual_pack,
-            },
-            spec,
-        )
-    spec = build_continuity_spec_v2(deps, states, relations)
-    if not visual_pack:
-        return (
-            {
-                "schema_version": 3,
+                "continuity": spec}
+        if visual_pack:
+            base["visual_reference_pack"] = visual_pack
+    else:
+        spec = build_continuity_spec_v2(deps, states, relations)
+        base = {"schema_version": 4 if visual_pack else 3,
                 "intent": v1["intent"],
                 "references": v1["references"],
-                "continuity": spec,
-            },
-            spec,
-        )
-    return (
-        {
-            "schema_version": 4,
-            "intent": v1["intent"],
-            "references": v1["references"],
-            "continuity": spec,
-            "visual_reference_pack": visual_pack,
-        },
-        spec,
-    )
+                "continuity": spec}
+        if visual_pack:
+            base["visual_reference_pack"] = visual_pack
+    if spatial_pack is not None:
+        # M10D §48-49: any non-empty M10 pack wraps the exact lower
+        # semantic base as schema 5 (M8 present or absent). No empty
+        # schema 5 exists — the resolver never yields an empty pack.
+        base = {"schema_version": 5, **base, "spatial_continuity":
+                spatial_pack}
+    return base, spec
 
 
 def effective_working_snapshot_hash(
     shot, refs, resolved: list[ResolvedDependency], feature_states=(),
-    relation_states=(), visual_pack=None,
+    relation_states=(), visual_pack=None, spatial_pack=None,
 ) -> str:
     """The Shot's effective working hash (M6-F15 + M7C §10.4 + M7D §10.2).
 
@@ -290,7 +270,8 @@ def effective_working_snapshot_hash(
     mutation. Delegates to THE builder — never a second hash
     implementation."""
     snapshot, _ = build_capturable_snapshot(
-        shot, refs, resolved, feature_states, relation_states, visual_pack
+        shot, refs, resolved, feature_states, relation_states, visual_pack,
+        spatial_pack,
     )
     return canonical_hash(snapshot)
 
