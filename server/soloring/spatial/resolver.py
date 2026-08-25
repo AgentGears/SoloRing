@@ -137,6 +137,18 @@ async def resolve_spatial_continuity(
                 json.loads(plan_row["plan_json"]),
                 duration_ms=shot["duration_ms"])
             parsed_hash = S.plan_hash(parsed_plan)
+            # stored bytes/hash integrity (P0-2): the plan service
+            # persists canonical bytes + their server-derived hash; any
+            # disagreement is direct-DB corruption, never re-normalized
+            from soloring.domain.canonical import (
+                canonical_json_str as _cjs,
+            )
+            if _cjs(parsed_plan) != plan_row["plan_json"] or \
+                    parsed_hash != plan_row["plan_hash"]:
+                raise internal_invariant(
+                    f"Stored ShotSpatialPlan for shot {shot_id}: "
+                    "plan_json/plan_hash disagree with the re-canonicalized"
+                    " value — persisted corruption.")
         except S.SchemaInvalid as exc:
             issues.append(_issue(
                 ErrorCode.SPATIAL_SHOT_PLAN_INVALID, "plan",
@@ -265,8 +277,14 @@ async def _resolve_with_world(conn, shot_id, shot, deps, selected,
     staging = await resolve_effective_staging(
         conn, shot_id=shot_id, spatial_world_id=selected["id"],
         resolved_entity_revisions=deps)
-    staged_entities = {s.entity_id for s in staging.states}
-    for eid in sorted(staged_entities & set(fixed_by_entity)):
+    # APPLICABLE Track authority (P0-1): a Track is a competing placement
+    # authority for its Entity even when its current temporal state is
+    # absent (winning clear, or no eligible transition) — states ∪ absent
+    applicable_entities = (
+        {s.entity_id for s in staging.states}
+        | {a.entity_id for a in staging.absent}
+    )
+    for eid in sorted(applicable_entities & set(fixed_by_entity)):
         conflicted_entities.add(eid)
         issues.append(_issue(
             ErrorCode.SPATIAL_ENTITY_PLACEMENT_CONFLICT, "placement",

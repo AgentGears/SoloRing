@@ -403,7 +403,9 @@ async def _revision_continuity(
     # approval. The captured side reads ONLY immutable provenance (§57);
     # the current side is presented as contrast, never as execution input.
     visual_provenance: dict | None = None
-    if schema_version == 4:
+    if schema_version in (4, 5):
+        # M10D P0-8: schema 5 wraps the schema-4 base when M8 authority
+        # is present — captured visual provenance must survive the wrap.
         # The schema-4 snapshot stores the pack VALUE inline; the captured
         # pack hash is the canonical hash of those bytes (M9 r1 fix: the
         # previous key lookup always returned None).
@@ -688,16 +690,30 @@ async def _captured_spatial_provenance(session, rev, snapshot: dict):
     pack_raw = snapshot.get("spatial_continuity")
     if pack_raw is None:
         # schema 1-4: frozen null convention; never inferred from
-        # current M10 state
-        world_row = (await session.execute(text(
-            "SELECT 1 FROM shot_revision_spatial_worlds WHERE "
-            "shot_revision_id = :r"), {"r": rev["id"]})).first()
-        if world_row is not None:
+        # current M10 state. ALL THREE M10 child families must be empty
+        # (P0-4) — a stray row in any family is corrupted history, not
+        # a null projection.
+        stray = (await session.execute(text(
+            "SELECT (SELECT COUNT(*) FROM shot_revision_spatial_worlds "
+            "WHERE shot_revision_id = :r) + (SELECT COUNT(*) FROM "
+            "shot_revision_spatial_track_states WHERE shot_revision_id ="
+            " :r) + (SELECT COUNT(*) FROM shot_revision_spatial_plans "
+            "WHERE shot_revision_id = :r)"),
+            {"r": rev["id"]})).scalar()
+        if stray:
             raise internal_invariant(
-                "Schema 1-4 ShotRevision carries spatial world children.")
+                "Schema 1-4 ShotRevision carries spatial children in "
+                f"{stray} row(s) — corrupted history.")
         return None
 
-    pack = parse_continuity_pack(pack_raw)
+    # any embedded-pack grammar failure is HISTORICAL CORRUPTION (P0-3):
+    # normalized to the invariant, never a current-domain 4xx
+    try:
+        pack = parse_continuity_pack(pack_raw)
+    except Exception as exc:
+        raise internal_invariant(
+            "Captured SpatialContinuityPack is malformed: "
+            f"{exc}") from exc
     w = pack["spatial_world"]
 
     world_child = (await session.execute(text(
