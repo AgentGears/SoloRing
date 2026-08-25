@@ -254,8 +254,10 @@ def build_capturable_snapshot(
         # M10D §48-49: any non-empty M10 pack wraps the exact lower
         # semantic base as schema 5 (M8 present or absent). No empty
         # schema 5 exists — the resolver never yields an empty pack.
-        base = {"schema_version": 5, **base, "spatial_continuity":
-                spatial_pack}
+        base = {"schema_version": 5,
+                **{k: v for k, v in base.items()
+                   if k != "schema_version"},
+                "spatial_continuity": spatial_pack}
     return base, spec
 
 
