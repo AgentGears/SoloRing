@@ -396,8 +396,42 @@ async def _revision_continuity(
         )
     ).scalar_one_or_none()
     if snap_row is not None:
-        snapshot = _json.loads(snap_row)
+        # P0-R2-3: the outer historical snapshot decode is normalized —
+        # malformed JSON, a non-object container, or an illegal schema
+        # version is HISTORICAL CORRUPTION (invariant), never a raw
+        # JSONDecodeError/AttributeError leak; and the persisted
+        # snapshot_hash must equal the canonical bytes of the decoded
+        # snapshot.
+        from soloring.domain.canonical import (
+            canonical_hash as _snap_hash,
+            canonical_json_str as _snap_json,
+        )
+
+        try:
+            snapshot = _json.loads(snap_row)
+        except Exception as exc:
+            raise internal_invariant(
+                f"ShotRevision {revision_id} snapshot_json is not "
+                f"decodable: {exc}") from exc
+        if not isinstance(snapshot, dict):
+            raise internal_invariant(
+                f"ShotRevision {revision_id} snapshot is not a JSON "
+                "object — corrupted history.")
         schema_version = snapshot.get("schema_version")
+        if not isinstance(schema_version, int) or isinstance(
+                schema_version, bool) or schema_version not in (
+                1, 2, 3, 4, 5):
+            raise internal_invariant(
+                f"ShotRevision {revision_id} carries illegal snapshot "
+                f"schema_version {schema_version!r}.")
+        snap_hash_row = (await session.execute(text(
+            "SELECT snapshot_hash FROM shot_revisions WHERE id = :rid"),
+            {"rid": revision_id})).scalar_one()
+        if _snap_hash(snapshot) != snap_hash_row or \
+                _snap_json(snapshot) != snap_row:
+            raise internal_invariant(
+                f"ShotRevision {revision_id} snapshot bytes/hash "
+                "disagree with the canonical historical snapshot.")
 
     # M8 §73: captured visual authority, strictly separated from current
     # approval. The captured side reads ONLY immutable provenance (§57);
@@ -410,17 +444,16 @@ async def _revision_continuity(
         # pack hash is the canonical hash of those bytes (M9 r1 fix: the
         # previous key lookup always returned None).
         pack_hash = None
-        visual_block = (snapshot or {}).get("visual") or {}
-        if isinstance(visual_block, dict) and isinstance(
-            visual_block.get("visual_reference_pack"), dict
-        ):
+        # P0-R2-4: the canonical builder stores the M8 pack at the
+        # snapshot TOP LEVEL ("visual_reference_pack"), preserved by the
+        # schema-5 wrap. Read the frozen shape, not a wrapper key.
+        visual_pack_value = (snapshot or {}).get("visual_reference_pack")
+        if isinstance(visual_pack_value, dict):
             from soloring.domain.canonical import (
                 canonical_hash as _canonical_hash,
             )
 
-            pack_hash = _canonical_hash(
-                visual_block["visual_reference_pack"]
-            )
+            pack_hash = _canonical_hash(visual_pack_value)
         vrows = (
             await session.execute(
                 text(
