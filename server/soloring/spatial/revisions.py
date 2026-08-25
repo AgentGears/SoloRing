@@ -376,3 +376,51 @@ async def unapprove(session: AsyncSession, state_id: str, *,
 
 
 __all__ = ["capture_revision", "approve_revision", "unapprove"]
+
+
+# --------------------------------------------------------------------------
+# M10D-2 verified immutable world-revision reader (M10D plan §20)
+# --------------------------------------------------------------------------
+
+async def load_verified_world_revision(
+    conn, *, spatial_world_state_id: str,
+    spatial_world_revision_id: str,
+) -> dict:
+    """One reusable immutable reader: load the revision row, verify exact
+    state ownership, parse + canonicalize snapshot_json, verify
+    snapshot_hash, batch-load immutable frame/axis children, and verify
+    exact child projections. Any disagreement is stored corruption →
+    INTERNAL_INVARIANT_VIOLATION (never a readiness alias). The complete
+    M10D resolver must use this reader, not a second parser."""
+    row = (await conn.execute(text(
+        "SELECT id, spatial_world_state_id, revision_number, "
+        "snapshot_json, snapshot_hash FROM spatial_world_revisions "
+        "WHERE id = :r"), {"r": spatial_world_revision_id})).mappings() \
+        .first()
+    if row is None:
+        raise internal_invariant(
+            f"SpatialWorldRevision {spatial_world_revision_id} referenced "
+            "by an approved pointer does not exist.")
+    if row["spatial_world_state_id"] != spatial_world_state_id:
+        raise internal_invariant(
+            f"SpatialWorldRevision {spatial_world_revision_id} belongs to "
+            f"state {row['spatial_world_state_id']}, not the approved "
+            f"state {spatial_world_state_id}.")
+    try:
+        canonical = S.parse_world_revision(json.loads(row["snapshot_json"]))
+    except Exception as exc:
+        raise internal_invariant(
+            f"Stored SpatialWorldRevision {spatial_world_revision_id} "
+            f"snapshot is unparseable: {exc}") from exc
+    if canonical_hash(canonical) != row["snapshot_hash"]:
+        raise internal_invariant(
+            f"Stored SpatialWorldRevision {spatial_world_revision_id} "
+            "snapshot_hash disagrees with its canonicalized bytes.")
+    await _verify_child_projection(conn, spatial_world_revision_id,
+                                   canonical)
+    return {
+        "id": row["id"],
+        "revision_number": row["revision_number"],
+        "snapshot_hash": row["snapshot_hash"],
+        "snapshot": canonical,
+    }
