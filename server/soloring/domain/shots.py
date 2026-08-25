@@ -354,25 +354,47 @@ async def read_shot_detail(engine: AsyncEngine, shot_id: str, *, settings=None):
                 resolved, outcome.states,
                 blob_store=_visual_blob_store(settings),
             )
+            # M10D §41: M10 inspection completes on this same coherent
+            # unit once M7 is coherent, even when M8 is blocked (sibling
+            # layers). When M7 is unresolved the resolver is not invoked
+            # and the spatial projection is honestly not-ready.
+            spatial_outcome = None
             if readiness["continuity_state_ready"]:
+                from soloring.spatial.resolver import (
+                    resolve_spatial_continuity,
+                )
+
+                spatial_outcome = await resolve_spatial_continuity(
+                    conn, shot_id=shot_id,
+                    resolved_dependencies=resolved,
+                )
+            if readiness["continuity_state_ready"] and (
+                spatial_outcome is None or spatial_outcome.ready
+            ):
+                # The working hash covers M10 authority; an unresolved
+                # required M10 state NULLs the hash WITHOUT falling back
+                # to lower-schema current bytes (M10D §43).
                 effective_hash = effective_working_snapshot_hash(
                     shot, refs, resolved, outcome.states,
                     relation_outcome.relation_states,
                     visual_result.pack,
+                    spatial_outcome.pack if spatial_outcome is not None
+                    else None,
                 )
                 differs = await canon.differs_from_approved(
                     conn, shot, refs, effective_hash
                 )
             else:
-                # No authoritative working snapshot exists (M7B §7): the
-                # hash and the canon comparison are both NULL — never a
-                # fabricated hash, never a misleading "matches".
+                # No authoritative working snapshot exists (M7B §7 /
+                # M10D §43): the hash and the canon comparison are both
+                # NULL — never a fabricated hash, never a misleading
+                # "matches".
                 effective_hash = None
                 differs = None
             await conn.commit()
             return (
                 shot, refs, differs, resolved, effective_hash, readiness,
-                visual_result,
+                visual_result, spatial_outcome,
             )
         except Exception:
             with contextlib.suppress(Exception):

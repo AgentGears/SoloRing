@@ -600,6 +600,10 @@ async def _revision_continuity(
             ],
         }
 
+    spatial_provenance = await _captured_spatial_provenance(
+        session, rev, snapshot or {}
+    )
+
     return {
         "shot_revision_id": rev["id"],
         "snapshot_schema_version": schema_version,
@@ -611,6 +615,7 @@ async def _revision_continuity(
         "relations": relations,
         "source_transition_audit": transition_audit,
         "visual": visual_provenance,
+        "spatial": spatial_provenance,
     }
 
 
@@ -662,6 +667,133 @@ async def generation_continuity(
     )
     projection["generation_id"] = generation_id
     return projection
+
+
+async def _captured_spatial_provenance(session, rev, snapshot: dict):
+    """M10D §60-62: captured-row-only spatial projection. Schema 1-4 →
+    None. Schema 5 → reconstruct from the embedded pack + the three
+    immutable child tables, cross-checking the referenced immutable
+    SpatialWorldRevision and its children on EVERY read. Uses ONLY
+    immutable tables — the current-table denylist holds; current edits
+    can never rewrite this response."""
+    import json as _json
+
+    from soloring.domain.canonical import canonical_hash, canonical_json_str
+    from soloring.errors import internal_invariant
+    from soloring.spatial.revisions import load_verified_world_revision
+    from soloring.spatial.schemas import (
+        parse_continuity_pack, plan_hash as _plan_hash,
+    )
+
+    pack_raw = snapshot.get("spatial_continuity")
+    if pack_raw is None:
+        # schema 1-4: frozen null convention; never inferred from
+        # current M10 state
+        world_row = (await session.execute(text(
+            "SELECT 1 FROM shot_revision_spatial_worlds WHERE "
+            "shot_revision_id = :r"), {"r": rev["id"]})).first()
+        if world_row is not None:
+            raise internal_invariant(
+                "Schema 1-4 ShotRevision carries spatial world children.")
+        return None
+
+    pack = parse_continuity_pack(pack_raw)
+    w = pack["spatial_world"]
+
+    world_child = (await session.execute(text(
+        "SELECT spatial_continuity_hash, spatial_world_id, "
+        "spatial_world_state_id, spatial_world_revision_id, "
+        "spatial_world_revision_hash, location_entity_id, "
+        "location_entity_revision_id, requirement FROM "
+        "shot_revision_spatial_worlds WHERE shot_revision_id = :r"),
+        {"r": rev["id"]})).mappings().one_or_none()
+    if world_child is None:
+        raise internal_invariant(
+            "Schema-5 ShotRevision is missing its spatial world child.")
+    expected_world = {
+        "spatial_continuity_hash": canonical_hash(pack),
+        "spatial_world_id": w["spatial_world_id"],
+        "spatial_world_state_id": w["spatial_world_state_id"],
+        "spatial_world_revision_id": w["spatial_world_revision_id"],
+        "spatial_world_revision_hash": w["spatial_world_revision_hash"],
+        "location_entity_id": w["location_entity_id"],
+        "location_entity_revision_id": w["location_entity_revision_id"],
+        "requirement": w["requirement"]}
+    if dict(world_child) != expected_world:
+        raise internal_invariant(
+            "Captured spatial world child disagrees with the embedded "
+            "pack.")
+
+    track_rows = [dict(r) for r in (await session.execute(text(
+        "SELECT position, spatial_track_id, entity_id, "
+        "entity_revision_id, requirement, x_mm, y_mm, z_mm, yaw_udeg, "
+        "pitch_udeg, roll_udeg, source_transition_id, source_anchor_type, "
+        "source_anchor_id, source_boundary FROM "
+        "shot_revision_spatial_track_states WHERE shot_revision_id = :r "
+        "ORDER BY position"), {"r": rev["id"]})).mappings().all()]
+    expected_tracks = [{
+        "position": i,
+        "spatial_track_id": st["spatial_track_id"],
+        "entity_id": st["entity_id"],
+        "entity_revision_id": st["entity_revision_id"],
+        "requirement": st["requirement"],
+        "x_mm": st["transform"]["translation_mm"][0],
+        "y_mm": st["transform"]["translation_mm"][1],
+        "z_mm": st["transform"]["translation_mm"][2],
+        "yaw_udeg": st["transform"]["rotation_udeg"][0],
+        "pitch_udeg": st["transform"]["rotation_udeg"][1],
+        "roll_udeg": st["transform"]["rotation_udeg"][2],
+        "source_transition_id": st["source_transition"][
+            "spatial_transition_id"],
+        "source_anchor_type": st["source_transition"]["anchor_type"],
+        "source_anchor_id": st["source_transition"]["anchor_id"],
+        "source_boundary": st["source_transition"]["boundary"]}
+        for i, st in enumerate(pack["staging"])]
+    if track_rows != expected_tracks:
+        raise internal_invariant(
+            "Captured spatial track children disagree with the embedded "
+            "pack.")
+
+    plan_row = (await session.execute(text(
+        "SELECT plan_hash, plan_json FROM shot_revision_spatial_plans "
+        "WHERE shot_revision_id = :r"), {"r": rev["id"]})).mappings() \
+        .one_or_none()
+    if plan_row is None:
+        raise internal_invariant(
+            "Schema-5 ShotRevision is missing its spatial plan child.")
+    if plan_row["plan_json"] != canonical_json_str(pack["shot_plan"]) \
+            or plan_row["plan_hash"] != _plan_hash(pack["shot_plan"]):
+        raise internal_invariant(
+            "Captured spatial plan child bytes/hash disagree with the "
+            "embedded pack.")
+
+    # mandatory immutable-world cross-check on every schema-5 read
+    conn = await session.connection()
+    verified = await load_verified_world_revision(
+        conn,
+        spatial_world_state_id=w["spatial_world_state_id"],
+        spatial_world_revision_id=w["spatial_world_revision_id"])
+    if verified["snapshot"] != w["world_snapshot"]:
+        raise internal_invariant(
+            "Referenced immutable SpatialWorldRevision bytes disagree "
+            "with the pack's embedded world snapshot.")
+
+    return {
+        "spatial_continuity_hash": canonical_hash(pack),
+        "spatial_continuity": pack,
+        "world": {
+            "spatial_world_id": w["spatial_world_id"],
+            "requirement": w["requirement"],
+            "spatial_world_state_id": w["spatial_world_state_id"],
+            "spatial_world_revision_id": w["spatial_world_revision_id"],
+            "spatial_world_revision_hash": w["spatial_world_revision_hash"],
+            "location_entity_id": w["location_entity_id"],
+            "location_entity_revision_id":
+                w["location_entity_revision_id"],
+        },
+        "staging": pack["staging"],
+        "shot_plan": pack["shot_plan"],
+    }
 
 
 # --- ContinuityFeature surface (M7A §47) ------------------------------------------

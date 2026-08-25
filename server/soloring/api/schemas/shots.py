@@ -102,6 +102,11 @@ class ShotRead(BaseModel):
     visual_continuity_ready: bool = False
     visual_reference_pack_hash: str | None = None
     visual_continuity_issues: list = []
+    # M10D §40 additive computed fields. Default-False: an unpopulated
+    # projection is not spatial readiness. No column is added to shots.
+    spatial_continuity_ready: bool = False
+    spatial_continuity_hash: str | None = None
+    spatial_continuity_issues: list = []
 
 
 class ShotListItem(BaseModel):
