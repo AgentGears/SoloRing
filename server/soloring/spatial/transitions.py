@@ -105,10 +105,22 @@ async def _coordinate_taken(conn, track_id: str, anchor_type: str,
     return (await conn.execute(text(sql), params)).first() is not None
 
 
-async def _world_project_id(conn, world_id: str) -> str:
-    return (await conn.execute(text(
-        "SELECT project_id FROM spatial_worlds WHERE id = :w"),
-        {"w": world_id})).scalar_one()
+async def _world_project_active(conn, world_id: str) -> str:
+    """The owning world's Project — failing CLOSED if the world is
+    missing or tombstoned: transition authority is never authored
+    beneath a deleted SpatialWorld (world-delete guard normally
+    prevents this; this also covers direct-DB corruption)."""
+    row = (await conn.execute(text(
+        "SELECT project_id, deleted_at FROM spatial_worlds "
+        "WHERE id = :w"), {"w": world_id})).first()
+    if row is None:
+        raise _err(ErrorCode.SPATIAL_TRANSITION_INVALID,
+                   f"Owning SpatialWorld {world_id} not found.", 404)
+    if row[1] is not None:
+        raise _err(ErrorCode.SPATIAL_TRANSITION_INVALID,
+                   "Cannot author transitions beneath a deleted "
+                   "SpatialWorld.", 409)
+    return row[0]
 
 
 async def create_transition(session: AsyncSession, track_id: str, *,
@@ -143,8 +155,8 @@ async def create_transition(session: AsyncSession, track_id: str, *,
                 raise _err(ErrorCode.SPATIAL_TRANSITION_INVALID,
                            "Cannot author a transition on a deleted "
                            "SpatialTrack.", 409)
-            project_id = await _world_project_id(conn,
-                                                 track["spatial_world_id"])
+            project_id = await _world_project_active(
+                conn, track["spatial_world_id"])
             await _validate_anchor(conn, project_id, anchor_type, anchor_id)
             if await _coordinate_taken(conn, track_id, anchor_type, anchor_id,
                                        boundary):
@@ -277,8 +289,8 @@ async def patch_transition(session: AsyncSession, transition_id: str, *,
                 return
 
             track = await _load_track(conn, row["spatial_track_id"])
-            project_id = await _world_project_id(conn,
-                                                 track["spatial_world_id"])
+            project_id = await _world_project_active(
+                conn, track["spatial_world_id"])
             await _validate_anchor(conn, project_id, p_at, p_aid)
             if await _coordinate_taken(conn, row["spatial_track_id"], p_at,
                                        p_aid, p_b, exclude=transition_id):

@@ -243,6 +243,15 @@ async def delete_world(session: AsyncSession, world_id: str) -> None:
                 raise _err(ErrorCode.SPATIAL_WORLD_INVALID,
                            "World is selected by an active ShotSpatialPlan.",
                            409)
+            track = (await conn.execute(text(
+                "SELECT id FROM spatial_tracks "
+                "WHERE spatial_world_id = :w AND deleted_at IS NULL"),
+                {"w": world_id})).first()
+            if track is not None:
+                raise _err(ErrorCode.SPATIAL_WORLD_INVALID,
+                           "World has active SpatialTracks; remove them "
+                           "first (tombstoning a world must not leave "
+                           "active track authority dangling).", 409)
             states = (await conn.execute(text(
                 "SELECT COUNT(*) FROM spatial_world_states "
                 "WHERE spatial_world_id = :w"), {"w": world_id})).scalar()

@@ -43,6 +43,22 @@ async def _load_world_active(conn, world_id: str) -> dict:
     return dict(row)
 
 
+async def _verify_owning_world_active(conn, world_id: str) -> None:
+    """Track mutation fails closed beneath a tombstoned world (normal
+    lifecycle is prevented by the world-delete guard; this also covers
+    direct-DB corruption of that invariant)."""
+    row = (await conn.execute(text(
+        "SELECT deleted_at FROM spatial_worlds WHERE id = :w"),
+        {"w": world_id})).first()
+    if row is None:
+        raise _err(ErrorCode.SPATIAL_TRACK_INVALID,
+                   f"Owning SpatialWorld {world_id} not found.", 404)
+    if row[0] is not None:
+        raise _err(ErrorCode.SPATIAL_TRACK_INVALID,
+                   "Cannot mutate a SpatialTrack beneath a deleted "
+                   "SpatialWorld.", 409)
+
+
 async def _load_track(conn, track_id: str) -> dict:
     row = (await conn.execute(text(
         "SELECT id, spatial_world_id, entity_id, requirement, created_at, "
@@ -155,6 +171,8 @@ async def patch_track(session: AsyncSession, track_id: str, *,
             if track["deleted_at"] is not None:
                 raise _err(ErrorCode.SPATIAL_TRACK_INVALID,
                            "Cannot patch a deleted SpatialTrack.", 409)
+            await _verify_owning_world_active(
+                conn, track["spatial_world_id"])
             await conn.execute(text(
                 "UPDATE spatial_tracks SET requirement = :r, updated_at = "
                 "strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = :t"),
@@ -183,6 +201,8 @@ async def delete_track(session: AsyncSession, track_id: str) -> None:
             track = await _load_track(conn, track_id)
             if track["deleted_at"] is not None:
                 return  # idempotent
+            await _verify_owning_world_active(
+                conn, track["spatial_world_id"])
             if track["requirement"] == "required":
                 raise _err(ErrorCode.SPATIAL_TRACK_INVALID,
                            "A required SpatialTrack cannot be deleted "

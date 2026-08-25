@@ -287,7 +287,10 @@ async def test_staging_exact_supplied_revision_emitted(factory, engine):
 
 
 async def test_staging_unassigned_shot_semantics(factory, engine):
-    # matrix 42 + 43
+    # matrix 42 + 43: the RESOLVER ITSELF raises the frozen strict
+    # failure for unassigned + relevant temporal data (no fabricated
+    # order, no silent projection); unassigned + no relevant data is an
+    # ordinary empty outcome that invents no blocker.
     ids = await _seed(factory, n_shots=1)
     unassigned = str(uuid.uuid4())
     async with factory() as session:
@@ -301,13 +304,12 @@ async def test_staging_unassigned_shot_semantics(factory, engine):
     assert out.assigned is False
     assert out.relevant_transition_data is False
     assert out.states == () and out.absent == ()
-    # relevant data: the condition is carried and strict consumers raise
+    # relevant data: the real resolver raises NARRATIVE_CONTEXT_REQUIRED
     await _set(factory, ids, "eva", "scene", ids["scenes"][0], "start")
-    out2 = await _resolve(engine, ids, unassigned)
-    assert out2.assigned is False
-    assert out2.relevant_transition_data is True
-    err = staging.narrative_context_required(unassigned)
-    assert err.code == ErrorCode.NARRATIVE_CONTEXT_REQUIRED
+    with pytest.raises(SoloRingError) as ei:
+        await _resolve(engine, ids, unassigned)
+    assert ei.value.code == ErrorCode.NARRATIVE_CONTEXT_REQUIRED
+    assert ei.value.status_code == 409
 
 
 async def test_staging_missing_shot_or_world_rejected(factory, engine):

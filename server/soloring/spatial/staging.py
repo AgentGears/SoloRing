@@ -191,11 +191,17 @@ async def resolve_effective_staging(
     relevant_transition_data = bool(transitions)
 
     if not assigned:
-        # condition carried structurally; strict consumers raise
-        # narrative_context_required (§8.7) — no fabricated order
+        if relevant_transition_data:
+            # the frozen strict failure at the production semantic seam
+            # (§8.5 step 6 / matrix 42): relevant temporal staging data
+            # exists but the Shot has no narrative position. Inspection
+            # wrappers (preview_staging) may catch and project this
+            # condition structurally; the resolver itself fails closed.
+            raise narrative_context_required(shot_id)
+        # no relevant data: an unassigned Shot invents no blocker
         return StagingResolutionOutcome(
             shot_id=shot_id, spatial_world_id=spatial_world_id,
-            assigned=False, relevant_transition_data=relevant_transition_data,
+            assigned=False, relevant_transition_data=False,
             states=(), absent=())
 
     ordering = await load_narrative_ordering(conn, shot.project_id)
@@ -311,10 +317,30 @@ async def preview_staging(session, *, spatial_world_id: str,
             # semantic layer's fail-closed behavior for unresolvable rows
             deps = await resolve_working_dependencies(conn, shot_id)
             revisions = {d.entity_id: d.entity_revision_id for d in deps}
-            outcome = await resolve_effective_staging(
-                conn, shot_id=shot_id,
-                spatial_world_id=spatial_world_id,
-                resolved_entity_revisions=revisions)
+            narrative_blocked = False
+            try:
+                outcome = await resolve_effective_staging(
+                    conn, shot_id=shot_id,
+                    spatial_world_id=spatial_world_id,
+                    resolved_entity_revisions=revisions)
+            except SoloRingError as exc:
+                if exc.code != ErrorCode.NARRATIVE_CONTEXT_REQUIRED:
+                    raise  # invariant/corruption conditions propagate
+                # the strict resolver raised the frozen condition; this
+                # inspection projection surfaces it structurally (§10.4)
+                outcome = None
+                narrative_blocked = True
+            if narrative_blocked:
+                await conn.exec_driver_sql("COMMIT")
+                return {
+                    "shot_id": shot_id,
+                    "spatial_world_id": spatial_world_id,
+                    "assigned": False,
+                    "relevant_transition_data": True,
+                    "narrative_context_required": True,
+                    "states": [],
+                    "absent": [],
+                }
             if revisions:
                 n_ph = ", ".join(f":n{i}" for i in range(len(revisions)))
                 n_params = {f"n{i}": e for i, e in
