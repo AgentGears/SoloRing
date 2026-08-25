@@ -190,7 +190,7 @@ async def test_take_derives_from_captured_revision_not_current_state(
     from soloring.domain.shots import read_shot_detail
     from soloring.domain.snapshots import working_snapshot_hash
 
-    shot_map, refs, _, _resolved, _eff, _ready, _vis = await read_shot_detail(engine, sid)
+    shot_map, refs, _, _resolved, _eff, _ready, _vis, _sp = await read_shot_detail(engine, sid)
     assert working_snapshot_hash(shot_map, refs) != rev_hash
 
 
