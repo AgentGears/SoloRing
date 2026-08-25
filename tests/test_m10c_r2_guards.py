@@ -141,6 +141,11 @@ async def test_mutations_fail_closed_beneath_tombstoned_world(factory):
         await trans_svc.patch_transition(fs(factory), tr["id"],
                                          operation="clear")
     assert e4.value.status_code == 409
+    # DELETE transition beneath the tombstoned world fails closed too
+    # (r3: completes the every-mutation coverage this test names)
+    with pytest.raises(SoloRingError, match="deleted SpatialWorld") as e5:
+        await trans_svc.delete_transition(fs(factory), tr["id"])
+    assert e5.value.status_code == 409
     # create_track beneath a tombstoned world was already fail-closed
     # (positive control)
     with pytest.raises(SoloRingError, match="not found or deleted"):

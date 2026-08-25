@@ -123,6 +123,19 @@ async def _world_project_active(conn, world_id: str) -> str:
     return row[0]
 
 
+async def _verify_parents_active(conn, transition_row: dict) -> str:
+    """Parent-integrity fence for Transition MUTATION (source-gate r3):
+    the parent SpatialTrack and the owning SpatialWorld must both be
+    active — verified BEFORE any successful mutation or no-op return,
+    in every PATCH/DELETE path. Returns the owning world's Project."""
+    track = await _load_track(conn, transition_row["spatial_track_id"])
+    if track["deleted_at"] is not None:
+        raise _err(ErrorCode.SPATIAL_TRANSITION_INVALID,
+                   "Cannot mutate a SpatialTransition of a deleted "
+                   "SpatialTrack.", 409)
+    return await _world_project_active(conn, track["spatial_world_id"])
+
+
 async def create_transition(session: AsyncSession, track_id: str, *,
                             anchor_type: str, anchor_id: str,
                             boundary: str, operation: str,
@@ -231,6 +244,10 @@ async def patch_transition(session: AsyncSession, transition_id: str, *,
         try:
             await conn.exec_driver_sql("BEGIN IMMEDIATE")
             row = await _load_transition(conn, transition_id)
+            # parent integrity FIRST — before any evaluation, mutation,
+            # or no-op return (source-gate r3: even PATCH {} fails closed
+            # beneath a tombstoned Track or World)
+            project_id = await _verify_parents_active(conn, row)
             if row["deleted_at"] is not None:
                 raise _err(ErrorCode.SPATIAL_TRANSITION_INVALID,
                            "Cannot patch a deleted SpatialTransition.", 409)
@@ -288,9 +305,6 @@ async def patch_transition(session: AsyncSession, transition_id: str, *,
                 await conn.exec_driver_sql("COMMIT")
                 return
 
-            track = await _load_track(conn, row["spatial_track_id"])
-            project_id = await _world_project_active(
-                conn, track["spatial_world_id"])
             await _validate_anchor(conn, project_id, p_at, p_aid)
             if await _coordinate_taken(conn, row["spatial_track_id"], p_at,
                                        p_aid, p_b, exclude=transition_id):
@@ -318,11 +332,15 @@ async def patch_transition(session: AsyncSession, transition_id: str, *,
 
 
 async def delete_transition(session: AsyncSession, transition_id: str) -> None:
-    """Soft-delete; the coordinate is freed for a NEW identity (§7.7)."""
+    """Soft-delete; the coordinate is freed for a NEW identity (§7.7).
+
+    Parent Track and owning World must be active — the same mutation
+    fail-closed fence as PATCH (source-gate r3)."""
     async with session.bind.connect() as conn:
         try:
             await conn.exec_driver_sql("BEGIN IMMEDIATE")
             row = await _load_transition(conn, transition_id)
+            await _verify_parents_active(conn, row)
             if row["deleted_at"] is not None:
                 return  # idempotent
             await conn.execute(text(
