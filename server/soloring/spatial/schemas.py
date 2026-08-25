@@ -35,8 +35,22 @@ class SchemaInvalid(SoloRingError):
         super().__init__(ErrorCode.SPATIAL_WORLD_INVALID, message, status_code=422)
 
 
+class PlanSchemaInvalid(SchemaInvalid):
+    """ShotSpatialPlan grammar failure carrying the frozen durable
+    SPATIAL_SHOT_PLAN_INVALID identity (M10D §8.7) while remaining a
+    SchemaInvalid subclass — predecessor catch compatibility holds."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.code = ErrorCode.SPATIAL_SHOT_PLAN_INVALID
+
+
 def _bad(message: str) -> SchemaInvalid:
     return SchemaInvalid(message)
+
+
+def _bad_plan(message: str) -> PlanSchemaInvalid:
+    return PlanSchemaInvalid(message)
 
 
 def _require_dict(value: Any, what: str) -> dict:
@@ -69,6 +83,17 @@ def _exact_keys(doc: dict, allowed: set[str], what: str) -> None:
     unknown = sorted(set(doc) - allowed)
     if unknown:
         raise _bad(f"{what} has unknown fields {unknown}; the field set is closed.")
+
+
+def _require_keys(doc: dict, required: set[str], what: str) -> None:
+    """Canonical closed grammar: required keys must be PRESENT (explicit
+    null is the canonical absence form for nullable fields — omission is
+    a grammar failure, never a KeyError (M10D §7)."""
+    missing = sorted(required - set(doc))
+    if missing:
+        raise _bad(f"{what} is missing required fields {missing}; "
+                   "canonical absence is an explicit present key with a "
+                   "null value.")
 
 
 def _transform(raw: Any, what: str) -> Transform:
@@ -238,8 +263,27 @@ def world_revision_hash(doc: dict) -> str:
 
 def parse_shot_plan(raw: Any, *, duration_ms: int | None) -> dict:
     """Validate one ShotSpatialPlan; duration_ms is the Shot's current
-    duration (NULL => only t=0 keyframes are legal)."""
+    duration (NULL => only t=0 keyframes are legal).
+
+    The RETURNED document is canonical authority: every camera/blocking
+    keyframe transform is replaced by the normalized Transform canonical
+    value (M10D §8.4-8.5) — wrap-equivalent rotations converge on
+    identical returned bytes/hash. Plan grammar failures carry
+    SPATIAL_SHOT_PLAN_INVALID (PlanSchemaInvalid)."""
+    try:
+        return _parse_shot_plan_impl(raw, duration_ms=duration_ms)
+    except PlanSchemaInvalid:
+        raise
+    except SchemaInvalid as exc:
+        raise PlanSchemaInvalid(exc.message) from exc
+
+
+def _parse_shot_plan_impl(raw: Any, *, duration_ms: int | None) -> dict:
     doc = _require_dict(raw, "ShotSpatialPlan")
+    _require_keys(doc, {
+        "schema_version", "spatial_world_id", "camera", "blocking",
+        "axis_constraint",
+    }, "ShotSpatialPlan")
     _exact_keys(doc, {
         "schema_version", "spatial_world_id", "camera", "blocking",
         "axis_constraint",
@@ -249,6 +293,10 @@ def parse_shot_plan(raw: Any, *, duration_ms: int | None) -> dict:
     _require_str(doc["spatial_world_id"], "ShotSpatialPlan.spatial_world_id")
 
     cam = _require_dict(doc["camera"], "camera")
+    _require_keys(cam, {
+        "projection", "focal_length_um", "sensor_width_um",
+        "sensor_height_um", "keyframes",
+    }, "camera")
     _exact_keys(cam, {
         "projection", "focal_length_um", "sensor_width_um", "sensor_height_um",
         "keyframes",
@@ -260,10 +308,10 @@ def parse_shot_plan(raw: Any, *, duration_ms: int | None) -> dict:
                      cam["sensor_height_um"])
     except (ValueError, TypeError) as exc:
         raise _bad(f"camera optics: {exc}") from exc
-    kfs = _require_list(cam["keyframes"], "camera.keyframes")
-    if not kfs:
+    cam_kfs_raw = _require_list(cam["keyframes"], "camera.keyframes")
+    if not cam_kfs_raw:
         raise _bad("camera.keyframes must contain at least one keyframe.")
-    _validate_keyframes(kfs, "camera.keyframes", duration_ms)
+    cam_kfs = _keyframes(cam_kfs_raw, "camera.keyframes", duration_ms)
 
     blocking_raw = _require_list(doc["blocking"], "blocking")
     blocking: list[dict] = []
@@ -271,6 +319,8 @@ def parse_shot_plan(raw: Any, *, duration_ms: int | None) -> dict:
     for i, entry in enumerate(blocking_raw):
         what = f"blocking[{i}]"
         entry = _require_dict(entry, what)
+        _require_keys(entry, {"spatial_track_id", "screen_direction",
+                              "keyframes"}, what)
         _exact_keys(entry, {"spatial_track_id", "screen_direction", "keyframes"},
                     what)
         tid = _require_str(entry["spatial_track_id"], f"{what}.spatial_track_id")
@@ -281,10 +331,10 @@ def parse_shot_plan(raw: Any, *, duration_ms: int | None) -> dict:
         if direction not in SCREEN_DIRECTIONS:
             raise _bad(f"{what}.screen_direction must be one of "
                        f"{list(SCREEN_DIRECTIONS)}.")
-        kfs = _require_list(entry["keyframes"], f"{what}.keyframes")
-        if not kfs:
+        kfs_raw = _require_list(entry["keyframes"], f"{what}.keyframes")
+        if not kfs_raw:
             raise _bad(f"{what}.keyframes must contain at least one keyframe.")
-        _validate_keyframes(kfs, f"{what}.keyframes", duration_ms)
+        kfs = _keyframes(kfs_raw, f"{what}.keyframes", duration_ms)
         blocking.append({
             "spatial_track_id": tid,
             "screen_direction": direction,
@@ -293,20 +343,42 @@ def parse_shot_plan(raw: Any, *, duration_ms: int | None) -> dict:
     blocking.sort(key=lambda b: b["spatial_track_id"])
 
     axis = doc["axis_constraint"]
+    axis_out: dict | None = None
     if axis is not None:
         axis = _require_dict(axis, "axis_constraint")
+        _require_keys(axis, {"spatial_axis_id", "camera_side"},
+                      "axis_constraint")
         _exact_keys(axis, {"spatial_axis_id", "camera_side"}, "axis_constraint")
-        _require_str(axis["spatial_axis_id"], "axis_constraint.spatial_axis_id")
+        aid = _require_str(axis["spatial_axis_id"],
+                           "axis_constraint.spatial_axis_id")
         if axis["camera_side"] not in CAMERA_SIDES:
             raise _bad("axis_constraint.camera_side must be positive|negative.")
-    return {**doc, "blocking": blocking}
+        axis_out = {"spatial_axis_id": aid,
+                    "camera_side": axis["camera_side"]}
+    return {
+        "schema_version": doc["schema_version"],
+        "spatial_world_id": doc["spatial_world_id"],
+        "camera": {
+            "projection": cam["projection"],
+            "focal_length_um": cam["focal_length_um"],
+            "sensor_width_um": cam["sensor_width_um"],
+            "sensor_height_um": cam["sensor_height_um"],
+            "keyframes": cam_kfs,
+        },
+        "blocking": blocking,
+        "axis_constraint": axis_out,
+    }
 
 
-def _validate_keyframes(kfs: list, what: str, duration_ms: int | None) -> None:
+def _keyframes(kfs: list, what: str, duration_ms: int | None) -> list[dict]:
+    """Validate keyframe ordering/duration rules and RETURN canonical
+    keyframes with normalized transforms (M10D §8.4)."""
+    out: list[dict] = []
     last_time = None
     for i, kf in enumerate(kfs):
         kwhat = f"{what}[{i}]"
         kf = _require_dict(kf, kwhat)
+        _require_keys(kf, {"time_ms", "transform"}, kwhat)
         _exact_keys(kf, {"time_ms", "transform"}, kwhat)
         t = kf["time_ms"]
         if not isinstance(t, int) or isinstance(t, bool) or t < 0:
@@ -321,7 +393,9 @@ def _validate_keyframes(kfs: list, what: str, duration_ms: int | None) -> None:
         if duration_ms is None and t != 0:
             raise _bad(f"{what}: only time_ms=0 keyframes are valid when the "
                        "Shot duration is NULL.")
-        _transform(kf["transform"], f"{kwhat}.transform")
+        tf = _transform(kf["transform"], f"{kwhat}.transform")
+        out.append({"time_ms": t, "transform": tf.canonical_value()})
+    return out
 
 
 def plan_hash(doc: dict) -> str:
@@ -399,6 +473,9 @@ def parse_continuity_pack(raw: Any) -> dict:
     # The pack is byte-level canonical authority; Shot-duration cross-checks
     # belong to the readiness resolver (§20.5), so validate the plan's own
     # internal grammar with its maximal legal duration (the last keyframe).
+    # The NORMALIZED returned plan is what the pack retains (M10D §32):
+    # unnormalized caller rotations cannot survive pack parsing. Staging
+    # transforms are M10C production authority and pass through unchanged.
     plan = doc["shot_plan"]
     times = [k["time_ms"] for k in plan["camera"]["keyframes"]]
     duration = max(times) if times else 0
@@ -406,8 +483,8 @@ def parse_continuity_pack(raw: Any) -> dict:
         times.extend(k["time_ms"] for k in entry["keyframes"])
         duration = max(duration, max(
             k["time_ms"] for k in entry["keyframes"]))
-    parse_shot_plan(plan, duration_ms=duration if duration else None)
-    return {**doc, "staging": staging}
+    plan_out = parse_shot_plan(plan, duration_ms=duration if duration else None)
+    return {**doc, "staging": staging, "shot_plan": plan_out}
 
 
 def pack_hash(doc: dict) -> str:
