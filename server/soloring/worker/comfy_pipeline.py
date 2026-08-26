@@ -363,6 +363,7 @@ async def _drive(
             )
             template_graph = json.loads(template_bytes.decode("utf-8"))
             schema3_derived = None
+            schema2_pending = None
             if spec.get("schema_version") == 3:
                 # M10 frozen r3 §2.2/§48: schema-3 historical execution
                 # reads captured state ONLY. The v3 manifest/profile/
@@ -756,10 +757,36 @@ async def _drive(
         )
         return "interrupted"
 
-    manifest = parse_manifest(
-        (await artifact_store.get_manifest(generation.manifest_hash))
-        .decode("utf-8")
-    )
+    # Output resolution is schema-aware (M10E: the captured manifest bytes
+    # are v3 for schema-3 generations, and v2 manifests carry the
+    # discriminated `source` object the schema-1 model rejects — the v1
+    # parse here was a latent shared-path defect for both). One manifest
+    # authority, schema-dispatched parse; resolve_comfy_outputs consumes
+    # only the outputs declarations, identical across schemas.
+    if spec.get("schema_version") == 3:
+        from soloring.spatial.package3 import parse_manifest_v3
+        from soloring.workflows.manifest import parse_manifest_v2
+
+        manifest_v3_doc = parse_manifest_v3(
+            (await artifact_store.get_manifest(generation.manifest_hash))
+            .decode("utf-8")
+        )
+        inherited = {k: v for k, v in manifest_v3_doc.items()
+                     if k != "spatial_bindings"}
+        inherited["schema_version"] = "2"
+        manifest = parse_manifest_v2(inherited)
+    elif spec.get("schema_version") == 2:
+        from soloring.workflows.manifest import parse_manifest_v2
+
+        manifest = parse_manifest_v2(
+            (await artifact_store.get_manifest(generation.manifest_hash))
+            .decode("utf-8")
+        )
+    else:
+        manifest = parse_manifest(
+            (await artifact_store.get_manifest(generation.manifest_hash))
+            .decode("utf-8")
+        )
     contracts = [
         CapturedOutputContract(
             name=o.name, kind=o.kind, expected_count=o.expected_count,
@@ -825,6 +852,22 @@ class ClientUploader:
             source_path=source_path, filename=filename, subfolder=subfolder,
         )
         return ref.name, ref.subfolder
+
+    async def upload_bytes(
+        self, *, data: bytes, filename: str, subfolder: str,
+    ) -> tuple[str, str]:
+        """Upload in-memory bytes through the same executor input
+        namespace (M10E: per-frame D0 uploads — the bytes are exact
+        slices of the verified retained Blob, never re-encoded)."""
+        import tempfile
+
+        tmp = Path(tempfile.gettempdir()) / f"soloring-up-{filename}"
+        tmp.write_bytes(data)
+        try:
+            return await self.upload(
+                source_path=tmp, filename=filename, subfolder=subfolder)
+        finally:
+            tmp.unlink(missing_ok=True)
 
 
 class ClientViewStreamProvider:

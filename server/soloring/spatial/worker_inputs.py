@@ -42,6 +42,94 @@ class VerifiedDerivedInput:
     blob_hash: str
     local_path: str
     execution_reference: str | None = None
+    # M10E §5.2 (frozen soloring.spatial.v1 consumption semantics): the
+    # retained multi-frame D0 Blob is uploaded as its exact PNG frame
+    # files (the CERTIFIED §114 executor consumption shape — the
+    # WanVideoControlnet control_images input is an IMAGE tensor, so the
+    # frames must enter through LoadImage nodes, never a bare filename
+    # string at the tensor field). frame_references carries the uploaded
+    # per-frame executor references, in frame order.
+    frame_references: tuple[str, ...] = ()
+
+
+def _split_png_frames(data: bytes) -> list[bytes] | None:
+    """Deterministically split a retained D0 Blob into its exact PNG frame
+    files. Returns None unless the content is a concatenation of complete
+    PNG streams covering ALL bytes (the frozen D0 grammar); arbitrary
+    non-PNG content stays a single opaque upload (legacy transport)."""
+    frames: list[bytes] = []
+    i, n = 0, len(data)
+    sig = b"\x89PNG\r\n\x1a\n"
+    while i < n:
+        if data[i:i + 8] != sig:
+            return None
+        j = i + 8
+        while True:
+            if j + 8 > n:
+                return None
+            length = int.from_bytes(data[j:j + 4], "big")
+            ctype = data[j + 4:j + 8]
+            j += 8 + length + 4  # header + data + CRC
+            if j > n:
+                return None
+            if ctype == b"IEND":
+                break
+        frames.append(data[i:j])
+        i = j
+    return frames if frames else None
+
+
+def current_m10_table_names() -> tuple[str, ...]:
+    """Forbidden current-authority table names for the read spy."""
+    return _CURRENT_M10_TABLES
+
+
+async def execute_schema3_derived_inputs(
+    session: AsyncSession,
+    store: BlobStore,
+    *,
+    generation_id: str,
+    workflow_spec: dict,
+    manifest_v3: dict,
+    client,
+) -> list[VerifiedDerivedInput]:
+    """Full worker schema-3 derived-input path: verify (this module) then
+    upload the EXACT retained historical Blob bytes to the executor's
+    attempt-scoped input namespace, recording the executor-local
+    reference for the manifest's exact node/field translation.
+
+    ``client`` is the worker's ClientUploader (upload(source_path=…,
+    filename=…, subfolder=…)); the bytes uploaded are read from the
+    verified physical Blob path. A retained D0 Blob that parses as
+    concatenated PNG frames is uploaded frame-per-file (the certified
+    consumption shape); any other content is uploaded whole."""
+    from pathlib import Path as _Path
+
+    from soloring.executors.comfy.translate import comfy_input_reference
+
+    verified = await load_verified_derived_inputs(
+        session, store, generation_id=generation_id,
+        workflow_spec=workflow_spec, manifest_v3=manifest_v3)
+    for v in verified:
+        subfolder = f"soloring-der-{generation_id[:8]}"
+        data = _Path(v.local_path).read_bytes()
+        frames = _split_png_frames(data)
+        if frames and len(frames) > 1:
+            refs = []
+            for i, frame in enumerate(frames):
+                filename = f"{v.input_key}_{v.blob_hash[:16]}_{i:03d}.png"
+                name, sub = await client.upload_bytes(
+                    data=frame, filename=filename, subfolder=subfolder)
+                refs.append(comfy_input_reference(name, sub))
+            v.frame_references = tuple(refs)
+        else:
+            ext = ".png" if frames else ".bin"
+            filename = f"{v.input_key}_{v.blob_hash[:16]}{ext}"
+            name, sub = await client.upload(
+                source_path=_Path(v.local_path), filename=filename,
+                subfolder=subfolder)
+            v.execution_reference = comfy_input_reference(name, sub)
+    return verified
 
 
 def _fail(code: str, message: str, status: int = 500) -> SoloRingError:
@@ -150,46 +238,6 @@ async def load_verified_derived_inputs(
             blob_hash=row["blob_hash"],
             local_path=str(store.path_for_hash(row["blob_hash"])),
         ))
-    return verified
-
-
-def current_m10_table_names() -> tuple[str, ...]:
-    """Forbidden current-authority table names for the read spy."""
-    return _CURRENT_M10_TABLES
-
-
-async def execute_schema3_derived_inputs(
-    session: AsyncSession,
-    store: BlobStore,
-    *,
-    generation_id: str,
-    workflow_spec: dict,
-    manifest_v3: dict,
-    client,
-) -> list[VerifiedDerivedInput]:
-    """Full worker schema-3 derived-input path: verify (this module) then
-    upload the EXACT retained historical Blob bytes to the executor's
-    attempt-scoped input namespace, recording the executor-local
-    reference for the manifest's exact node/field translation.
-
-    ``client`` is the worker's ClientUploader (upload(source_path=…,
-    filename=…, subfolder=…)); the bytes uploaded are read from the
-    verified physical Blob path.
-    """
-    from pathlib import Path as _Path
-
-    from soloring.executors.comfy.translate import comfy_input_reference
-
-    verified = await load_verified_derived_inputs(
-        session, store, generation_id=generation_id,
-        workflow_spec=workflow_spec, manifest_v3=manifest_v3)
-    for v in verified:
-        filename = f"{v.input_key}_{v.blob_hash[:16]}.bin"
-        subfolder = f"soloring-der-{generation_id[:8]}"
-        name, sub = await client.upload(
-            source_path=_Path(v.local_path), filename=filename,
-            subfolder=subfolder)
-        v.execution_reference = comfy_input_reference(name, sub)
     return verified
 
 

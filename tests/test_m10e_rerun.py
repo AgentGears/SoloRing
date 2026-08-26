@@ -213,3 +213,88 @@ async def test_rerun_reuses_retained_blob_identities(
             manifest_v3=parse_manifest_v3(prod.production_manifest_v3()))
     assert [v.blob_hash for v in verified] == \
         [r["blob_hash"] for r in await _siblings(engine, gen.id)]
+
+
+async def test_rerun_transport_references_are_nondurable(
+        factory, engine, settings, tmp_path):
+    """E-077: rerun-local upload filenames/subfolders/executor references
+    legitimately DIFFER between the source execution and its rerun — they
+    are execution-attempt-local transport state, never historical
+    identity. Exactness is asserted ONLY over retained Blob bytes/hashes,
+    the durable WorkflowSpec bytes, and the five-field derived payload
+    projection."""
+    import hashlib
+
+    from soloring.assets.blob_store import BlobStore
+    from soloring.generation import rerun
+    from soloring.spatial.package3 import parse_manifest_v3
+    from soloring.spatial import production_package as prod
+    from soloring.spatial.worker_inputs import execute_schema3_derived_inputs
+
+    class _Recording:
+        def __init__(self) -> None:
+            self.uploads: list[tuple[str, str, bytes]] = []
+
+        async def upload(self, *, source_path: Path, filename: str,
+                         subfolder: str):
+            data = source_path.read_bytes()
+            self.uploads.append((filename, subfolder, data))
+            return filename, subfolder
+
+        async def upload_bytes(self, *, data: bytes, filename: str,
+                               subfolder: str):
+            self.uploads.append((filename, subfolder, data))
+            return filename, subfolder
+
+    gen, _, _ = await _terminal_generation(
+        factory, engine, settings, tmp_path, staged=2)
+    new = await rerun.create_rerun(_session(factory), gen.id)
+
+    async with engine.connect() as conn:
+        src_row = (await conn.execute(text(
+            "SELECT workflow_spec_json, workflow_spec_hash FROM "
+            "generations WHERE id = :g"),
+            {"g": gen.id})).mappings().one()
+        new_row = (await conn.execute(text(
+            "SELECT workflow_spec_json, workflow_spec_hash FROM "
+            "generations WHERE id = :g"),
+            {"g": new.id})).mappings().one()
+
+    # durable identity: EXACT for both spec bytes and the derived payload
+    assert new_row["workflow_spec_json"] == src_row["workflow_spec_json"]
+    assert new_row["workflow_spec_hash"] == src_row["workflow_spec_hash"]
+    assert await _siblings(engine, new.id) == await _siblings(engine, gen.id)
+
+    src_up, new_up = _Recording(), _Recording()
+    manifest_v3 = parse_manifest_v3(prod.production_manifest_v3())
+    for generation_id, uploader in ((gen.id, src_up), (new.id, new_up)):
+        async with factory() as session:
+            verified = await execute_schema3_derived_inputs(
+                session, BlobStore(settings), generation_id=generation_id,
+                workflow_spec=json.loads(src_row["workflow_spec_json"]),
+                manifest_v3=manifest_v3, client=uploader)
+        assert [v.blob_hash for v in verified] == \
+            [r["blob_hash"] for r in await _siblings(engine, gen.id)]
+
+    # transport identity: DIFFERENT by construction (attempt-scoped
+    # namespaces), while the uploaded BYTES are the exact retained Blobs
+    src_names = {(f, s) for f, s, _ in src_up.uploads}
+    new_names = {(f, s) for f, s, _ in new_up.uploads}
+    assert src_names and new_names
+    assert not (src_names & new_names), (
+        "rerun transport references should be attempt-scoped, not "
+        "shared historical identity")
+    # per-stream frame uploads concatenate to the EXACT retained Blob
+    # bytes (frame splitting never re-encodes)
+    blob_bytes = {r["blob_hash"]: BlobStore(settings).path_for_hash(
+        r["blob_hash"]).read_bytes() for r in await _siblings(engine, gen.id)}
+    for uploads in (src_up.uploads, new_up.uploads):
+        by_stream: dict[str, list[bytes]] = {}
+        for filename, _, data in uploads:
+            stream = filename.rsplit("_", 1)[0]  # input_key + blob prefix
+            by_stream.setdefault(stream, []).append(data)
+        assert len(by_stream) == 3
+        for key, parts in by_stream.items():
+            joined = b"".join(parts)
+            assert joined in blob_bytes.values(), (
+                f"stream {key} uploads are not the exact retained bytes")

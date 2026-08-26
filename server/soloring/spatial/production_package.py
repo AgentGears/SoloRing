@@ -13,7 +13,16 @@ from soloring.spatial import production_pins as pins
 
 def production_template() -> dict:
     """The captured workflow template the §114 smoke executed: Wan2.1 1.3B
-    T2V + TheDenk depth ControlNet, control_images at node/field, unipc."""
+    T2V + TheDenk depth ControlNet, control_images at node/field, unipc.
+
+    M10E §5.2 completion to the CERTIFIED executable shape: the M10A
+    fragment carried the loaders/applies/sampler skeleton without the
+    model/text/decode/output LINK wiring (and no output node wiring), so
+    it could never satisfy prompt validation. The links below mirror the
+    certified §114 workflow_A.json exactly: model chain 1→101→111→121→60,
+    text_embeds 3→60, decode 60→70 (vae 2), save 70→80. The three
+    control_images placeholders ([\"__INPUT__\", 0]) are replaced at
+    translation by the frozen soloring.spatial.v1 frame-chain expansion."""
     return {
         "1": {"class_type": "WanVideoModelLoader", "inputs": {
             "model": pins.BASE_MODEL_NAME, "base_precision": "fp16",
@@ -28,14 +37,19 @@ def production_template() -> dict:
             "width": pins.GRAMMAR_WIDTH, "height": pins.GRAMMAR_HEIGHT,
             "num_frames": pins.GRAMMAR_FRAMES}},
         "60": {"class_type": "WanVideoSampler", "inputs": {
-            "image_embeds": ["50", 0], "scheduler": pins.SMOKE_SCHEDULER,
+            "model": ["121", 0],
+            "image_embeds": ["50", 0], "text_embeds": ["3", 0],
+            "seed": pins.SMOKE_SEED,
+            "scheduler": pins.SMOKE_SCHEDULER,
             "cfg": pins.SMOKE_CFG, "shift": pins.SMOKE_SHIFT,
             "steps": pins.SMOKE_STEPS, "force_offload": True,
             "riflex_freq_index": 0}},
         "70": {"class_type": "WanVideoDecode", "inputs": {
+            "samples": ["60", 0], "vae": ["2", 0],
             "enable_vae_tiling": True, "tile_x": 512, "tile_y": 352,
             "tile_stride_x": 256, "tile_stride_y": 192}},
         "80": {"class_type": "SaveAnimatedWEBP", "inputs": {
+            "images": ["70", 0], "filename_prefix": "soloring",
             "fps": 8.0, "lossless": True, "quality": 100,
             "method": "default"}},
         # world_depth control stream (position 0)
@@ -43,6 +57,7 @@ def production_template() -> dict:
             "model": pins.CONTROLNET_NAME, "base_precision": "fp16",
             "quantization": "disabled", "load_device": "main_device"}},
         "101": {"class_type": "WanVideoControlnet", "inputs": {
+            "model": ["1", 0],
             "controlnet": ["100", 0], "control_images": ["__INPUT__", 0],
             "strength": 1.0, "control_stride": pins.SMOKE_CONTROL_STRIDE,
             "control_start_percent": 0.0, "control_end_percent": 1.0}},
@@ -51,6 +66,7 @@ def production_template() -> dict:
             "model": pins.CONTROLNET_NAME, "base_precision": "fp16",
             "quantization": "disabled", "load_device": "main_device"}},
         "111": {"class_type": "WanVideoControlnet", "inputs": {
+            "model": ["101", 0],
             "controlnet": ["110", 0], "control_images": ["__INPUT__", 0],
             "strength": 1.0, "control_stride": pins.SMOKE_CONTROL_STRIDE,
             "control_start_percent": 0.0, "control_end_percent": 1.0}},
@@ -59,6 +75,7 @@ def production_template() -> dict:
             "model": pins.CONTROLNET_NAME, "base_precision": "fp16",
             "quantization": "disabled", "load_device": "main_device"}},
         "121": {"class_type": "WanVideoControlnet", "inputs": {
+            "model": ["111", 0],
             "controlnet": ["120", 0], "control_images": ["__INPUT__", 0],
             "strength": 1.0, "control_stride": pins.SMOKE_CONTROL_STRIDE,
             "control_start_percent": 0.0, "control_end_percent": 1.0}},

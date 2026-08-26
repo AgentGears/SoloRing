@@ -4,6 +4,7 @@ statement classes stay stable as captured authority cardinality grows
 (E-085..E-087)."""
 from __future__ import annotations
 
+import json
 import re
 from collections import Counter
 
@@ -148,6 +149,19 @@ async def test_sql_statement_shape_stable_under_cardinality(
             assert gen.status == "queued"
         finally:
             event.remove(eng, "before_cursor_execute", _spy)
+        # §23.4 honesty precondition, made mechanical: the representative
+        # fixture genuinely INCREASED the captured upstream spatial
+        # authority BEFORE the ShotRevision capture seam (world-revision
+        # state frames inside the captured pack), with identical
+        # execution-table classes — the D0 output frame count is frozen
+        # at 17 in both fixtures and is NOT the varied dimension.
+        async with engine.connect() as conn:
+            snapshot = json.loads((await conn.execute(text(
+                "SELECT snapshot_json FROM shot_revisions WHERE id = :r"),
+                {"r": gen.shot_revision_id})).scalar())
+        captured = snapshot["spatial_continuity"]["spatial_world"][
+            "world_snapshot"]["frames"]
+        assert len(captured) == frames
         return Counter(statements)
 
     small = await _profiled(2)

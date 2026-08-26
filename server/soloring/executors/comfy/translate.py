@@ -331,10 +331,6 @@ def _bind_schema3_derived(
                 f"derived input {key!r}: manifest role disagrees with the "
                 "workflow spec"
             )
-        if not v.execution_reference:
-            raise TranslationFailed(
-                f"derived input {key!r} has no uploaded executor reference"
-            )
         node, field = binding["node"], binding["field"]
         target = (node, field)
         if target in bound_targets:
@@ -344,8 +340,50 @@ def _bind_schema3_derived(
             )
         bound_targets.add(target)
         what = f"derived input {key!r}"
-        node_inputs = _node_inputs(graph, node, what)
-        _bind(node_inputs, field, v.execution_reference, node, what)
+        _bind_schema3_control_stream(
+            graph, key, v, node, field, what)
+
+
+def _bind_schema3_control_stream(
+    graph: dict, key: str, verified, node: str, field: str, what: str,
+) -> None:
+    """Frozen soloring.spatial.v1 consumption semantics (M10E §5.2,
+    completing the M10A binding contract to the CERTIFIED §114 executor
+    shape): the target node/field is an IMAGE-TENSOR input, so the
+    uploaded control frames must enter through LoadImage nodes batched
+    into a frame video — exactly the consumption machinery the certified
+    smoke executed. The expansion is deterministic from the explicit
+    captured binding + the verified uploaded frame set: node ids are
+    namespaced ``{input_key}::load::{i}`` / ``{input_key}::batch::{i}``
+    and can never alias template nodes (enforced); the manifest's exact
+    node/field receives the chain-head LINK. No heuristic discovery of
+    existing nodes occurs."""
+    refs = tuple(verified.frame_references or ())
+    if not refs and verified.execution_reference:
+        refs = (verified.execution_reference,)
+    if not refs:
+        raise TranslationFailed(
+            f"{what} has no uploaded executor reference")
+    for nid in (f"{key}::load::0", f"{key}::batch::0"):
+        if nid in graph:
+            raise TranslationFailed(
+                f"{what}: generated expansion node id {nid!r} collides "
+                "with the captured template"
+            )
+    for i, ref in enumerate(refs):
+        graph[f"{key}::load::{i}"] = {
+            "class_type": "LoadImage", "inputs": {"image": ref}}
+    head = f"{key}::load::0"
+    for i in range(1, len(refs)):
+        nid = f"{key}::batch::{i}"
+        graph[nid] = {
+            "class_type": "ImageBatch",
+            "inputs": {"image1": [head, 0],
+                       "image2": [f"{key}::load::{i}", 0]},
+        }
+        head = nid
+    node_inputs = _node_inputs(graph, node, what)
+    _bind(node_inputs, field, [head, 0], node, what)
 
 
 def submission_artifact(payload: ComfyPromptPayload) -> tuple[bytes, str]:
