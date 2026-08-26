@@ -437,23 +437,26 @@ async def _revision_continuity(
     # approval. The captured side reads ONLY immutable provenance (§57);
     # the current side is presented as contrast, never as execution input.
     visual_provenance: dict | None = None
-    if schema_version in (4, 5):
+    # P0-R3-1: the visual branch runs only when captured M8 authority
+    # actually exists. Schema 5 WITHOUT visual_reference_pack is the
+    # legal M8-absent cell -> visual stays null (no fabricated empty
+    # projection). Schema 4 without the pack is corruption (mandatory).
+    visual_pack_value = (snapshot or {}).get("visual_reference_pack")
+    _visual_pack_present = isinstance(visual_pack_value, dict)
+    if schema_version == 4 and not _visual_pack_present:
+        raise internal_invariant(
+            f"ShotRevision {revision_id} schema-4 snapshot is missing "
+            "its mandatory visual_reference_pack — corrupted history.")
+    if _visual_pack_present:
         # M10D P0-8: schema 5 wraps the schema-4 base when M8 authority
         # is present — captured visual provenance must survive the wrap.
-        # The schema-4 snapshot stores the pack VALUE inline; the captured
-        # pack hash is the canonical hash of those bytes (M9 r1 fix: the
-        # previous key lookup always returned None).
-        pack_hash = None
-        # P0-R2-4: the canonical builder stores the M8 pack at the
-        # snapshot TOP LEVEL ("visual_reference_pack"), preserved by the
-        # schema-5 wrap. Read the frozen shape, not a wrapper key.
-        visual_pack_value = (snapshot or {}).get("visual_reference_pack")
-        if isinstance(visual_pack_value, dict):
-            from soloring.domain.canonical import (
-                canonical_hash as _canonical_hash,
-            )
+        # The captured pack hash is the canonical hash of the frozen
+        # top-level value (P0-R2-4).
+        from soloring.domain.canonical import (
+            canonical_hash as _canonical_hash,
+        )
 
-            pack_hash = _canonical_hash(visual_pack_value)
+        pack_hash = _canonical_hash(visual_pack_value)
         vrows = (
             await session.execute(
                 text(
