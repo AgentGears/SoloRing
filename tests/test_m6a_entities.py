@@ -219,8 +219,14 @@ async def test_concurrent_identical_revisions_converge(factory):
 
     results = await asyncio.gather(*(one() for _ in range(6)))
     ids = {r.revision["id"] for r in results}
-    assert len(ids) == 1  # one row
-    assert all(r.created is False for r in results[1:])
+    assert len(ids) == 1  # one converged row
+    # Convergence contract: exactly ONE competitor created the row; the
+    # other five converged onto it. gather() preserves input ordering of
+    # RESULTS, not which transaction won the creation race — creator
+    # status must not be assigned to results[0] (publication-gate fix).
+    created_flags = [r.created for r in results]
+    assert created_flags.count(True) == 1
+    assert created_flags.count(False) == 5
 
 
 async def test_concurrent_different_revisions_both_succeed(factory):
