@@ -17,6 +17,10 @@ dependencies = [
     "aiosqlite>=0.20",
     "alembic>=1.13",
     "python-multipart>=0.0.9",
+    # M10 D0 spatial materializer runtime (frozen r3 §114: numpy + image
+    # encoding are material runtime-fingerprint components)
+    "numpy>=2.0",
+    "Pillow>=10",
 ]
 
 [project.optional-dependencies]

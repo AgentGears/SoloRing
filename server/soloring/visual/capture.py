@@ -60,8 +60,8 @@ async def persist_visual_children(
 
     Positions derive from the pack's canonical anchor order (§50) — the
     caller passes the already-sorted canonical pack."""
-    for pos, anchor in enumerate(pack.get("anchors", [])):
-        target = anchor["target"]
+    anchors = pack.get("anchors", [])
+    if anchors:
         await conn.execute(
             text(
                 "INSERT INTO shot_revision_visual_anchors "
@@ -74,37 +74,46 @@ async def persist_visual_children(
                 "(:rid, :pos, :fid, :fkey, :aid, :rev, :revh, :kind, "
                 ":eid, :erid, :featid, :vh, :vj, :ctx)"
             ),
-            {
-                "rid": revision_id, "pos": pos,
-                "fid": anchor["visual_facet_id"],
-                "fkey": anchor["facet_key"],
-                "aid": anchor["visual_anchor_id"],
-                "rev": anchor["visual_anchor_revision_id"],
-                "revh": anchor["visual_anchor_snapshot_hash"],
-                "kind": target["kind"],
-                "eid": target.get("entity_id"),
-                "erid": target.get("entity_revision_id"),
-                "featid": target.get("feature_id"),
-                "vh": target.get("feature_value_hash"),
-                "vj": target.get("feature_value_json"),
-                "ctx": target.get("visual_context_entity_revision_id"),
-            },
-        )
-        for it in anchor.get("items", []):
-            await conn.execute(
-                text(
-                    "INSERT INTO shot_revision_visual_anchor_items "
-                    "(shot_revision_id, anchor_position, item_position, "
-                    " asset_id, blob_hash, role, view_key) VALUES "
-                    "(:rid, :apos, :ipos, :asset, :bh, :role, :vk)"
-                ),
+            [
                 {
-                    "rid": revision_id, "apos": pos,
-                    "ipos": it["position"], "asset": it["asset_id"],
-                    "bh": it["blob_hash"], "role": it["role"],
-                    "vk": it["view_key"],
-                },
-            )
+                    "rid": revision_id, "pos": pos,
+                    "fid": anchor["visual_facet_id"],
+                    "fkey": anchor["facet_key"],
+                    "aid": anchor["visual_anchor_id"],
+                    "rev": anchor["visual_anchor_revision_id"],
+                    "revh": anchor["visual_anchor_snapshot_hash"],
+                    "kind": anchor["target"]["kind"],
+                    "eid": anchor["target"].get("entity_id"),
+                    "erid": anchor["target"].get("entity_revision_id"),
+                    "featid": anchor["target"].get("feature_id"),
+                    "vh": anchor["target"].get("feature_value_hash"),
+                    "vj": anchor["target"].get("feature_value_json"),
+                    "ctx": anchor["target"].get(
+                        "visual_context_entity_revision_id"),
+                }
+                for pos, anchor in enumerate(anchors)
+            ],
+        )
+    item_rows = [
+        {
+            "rid": revision_id, "apos": pos,
+            "ipos": it["position"], "asset": it["asset_id"],
+            "bh": it["blob_hash"], "role": it["role"],
+            "vk": it["view_key"],
+        }
+        for pos, anchor in enumerate(anchors)
+        for it in anchor.get("items", [])
+    ]
+    if item_rows:
+        await conn.execute(
+            text(
+                "INSERT INTO shot_revision_visual_anchor_items "
+                "(shot_revision_id, anchor_position, item_position, "
+                " asset_id, blob_hash, role, view_key) VALUES "
+                "(:rid, :apos, :ipos, :asset, :bh, :role, :vk)"
+            ),
+            item_rows,
+        )
 
 
 async def validate_visual_reuse(

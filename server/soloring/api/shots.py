@@ -28,12 +28,12 @@ async def _shot_read(request: Request, shot_id: str) -> ShotRead:
     but never participates in the hash.
     """
     engine: AsyncEngine = request.app.state.engine
-    shot, refs, differs, resolved, effective_hash, readiness, visual = (
-        await shots.read_shot_detail(
-            engine, shot_id,
-            settings=getattr(request.app.state, "settings", None),
-        )
+    read = await shots.read_shot_detail(
+        engine, shot_id,
+        settings=getattr(request.app.state, "settings", None),
     )
+    (shot, refs, differs, resolved, effective_hash, readiness, visual,
+     spatial) = read
     return ShotRead(
         **dict(shot),
         working_snapshot_hash=effective_hash,
@@ -51,6 +51,18 @@ async def _shot_read(request: Request, shot_id: str) -> ShotRead:
         visual_continuity_issues=(
             list(visual.issues) if visual is not None else []
         ),
+        spatial_continuity_ready=(
+            spatial.ready if spatial is not None else False
+        ),
+        spatial_continuity_hash=(
+            spatial.spatial_continuity_hash if spatial is not None
+            else None
+        ),
+        spatial_continuity_issues=[
+            {"code": i.code, "layer": i.layer, "message": i.message,
+             "details": dict(i.details)}
+            for i in (spatial.issues if spatial is not None else ())
+        ],
         semantic_dependencies=[
             SemanticDependencyItem(
                 entity_id=d.entity_id,

@@ -161,7 +161,7 @@ def test_0007_rebuild_preserves_populated_rows_exactly(
         assert raised, "active-only uniqueness not enforced"
 
         assert con.execute("SELECT version_num FROM alembic_version"
-                           ).fetchone()[0] == "0009_m8_visual_identity"
+                           ).fetchone()[0] == "0011_m10_derived_spatial_execution"
     finally:
         con.close()
 

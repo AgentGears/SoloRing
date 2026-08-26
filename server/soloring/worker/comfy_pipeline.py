@@ -362,7 +362,70 @@ async def _drive(
                 generation.workflow_template_hash
             )
             template_graph = json.loads(template_bytes.decode("utf-8"))
-            if spec.get("schema_version") == 2:
+            schema3_derived = None
+            if spec.get("schema_version") == 3:
+                # M10 frozen r3 §2.2/§48: schema-3 historical execution
+                # reads captured state ONLY. The v3 manifest/profile/
+                # fingerprint artifacts are retrieved by CAPTURED hash,
+                # runtime closure is proven against them, and derived
+                # spatial inputs are verified + uploaded from the exact
+                # retained physical Blob bytes. Zero current-M10 reads.
+                from soloring.domain.canonical import (
+                    canonical_hash as _spec_hash,
+                )
+                from soloring.errors import internal_invariant
+                from soloring.spatial.package3 import (
+                    check_runtime_closure,
+                    parse_manifest_v3,
+                    parse_profile_v2,
+                )
+                from soloring.spatial.worker_inputs import (
+                    execute_schema3_derived_inputs,
+                )
+
+                if _spec_hash(spec) != generation.workflow_spec_hash:
+                    raise internal_invariant(
+                        "Stored schema-3 workflow spec bytes disagree with "
+                        "the persisted workflow_spec_hash."
+                    )
+                manifest = parse_manifest_v3(
+                    manifest_bytes.decode("utf-8")
+                )
+                profile = parse_profile_v2(
+                    (
+                        await artifact_store.get_profile(
+                            spec["spatial_realization"][
+                                "realization_profile_hash"
+                            ]
+                        )
+                    ).decode("utf-8")
+                )
+                fingerprint_doc = json.loads(
+                    (
+                        await artifact_store.get_fingerprint(
+                            spec["model"][
+                                "execution_model_fingerprint_hash"
+                            ]
+                        )
+                    ).decode("utf-8")
+                )
+                unproven = check_runtime_closure(
+                    profile["spatial"], fingerprint=fingerprint_doc,
+                    template=template_graph)
+                if unproven:
+                    raise internal_invariant(
+                        "Schema-3 profile runtime requirements not closed "
+                        f"by captured fingerprint/template: {unproven}"
+                    )
+                async with factory() as session:
+                    schema3_derived = await execute_schema3_derived_inputs(
+                        session, blob_store,
+                        generation_id=generation_id,
+                        workflow_spec=spec,
+                        manifest_v3=manifest,
+                        client=ClientUploader(client),
+                    )
+            elif spec.get("schema_version") == 2:
                 from soloring.domain.canonical import (
                     canonical_hash as _spec_hash,
                 )

@@ -517,11 +517,11 @@ async def test_structural_singularity_both_paths_invoke_builder(
     original = snaps.build_capturable_snapshot
 
     def spy(shot, refs, resolved, feature_states=(), relation_states=(),
-            visual_pack=None):
+            visual_pack=None, spatial_pack=None):
         calls.append(len(feature_states))
         return original(
             shot, refs, resolved, feature_states, relation_states,
-            visual_pack,
+            visual_pack, spatial_pack,
         )
 
     monkeypatch.setattr(snaps, "build_capturable_snapshot", spy)
@@ -530,11 +530,11 @@ async def test_structural_singularity_both_paths_invoke_builder(
     monkeypatch.setattr(
         snaps, "effective_working_snapshot_hash",
         lambda shot, refs, resolved, feature_states=(),
-        relation_states=(), visual_pack=None: (
+        relation_states=(), visual_pack=None, spatial_pack=None: (
             __import__("soloring.domain.canonical",
                        fromlist=["canonical_hash"]).canonical_hash(
                 spy(shot, refs, resolved, feature_states,
-                    relation_states, visual_pack)[0])
+                    relation_states, visual_pack, spatial_pack)[0])
         ),
     )
 
@@ -599,9 +599,9 @@ def test_migration_files_and_head_is_0009():
     to 0009 only with M8A's visual-identity migration."""
     versions = BASE_DIR / "server" / "alembic" / "versions"
     files = sorted(p.name for p in versions.glob("*.py"))
-    assert files[-2] == "0008_narrative_continuity_state.py"
-    assert files[-1] == "0009_m8_visual_identity.py"
-    assert len(files) == 9
+    assert files[-2] == "0010_m10_spatial_cinematic_continuity.py"
+    assert files[-1] == "0011_m10_derived_spatial_execution.py"
+    assert len(files) == 11
 
 
 # --- Reuse integrity fail-closed ----------------------------------------------------------------

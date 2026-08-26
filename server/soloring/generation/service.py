@@ -94,6 +94,30 @@ def build_workflow_spec(
     }
 
 
+
+def assert_pre_m10e_spatial_execution_fence(revision) -> None:
+    """M10D §63.1: one named temporary integration seam. Schema-5 (any
+    non-empty captured SpatialContinuityPack) blocks Generation creation
+    with SPATIAL_REALIZATION_UNSUPPORTED and NOTHING is queued or
+    persisted. M10E must explicitly subsume this branch with real
+    spatial capability handling while preserving the fail-closed default
+    for unsupported hard M10 authority."""
+    import json as _json
+
+    from soloring.errors import ErrorCode, SoloRingError
+
+    snapshot = _json.loads(revision.snapshot_json)
+    if snapshot.get("schema_version") == 5:
+        raise SoloRingError(
+            ErrorCode.SPATIAL_REALIZATION_UNSUPPORTED,
+            "This ShotRevision captures spatial continuity authority "
+            "(schema 5); spatial realization is not yet supported — "
+            "Generation creation is blocked until spatial-capable "
+            "packages exist.",
+            status_code=409,
+            details={"shot_revision_id": revision.id,
+                     "snapshot_hash": revision.snapshot_hash})
+
 async def create_generation_request(
     session: AsyncSession, shot_id: str, *, settings: "Settings | None" = None
 ) -> Generation:
@@ -150,6 +174,14 @@ async def create_generation_request(
             session, shot_id, settings=settings
         )
     )
+
+    # M10D §63 — pre-M10E schema-5 fail-closed fence: spatially captured
+    # authority cannot be executed until M10E installs real spatial
+    # realization. Runs immediately after coherent capture/reuse and
+    # BEFORE package semantic validation, input mapping, workflow-spec
+    # assembly, or any Generation persistence. Existing Stage-0 raw
+    # release capture above is not reclassified as package acceptance.
+    assert_pre_m10e_spatial_execution_fence(revision)
 
     if release is not None:
         # §11.1 step 3 — NOW the captured package semantics are parsed

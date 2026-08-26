@@ -11,6 +11,7 @@ import GenerationRealizationInspector from "@/components/GenerationRealizationIn
 import RealizationPanel from "@/components/RealizationPanel";
 import VisualContinuityPanel from "@/components/VisualContinuityPanel";
 import VisualProvenanceList from "@/components/VisualProvenanceList";
+import SpatialContinuityPanel from "@/components/SpatialContinuityPanel";
 import ReferencePanel from "@/components/ReferencePanel";
 import { SemanticDependenciesPanel } from "@/components/SemanticDependenciesPanel";
 import RevisionProvenanceList from "@/components/RevisionProvenanceList";
@@ -293,6 +294,9 @@ export default async function ShotPage({
           entities.map((e) => [e.id, e.name]),
         )}
       />
+
+      <h2>Spatial continuity</h2>
+      <SpatialContinuityPanel shotId={shot!.id} />
 
       <h2>Visual references at capture</h2>
       <VisualProvenanceList revisions={revisions} continuity={provenance} />

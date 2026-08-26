@@ -396,29 +396,67 @@ async def _revision_continuity(
         )
     ).scalar_one_or_none()
     if snap_row is not None:
-        snapshot = _json.loads(snap_row)
+        # P0-R2-3: the outer historical snapshot decode is normalized —
+        # malformed JSON, a non-object container, or an illegal schema
+        # version is HISTORICAL CORRUPTION (invariant), never a raw
+        # JSONDecodeError/AttributeError leak; and the persisted
+        # snapshot_hash must equal the canonical bytes of the decoded
+        # snapshot.
+        from soloring.domain.canonical import (
+            canonical_hash as _snap_hash,
+            canonical_json_str as _snap_json,
+        )
+
+        try:
+            snapshot = _json.loads(snap_row)
+        except Exception as exc:
+            raise internal_invariant(
+                f"ShotRevision {revision_id} snapshot_json is not "
+                f"decodable: {exc}") from exc
+        if not isinstance(snapshot, dict):
+            raise internal_invariant(
+                f"ShotRevision {revision_id} snapshot is not a JSON "
+                "object — corrupted history.")
         schema_version = snapshot.get("schema_version")
+        if not isinstance(schema_version, int) or isinstance(
+                schema_version, bool) or schema_version not in (
+                1, 2, 3, 4, 5):
+            raise internal_invariant(
+                f"ShotRevision {revision_id} carries illegal snapshot "
+                f"schema_version {schema_version!r}.")
+        snap_hash_row = (await session.execute(text(
+            "SELECT snapshot_hash FROM shot_revisions WHERE id = :rid"),
+            {"rid": revision_id})).scalar_one()
+        if _snap_hash(snapshot) != snap_hash_row or \
+                _snap_json(snapshot) != snap_row:
+            raise internal_invariant(
+                f"ShotRevision {revision_id} snapshot bytes/hash "
+                "disagree with the canonical historical snapshot.")
 
     # M8 §73: captured visual authority, strictly separated from current
     # approval. The captured side reads ONLY immutable provenance (§57);
     # the current side is presented as contrast, never as execution input.
     visual_provenance: dict | None = None
-    if schema_version == 4:
-        # The schema-4 snapshot stores the pack VALUE inline; the captured
-        # pack hash is the canonical hash of those bytes (M9 r1 fix: the
-        # previous key lookup always returned None).
-        pack_hash = None
-        visual_block = (snapshot or {}).get("visual") or {}
-        if isinstance(visual_block, dict) and isinstance(
-            visual_block.get("visual_reference_pack"), dict
-        ):
-            from soloring.domain.canonical import (
-                canonical_hash as _canonical_hash,
-            )
+    # P0-R3-1: the visual branch runs only when captured M8 authority
+    # actually exists. Schema 5 WITHOUT visual_reference_pack is the
+    # legal M8-absent cell -> visual stays null (no fabricated empty
+    # projection). Schema 4 without the pack is corruption (mandatory).
+    visual_pack_value = (snapshot or {}).get("visual_reference_pack")
+    _visual_pack_present = isinstance(visual_pack_value, dict)
+    if schema_version == 4 and not _visual_pack_present:
+        raise internal_invariant(
+            f"ShotRevision {revision_id} schema-4 snapshot is missing "
+            "its mandatory visual_reference_pack — corrupted history.")
+    if _visual_pack_present:
+        # M10D P0-8: schema 5 wraps the schema-4 base when M8 authority
+        # is present — captured visual provenance must survive the wrap.
+        # The captured pack hash is the canonical hash of the frozen
+        # top-level value (P0-R2-4).
+        from soloring.domain.canonical import (
+            canonical_hash as _canonical_hash,
+        )
 
-            pack_hash = _canonical_hash(
-                visual_block["visual_reference_pack"]
-            )
+        pack_hash = _canonical_hash(visual_pack_value)
         vrows = (
             await session.execute(
                 text(
@@ -600,6 +638,10 @@ async def _revision_continuity(
             ],
         }
 
+    spatial_provenance = await _captured_spatial_provenance(
+        session, rev, snapshot or {}
+    )
+
     return {
         "shot_revision_id": rev["id"],
         "snapshot_schema_version": schema_version,
@@ -611,6 +653,7 @@ async def _revision_continuity(
         "relations": relations,
         "source_transition_audit": transition_audit,
         "visual": visual_provenance,
+        "spatial": spatial_provenance,
     }
 
 
@@ -662,6 +705,147 @@ async def generation_continuity(
     )
     projection["generation_id"] = generation_id
     return projection
+
+
+async def _captured_spatial_provenance(session, rev, snapshot: dict):
+    """M10D §60-62: captured-row-only spatial projection. Schema 1-4 →
+    None. Schema 5 → reconstruct from the embedded pack + the three
+    immutable child tables, cross-checking the referenced immutable
+    SpatialWorldRevision and its children on EVERY read. Uses ONLY
+    immutable tables — the current-table denylist holds; current edits
+    can never rewrite this response."""
+    import json as _json
+
+    from soloring.domain.canonical import canonical_hash, canonical_json_str
+    from soloring.errors import internal_invariant
+    from soloring.spatial.revisions import load_verified_world_revision
+    from soloring.spatial.schemas import (
+        parse_continuity_pack, plan_hash as _plan_hash,
+    )
+
+    pack_raw = snapshot.get("spatial_continuity")
+    if pack_raw is None:
+        # schema 1-4: frozen null convention; never inferred from
+        # current M10 state. ALL THREE M10 child families must be empty
+        # (P0-4) — a stray row in any family is corrupted history, not
+        # a null projection.
+        stray = (await session.execute(text(
+            "SELECT (SELECT COUNT(*) FROM shot_revision_spatial_worlds "
+            "WHERE shot_revision_id = :r) + (SELECT COUNT(*) FROM "
+            "shot_revision_spatial_track_states WHERE shot_revision_id ="
+            " :r) + (SELECT COUNT(*) FROM shot_revision_spatial_plans "
+            "WHERE shot_revision_id = :r)"),
+            {"r": rev["id"]})).scalar()
+        if stray:
+            raise internal_invariant(
+                "Schema 1-4 ShotRevision carries spatial children in "
+                f"{stray} row(s) — corrupted history.")
+        return None
+
+    # any embedded-pack grammar failure is HISTORICAL CORRUPTION (P0-3):
+    # normalized to the invariant, never a current-domain 4xx
+    try:
+        pack = parse_continuity_pack(pack_raw)
+    except Exception as exc:
+        raise internal_invariant(
+            "Captured SpatialContinuityPack is malformed: "
+            f"{exc}") from exc
+    w = pack["spatial_world"]
+
+    world_child = (await session.execute(text(
+        "SELECT spatial_continuity_hash, spatial_world_id, "
+        "spatial_world_state_id, spatial_world_revision_id, "
+        "spatial_world_revision_hash, location_entity_id, "
+        "location_entity_revision_id, requirement FROM "
+        "shot_revision_spatial_worlds WHERE shot_revision_id = :r"),
+        {"r": rev["id"]})).mappings().one_or_none()
+    if world_child is None:
+        raise internal_invariant(
+            "Schema-5 ShotRevision is missing its spatial world child.")
+    expected_world = {
+        "spatial_continuity_hash": canonical_hash(pack),
+        "spatial_world_id": w["spatial_world_id"],
+        "spatial_world_state_id": w["spatial_world_state_id"],
+        "spatial_world_revision_id": w["spatial_world_revision_id"],
+        "spatial_world_revision_hash": w["spatial_world_revision_hash"],
+        "location_entity_id": w["location_entity_id"],
+        "location_entity_revision_id": w["location_entity_revision_id"],
+        "requirement": w["requirement"]}
+    if dict(world_child) != expected_world:
+        raise internal_invariant(
+            "Captured spatial world child disagrees with the embedded "
+            "pack.")
+
+    track_rows = [dict(r) for r in (await session.execute(text(
+        "SELECT position, spatial_track_id, entity_id, "
+        "entity_revision_id, requirement, x_mm, y_mm, z_mm, yaw_udeg, "
+        "pitch_udeg, roll_udeg, source_transition_id, source_anchor_type, "
+        "source_anchor_id, source_boundary FROM "
+        "shot_revision_spatial_track_states WHERE shot_revision_id = :r "
+        "ORDER BY position"), {"r": rev["id"]})).mappings().all()]
+    expected_tracks = [{
+        "position": i,
+        "spatial_track_id": st["spatial_track_id"],
+        "entity_id": st["entity_id"],
+        "entity_revision_id": st["entity_revision_id"],
+        "requirement": st["requirement"],
+        "x_mm": st["transform"]["translation_mm"][0],
+        "y_mm": st["transform"]["translation_mm"][1],
+        "z_mm": st["transform"]["translation_mm"][2],
+        "yaw_udeg": st["transform"]["rotation_udeg"][0],
+        "pitch_udeg": st["transform"]["rotation_udeg"][1],
+        "roll_udeg": st["transform"]["rotation_udeg"][2],
+        "source_transition_id": st["source_transition"][
+            "spatial_transition_id"],
+        "source_anchor_type": st["source_transition"]["anchor_type"],
+        "source_anchor_id": st["source_transition"]["anchor_id"],
+        "source_boundary": st["source_transition"]["boundary"]}
+        for i, st in enumerate(pack["staging"])]
+    if track_rows != expected_tracks:
+        raise internal_invariant(
+            "Captured spatial track children disagree with the embedded "
+            "pack.")
+
+    plan_row = (await session.execute(text(
+        "SELECT plan_hash, plan_json FROM shot_revision_spatial_plans "
+        "WHERE shot_revision_id = :r"), {"r": rev["id"]})).mappings() \
+        .one_or_none()
+    if plan_row is None:
+        raise internal_invariant(
+            "Schema-5 ShotRevision is missing its spatial plan child.")
+    if plan_row["plan_json"] != canonical_json_str(pack["shot_plan"]) \
+            or plan_row["plan_hash"] != _plan_hash(pack["shot_plan"]):
+        raise internal_invariant(
+            "Captured spatial plan child bytes/hash disagree with the "
+            "embedded pack.")
+
+    # mandatory immutable-world cross-check on every schema-5 read
+    conn = await session.connection()
+    verified = await load_verified_world_revision(
+        conn,
+        spatial_world_state_id=w["spatial_world_state_id"],
+        spatial_world_revision_id=w["spatial_world_revision_id"])
+    if verified["snapshot"] != w["world_snapshot"]:
+        raise internal_invariant(
+            "Referenced immutable SpatialWorldRevision bytes disagree "
+            "with the pack's embedded world snapshot.")
+
+    return {
+        "spatial_continuity_hash": canonical_hash(pack),
+        "spatial_continuity": pack,
+        "world": {
+            "spatial_world_id": w["spatial_world_id"],
+            "requirement": w["requirement"],
+            "spatial_world_state_id": w["spatial_world_state_id"],
+            "spatial_world_revision_id": w["spatial_world_revision_id"],
+            "spatial_world_revision_hash": w["spatial_world_revision_hash"],
+            "location_entity_id": w["location_entity_id"],
+            "location_entity_revision_id":
+                w["location_entity_revision_id"],
+        },
+        "staging": pack["staging"],
+        "shot_plan": pack["shot_plan"],
+    }
 
 
 # --- ContinuityFeature surface (M7A §47) ------------------------------------------

@@ -124,11 +124,24 @@ async def _snapshot_one_read(
             blocker = visual_first_blocker(visual_result)
             if blocker is not None:
                 raise blocker
+            # M10D §52: the complete spatial resolution runs on this SAME
+            # pinned snapshot, after M7/M8 (frozen global precedence),
+            # before any builder invocation. The strict gate raises the
+            # first spatial blocker with the full reachable issue set;
+            # shots without applicable M10 authority resolve ready/empty.
+            from soloring.spatial.resolver import (
+                require_spatial_ready, resolve_spatial_continuity,
+            )
+
+            spatial_result = await resolve_spatial_continuity(
+                conn, shot_id=shot_id, resolved_dependencies=resolved
+            )
+            require_spatial_ready(spatial_result)
             await conn.commit()
             return (
                 shot, refs, resolved, outcome.states,
                 relation_outcome.relation_states,
-                visual_result,
+                visual_result, spatial_result,
             )
         except Exception:
             with contextlib.suppress(Exception):
@@ -186,6 +199,7 @@ def _expected_relation_rows(relation_states):
 async def _validate_reuse_integrity(
     conn, revision_id, snapshot_json, spec_json, spec_hash,
     resolved, feature_states, relation_states=(), visual_result=None,
+    spatial_result=None,
 ) -> None:
     """Fail-closed validation of an EXISTING winner (M7C §9.4 + M7D §10.4,
     APR-023).
@@ -295,6 +309,7 @@ async def _validate_reuse_integrity(
             "children disagree with the captured expectation."
         )
 
+    await _validate_spatial_reuse(conn, revision_id, spatial_result)
     if visual_result is not None:
         from soloring.visual.capture import validate_visual_reuse
 
@@ -312,6 +327,7 @@ async def _persist_revision_fenced(
     feature_states=(),
     relation_states=(),
     visual_result=None,
+    spatial_result=None,
 ) -> str:
     """The ShotRevision write phase as ONE BEGIN IMMEDIATE unit (M6 §9/§57,
     M6C re-gate blocker 2; M7D §10.3 adds the relation children):
@@ -352,7 +368,7 @@ async def _persist_revision_fenced(
                     await _validate_reuse_integrity(
                         conn, existing[0], snapshot_json, spec_json,
                         spec_hash, resolved, feature_states, relation_states,
-                        visual_result,
+                        visual_result, spatial_result,
                     )
                     await conn.exec_driver_sql("COMMIT")
                     return existing[0]
@@ -377,7 +393,7 @@ async def _persist_revision_fenced(
                         "ch": spec_hash,
                     },
                 )
-                for dep in resolved:
+                if resolved:
                     await conn.execute(
                         text(
                             "INSERT INTO shot_revision_entity_dependencies "
@@ -385,16 +401,19 @@ async def _persist_revision_fenced(
                             " role, position, source) "
                             "VALUES (:rid, :eid, :erv, :role, :pos, :src)"
                         ),
-                        {
-                            "rid": revision_id,
-                            "eid": dep.entity_id,
-                            "erv": dep.entity_revision_id,
-                            "role": dep.role,
-                            "pos": dep.position,
-                            "src": dep.source,
-                        },
+                        [
+                            {
+                                "rid": revision_id,
+                                "eid": dep.entity_id,
+                                "erv": dep.entity_revision_id,
+                                "role": dep.role,
+                                "pos": dep.position,
+                                "src": dep.source,
+                            }
+                            for dep in resolved
+                        ],
                     )
-                for st in feature_states:
+                if feature_states:
                     await conn.execute(
                         text(
                             "INSERT INTO shot_revision_feature_states "
@@ -406,23 +425,26 @@ async def _persist_revision_fenced(
                             "VALUES (:rid, :eid, :fid, :fkey, :fkind, :vt, "
                             ":unit, :vj, :vh, :tid, :sat, :said, :sb)"
                         ),
-                        {
-                            "rid": revision_id,
-                            "eid": st.entity_id,
-                            "fid": st.feature_id,
-                            "fkey": st.feature_key,
-                            "fkind": st.feature_kind,
-                            "vt": st.value_type,
-                            "unit": st.unit,
-                            "vj": st.value_json,
-                            "vh": st.value_hash,
-                            "tid": st.source_transition_id,
-                            "sat": st.source_anchor_type,
-                            "said": st.source_anchor_id,
-                            "sb": st.source_boundary,
-                        },
+                        [
+                            {
+                                "rid": revision_id,
+                                "eid": st.entity_id,
+                                "fid": st.feature_id,
+                                "fkey": st.feature_key,
+                                "fkind": st.feature_kind,
+                                "vt": st.value_type,
+                                "unit": st.unit,
+                                "vj": st.value_json,
+                                "vh": st.value_hash,
+                                "tid": st.source_transition_id,
+                                "sat": st.source_anchor_type,
+                                "said": st.source_anchor_id,
+                                "sb": st.source_boundary,
+                            }
+                            for st in feature_states
+                        ],
                     )
-                for rs in relation_states:
+                if relation_states:
                     await conn.execute(
                         text(
                             "INSERT INTO shot_revision_relation_states "
@@ -434,18 +456,21 @@ async def _persist_revision_fenced(
                             "VALUES (:rid, :rlid, :sid, :pid, :pkey, :oid, "
                             ":tid, :sat, :said, :sb)"
                         ),
-                        {
-                            "rid": revision_id,
-                            "rlid": rs.relation_id,
-                            "sid": rs.subject_entity_id,
-                            "pid": rs.predicate_id,
-                            "pkey": rs.predicate_key,
-                            "oid": rs.object_entity_id,
-                            "tid": rs.source_transition_id,
-                            "sat": rs.source_anchor_type,
-                            "said": rs.source_anchor_id,
-                            "sb": rs.source_boundary,
-                        },
+                        [
+                            {
+                                "rid": revision_id,
+                                "rlid": rs.relation_id,
+                                "sid": rs.subject_entity_id,
+                                "pid": rs.predicate_id,
+                                "pkey": rs.predicate_key,
+                                "oid": rs.object_entity_id,
+                                "tid": rs.source_transition_id,
+                                "sat": rs.source_anchor_type,
+                                "said": rs.source_anchor_id,
+                                "sb": rs.source_boundary,
+                            }
+                            for rs in relation_states
+                        ],
                     )
                 if visual_result is not None and visual_result.pack:
                     from soloring.visual.capture import (
@@ -454,6 +479,11 @@ async def _persist_revision_fenced(
 
                     await persist_visual_children(
                         conn, revision_id, visual_result.pack
+                    )
+                if spatial_result is not None and \
+                        spatial_result.pack is not None:
+                    await _persist_spatial_children(
+                        conn, revision_id, spatial_result
                     )
                 await conn.exec_driver_sql("COMMIT")
                 return revision_id
@@ -504,11 +534,16 @@ async def capture_revision_with_visual(
     read = await _snapshot_one_read(session, shot_id, settings=settings)
     shot, refs, resolved = read[0], read[1], read[2]
     feature_states, relation_states, visual_result = read[3], read[4], read[5]
+    spatial_result = read[6]
     visual_pack = (
         visual_result.pack if visual_result is not None else None
     )
+    spatial_pack = (
+        spatial_result.pack if spatial_result is not None else None
+    )
     snapshot, continuity_spec = build_capturable_snapshot(
-        shot, refs, resolved, feature_states, relation_states, visual_pack
+        shot, refs, resolved, feature_states, relation_states, visual_pack,
+        spatial_pack,
     )
     snapshot_hash = canonical_hash(snapshot)
     snapshot_json = canonical_json_str(snapshot)
@@ -520,7 +555,7 @@ async def capture_revision_with_visual(
     revision_id = await _persist_revision_fenced(
         session.bind, shot_id, snapshot_json, snapshot_hash,
         spec_json, spec_hash, resolved, feature_states, relation_states,
-        visual_result,
+        visual_result, spatial_result,
     )
     revision = await session.get(ShotRevision, revision_id)
     assert revision is not None
@@ -566,3 +601,141 @@ async def list_revisions(session: AsyncSession, shot_id: str) -> list[dict]:
         }
         for r in res
     ]
+
+
+async def _persist_spatial_children(conn, revision_id: str,
+                                    spatial_result) -> None:
+    """Immutable M10 ShotRevision children (M10D §54-58): exactly one
+    world row, canonical-order track rows as ONE batch, exactly one plan
+    row — every field projecting exactly from the embedded pack."""
+    from soloring.domain.canonical import canonical_json_str
+    from soloring.spatial.schemas import plan_hash as _plan_hash
+
+    pack = spatial_result.pack
+    w = pack["spatial_world"]
+    await conn.execute(text(
+        "INSERT INTO shot_revision_spatial_worlds (shot_revision_id, "
+        "spatial_continuity_hash, spatial_world_id, "
+        "spatial_world_state_id, spatial_world_revision_id, "
+        "spatial_world_revision_hash, location_entity_id, "
+        "location_entity_revision_id, requirement) VALUES (:r, :ch, :w, "
+        ":st, :wr, :wrh, :l, :lr, :req)"),
+        {"r": revision_id, "ch": spatial_result.spatial_continuity_hash,
+         "w": w["spatial_world_id"], "st": w["spatial_world_state_id"],
+         "wr": w["spatial_world_revision_id"],
+         "wrh": w["spatial_world_revision_hash"],
+         "l": w["location_entity_id"],
+         "lr": w["location_entity_revision_id"],
+         "req": w["requirement"]})
+    if pack["staging"]:
+        await conn.execute(text(
+            "INSERT INTO shot_revision_spatial_track_states ("
+            "shot_revision_id, position, spatial_track_id, entity_id, "
+            "entity_revision_id, requirement, x_mm, y_mm, z_mm, yaw_udeg, "
+            "pitch_udeg, roll_udeg, source_transition_id, "
+            "source_anchor_type, source_anchor_id, source_boundary) "
+            "VALUES (:r, :pos, :t, :e, :er, :req, :x, :y, :z, :yaw, "
+            ":pitch, :roll, :tid, :sat, :said, :sb)"),
+            [{"r": revision_id, "pos": i,
+              "t": st["spatial_track_id"], "e": st["entity_id"],
+              "er": st["entity_revision_id"], "req": st["requirement"],
+              "x": st["transform"]["translation_mm"][0],
+              "y": st["transform"]["translation_mm"][1],
+              "z": st["transform"]["translation_mm"][2],
+              "yaw": st["transform"]["rotation_udeg"][0],
+              "pitch": st["transform"]["rotation_udeg"][1],
+              "roll": st["transform"]["rotation_udeg"][2],
+              "tid": st["source_transition"]["spatial_transition_id"],
+              "sat": st["source_transition"]["anchor_type"],
+              "said": st["source_transition"]["anchor_id"],
+              "sb": st["source_transition"]["boundary"]}
+             for i, st in enumerate(pack["staging"])])
+    plan_json = canonical_json_str(pack["shot_plan"])
+    await conn.execute(text(
+        "INSERT INTO shot_revision_spatial_plans (shot_revision_id, "
+        "plan_hash, plan_json) VALUES (:r, :h, :j)"),
+        {"r": revision_id, "h": _plan_hash(pack["shot_plan"]),
+         "j": plan_json})
+
+
+async def _validate_spatial_reuse(conn, revision_id: str,
+                                  spatial_result) -> None:
+    """M10D §59 reuse integrity: every schema-5 projection must equal the
+    embedded pack exactly; schemas 1-4 must carry ZERO spatial children.
+    Any disagreement is INTERNAL_INVARIANT_VIOLATION — never
+    reuse-decline-and-recapture, never repair."""
+    from soloring.domain.canonical import canonical_json_str
+    from soloring.spatial.schemas import plan_hash as _plan_hash
+
+    pack = spatial_result.pack if spatial_result is not None else None
+    world_row = (await conn.execute(text(
+        "SELECT spatial_continuity_hash, spatial_world_id, "
+        "spatial_world_state_id, spatial_world_revision_id, "
+        "spatial_world_revision_hash, location_entity_id, "
+        "location_entity_revision_id, requirement FROM "
+        "shot_revision_spatial_worlds WHERE shot_revision_id = :r"),
+        {"r": revision_id})).mappings().first()
+    track_rows = [dict(r) for r in (await conn.execute(text(
+        "SELECT position, spatial_track_id, entity_id, "
+        "entity_revision_id, requirement, x_mm, y_mm, z_mm, yaw_udeg, "
+        "pitch_udeg, roll_udeg, source_transition_id, source_anchor_type, "
+        "source_anchor_id, source_boundary FROM "
+        "shot_revision_spatial_track_states WHERE shot_revision_id = :r "
+        "ORDER BY position"), {"r": revision_id})).mappings().all()]
+    plan_row = (await conn.execute(text(
+        "SELECT plan_hash, plan_json FROM shot_revision_spatial_plans "
+        "WHERE shot_revision_id = :r"), {"r": revision_id})).mappings() \
+        .first()
+
+    if pack is None:
+        if world_row is not None or track_rows or plan_row is not None:
+            raise internal_invariant(
+                f"ShotRevision {revision_id} reuse: spatial children "
+                "exist for a schema 1-4 snapshot.")
+        return
+    if world_row is None or plan_row is None:
+        raise internal_invariant(
+            f"ShotRevision {revision_id} reuse: schema-5 snapshot is "
+            "missing its world or plan child.")
+    w = pack["spatial_world"]
+    expected_world = {
+        "spatial_continuity_hash": spatial_result.spatial_continuity_hash,
+        "spatial_world_id": w["spatial_world_id"],
+        "spatial_world_state_id": w["spatial_world_state_id"],
+        "spatial_world_revision_id": w["spatial_world_revision_id"],
+        "spatial_world_revision_hash": w["spatial_world_revision_hash"],
+        "location_entity_id": w["location_entity_id"],
+        "location_entity_revision_id": w["location_entity_revision_id"],
+        "requirement": w["requirement"]}
+    if dict(world_row) != expected_world:
+        raise internal_invariant(
+            f"ShotRevision {revision_id} reuse: stored spatial world "
+            "child disagrees with the embedded pack.")
+    expected_tracks = [{
+        "position": i,
+        "spatial_track_id": st["spatial_track_id"],
+        "entity_id": st["entity_id"],
+        "entity_revision_id": st["entity_revision_id"],
+        "requirement": st["requirement"],
+        "x_mm": st["transform"]["translation_mm"][0],
+        "y_mm": st["transform"]["translation_mm"][1],
+        "z_mm": st["transform"]["translation_mm"][2],
+        "yaw_udeg": st["transform"]["rotation_udeg"][0],
+        "pitch_udeg": st["transform"]["rotation_udeg"][1],
+        "roll_udeg": st["transform"]["rotation_udeg"][2],
+        "source_transition_id": st["source_transition"][
+            "spatial_transition_id"],
+        "source_anchor_type": st["source_transition"]["anchor_type"],
+        "source_anchor_id": st["source_transition"]["anchor_id"],
+        "source_boundary": st["source_transition"]["boundary"]}
+        for i, st in enumerate(pack["staging"])]
+    if track_rows != expected_tracks:
+        raise internal_invariant(
+            f"ShotRevision {revision_id} reuse: stored spatial track "
+            "children disagree with the embedded pack.")
+    expected_plan_json = canonical_json_str(pack["shot_plan"])
+    if plan_row["plan_json"] != expected_plan_json or \
+            plan_row["plan_hash"] != _plan_hash(pack["shot_plan"]):
+        raise internal_invariant(
+            f"ShotRevision {revision_id} reuse: stored spatial plan "
+            "child bytes/hash disagree with the embedded pack.")
