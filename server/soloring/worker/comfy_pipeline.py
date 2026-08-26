@@ -552,13 +552,18 @@ async def _drive(
                 inputs=captured,
             )
 
-            # 3) Pure translation from the captured triple.
+            # 3) Pure translation from the captured triple. For schema 3
+            # the verified/uploaded derived references (schema3_derived)
+            # are part of the pure translation input — bound at the exact
+            # captured manifest-v3 node/field (M10E §17.2: the M10A
+            # baseline computed them but never fed them into translation).
             payload = build_comfy_prompt(
                 workflow_spec=spec, manifest=manifest,
                 template=template_graph,
                 materialized=outcome.materialized,
                 generation_id=generation_id, attempt_id=attempt_id,
                 client_id=worker_id,
+                schema3_derived=schema3_derived,
             )
             payload_document = payload.to_document()
         else:

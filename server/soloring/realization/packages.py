@@ -71,7 +71,7 @@ class CapturedPackageRelease:
             "manifest_hash": self.manifest_hash,
             "workflow_template_hash": self.workflow_template_hash,
         }
-        if self.schema_version == 2:
+        if self.schema_version in (2, 3):
             out["realization_profile_hash"] = self.realization_profile_hash
             out["execution_model_fingerprint_hash"] = (
                 self.execution_model_fingerprint_hash
@@ -108,7 +108,7 @@ def _read_descriptor(package_path: Path) -> dict:
         "schema_version", "workflow_id", "workflow_version",
         "manifest_hash", "workflow_template_hash",
     }
-    if schema == 2:
+    if schema in (2, 3):
         allowed_fields |= {
             "realization_profile_hash",
             "execution_model_fingerprint_hash",
@@ -119,18 +119,18 @@ def _read_descriptor(package_path: Path) -> dict:
             f"workflow-package.json carries unknown fields "
             f"{sorted(unknown)}; the descriptor field set is closed"
         )
-    if schema not in (1, 2):
-        raise PackageIntegrity("descriptor schema_version must be 1 or 2")
+    if schema not in (1, 2, 3):
+        raise PackageIntegrity("descriptor schema_version must be 1, 2 or 3")
     for field in ("workflow_id", "workflow_version", "manifest_hash",
                   "workflow_template_hash"):
         if field not in doc:
             raise PackageIntegrity(f"descriptor lacks {field}")
-    if schema == 2 and (
+    if schema in (2, 3) and (
         "realization_profile_hash" not in doc
         or "execution_model_fingerprint_hash" not in doc
     ):
         raise PackageIntegrity(
-            "schema-2 descriptor lacks profile/fingerprint hashes"
+            "schema-2/3 descriptor lacks profile/fingerprint hashes"
         )
     if schema == 1 and (
         "realization_profile_hash" in doc
@@ -187,7 +187,7 @@ async def capture_release(
     }
 
     profile_bytes = fingerprint_bytes = None
-    if d1["schema_version"] == 2:
+    if d1["schema_version"] in (2, 3):
         profile_bytes = await _read(
             profile_path, "realization-profile"
         )
@@ -239,10 +239,21 @@ class ValidatedPackage:
     profile: RealizationProfileDocument | None
     fingerprint: ExecutionModelFingerprintDocument | None
     template_graph: dict
+    # M10E schema-3 view: the frozen M10 parsers return canonical dicts
+    # (profile v2 embeds the inherited M9 profile; manifest v3 embeds the
+    # inherited M9 manifest; the fingerprint is the m10_spatial_runtime
+    # extension document). One package authority, delegated parsing.
+    manifest_v3: dict | None = None
+    profile_v2: dict | None = None
+    fingerprint_v3: dict | None = None
 
     @property
     def is_schema2(self) -> bool:
         return self.release.schema_version == 2
+
+    @property
+    def is_schema3(self) -> bool:
+        return self.release.schema_version == 3
 
 
 def validate_package(release: CapturedPackageRelease) -> ValidatedPackage:
@@ -257,12 +268,76 @@ def validate_package(release: CapturedPackageRelease) -> ValidatedPackage:
     template_graph = json.loads(release.template_bytes.decode("utf-8"))
     manifest_v1 = manifest_v2 = None
     profile = fingerprint = None
+    manifest_v3 = profile_v2 = fingerprint_v3 = None
 
     if release.schema_version == 1:
         manifest_v1 = parse_manifest(
             release.manifest_bytes.decode("utf-8")
         )
         validate_manifest_template_bindings(manifest_v1, template_graph)
+    elif release.schema_version == 3:
+        # M10E §8: descriptor schema 3 delegates ALL M10-specific parsing
+        # to the frozen soloring.spatial.package3 authority (profile v2
+        # through the frozen M9 parser view, manifest v3 through the frozen
+        # M9 schema-2 parser view, runtime closure by exact captured
+        # fingerprint/template identity — presence-only never passes).
+        from soloring.spatial.package3 import (
+            Package3Invalid,
+            check_runtime_closure,
+            parse_manifest_v3,
+            parse_profile_v2,
+            validate_manifest_v3_template_bindings,
+        )
+
+        manifest_v3 = parse_manifest_v3(
+            release.manifest_bytes.decode("utf-8")
+        )
+        profile_v2 = parse_profile_v2(
+            release.profile_bytes.decode("utf-8")
+        )
+        try:
+            fingerprint_v3 = json.loads(
+                release.fingerprint_bytes.decode("utf-8")
+            )
+        except ValueError as exc:
+            raise Package3Invalid(
+                "execution-model-fingerprint v3 is not valid JSON"
+            ) from exc
+        if not isinstance(fingerprint_v3, dict):
+            raise Package3Invalid(
+                "execution-model-fingerprint v3 must be an object"
+            )
+
+        # Package cross-identity: one workflow identity everywhere.
+        for label, wf_id, wf_version in (
+            ("manifest", manifest_v3["workflow_id"], manifest_v3["version"]),
+            ("profile", profile_v2["workflow_id"],
+             profile_v2["workflow_version"]),
+            (
+                "descriptor",
+                release.workflow_id,
+                release.workflow_version,
+            ),
+        ):
+            if wf_id != release.workflow_id or wf_version != release.workflow_version:
+                raise SoloRingError(
+                    ErrorCode.REALIZATION_INPUT_BINDING_INVALID,
+                    f"Package {label} workflow identity "
+                    f"({wf_id} v{wf_version}) disagrees with the descriptor "
+                    f"({release.workflow_id} "
+                    f"v{release.workflow_version}).",
+                    status_code=422,
+                )
+
+        validate_manifest_v3_template_bindings(manifest_v3, template_graph)
+        unproven = check_runtime_closure(
+            profile_v2["spatial"], fingerprint=fingerprint_v3,
+            template=template_graph)
+        if unproven:
+            raise Package3Invalid(
+                "Schema-3 profile runtime requirements not closed by the "
+                f"captured fingerprint/template: {unproven}"
+            )
     else:
         manifest_v2 = parse_manifest_v2(
             release.manifest_bytes.decode("utf-8")
@@ -321,6 +396,9 @@ def validate_package(release: CapturedPackageRelease) -> ValidatedPackage:
         profile=profile,
         fingerprint=fingerprint,
         template_graph=template_graph,
+        manifest_v3=manifest_v3,
+        profile_v2=profile_v2,
+        fingerprint_v3=fingerprint_v3,
     )
 
 

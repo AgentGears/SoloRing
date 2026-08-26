@@ -145,6 +145,13 @@ class WorkflowTemplate:
     # the schema marker. Defaults keep every legacy template schema-1.
     is_schema2: bool = False
     realization_input_keys: tuple[str, ...] = ()
+    # M10E schema-3 surface: the spatial binding keys are derived inputs —
+    # they NEVER participate in ordinary reference-input mapping or
+    # cardinality (their only authority is spatial_bindings + the immutable
+    # GenerationDerivedSpatialInput siblings). Defaults keep every legacy
+    # template schema 1/2.
+    is_schema3: bool = False
+    spatial_binding_keys: tuple[str, ...] = ()
 
 
 def _hash_file(path: Path) -> str:
@@ -487,6 +494,75 @@ def build_template_v2(
         ),
         is_schema2=True,
         realization_input_keys=tuple(realization_keys),
+    )
+
+
+def build_template_v3(doc_v3: dict, manifest_hash: str,
+                      template_hash: str) -> WorkflowTemplate:
+    """Schema-3 template value object from an ALREADY-validated manifest v3
+    document (soloring.spatial.package3.parse_manifest_v3).
+
+    Spatial binding keys are EXCLUDED from reference_inputs entirely: they
+    are derived inputs bound only through spatial_bindings + the immutable
+    GenerationDerivedSpatialInput siblings (M10E §14/§17.5), never through
+    ordinary ShotReference/Asset resolution. The inherited manifest-2
+    portion is re-parsed through the FROZEN M9 schema-2 parser (strict
+    delegation, never a second grammar) so parameters/outputs inherit the
+    same strict value objects as schema 2."""
+    inherited = {k: v for k, v in doc_v3.items() if k != "spatial_bindings"}
+    inherited["schema_version"] = MANIFEST_SCHEMA_VERSION_2
+    inherited_doc = parse_manifest_v2(inherited)
+    spatial_keys = frozenset(doc_v3["spatial_bindings"])
+
+    ref_inputs: list[WorkflowInputDef] = []
+    realization_keys: list[str] = []
+    for key, decl in inherited_doc.inputs.items():
+        if key in spatial_keys:
+            continue  # derived inputs: never ordinary reference mapping
+        source = decl.source
+        if source is None:
+            continue
+        if isinstance(source, ShotReferenceSource):
+            ref_inputs.append(WorkflowInputDef(
+                input_key=key, source_role=source.role,
+                required=decl.required, cardinality=decl.cardinality,
+            ))
+        else:
+            ref_inputs.append(WorkflowInputDef(
+                input_key=key, source_role=None,
+                required=decl.required, cardinality=decl.cardinality,
+            ))
+            realization_keys.append(key)
+    return WorkflowTemplate(
+        workflow_id=inherited_doc.workflow_id,
+        workflow_version=inherited_doc.version,
+        manifest_schema_version=doc_v3["schema_version"],
+        manifest_hash=manifest_hash,
+        workflow_template_hash=template_hash,
+        reference_inputs=tuple(ref_inputs),
+        parameters=tuple(
+            ParameterDef(
+                name=name, type=decl.type, default=decl.default,
+                min=decl.min, max=decl.max,
+                enum=tuple(decl.enum) if decl.enum is not None else None,
+            )
+            for name, decl in inherited_doc.parameters.items()
+        ),
+        outputs=tuple(
+            ExpectedOutput(
+                name=name, kind=decl.kind,
+                expected_count=decl.expected_count,
+                accepted_media_types=(
+                    tuple(decl.accepted_media_types)
+                    if decl.accepted_media_types is not None
+                    else None
+                ),
+            )
+            for name, decl in inherited_doc.outputs.items()
+        ),
+        realization_input_keys=tuple(realization_keys),
+        is_schema3=True,
+        spatial_binding_keys=tuple(sorted(spatial_keys)),
     )
 
 

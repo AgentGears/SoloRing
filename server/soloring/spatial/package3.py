@@ -192,7 +192,12 @@ def _closed_by_fingerprint(req: dict, proof: dict,
     if not fingerprint:
         return False
     name = req["name"]
-    rr = fingerprint.get("runtime_requirements") or {}
+    # A captured schema-3 fingerprint artifact carries its closure facts in
+    # the frozen "m10_spatial_runtime" extension document (production
+    # fingerprint shape); the bare root "runtime_requirements" form remains
+    # accepted for documents that carry it directly (M10A test fixtures).
+    rr = (fingerprint.get("runtime_requirements")
+          or fingerprint.get("m10_spatial_runtime") or {})
     if rr.get("custom_nodes", {}).get(name) == proof["value"]:
         return True
     for artifact in rr.get("artifacts", []) if isinstance(rr, dict) else []:
@@ -348,6 +353,61 @@ def manifest_binding_map(manifest_v3: dict) -> dict[str, dict]:
     return dict(manifest_v3["spatial_bindings"])
 
 
+def validate_manifest_v3_template_bindings(manifest_v3: dict,
+                                           template: dict) -> None:
+    """Structural exactness for schema 3 (M10E §8.4): every declared
+    binding — spatial_bindings, inherited inputs, parameters, outputs —
+    resolves against the captured template graph with no heuristic
+    substitute search. Raises Package3Invalid (SPATIAL_REALIZATION_BINDING_
+    INVALID) on any missing node/field."""
+    def _node_inputs(node_id: object, what: str) -> dict:
+        if not isinstance(node_id, str) or not node_id:
+            raise _bad(f"{what}: manifest declares no node binding")
+        node = template.get(node_id) if isinstance(template, dict) else None
+        if not isinstance(node, dict):
+            raise _bad(f"{what}: template has no node {node_id!r}")
+        inputs = node.get("inputs")
+        if not isinstance(inputs, dict):
+            raise _bad(f"{what}: node {node_id!r} has no inputs")
+        return inputs
+
+    def _require_field(inputs: dict, field: object, node_id: object,
+                       what: str) -> None:
+        if not isinstance(field, str) or not field:
+            raise _bad(f"{what}: manifest declares no field binding")
+        if field not in inputs:
+            raise _bad(f"{what}: node {node_id!r} has no input field "
+                       f"{field!r}")
+
+    if not isinstance(template, dict) or not template:
+        raise _bad("captured workflow template is empty or malformed")
+    for key, binding in manifest_v3["spatial_bindings"].items():
+        what = f"spatial binding {key!r}"
+        inputs = _node_inputs(binding["node"], what)
+        _require_field(inputs, binding["field"], binding["node"], what)
+    for key, decl in (manifest_v3.get("inputs") or {}).items():
+        if not isinstance(decl, dict):
+            raise _bad(f"manifest input {key!r} is not an object.")
+        what = f"manifest input {key!r}"
+        inputs = _node_inputs(decl.get("node"), what)
+        _require_field(inputs, decl.get("field"), decl.get("node"), what)
+    for name, decl in (manifest_v3.get("parameters") or {}).items():
+        if not isinstance(decl, dict):
+            raise _bad(f"manifest parameter {name!r} is not an object.")
+        what = f"manifest parameter {name!r}"
+        inputs = _node_inputs(decl.get("node"), what)
+        _require_field(inputs, decl.get("field"), decl.get("node"), what)
+    for name, decl in (manifest_v3.get("outputs") or {}).items():
+        if not isinstance(decl, dict):
+            raise _bad(f"manifest output {name!r} is not an object.")
+        node_id = decl.get("node")
+        if not isinstance(node_id, str) or not node_id:
+            raise _bad(f"manifest output {name!r}: no node binding")
+        if not isinstance(template.get(node_id), dict):
+            raise _bad(f"manifest output {name!r}: template has no node "
+                       f"{node_id!r}")
+
+
 def resolve_derived_binding(manifest_v3: dict, artifact_role: str,
                              position: int) -> tuple[str, str, str]:
     """Resolve one (role, position) to the exact manifest input_key/node/field.
@@ -404,5 +464,5 @@ __all__ = [
     "DESCRIPTOR_SCHEMA_VERSION_3", "Package3Invalid",
     "parse_profile_v2", "parse_manifest_v3", "parse_descriptor_v3",
     "manifest_binding_map", "resolve_derived_binding",
-    "check_runtime_closure",
+    "validate_manifest_v3_template_bindings", "check_runtime_closure",
 ]
