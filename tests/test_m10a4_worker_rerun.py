@@ -188,7 +188,11 @@ async def _seed_spatial_generation(factory, engine, settings, continuity="9" * 6
                 "(:g, 'world_depth', 0, 'spatial.world_depth', :a, :bh)"),
                 {"g": gen, "a": art, "bh": blob})
     return {"generation_id": gen, "blob": blob, "continuity": continuity,
-            "artifact": art, "shot_id": shot_id, "project": pid}
+            "artifact": art, "shot_id": shot_id, "project": pid,
+            "spec_hash": hashlib.sha256(
+                _spec_json(blob, continuity).encode()).hexdigest(),
+            "runtime_hash": hashlib.sha256(
+                _fp_json().encode()).hexdigest()}
 
 
 def _manifest_doc():
@@ -201,7 +205,14 @@ def _manifest_doc():
                             "format": "soloring.spatial.v1"}}})
 
 
-def _spec(continuity):
+def _spec(continuity, ids=None):
+    """Build a schema-3 spec whose derived entries carry the REAL seeded
+    identities when ``ids`` is supplied (the M10E worker cross-checks
+    spec ↔ sibling ↔ provenance; synthetic placeholders no longer pass)."""
+    artifact = (ids or {}).get("artifact", "x")
+    blob = (ids or {}).get("blob", HEX)
+    spec_hash = (ids or {}).get("spec_hash", HEX)
+    runtime_hash = (ids or {}).get("runtime_hash", HEX)
     return compose_workflow_spec_v3(
         {"prompt": "p"},
         model={"id": "m", "version": "1", "execution_model_fingerprint_hash": HEX},
@@ -212,9 +223,9 @@ def _spec(continuity):
             derived_artifacts=[{
                 "input_key": "world_depth", "position": 0,
                 "artifact_role": "spatial.world_depth",
-                "derived_spatial_artifact_id": "x",
-                "spec_hash": HEX, "runtime_fingerprint_hash": HEX,
-                "blob_hash": HEX}]))
+                "derived_spatial_artifact_id": artifact,
+                "spec_hash": spec_hash, "runtime_fingerprint_hash": runtime_hash,
+                "blob_hash": blob}]))
 
 
 # ---------------------------------------------------------------- worker ---
@@ -224,7 +235,7 @@ async def test_worker_transport_valid(factory, engine, settings):
     async with factory() as session:
         got = await load_verified_derived_inputs(
             session, BlobStore(settings), generation_id=ids["generation_id"],
-            workflow_spec=_spec(ids["continuity"]),
+            workflow_spec=_spec(ids["continuity"], ids),
             manifest_v3=_manifest_doc())
     assert len(got) == 1
     assert got[0].node == "7" and got[0].field == "control_images"
@@ -240,7 +251,7 @@ async def test_worker_missing_blob_fails(factory, engine, settings):
             await load_verified_derived_inputs(
                 session, BlobStore(settings),
                 generation_id=ids["generation_id"],
-                workflow_spec=_spec(ids["continuity"]),
+                workflow_spec=_spec(ids["continuity"], ids),
                 manifest_v3=_manifest_doc())
     assert ei.value.code == ec.DERIVED_SPATIAL_BLOB_MISSING
 
@@ -254,7 +265,7 @@ async def test_worker_corrupt_blob_fails(factory, engine, settings):
             await load_verified_derived_inputs(
                 session, BlobStore(settings),
                 generation_id=ids["generation_id"],
-                workflow_spec=_spec(ids["continuity"]),
+                workflow_spec=_spec(ids["continuity"], ids),
                 manifest_v3=_manifest_doc())
     assert ei.value.code == ec.DERIVED_SPATIAL_BLOB_CORRUPT
 
@@ -272,7 +283,7 @@ async def test_worker_provenance_mismatch_fails(factory, engine, settings):
             await load_verified_derived_inputs(
                 session, BlobStore(settings),
                 generation_id=ids["generation_id"],
-                workflow_spec=_spec(ids["continuity"]),
+                workflow_spec=_spec(ids["continuity"], ids),
                 manifest_v3=_manifest_doc())
     assert ei.value.code == ec.DERIVED_SPATIAL_PROVENANCE_MISMATCH
 
@@ -292,7 +303,7 @@ async def test_worker_wrong_binding_fails(factory, engine, settings):
             await load_verified_derived_inputs(
                 session, BlobStore(settings),
                 generation_id=ids["generation_id"],
-                workflow_spec=_spec(ids["continuity"]), manifest_v3=bad)
+                workflow_spec=_spec(ids["continuity"], ids), manifest_v3=bad)
     assert ei.value.code == ec.DERIVED_SPATIAL_BINDING_INVALID
 
 

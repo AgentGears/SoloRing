@@ -109,6 +109,120 @@ _UNIQUE_NUMBER_SIGNATURE = (
     "UNIQUE constraint failed: generations.shot_id, generations.generation_number"
 )
 
+# M10E §15: one atomic write unit persists the Generation, its ordinary
+# GenerationInputs, AND its schema-3 GenerationDerivedSpatialInputs. The
+# derived sibling inserts/validation mirror the frozen
+# bind_generation_derived_inputs contract, but run INSIDE the caller's
+# write unit — there is no second post-Generation transaction in the
+# production creation path.
+_DERIVED_SIBLING_INSERT = """
+INSERT INTO generation_derived_spatial_inputs
+    (generation_id, input_key, position, artifact_role,
+     derived_spatial_artifact_id, blob_hash)
+VALUES (:gid, :ik, :pos, :role, :aid, :bh)
+"""
+
+
+def _derived_bad(message: str) -> SoloRingError:
+    from soloring.spatial.error_codes import DERIVED_SPATIAL_BINDING_INVALID
+
+    return SoloRingError(DERIVED_SPATIAL_BINDING_INVALID, message,
+                         status_code=503)
+
+
+def _derived_provenance_bad(message: str) -> SoloRingError:
+    from soloring.spatial.error_codes import (
+        DERIVED_SPATIAL_PROVENANCE_MISMATCH,
+    )
+
+    return SoloRingError(DERIVED_SPATIAL_PROVENANCE_MISMATCH, message,
+                         status_code=500)
+
+
+async def _validate_and_insert_derived_siblings(
+    executor, *, generation_id: str, derived_inputs, ordinary_keys
+) -> None:
+    """Validate + insert derived siblings on the caller's transactional
+    executor (AsyncSession inside the RETURNING unit, or the raw
+    BEGIN IMMEDIATE connection of the fenced fallback).
+
+    Owns exactly the M10E §15.2 derived-family checks: frozen coordinate
+    validation, cross-family input_key disjointness, immutable
+    DerivedSpatialArtifact agreement (identity, Project, spatial
+    continuity, role/scope), and canonical Entity ordering. Physical
+    Blob bytes were verified before provenance registration (§12.3) and
+    are re-verified by the worker before upload (E-062) — persistence
+    re-checks the durable DB facts only."""
+    from soloring.spatial.derived import validate_derived_provenance_row
+    from soloring.spatial.derived_inputs import validate_bindings
+
+    if not derived_inputs:
+        return
+    bindings = tuple(derived_inputs)
+    validate_bindings(bindings)
+
+    cross = ordinary_keys & {b.input_key for b in bindings}
+    if cross:
+        raise SoloRingError(
+            ErrorCode.SPATIAL_REALIZATION_BINDING_INVALID,
+            f"Ordinary/M9 input keys collide with derived spatial input "
+            f"keys on {sorted(cross)}.",
+            status_code=422,
+        )
+
+    gen = (await executor.execute(text(
+        "SELECT g.id, s.project_id, srsw.spatial_continuity_hash "
+        "FROM generations g JOIN shots s ON s.id = g.shot_id "
+        "LEFT JOIN shot_revision_spatial_worlds srsw "
+        "  ON srsw.shot_revision_id = g.shot_revision_id "
+        "WHERE g.id = :g"),
+        {"g": generation_id})).mappings().one_or_none()
+    if gen is None:
+        raise internal_invariant(
+            "Derived sibling validation cannot see the tentative "
+            "Generation inside the write unit.")
+    if gen["spatial_continuity_hash"] is None:
+        raise _derived_provenance_bad(
+            "Generation ShotRevision has no captured spatial authority.")
+
+    checked = []
+    for b in bindings:
+        row = (await executor.execute(text(
+            "SELECT * FROM derived_spatial_artifacts WHERE id = :a"),
+            {"a": b.derived_spatial_artifact_id})).mappings().one_or_none()
+        if row is None or row["blob_hash"] != b.blob_hash:
+            raise _derived_provenance_bad(
+                "Derived artifact/blob identity is invalid.")
+        if (row["project_id"] != gen["project_id"]
+                or row["spatial_continuity_hash"]
+                != gen["spatial_continuity_hash"]):
+            raise _derived_provenance_bad(
+                "Derived artifact Project/spatial authority mismatch.")
+        spec, _ = validate_derived_provenance_row(dict(row))
+        scope = spec.derivation.parameters.scope
+        if (b.artifact_role == "spatial.world_depth") != (scope == "world"):
+            raise _derived_bad("Derived role/scope mismatch.")
+        checked.append((b, spec))
+
+    order = [
+        (s.derivation.parameters.entity_id,
+         s.derivation.parameters.placement_source_kind,
+         s.derivation.parameters.placement_source_id)
+        for b, s in sorted(checked, key=lambda x: x[0].position)
+        if b.artifact_role == "spatial.entity_depth"]
+    if order != sorted(order):
+        raise _derived_bad(
+            "Entity depth streams violate canonical Entity/placement "
+            "ordering.")
+
+    for b in bindings:
+        await executor.execute(
+            text(_DERIVED_SIBLING_INSERT),
+            {"gid": generation_id, "ik": b.input_key, "pos": b.position,
+             "role": b.artifact_role,
+             "aid": b.derived_spatial_artifact_id, "bh": b.blob_hash},
+        )
+
 
 def _is_generation_number_uniqueness_error(exc: IntegrityError) -> bool:
     """True iff `exc` is exactly the (shot_id, generation_number) UNIQUE violation.
@@ -280,7 +394,7 @@ async def _add_inputs(session: AsyncSession, generation_id: str, inputs) -> None
 
 
 async def _create_returning(
-    session: AsyncSession, draft: GenerationDraft, inputs
+    session: AsyncSession, draft: GenerationDraft, inputs, derived_inputs=()
 ) -> Generation:
     generation_id = str(uuid4())
     params = _draft_params(draft, generation_id)
@@ -295,10 +409,18 @@ async def _create_returning(
 
             # Write lock held from the insert onward: binding validation and
             # input insertion run in the same serialized transaction. A
-            # failure here rolls back the tentative Generation entirely.
+            # failure here rolls back the tentative Generation entirely —
+            # including any derived siblings already validated/inserted
+            # (M10E §15.4: no half-Generation may survive).
             try:
                 await _validate_bindings(session, inputs)
                 await _add_inputs(session, generation_id, inputs)
+                await _validate_and_insert_derived_siblings(
+                    session,
+                    generation_id=generation_id,
+                    derived_inputs=derived_inputs,
+                    ordinary_keys={i.input_key for i in inputs},
+                )
                 await session.commit()
             except SoloRingError:
                 await session.rollback()
@@ -331,7 +453,7 @@ async def _create_returning(
 
 
 async def _create_fenced(
-    engine: AsyncEngine, draft: GenerationDraft, inputs
+    engine: AsyncEngine, draft: GenerationDraft, inputs, derived_inputs=()
 ) -> str:
     """RETURNING-less fallback: one connection, BEGIN IMMEDIATE first (§37.2).
 
@@ -403,6 +525,14 @@ async def _create_fenced(
                     asset_id=inp.asset_id,
                     blob_hash=inp.blob_hash,
                 )
+            # M10E §15.3: derived siblings participate identically in the
+            # BEGIN IMMEDIATE fallback — one write unit, both families.
+            await _validate_and_insert_derived_siblings(
+                conn,
+                generation_id=generation_id,
+                derived_inputs=derived_inputs,
+                ordinary_keys={i.input_key for i in inputs},
+            )
             await conn.exec_driver_sql("COMMIT")
             return generation_id
         except IntegrityError:
@@ -429,11 +559,18 @@ async def create_generation(
     session: AsyncSession,
     draft: GenerationDraft,
     inputs: Sequence[ResolvedGenerationInput],
+    derived_inputs: Sequence = (),
 ) -> Generation:
-    """Atomically persist a queued Generation plus its input bindings (§40)."""
+    """Atomically persist a queued Generation plus its input bindings
+    (§40) — ordinary GenerationInputs and, for schema 3, the required
+    GenerationDerivedSpatialInputs inside the SAME write unit (M10E
+    §15.1: exactly one new-Generation persistence primitive; the
+    production path never attaches derived siblings in a second,
+    post-Generation transaction)."""
     if sqlite_supports_returning():
-        return await _create_returning(session, draft, inputs)
-    generation_id = await _create_fenced(session.bind, draft, inputs)
+        return await _create_returning(session, draft, inputs, derived_inputs)
+    generation_id = await _create_fenced(
+        session.bind, draft, inputs, derived_inputs)
     generation = await session.get(Generation, generation_id)
     assert generation is not None
     return generation

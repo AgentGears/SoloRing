@@ -195,6 +195,114 @@ async def resolve_capability(
     )
 
 
+def _load_verified_schema3_workflow_spec(generation) -> dict:
+    """One production seam for the stored schema-3 WorkflowSpec (E-080
+    cells 18/19/20): parse the stored BYTES (malformed JSON fails
+    closed), verify the canonical hash, and verify the stored bytes ARE
+    canonical — a reordered/pretty-printed document is historical
+    corruption, not an accepted equivalence."""
+    import json as _json
+
+    from soloring.domain.canonical import (
+        canonical_hash as _spec_hash,
+        canonical_json_str as _spec_canonical,
+    )
+    from soloring.errors import internal_invariant
+
+    try:
+        spec = _json.loads(generation.workflow_spec_json)
+    except ValueError as exc:
+        raise internal_invariant(
+            f"Stored schema-3 workflow spec bytes are not valid JSON: "
+            f"{exc}") from exc
+    if _spec_hash(spec) != generation.workflow_spec_hash:
+        raise internal_invariant(
+            "Stored schema-3 workflow spec bytes disagree with the "
+            "persisted workflow_spec_hash."
+        )
+    if _spec_canonical(spec) != generation.workflow_spec_json:
+        raise internal_invariant(
+            "Stored schema-3 workflow spec bytes are not canonical."
+        )
+    return spec
+
+
+def _verify_schema3_stored_spec_canonical(spec: dict,
+                                           stored_json: str) -> None:
+    """E-106 B3a / corruption cell 20: the stored schema-3 WorkflowSpec
+    BYTES must be canonical — semantic hash equality alone would accept a
+    reordered/pretty-printed document as history."""
+    from soloring.domain.canonical import canonical_json_str
+
+    if canonical_json_str(spec) != stored_json:
+        raise SoloRingError(
+            ErrorCode.INTERNAL_INVARIANT_VIOLATION,
+            "Stored schema-3 workflow spec bytes are not canonical.",
+            status_code=500,
+        )
+
+
+def verify_schema3_runtime_environment(fingerprint_doc: dict,
+                                       settings) -> None:
+    """R3 §18 / E-106 B2: validate the CAPTURED schema-3
+    ExecutionModelFingerprint against the ACTUAL execution environment:
+    the live v4 deployment attestation proves the serving-process
+    identity (pid + process-start fingerprint on the configured origin)
+    and carries the launched ComfyUI commit + the whitelisted custom-node
+    commit; the M10 fingerprint's artifact list is live-verified by
+    streaming SHA-256 against the configured model roots. Failure is
+    EXECUTION_MODEL_INCOMPATIBLE before any upload or submission. This
+    NEVER compares against application constants — only captured identity
+    vs live process/bytes."""
+    from soloring.realization.model_roots import verify_live_model_bytes
+    from soloring.realization.runtime import (
+        load_live_attestation,
+        verify_attested_process_live,
+    )
+
+    rr = fingerprint_doc.get("m10_spatial_runtime") or {}
+    # The required custom-node IDENTITY is derived from the CAPTURED
+    # runtime requirement — both the whitelisted NAME and the COMMIT must
+    # match the attested deployment (a correct commit attached to the
+    # wrong node is a wrong executable extension set).
+    required_nodes = rr.get("custom_nodes") or {}
+    if len(required_nodes) != 1:
+        raise SoloRingError(
+            ErrorCode.EXECUTION_MODEL_INCOMPATIBLE,
+            f"The captured fingerprint requires {len(required_nodes)} "
+            "custom nodes; the v4 single-node deployment attestation "
+            "cannot close that requirement set.",
+            status_code=503,
+        )
+    required_name, required_commit = next(iter(required_nodes.items()))
+    attestation = load_live_attestation(
+        settings, expected_whitelist=(required_name,))
+    if attestation.comfyui_commit != rr.get("comfyui_commit"):
+        raise SoloRingError(
+            ErrorCode.EXECUTION_MODEL_INCOMPATIBLE,
+            f"Live executor ComfyUI commit {attestation.comfyui_commit} "
+            f"disagrees with the captured fingerprint "
+            f"{rr.get('comfyui_commit')}.",
+            status_code=503,
+        )
+    if attestation.gguf_commit != required_commit:
+        raise SoloRingError(
+            ErrorCode.EXECUTION_MODEL_INCOMPATIBLE,
+            f"Live executor custom-node {required_name!r} commit "
+            f"{attestation.gguf_commit} disagrees with the captured pin "
+            f"{required_commit}.",
+            status_code=503,
+        )
+    verify_attested_process_live(attestation, settings)
+    artifacts = rr.get("artifacts") or []
+    if artifacts:
+        verify_live_model_bytes(settings, [
+            (a["artifact_key"], a["storage_root_key"], a["declared_name"],
+             a["sha256"])
+            for a in artifacts
+        ])
+
+
 async def drive_comfy_generation(
     engine: AsyncEngine,
     settings: Settings,
@@ -363,6 +471,7 @@ async def _drive(
             )
             template_graph = json.loads(template_bytes.decode("utf-8"))
             schema3_derived = None
+            schema2_pending = None
             if spec.get("schema_version") == 3:
                 # M10 frozen r3 §2.2/§48: schema-3 historical execution
                 # reads captured state ONLY. The v3 manifest/profile/
@@ -383,11 +492,10 @@ async def _drive(
                     execute_schema3_derived_inputs,
                 )
 
-                if _spec_hash(spec) != generation.workflow_spec_hash:
-                    raise internal_invariant(
-                        "Stored schema-3 workflow spec bytes disagree with "
-                        "the persisted workflow_spec_hash."
-                    )
+                # E-080 cells 18/19/20 through ONE production seam: parse
+                # stored bytes, verify canonical hash, verify stored bytes
+                # ARE canonical.
+                spec = _load_verified_schema3_workflow_spec(generation)
                 manifest = parse_manifest_v3(
                     manifest_bytes.decode("utf-8")
                 )
@@ -417,10 +525,20 @@ async def _drive(
                         "Schema-3 profile runtime requirements not closed "
                         f"by captured fingerprint/template: {unproven}"
                     )
+                # R3 §18 / E-106 B2: the CAPTURED ExecutionModelFingerprint
+                # must be validated against the ACTUAL execution
+                # environment before any upload/submission — live
+                # deployment attestation (serving-process identity +
+                # ComfyUI/WanVideoWrapper commits) plus live model-byte
+                # verification. Never a comparison against application
+                # constants.
+                verify_schema3_runtime_environment(
+                    fingerprint_doc, settings)
                 async with factory() as session:
                     schema3_derived = await execute_schema3_derived_inputs(
                         session, blob_store,
                         generation_id=generation_id,
+                        attempt_id=attempt_id,
                         workflow_spec=spec,
                         manifest_v3=manifest,
                         client=ClientUploader(client),
@@ -552,13 +670,18 @@ async def _drive(
                 inputs=captured,
             )
 
-            # 3) Pure translation from the captured triple.
+            # 3) Pure translation from the captured triple. For schema 3
+            # the verified/uploaded derived references (schema3_derived)
+            # are part of the pure translation input — bound at the exact
+            # captured manifest-v3 node/field (M10E §17.2: the M10A
+            # baseline computed them but never fed them into translation).
             payload = build_comfy_prompt(
                 workflow_spec=spec, manifest=manifest,
                 template=template_graph,
                 materialized=outcome.materialized,
                 generation_id=generation_id, attempt_id=attempt_id,
                 client_id=worker_id,
+                schema3_derived=schema3_derived,
             )
             payload_document = payload.to_document()
         else:
@@ -751,10 +874,36 @@ async def _drive(
         )
         return "interrupted"
 
-    manifest = parse_manifest(
-        (await artifact_store.get_manifest(generation.manifest_hash))
-        .decode("utf-8")
-    )
+    # Output resolution is schema-aware (M10E: the captured manifest bytes
+    # are v3 for schema-3 generations, and v2 manifests carry the
+    # discriminated `source` object the schema-1 model rejects — the v1
+    # parse here was a latent shared-path defect for both). One manifest
+    # authority, schema-dispatched parse; resolve_comfy_outputs consumes
+    # only the outputs declarations, identical across schemas.
+    if spec.get("schema_version") == 3:
+        from soloring.spatial.package3 import parse_manifest_v3
+        from soloring.workflows.manifest import parse_manifest_v2
+
+        manifest_v3_doc = parse_manifest_v3(
+            (await artifact_store.get_manifest(generation.manifest_hash))
+            .decode("utf-8")
+        )
+        inherited = {k: v for k, v in manifest_v3_doc.items()
+                     if k != "spatial_bindings"}
+        inherited["schema_version"] = "2"
+        manifest = parse_manifest_v2(inherited)
+    elif spec.get("schema_version") == 2:
+        from soloring.workflows.manifest import parse_manifest_v2
+
+        manifest = parse_manifest_v2(
+            (await artifact_store.get_manifest(generation.manifest_hash))
+            .decode("utf-8")
+        )
+    else:
+        manifest = parse_manifest(
+            (await artifact_store.get_manifest(generation.manifest_hash))
+            .decode("utf-8")
+        )
     contracts = [
         CapturedOutputContract(
             name=o.name, kind=o.kind, expected_count=o.expected_count,
@@ -820,6 +969,26 @@ class ClientUploader:
             source_path=source_path, filename=filename, subfolder=subfolder,
         )
         return ref.name, ref.subfolder
+
+    async def upload_bytes(
+        self, *, data: bytes, filename: str, subfolder: str,
+    ) -> tuple[str, str]:
+        """Upload in-memory bytes through the same executor input
+        namespace (M10E: per-frame D0 uploads — the bytes are exact
+        slices of the verified retained Blob, never re-encoded). The
+        temp path is uniquely keyed (uuid): concurrent attempts sharing
+        a convergent derived Blob must never race one pathname."""
+        import tempfile
+        import uuid
+
+        tmp = Path(tempfile.gettempdir()) / (
+            f"soloring-up-{uuid.uuid4().hex}-{filename}")
+        tmp.write_bytes(data)
+        try:
+            return await self.upload(
+                source_path=tmp, filename=filename, subfolder=subfolder)
+        finally:
+            tmp.unlink(missing_ok=True)
 
 
 class ClientViewStreamProvider:

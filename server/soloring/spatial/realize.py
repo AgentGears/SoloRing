@@ -24,6 +24,17 @@ from soloring.spatial.derived import DerivedSpatialArtifactSpec  # noqa: F401
 from soloring.spatial.spec3 import build_spatial_realization_block
 
 
+class StagingCapacityExceeded(ValueError):
+    """Whole-item capacity overflow of the frozen 3-stream contract.
+
+    A ValueError subclass by frozen contract (M10E R3 §4.5): the M10A
+    baseline pins ``pytest.raises(ValueError, match="capacity")`` and the
+    message retains the word "capacity", so inherited assertions stay
+    valid while Generation orchestration can catch exactly this typed
+    condition and translate it to SPATIAL_REALIZATION_UNSUPPORTED.
+    Bare/unrelated ValueError is never converted through that seam."""
+
+
 @dataclass(frozen=True)
 class SpatialRealizationOutput:
     """Everything a Generation capture needs, fully materialized."""
@@ -81,7 +92,13 @@ def _entity_spec(continuity_hash: str, staging_entry: dict) -> dict:
     spec["derivation"]["parameters"]["placement_source_kind"] = "spatial_track"
     spec["derivation"]["parameters"]["placement_source_id"] = staging_entry[
         "spatial_track_id"]
-    spec["derivation"]["parameters"]["proxy_geometry"] = pins.PROXY_POLICY_ID
+    # The frozen DerivedSpatialArtifactSpec grammar requires proxy_geometry
+    # as a structured object (identity-bearing, JSON-domain values only);
+    # the M10A baseline embedded the bare policy string, which the frozen
+    # provenance parser rejects — fixed in place, never a second grammar.
+    spec["derivation"]["parameters"]["proxy_geometry"] = {
+        "policy_id": pins.PROXY_POLICY_ID,
+    }
     return spec
 
 
@@ -106,7 +123,7 @@ def compose_spatial_realization(
 
     staging = continuity_pack["staging"]
     if len(staging) > pins.MAX_CONTROL_STREAMS - 1:
-        raise ValueError(
+        raise StagingCapacityExceeded(
             "captured staging exceeds frozen capacity: at most "
             f"{pins.MAX_CONTROL_STREAMS - 1} staged entities, captured "
             f"{len(staging)}; the whole item fails rather than dropping "
@@ -169,4 +186,7 @@ def _role_input_key(position: int) -> str:
     return f"entity_depth_{position}"
 
 
-__all__ = ["compose_spatial_realization", "SpatialRealizationOutput"]
+__all__ = [
+    "compose_spatial_realization", "SpatialRealizationOutput",
+    "StagingCapacityExceeded",
+]

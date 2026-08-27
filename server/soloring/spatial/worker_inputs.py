@@ -42,6 +42,109 @@ class VerifiedDerivedInput:
     blob_hash: str
     local_path: str
     execution_reference: str | None = None
+    # M10E §5.2 (frozen soloring.spatial.v1 consumption semantics): the
+    # retained multi-frame D0 Blob is uploaded as its exact PNG frame
+    # files (the CERTIFIED §114 executor consumption shape — the
+    # WanVideoControlnet control_images input is an IMAGE tensor, so the
+    # frames must enter through LoadImage nodes, never a bare filename
+    # string at the tensor field). frame_references carries the uploaded
+    # per-frame executor references, in frame order.
+    frame_references: tuple[str, ...] = ()
+
+
+def _split_png_frames(data: bytes) -> list[bytes] | None:
+    """Deterministically split a retained D0 Blob into its exact PNG frame
+    files. Returns None unless the content is a concatenation of complete
+    PNG streams covering ALL bytes (the frozen D0 grammar); arbitrary
+    non-PNG content stays a single opaque upload (legacy transport)."""
+    frames: list[bytes] = []
+    i, n = 0, len(data)
+    sig = b"\x89PNG\r\n\x1a\n"
+    while i < n:
+        if data[i:i + 8] != sig:
+            return None
+        j = i + 8
+        while True:
+            if j + 8 > n:
+                return None
+            length = int.from_bytes(data[j:j + 4], "big")
+            ctype = data[j + 4:j + 8]
+            j += 8 + length + 4  # header + data + CRC
+            if j > n:
+                return None
+            if ctype == b"IEND":
+                break
+        frames.append(data[i:j])
+        i = j
+    return frames if frames else None
+
+
+def current_m10_table_names() -> tuple[str, ...]:
+    """Forbidden current-authority table names for the read spy."""
+    return _CURRENT_M10_TABLES
+
+
+async def execute_schema3_derived_inputs(
+    session: AsyncSession,
+    store: BlobStore,
+    *,
+    generation_id: str,
+    attempt_id: str,
+    workflow_spec: dict,
+    manifest_v3: dict,
+    client,
+) -> list[VerifiedDerivedInput]:
+    """Full worker schema-3 derived-input path: verify (this module) then
+    upload the EXACT retained historical Blob bytes to the executor's
+    ATTEMPT-scoped input namespace (R4 §2.4: generation AND attempt
+    identity — two attempts of the same Generation are isolated),
+    recording the executor-local reference for the manifest's exact
+    node/field translation.
+
+    ``client`` is the worker's ClientUploader (upload(source_path=…,
+    filename=…, subfolder=…)); the bytes uploaded are read from the
+    verified physical Blob path. A retained D0 Blob that parses as
+    concatenated PNG frames is uploaded frame-per-file (the certified
+    consumption shape); any other content is uploaded whole."""
+    from soloring.executors.comfy.input_materializer import (
+        attempt_namespace,
+        validate_returned_reference,
+    )
+    from soloring.executors.comfy.translate import comfy_input_reference
+
+    verified = await load_verified_derived_inputs(
+        session, store, generation_id=generation_id,
+        workflow_spec=workflow_spec, manifest_v3=manifest_v3)
+    for v in verified:
+        # R4 §2.4 / E-106 B4: the predecessor's FULL-identity attempt
+        # namespace (complete generation + attempt ids under the bounded
+        # namespace policy — never a truncated 8-char prefix) and the
+        # predecessor's hostile validation of the returned upload
+        # reference: a hostile/incorrect upload response cannot escape
+        # the requested attempt namespace.
+        namespace = attempt_namespace(generation_id, attempt_id)
+        from pathlib import Path as _Path
+
+        data = _Path(v.local_path).read_bytes()
+        frames = _split_png_frames(data)
+        if frames and len(frames) > 1:
+            refs = []
+            for i, frame in enumerate(frames):
+                filename = f"{v.input_key}_{v.blob_hash[:16]}_{i:03d}.png"
+                name, sub = await client.upload_bytes(
+                    data=frame, filename=filename, subfolder=namespace)
+                validate_returned_reference(name, sub, namespace)
+                refs.append(comfy_input_reference(name, sub))
+            v.frame_references = tuple(refs)
+        else:
+            ext = ".png" if frames else ".bin"
+            filename = f"{v.input_key}_{v.blob_hash[:16]}{ext}"
+            name, sub = await client.upload(
+                source_path=_Path(v.local_path), filename=filename,
+                subfolder=namespace)
+            validate_returned_reference(name, sub, namespace)
+            v.execution_reference = comfy_input_reference(name, sub)
+    return verified
 
 
 def _fail(code: str, message: str, status: int = 500) -> SoloRingError:
@@ -75,16 +178,63 @@ async def load_verified_derived_inputs(
         "WHERE gdsi.generation_id = :gid ORDER BY gdsi.position"),
         {"gid": generation_id})).mappings().all()
 
-    srsw = (await session.execute(text(
-        "SELECT srsw.spatial_continuity_hash "
+    # E-106 B3c: artifact Project ownership is verified against the
+    # Generation's Shot-owning Project, not merely selected.
+    ctx = (await session.execute(text(
+        "SELECT s.project_id, srsw.spatial_continuity_hash "
         "FROM generations g "
-        "JOIN shot_revision_spatial_worlds srsw "
+        "JOIN shots s ON s.id = g.shot_id "
+        "LEFT JOIN shot_revision_spatial_worlds srsw "
         "  ON srsw.shot_revision_id = g.shot_revision_id "
-        "WHERE g.id = :gid"), {"gid": generation_id})).first()
-    if srsw is None or srsw[0] != captured_hash:
+        "WHERE g.id = :gid"), {"gid": generation_id})).mappings().one_or_none()
+    if ctx is None or ctx["spatial_continuity_hash"] != captured_hash:
         raise _fail(ec.DERIVED_SPATIAL_PROVENANCE_MISMATCH,
                     "Captured spatial authority hash disagrees with the "
                     "Generation's ShotRevision spatial history.")
+    project_id = ctx["project_id"]
+
+    # E-106 B3 round 2 / cells 22+51: the STRICT historical semantic
+    # validator runs BEFORE the dict conversion consumes list order —
+    # structured_bindings emptiness, list-order == canonical position
+    # order, uniqueness, world-at-zero, no pending: identities.
+    from soloring.spatial.spec3 import (
+        validate_spatial_realization_block_history,
+    )
+
+    validate_spatial_realization_block_history(
+        workflow_spec.get("spatial_realization"))
+
+    # E-106 B3b: the immutable WorkflowSpec's derived identities are
+    # cross-checked against the sibling rows AND the provenance before
+    # ANY upload — one exact projection, every identity-bearing field.
+    spec_entries = {
+        e["input_key"]: e
+        for e in (workflow_spec.get("spatial_realization") or {}).get(
+            "derived_artifacts") or []
+    }
+    row_keys = {row["input_key"] for row in rows}
+    if spec_entries.keys() != row_keys:
+        raise _fail(ec.DERIVED_SPATIAL_BINDING_INVALID,
+                    f"WorkflowSpec derived entries {sorted(spec_entries)} "
+                    f"disagree with sibling rows {sorted(row_keys)}.")
+    for row in rows:
+        entry = spec_entries[row["input_key"]]
+        for field in ("derived_spatial_artifact_id", "blob_hash"):
+            if entry.get(field) != row[field]:
+                raise _fail(
+                    ec.DERIVED_SPATIAL_PROVENANCE_MISMATCH,
+                    f"WorkflowSpec {field!r} disagrees with the sibling "
+                    f"row for {row['input_key']!r}.")
+        for field in ("position", "artifact_role"):
+            if entry.get(field) != row[field]:
+                raise _fail(ec.DERIVED_SPATIAL_BINDING_INVALID,
+                            f"WorkflowSpec {field!r} disagrees with the "
+                            f"sibling row for {row['input_key']!r}.")
+        if str(entry.get("derived_spatial_artifact_id", "")).startswith(
+                "pending:"):
+            raise _fail(ec.DERIVED_SPATIAL_PROVENANCE_MISMATCH,
+                        f"WorkflowSpec carries a provisional pending: "
+                        f"identity for {row['input_key']!r}.")
 
     verified: list[VerifiedDerivedInput] = []
     for row in rows:
@@ -117,6 +267,19 @@ async def load_verified_derived_inputs(
         if art["blob_hash"] != row["blob_hash"]:
             raise _fail(ec.DERIVED_SPATIAL_PROVENANCE_MISMATCH,
                         "Derived input Blob identity disagrees with provenance.")
+        # E-106 B3b/B3c: provenance ↔ WorkflowSpec ↔ Project agreement
+        entry = spec_entries[row["input_key"]]
+        if art["spec_hash"] != entry.get("spec_hash") or \
+                art["runtime_fingerprint_hash"] != entry.get(
+                    "runtime_fingerprint_hash"):
+            raise _fail(ec.DERIVED_SPATIAL_PROVENANCE_MISMATCH,
+                        f"Derived provenance spec/runtime identity "
+                        f"disagrees with the WorkflowSpec entry for "
+                        f"{row['input_key']!r}.")
+        if art["project_id"] != project_id:
+            raise _fail(ec.DERIVED_SPATIAL_PROVENANCE_MISMATCH,
+                        "Derived artifact Project ownership disagrees "
+                        "with the Generation's Shot-owning Project.")
 
         # exact manifest binding (no graph heuristics)
         input_key, node, field = resolve_derived_binding(
@@ -150,46 +313,6 @@ async def load_verified_derived_inputs(
             blob_hash=row["blob_hash"],
             local_path=str(store.path_for_hash(row["blob_hash"])),
         ))
-    return verified
-
-
-def current_m10_table_names() -> tuple[str, ...]:
-    """Forbidden current-authority table names for the read spy."""
-    return _CURRENT_M10_TABLES
-
-
-async def execute_schema3_derived_inputs(
-    session: AsyncSession,
-    store: BlobStore,
-    *,
-    generation_id: str,
-    workflow_spec: dict,
-    manifest_v3: dict,
-    client,
-) -> list[VerifiedDerivedInput]:
-    """Full worker schema-3 derived-input path: verify (this module) then
-    upload the EXACT retained historical Blob bytes to the executor's
-    attempt-scoped input namespace, recording the executor-local
-    reference for the manifest's exact node/field translation.
-
-    ``client`` is the worker's ClientUploader (upload(source_path=…,
-    filename=…, subfolder=…)); the bytes uploaded are read from the
-    verified physical Blob path.
-    """
-    from pathlib import Path as _Path
-
-    from soloring.executors.comfy.translate import comfy_input_reference
-
-    verified = await load_verified_derived_inputs(
-        session, store, generation_id=generation_id,
-        workflow_spec=workflow_spec, manifest_v3=manifest_v3)
-    for v in verified:
-        filename = f"{v.input_key}_{v.blob_hash[:16]}.bin"
-        subfolder = f"soloring-der-{generation_id[:8]}"
-        name, sub = await client.upload(
-            source_path=_Path(v.local_path), filename=filename,
-            subfolder=subfolder)
-        v.execution_reference = comfy_input_reference(name, sub)
     return verified
 
 

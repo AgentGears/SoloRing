@@ -176,8 +176,18 @@ def load_capability_record(data_dir: Path) -> CapabilityRecord:
     )
 
 
-def load_deployment_attestation(data_dir: Path) -> DeploymentAttestation:
-    """Strictly validate the v4 launcher attestation."""
+def load_deployment_attestation(
+    data_dir: Path,
+    *,
+    expected_whitelist: tuple[str, ...] = ("ComfyUI-GGUF",),
+) -> DeploymentAttestation:
+    """Strictly validate the v4 launcher attestation.
+
+    ``expected_whitelist`` is the caller's REQUIRED custom-node identity:
+    the frozen M5 default (ComfyUI-GGUF) for the predecessor/schema-2
+    path; the M10E schema-3 path derives it from the CAPTURED runtime
+    requirement, so a correct commit attached to the WRONG whitelisted
+    node is rejected exactly like a wrong commit."""
     doc = _read_json(Path(data_dir) / "comfy-fingerprint"
                      / ATTESTATION_FILENAME)
     if doc.get("schema_version") != ATTESTATION_SCHEMA_VERSION:
@@ -198,15 +208,29 @@ def load_deployment_attestation(data_dir: Path) -> DeploymentAttestation:
     # all custom nodes disabled except the pinned whitelist. Imported
     # custom-node code is ordinary Python; an attestation without this
     # policy does not fingerprint what the process actually executes.
+    # The SHAPE is strict (disable_all + exactly ONE whitelisted custom
+    # node, whose commit is pinned in the attestation's custom-node
+    # commit slot) AND the NAME must equal the caller's expected
+    # deployment identity.
     policy = att.get("custom_node_policy")
+    whitelist = (policy or {}).get("whitelist")
     if (not isinstance(policy, dict)
             or set(policy) != {"disable_all", "whitelist"}
             or policy.get("disable_all") is not True
-            or policy.get("whitelist") != ["ComfyUI-GGUF"]):
+            or not isinstance(whitelist, list)
+            or len(whitelist) != 1
+            or not isinstance(whitelist[0], str)
+            or not whitelist[0]):
         raise CapabilityRecordInvalid(
             "attestation custom_node_policy must be exactly "
-            '{"disable_all": true, "whitelist": ["ComfyUI-GGUF"]}; got '
-            f"{policy!r}")
+            '{"disable_all": true, "whitelist": [<one custom node>]}; '
+            f"got {policy!r}")
+    if tuple(whitelist) != tuple(expected_whitelist):
+        raise CapabilityRecordInvalid(
+            f"attested custom-node identity {whitelist!r} does not match "
+            f"the required deployment whitelist "
+            f"{list(expected_whitelist)!r} — the attestation does not "
+            "describe the expected executable extension set")
     pid = att.get("pid")
     if not isinstance(pid, int) or pid <= 0:
         raise CapabilityRecordInvalid("attestation pid missing/invalid")
@@ -277,9 +301,14 @@ def build_capability_record(
 def build_deployment_attestation(
     *, comfyui_commit: str, gguf_commit: str, launched_at: str,
     pid: int, process_start_fingerprint: str, executor_origin: str,
+    custom_node_whitelist: tuple[str, ...] = ("ComfyUI-GGUF",),
 ) -> dict:
     """Emit the v4 attestation document (scripts/launch_comfy.py — only
-    after proving the launched process serves the whitelisted executor)."""
+    after proving the launched process serves the whitelisted executor).
+    ``custom_node_whitelist`` names the ONE custom node the launcher
+    actually whitelisted (predecessor default: ComfyUI-GGUF; the M10E
+    Wan deployment supplies ComfyUI-WanVideoWrapper) — the attestation
+    must describe the executable extension set of the attested process."""
     doc = {
         "schema_version": ATTESTATION_SCHEMA_VERSION,
         "attestation": {
@@ -287,7 +316,7 @@ def build_deployment_attestation(
             "gguf_commit": gguf_commit,
             "executor_origin": normalize_origin(executor_origin),
             "custom_node_policy": {"disable_all": True,
-                                   "whitelist": ["ComfyUI-GGUF"]},
+                                   "whitelist": list(custom_node_whitelist)},
             "pid": pid,
             "process_start_fingerprint": process_start_fingerprint,
             "launched_at": launched_at,
@@ -300,7 +329,8 @@ def build_deployment_attestation(
         p.mkdir()
         (p / ATTESTATION_FILENAME).write_text(json.dumps(doc, indent=2),
                                               encoding="utf-8")
-        load_deployment_attestation(Path(td))
+        load_deployment_attestation(
+            Path(td), expected_whitelist=custom_node_whitelist)
     return doc
 
 

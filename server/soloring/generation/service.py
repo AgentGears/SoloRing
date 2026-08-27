@@ -96,12 +96,12 @@ def build_workflow_spec(
 
 
 def assert_pre_m10e_spatial_execution_fence(revision) -> None:
-    """M10D §63.1: one named temporary integration seam. Schema-5 (any
-    non-empty captured SpatialContinuityPack) blocks Generation creation
-    with SPATIAL_REALIZATION_UNSUPPORTED and NOTHING is queued or
-    persisted. M10E must explicitly subsume this branch with real
-    spatial capability handling while preserving the fail-closed default
-    for unsupported hard M10 authority."""
+    """M10D §63.1 fence, now narrowed to its M10E fail-closed residue
+    (M10E R3 §4.4/§7.1): schema-5 authority can execute ONLY through a
+    captured schema-3 comfy package. When no package release was captured
+    at Stage 0 (non-comfy executors), spatial execution remains
+    unsupported and NOTHING is queued or persisted. The real schema-3
+    realization path lives below in create_generation_request."""
     import json as _json
 
     from soloring.errors import ErrorCode, SoloRingError
@@ -111,12 +111,179 @@ def assert_pre_m10e_spatial_execution_fence(revision) -> None:
         raise SoloRingError(
             ErrorCode.SPATIAL_REALIZATION_UNSUPPORTED,
             "This ShotRevision captures spatial continuity authority "
-            "(schema 5); spatial realization is not yet supported — "
-            "Generation creation is blocked until spatial-capable "
-            "packages exist.",
+            "(schema 5); spatial realization requires a schema-3 spatial "
+            "workflow package, and no package release was captured for "
+            "this executor.",
             status_code=409,
             details={"shot_revision_id": revision.id,
                      "snapshot_hash": revision.snapshot_hash})
+
+async def _realize_spatial_inputs(
+    session: AsyncSession,
+    settings,
+    *,
+    shot_id: str,
+    shot_revision_id: str,
+    pack: dict,
+    manifest_v3: dict,
+    realization_profile_hash: str,
+):
+    """M10E §7.1 steps 5-6 production finalizer (Generation-orchestration
+    owned; the pure compiler owns derivation, the frozen primitives own
+    publication/registration/binding).
+
+    captured pack → canonical re-verification → pure D0 composition →
+    content-addressed Blob publication → immutable DerivedSpatialArtifact
+    registration (global convergence) → exact manifest input coordinates →
+    final real-ID spatial_realization block + DerivedInputBinding siblings.
+
+    Reads ONLY the captured pack and the Shot/ShotRevision identity rows —
+    never current M10 authority. Pre-published owner-free
+    Blob/provenance may outlive a later Generation rollback (§12.4)."""
+    import hashlib as _hashlib
+
+    from soloring.assets.blob_store import BlobStore as _BlobStore
+    from soloring.db.timeutil import DB_NOW_SQL as _NOW
+    from soloring.errors import ErrorCode as _EC
+    from soloring.spatial import production_pins as _pins
+    from soloring.spatial.derived import (
+        prepare_derived_artifact as _prepare,
+        register_derived_artifact as _register,
+    )
+    from soloring.spatial.derived_inputs import DerivedInputBinding
+    from soloring.spatial.package3 import resolve_derived_binding
+    from soloring.spatial.realize import (
+        StagingCapacityExceeded,
+        compose_spatial_realization,
+    )
+    from soloring.spatial.schemas import (
+        parse_continuity_pack as _parse_pack,
+    )
+    from soloring.spatial.spec3 import build_spatial_realization_block
+    from sqlalchemy import text as _text
+
+    # §10.2: canonical verification through the frozen M10D grammar —
+    # never normalize or "repair" captured bytes.
+    _parse_pack(pack)
+
+    # §13: the registration Project is derived from the same Shot context
+    # that supplied the captured pack; the stored M10D continuity hash
+    # must agree with the captured canonical bytes.
+    row = (await session.execute(
+        _text("SELECT s.project_id, srsw.spatial_continuity_hash "
+              "FROM shots s JOIN shot_revisions sr ON sr.shot_id = s.id "
+              "LEFT JOIN shot_revision_spatial_worlds srsw "
+              "  ON srsw.shot_revision_id = sr.id "
+              "WHERE s.id = :sid AND sr.id = :rid"),
+        {"sid": shot_id, "rid": shot_revision_id})).mappings().one_or_none()
+    if row is None or row["project_id"] is None:
+        raise internal_invariant(
+            "Spatial realization could not resolve the Shot-owning "
+            "Project for registration.")
+    project_id = row["project_id"]
+
+    try:
+        out = compose_spatial_realization(
+            pack, realization_profile_hash=realization_profile_hash)
+    except StagingCapacityExceeded as exc:
+        # M10E R3 §4.5: the ONLY conversion seam — the typed capacity
+        # condition becomes the durable SPATIAL_REALIZATION_UNSUPPORTED;
+        # bare/unrelated ValueError is never converted.
+        raise SoloRingError(
+            _EC.SPATIAL_REALIZATION_UNSUPPORTED,
+            f"Captured staging exceeds the frozen 3-stream control "
+            f"capacity: {exc}",
+            status_code=409,
+            details={"shot_id": shot_id},
+        ) from exc
+
+    continuity_hash = canonical_hash(pack)
+    if row["spatial_continuity_hash"] is not None and \
+            row["spatial_continuity_hash"] != continuity_hash:
+        raise internal_invariant(
+            "Captured spatial continuity hash disagrees with the "
+            "ShotRevision's stored M10D provenance.")
+
+    store = _BlobStore(settings)
+    artifacts: list[str] = []
+    final_entries: list[dict] = []
+    bindings: list[DerivedInputBinding] = []
+
+    # §12.3 publication first, in its OWN committed BEGIN IMMEDIATE unit:
+    # the service session stays read-only until the final Generation write
+    # (WAL single-writer — a held session write transaction would block
+    # the registration primitive's own BEGIN IMMEDIATE below).
+    import contextlib as _cl
+
+    async with session.bind.connect() as _pub:
+        try:
+            await _pub.exec_driver_sql("BEGIN IMMEDIATE")
+            for spec, frames, digest in zip(
+                    out.specs, out.frames, out.artifact_digests):
+                content = b"".join(frames)
+                if _hashlib.sha256(content).hexdigest() != digest:
+                    raise internal_invariant(
+                        "Materialized D0 bytes disagree with the artifact "
+                        "digest.")
+                tmp = store.tmp_path()
+                tmp.write_bytes(content)
+                await store.place(digest, tmp)
+                await _pub.execute(
+                    _text(f"INSERT OR IGNORE INTO blobs (hash, path, "
+                          f"size_bytes, created_at) VALUES (:h, :p, :s, "
+                          f"{_NOW})"),
+                    {"h": digest, "p": str(store.path_for_hash(digest)),
+                     "s": len(content)})
+            await _pub.exec_driver_sql("COMMIT")
+        except Exception:
+            with _cl.suppress(Exception):
+                await _pub.exec_driver_sql("ROLLBACK")
+            raise
+
+    for position, (spec, spec_hash, digest) in enumerate(zip(
+            out.specs, out.spec_hashes, out.artifact_digests)):
+        # §12.4/§13: immutable registration BEFORE the Generation write
+        # unit; global convergence inside BEGIN IMMEDIATE.
+        prepared = _prepare(
+            spec, out.runtime_fingerprint, digest,
+            allowed_artifact_kinds=frozenset({"boxdepth_control_video"}),
+            allowed_media_types=frozenset({"image/png"}),
+            allowed_algorithms=frozenset({
+                (_pins.BOXDEPTH_ALGORITHM_ID,
+                 _pins.BOXDEPTH_ALGORITHM_VERSION)}))
+        artifact_id = await _register(session, store, project_id, prepared)
+        artifacts.append(artifact_id)
+
+        # §14.2: exact captured-manifest coordinates; no heuristics.
+        role = ("spatial.world_depth" if position == 0
+                else "spatial.entity_depth")
+        input_key, _node, _field = resolve_derived_binding(
+            manifest_v3, role, position)
+        final_entries.append({
+            "input_key": input_key,
+            "position": position,
+            "artifact_role": role,
+            "derived_spatial_artifact_id": artifact_id,
+            "spec_hash": spec_hash,
+            "runtime_fingerprint_hash": out.runtime_fingerprint_hash,
+            "blob_hash": digest,
+        })
+        bindings.append(DerivedInputBinding(
+            input_key=input_key, position=position, artifact_role=role,
+            derived_spatial_artifact_id=artifact_id, blob_hash=digest))
+
+    # §11.2/§16.2: the FINAL block is rebuilt from real registered
+    # identities — the pure compiler's provisional pending:* block is
+    # never persisted.
+    block = build_spatial_realization_block(
+        spatial_continuity_hash=continuity_hash,
+        realization_profile_hash=realization_profile_hash,
+        derived_artifacts=final_entries,
+        advisory_omissions=list(
+            out.spatial_realization_block["advisory_omissions"]),
+    )
+    return block, tuple(bindings)
+
 
 async def create_generation_request(
     session: AsyncSession, shot_id: str, *, settings: "Settings | None" = None
@@ -175,13 +342,18 @@ async def create_generation_request(
         )
     )
 
-    # M10D §63 — pre-M10E schema-5 fail-closed fence: spatially captured
-    # authority cannot be executed until M10E installs real spatial
-    # realization. Runs immediately after coherent capture/reuse and
-    # BEFORE package semantic validation, input mapping, workflow-spec
-    # assembly, or any Generation persistence. Existing Stage-0 raw
-    # release capture above is not reclassified as package acceptance.
-    assert_pre_m10e_spatial_execution_fence(revision)
+    # M10E §7.1: the captured snapshot decides the spatial plane. Schema 5
+    # carries a canonical non-empty SpatialContinuityPack that ONLY the
+    # schema-3 realization path below may consume; with no captured
+    # package release (non-comfy executors) the M10D-era fail-closed
+    # posture is preserved — nothing queues, nothing persists.
+    snapshot = json.loads(revision.snapshot_json)
+    spatial_pack = (
+        snapshot.get("spatial_continuity")
+        if snapshot.get("schema_version") == 5 else None
+    )
+    if spatial_pack is not None and release is None:
+        assert_pre_m10e_spatial_execution_fence(revision)
 
     if release is not None:
         # §11.1 step 3 — NOW the captured package semantics are parsed
@@ -191,9 +363,18 @@ async def create_generation_request(
         # installed read could straddle an installation switch and
         # persist a Generation whose recorded artifacts were never
         # captured. Schema-2 releases additionally bind profile +
-        # ExecutionModelFingerprint (§6.2).
+        # ExecutionModelFingerprint (§6.2); schema-3 releases additionally
+        # carry the M10 spatial package documents (M10E §8).
         package = validate_package(release)
-        if package.is_schema2:
+        if package.is_schema3:
+            from soloring.workflows.manifest import build_template_v3
+
+            template = build_template_v3(
+                package.manifest_v3,
+                package.release.manifest_hash,
+                package.release.workflow_template_hash,
+            )
+        elif package.is_schema2:
             template = build_template_v2(
                 package.manifest_v2,
                 package.release.manifest_hash,
@@ -222,7 +403,7 @@ async def create_generation_request(
 
     # Deterministic input mapping from the CAPTURED revision snapshot
     # (`template` already holds the captured-bytes workflow for comfy).
-    snapshot = json.loads(revision.snapshot_json)
+    # The snapshot was loaded above (M10E §7.1 spatial-plane decision).
     rules = [
         GenerationInputRule(input_key=i.input_key, source_role=i.source_role)
         for i in template.reference_inputs
@@ -239,7 +420,9 @@ async def create_generation_request(
     authority_nonempty = bool(
         (snapshot.get("visual_reference_pack") or {}).get("anchors")
     )
-    if executor == "comfy" and not getattr(template, "is_schema2", False):
+    if executor == "comfy" and not (
+            getattr(template, "is_schema2", False)
+            or getattr(template, "is_schema3", False)):
         # §11.3: non-empty captured M8 authority may never be silently
         # ignored — a schema-1 package is insufficient.
         if authority_nonempty:
@@ -250,18 +433,51 @@ async def create_generation_request(
                 "contract).",
                 status_code=409,
             )
-    if getattr(template, "is_schema2", False):
+    if getattr(template, "is_schema2", False) or getattr(
+            template, "is_schema3", False):
         release = package.release
         if not authority_nonempty:
             # §11.2/§16.3: empty effective M8 authority → exact spec v1
             # legacy path; profile/fingerprint are not Generation
-            # dependencies.
+            # dependencies. (A schema-3 package still composes spec v3
+            # below — the M10 spatial plane is independent of M8.)
             pass
         else:
             from soloring.realization.authority import (
                 reconstruct_authority,
             )
             from soloring.realization.compiler import compile_realization
+
+            if getattr(template, "is_schema3", False):
+                # M10E §9.2: the inherited M9 portion of the schema-3
+                # documents is re-parsed through the FROZEN M9 parsers —
+                # the exact same compiler seam as schema 2, never a fork.
+                # The derived spatial inputs are EXCLUDED from the M9
+                # manifest view (the same exclusion rule as
+                # build_template_v3 and the schema-3 translator): they are
+                # never realization-channel inputs.
+                from soloring.realization.profile import (
+                    parse_profile as _parse_profile_m9,
+                )
+                from soloring.workflows.manifest import (
+                    parse_manifest_v2 as _parse_manifest_v2,
+                )
+
+                _spatial_keys = frozenset(
+                    package.manifest_v3["spatial_bindings"])
+                m9_profile = _parse_profile_m9(
+                    {k: v for k, v in package.profile_v2.items()
+                     if k != "spatial"} | {"schema_version": 1})
+                m9_manifest = _parse_manifest_v2(
+                    {**{k: v for k, v in package.manifest_v3.items()
+                        if k != "spatial_bindings"},
+                     "inputs": {k: v for k, v in
+                                package.manifest_v3["inputs"].items()
+                                if k not in _spatial_keys},
+                     "schema_version": "2"})
+            else:
+                m9_profile = package.profile
+                m9_manifest = package.manifest_v2
 
             requirement_map = {
                 st.visual_facet_id: st.requirement
@@ -282,8 +498,8 @@ async def create_generation_request(
                     raise
             result = compile_realization(
                 captured_visual_authority=authority,
-                profile=package.profile,
-                manifest=package.manifest_v2,
+                profile=m9_profile,
+                manifest=m9_manifest,
                 profile_hash=release.realization_profile_hash,
                 execution_model_fingerprint_hash=(
                     release.execution_model_fingerprint_hash
@@ -310,17 +526,75 @@ async def create_generation_request(
                 )
                 for p in result.inputs
             ]
-            model = package.profile.model.id
-            model_version = package.profile.model.version
+            if getattr(template, "is_schema3", False):
+                model = package.profile_v2["model"]["id"]
+                model_version = package.profile_v2["model"]["version"]
+            else:
+                model = package.profile.model.id
+                model_version = package.profile.model.version
+
+    # ---- M10E §7.1 steps 5-6: derived spatial realization (schema 5) ----
+    derived_bindings: tuple = ()
+    spatial_block: dict | None = None
+    if spatial_pack is not None:
+        if not getattr(template, "is_schema3", False):
+            # Fail-closed M10 capability posture (§4.4): captured spatial
+            # authority exists but the selected package is not a schema-3
+            # spatial package — no hard spatial component may be silently
+            # dropped. This fires AFTER package semantic validation and the
+            # inherited M9 blockers, per the frozen §20.1 precedence.
+            raise SoloRingError(
+                ErrorCode.SPATIAL_REALIZATION_UNSUPPORTED,
+                "The captured spatial continuity authority requires a "
+                "schema-3 spatial workflow package; the selected package "
+                "does not provide spatial realization.",
+                status_code=409,
+                details={"shot_revision_id": revision.id},
+            )
+        spatial_block, derived_bindings = await _realize_spatial_inputs(
+            session, settings,
+            shot_id=shot_id, shot_revision_id=revision.id,
+            pack=spatial_pack,
+            manifest_v3=package.manifest_v3,
+            realization_profile_hash=package.release.realization_profile_hash,
+        )
+    elif getattr(template, "is_schema3", False):
+        # A schema-3 package is a spatial package: with no captured M10
+        # authority there is no executable spatial realization, and no
+        # empty spec v3 exists (spec3 §2.1).
+        raise SoloRingError(
+            ErrorCode.SPATIAL_REALIZATION_UNSUPPORTED,
+            "The selected schema-3 spatial package requires captured "
+            "spatial continuity authority; this ShotRevision captures "
+            "none.",
+            status_code=409,
+        )
+
+    # M10-only v3 retains the real captured model identity even when the
+    # M9 realization is absent (spec3 §2.1; no fake M9 block is invented).
+    if getattr(template, "is_schema3", False) and model is None:
+        model = package.profile_v2["model"]["id"]
+        model_version = package.profile_v2["model"]["version"]
 
     # §19: source classes stay disjoint by input_key; combined
-    # cardinality is assembly-layer validation only.
+    # cardinality is assembly-layer validation only. M10E §15.2 extends
+    # the disjointness to the derived spatial family — an ordinary/M9 key
+    # colliding with a derived key is a composition-binding failure.
     legacy_keys = {i.input_key for i in legacy_inputs}
     realization_keys = {i.input_key for i in realization_inputs}
+    derived_keys = {b.input_key for b in derived_bindings}
     overlap = legacy_keys & realization_keys
     if overlap:
         raise internal_invariant(
             f"Legacy and realization inputs collide on {sorted(overlap)}."
+        )
+    cross_family = (legacy_keys | realization_keys) & derived_keys
+    if cross_family:
+        raise SoloRingError(
+            ErrorCode.SPATIAL_REALIZATION_BINDING_INVALID,
+            f"Ordinary/realization input keys collide with derived "
+            f"spatial input keys on {sorted(cross_family)}.",
+            status_code=422,
         )
     inputs = legacy_inputs + realization_inputs
 
@@ -348,7 +622,30 @@ async def create_generation_request(
                     "final captured parameters."
                 )
     spec = build_workflow_spec(template, inputs, compiled_prompt, parameters)
-    if realization_spec is not None:
+    if getattr(template, "is_schema3", False):
+        # M10E §16: spec v3 is composed exactly once, only after every
+        # real immutable derived identity exists (spatial_block was built
+        # from registered artifact UUIDs — never the provisional
+        # pending:* block from the pure compiler).
+        from soloring.spatial.spec3 import (
+            compose_workflow_spec_v3,
+            validate_spec_v3,
+        )
+
+        spec = compose_workflow_spec_v3(
+            spec,
+            model={
+                "id": model,
+                "version": model_version,
+                "execution_model_fingerprint_hash": (
+                    package.release.execution_model_fingerprint_hash
+                ),
+            },
+            realization=realization_spec,
+            spatial_realization=spatial_block,
+        )
+        validate_spec_v3(spec)
+    elif realization_spec is not None:
         # §16.2: schema 2 preserves all schema-1 fields and adds model +
         # realization; no empty schema-2 is ever emitted (§16.1).
         spec["schema_version"] = LOGICAL_WORKFLOW_SCHEMA_VERSION_2
@@ -362,6 +659,12 @@ async def create_generation_request(
         spec["realization"] = realization_spec
     spec_json = canonical_json_str(spec)
     spec_hash = canonical_hash(spec)
+    if getattr(template, "is_schema3", False) and "pending:" in spec_json:
+        # E-041 defense at the composition seam itself.
+        raise internal_invariant(
+            "Provisional derived-artifact identity reached schema-3 "
+            "WorkflowSpec composition."
+        )
 
     draft = GenerationDraft(
         shot_id=shot_id,
@@ -382,7 +685,8 @@ async def create_generation_request(
         workflow_spec_json=spec_json,
         workflow_spec_hash=spec_hash,
     )
-    return await repo.create_generation(session, draft, inputs)
+    return await repo.create_generation(
+        session, draft, inputs, derived_inputs=derived_bindings)
 
 
 async def list_generations(session: AsyncSession, shot_id: str) -> list[Generation]:
