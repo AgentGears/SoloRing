@@ -86,16 +86,22 @@ def verify_attested_process_live(attestation, settings) -> None:
         )
 
 
-def load_live_attestation(settings):
+def load_live_attestation(settings, *,
+                          expected_whitelist=("ComfyUI-GGUF",)):
     """Load the live v4 deployment attestation; for schema-2 execution an
-    unavailable/invalid attestation is EXECUTION_MODEL_INCOMPATIBLE."""
+    unavailable/invalid attestation is EXECUTION_MODEL_INCOMPATIBLE.
+    ``expected_whitelist`` is the caller's required custom-node identity
+    (frozen M5 default; the schema-3 path derives it from the CAPTURED
+    runtime requirement)."""
     from soloring.executors.comfy.capability_record import (
         CapabilityRecordInvalid,
         load_deployment_attestation,
     )
 
     try:
-        return load_deployment_attestation(settings.data_dir)
+        return load_deployment_attestation(
+            settings.data_dir, expected_whitelist=tuple(
+                expected_whitelist))
     except (CapabilityRecordInvalid, FileNotFoundError) as exc:
         raise ModelIncompatible(
             f"No valid live deployment attestation is available: {exc}"

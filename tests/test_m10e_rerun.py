@@ -351,10 +351,94 @@ async def test_same_generation_attempts_get_isolated_transport(
     assert not (subs_a & subs_b), (
         "attempts of the SAME generation must not share a transport "
         "namespace")
-    assert all(sub.startswith(f"soloring-der-{gen.id[:8]}")
+    assert all(sub.startswith(f"soloring_gen_{gen.id}_att_")
                for sub in subs_a | subs_b)
     # identical durable inputs: same frame sets, byte-for-byte
     assert sorted(f for f, _, _ in ups["a"]) == \
         sorted(f for f, _, _ in ups["b"])
     assert sorted(d for _, _, d in ups["a"]) == \
         sorted(d for _, _, d in ups["b"])
+
+
+# ------------- E-106 round-2: transport namespace details (B4) -----------
+
+async def test_same_prefix_attempt_ids_get_distinct_namespaces(
+        factory, engine, settings, tmp_path):
+    """Two attempt IDs sharing their FIRST EIGHT characters receive
+    distinct transport namespaces (full-identity attempt_namespace,
+    not a truncated prefix)."""
+    from soloring.assets.blob_store import BlobStore
+    from soloring.executors.comfy.input_materializer import attempt_namespace
+    from soloring.spatial.package3 import parse_manifest_v3
+    from soloring.spatial import production_package as prod
+    from soloring.spatial.worker_inputs import execute_schema3_derived_inputs
+
+    class _Rec:
+        def __init__(self) -> None:
+            self.subs: set[str] = set()
+
+        async def upload(self, *, source_path, filename, subfolder):
+            self.subs.add(subfolder)
+            return filename, subfolder
+
+        async def upload_bytes(self, *, data, filename, subfolder):
+            self.subs.add(subfolder)
+            return filename, subfolder
+
+    gen, _, _ = await _terminal_generation(
+        factory, engine, settings, tmp_path, staged=1)
+    spec = await _spec(engine, gen.id)
+    manifest_v3 = parse_manifest_v3(prod.production_manifest_v3())
+    shared = "aaaaaaaa-bbbb-4bbb-8bbb-"
+    attempts = [shared + "00000000000a", shared + "00000000000b"]
+    assert attempts[0][:8] == attempts[1][:8]
+    subs = set()
+    for attempt in attempts:
+        rec = _Rec()
+        async with factory() as session:
+            await execute_schema3_derived_inputs(
+                session, BlobStore(settings), generation_id=gen.id,
+                attempt_id=attempt, workflow_spec=spec,
+                manifest_v3=manifest_v3, client=rec)
+        subs |= rec.subs
+    assert len(subs) == 2, "same-prefix attempts must not share a namespace"
+    assert all(sub.startswith(f"soloring_gen_{gen.id}_att_")
+               for sub in subs)
+    # the full-identity primitive itself distinguishes them
+    assert (attempt_namespace(gen.id, attempts[0])
+            != attempt_namespace(gen.id, attempts[1]))
+
+
+async def test_wrong_returned_subfolder_fails_closed(
+        factory, engine, settings, tmp_path):
+    """A hostile/incorrect upload response escaping the requested
+    attempt namespace is rejected by the predecessor
+    validate_returned_reference before it becomes a Comfy reference."""
+    from soloring.assets.blob_store import BlobStore
+    from soloring.errors import SoloRingError
+    from soloring.spatial.package3 import parse_manifest_v3
+    from soloring.spatial import production_package as prod
+    from soloring.spatial.worker_inputs import execute_schema3_derived_inputs
+
+    class _Hostile:
+        async def upload(self, *, source_path, filename, subfolder):
+            return filename, "elsewhere"  # escapes the namespace
+
+        async def upload_bytes(self, *, data, filename, subfolder):
+            return filename, "elsewhere"
+
+    gen, _, _ = await _terminal_generation(
+        factory, engine, settings, tmp_path, staged=1)
+    spec = await _spec(engine, gen.id)
+    async with factory() as session:
+        with pytest.raises(SoloRingError) as ei:
+            await execute_schema3_derived_inputs(
+                session, BlobStore(settings), generation_id=gen.id,
+                attempt_id="11111111-1111-4111-8111-111111111116",
+                workflow_spec=spec,
+                manifest_v3=parse_manifest_v3(
+                    prod.production_manifest_v3()),
+                client=_Hostile())
+    from soloring.errors import ErrorCode as _EC
+
+    assert ei.value.code == _EC.COMFY_INPUT_REFERENCE_INVALID

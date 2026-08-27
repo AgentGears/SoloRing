@@ -119,6 +119,87 @@ def compose_workflow_spec_v3(
     return spec
 
 
+def validate_spatial_realization_block_history(sr: Any) -> None:
+    """STRICT historical semantic validator for a captured
+    spatial_realization block (M10E E-106 B3: corruption cells 22/51 and
+    the duplicate-identity shadow). Called on the HISTORICAL bytes before
+    any dict conversion consumes list order:
+
+        schema_version exact; structured_bindings EXACTLY empty (initial
+        Path B); derived_artifacts non-empty; per-entry exact key set and
+        64-hex identities; NO pending: identity; input_keys unique;
+        positions unique, contiguous from zero, and the LIST ORDER IS the
+        canonical position order; world stream at position 0; entity
+        streams only at positions >= 1.
+    """
+    if not isinstance(sr, dict):
+        raise _bad("spatial_realization must be an object.")
+    if sr.get("schema_version") != SPATIAL_REALIZATION_SCHEMA_VERSION:
+        raise _bad("spatial_realization schema_version must be "
+                   f"{SPATIAL_REALIZATION_SCHEMA_VERSION}.")
+    if sr.get("structured_bindings") != []:
+        raise _bad("Initial M10 Path B requires structured_bindings to "
+                   "be exactly empty.")
+    artifacts = sr.get("derived_artifacts")
+    if not isinstance(artifacts, list) or not artifacts:
+        raise _bad("spatial_realization.derived_artifacts must be a "
+                   "non-empty list.")
+    _exact_keys(sr, {
+        "schema_version", "spatial_continuity_hash",
+        "realization_profile_hash", "structured_bindings",
+        "derived_artifacts", "advisory_omissions",
+    }, "spatial_realization")
+    if not isinstance(sr.get("advisory_omissions"), list):
+        raise _bad("advisory_omissions must be a list.")
+    seen_keys: set[str] = set()
+    seen_positions: set[int] = set()
+    previous_position: int | None = None
+    for index, a in enumerate(artifacts):
+        if not isinstance(a, dict):
+            raise _bad(f"derived_artifacts[{index}] must be an object.")
+        _exact_keys(a, {
+            "input_key", "position", "artifact_role",
+            "derived_spatial_artifact_id", "spec_hash",
+            "runtime_fingerprint_hash", "blob_hash",
+        }, f"derived_artifacts[{index}]")
+        key = a["input_key"]
+        if not isinstance(key, str) or not key:
+            raise _bad("derived artifact input_key must be non-empty.")
+        if key in seen_keys:
+            raise _bad(f"duplicate derived input_key {key!r}.")
+        seen_keys.add(key)
+        pos = a["position"]
+        if not isinstance(pos, int) or isinstance(pos, bool) or pos < 0:
+            raise _bad("derived artifact position must be a non-negative "
+                       "int.")
+        if pos in seen_positions:
+            raise _bad(f"duplicate derived position {pos}.")
+        seen_positions.add(pos)
+        if previous_position is None:
+            if pos != 0:
+                raise _bad("derived_artifacts list must start at "
+                           "position zero.")
+        elif pos != previous_position + 1:
+            raise _bad("derived_artifacts list order is not the canonical "
+                       "contiguous position order.")
+        previous_position = pos
+        role = a["artifact_role"]
+        if pos == 0 and role != "spatial.world_depth":
+            raise _bad("position zero must be the world depth stream.")
+        if pos > 0 and role != "spatial.entity_depth":
+            raise _bad("entity positions must carry the entity depth "
+                       "role.")
+        if str(a.get("derived_spatial_artifact_id", "")).startswith(
+                "pending:"):
+            raise _bad(f"provisional pending: identity for {key!r}.")
+        for field in ("spec_hash", "runtime_fingerprint_hash",
+                      "blob_hash"):
+            v = a[field]
+            if not isinstance(v, str) or len(v) != 64:
+                raise _bad(f"derived artifact {field} must be 64-hex "
+                           "sha256.")
+
+
 def validate_spec_v3(spec: dict) -> None:
     """Validate the v3 lattice rules and identity retention."""
     if spec.get("schema_version") != WORKFLOW_SPEC_SCHEMA_VERSION_3:
@@ -145,7 +226,8 @@ def spec_v3_bytes_hash(spec: dict) -> tuple[str, str]:
 __all__ = [
     "WORKFLOW_SPEC_SCHEMA_VERSION_3", "SPATIAL_REALIZATION_SCHEMA_VERSION",
     "build_spatial_realization_block", "compose_workflow_spec_v3",
-    "validate_spec_v3", "spec_v3_bytes_hash",
+    "validate_spec_v3", "validate_spatial_realization_block_history",
+    "spec_v3_bytes_hash",
 ]
 
 

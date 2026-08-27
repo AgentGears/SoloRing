@@ -344,7 +344,8 @@ def _launch_attested_executor() -> dict:
         launched_at=time.strftime("%Y-%m-%dT%H:%M:%S+00:00"),
         pid=pid,
         process_start_fingerprint=capture_process_start_fingerprint(pid),
-        executor_origin="http://127.0.0.1:8199")
+        executor_origin="http://127.0.0.1:8199",
+        custom_node_whitelist=("ComfyUI-WanVideoWrapper",))
     att_dir = DATA_DIR / "comfy-fingerprint"
     att_dir.mkdir(parents=True, exist_ok=True)
     (att_dir / "deployment_attestation.json").write_text(

@@ -195,6 +195,38 @@ async def resolve_capability(
     )
 
 
+def _load_verified_schema3_workflow_spec(generation) -> dict:
+    """One production seam for the stored schema-3 WorkflowSpec (E-080
+    cells 18/19/20): parse the stored BYTES (malformed JSON fails
+    closed), verify the canonical hash, and verify the stored bytes ARE
+    canonical — a reordered/pretty-printed document is historical
+    corruption, not an accepted equivalence."""
+    import json as _json
+
+    from soloring.domain.canonical import (
+        canonical_hash as _spec_hash,
+        canonical_json_str as _spec_canonical,
+    )
+    from soloring.errors import internal_invariant
+
+    try:
+        spec = _json.loads(generation.workflow_spec_json)
+    except ValueError as exc:
+        raise internal_invariant(
+            f"Stored schema-3 workflow spec bytes are not valid JSON: "
+            f"{exc}") from exc
+    if _spec_hash(spec) != generation.workflow_spec_hash:
+        raise internal_invariant(
+            "Stored schema-3 workflow spec bytes disagree with the "
+            "persisted workflow_spec_hash."
+        )
+    if _spec_canonical(spec) != generation.workflow_spec_json:
+        raise internal_invariant(
+            "Stored schema-3 workflow spec bytes are not canonical."
+        )
+    return spec
+
+
 def _verify_schema3_stored_spec_canonical(spec: dict,
                                            stored_json: str) -> None:
     """E-106 B3a / corruption cell 20: the stored schema-3 WorkflowSpec
@@ -229,7 +261,22 @@ def verify_schema3_runtime_environment(fingerprint_doc: dict,
     )
 
     rr = fingerprint_doc.get("m10_spatial_runtime") or {}
-    attestation = load_live_attestation(settings)
+    # The required custom-node IDENTITY is derived from the CAPTURED
+    # runtime requirement — both the whitelisted NAME and the COMMIT must
+    # match the attested deployment (a correct commit attached to the
+    # wrong node is a wrong executable extension set).
+    required_nodes = rr.get("custom_nodes") or {}
+    if len(required_nodes) != 1:
+        raise SoloRingError(
+            ErrorCode.EXECUTION_MODEL_INCOMPATIBLE,
+            f"The captured fingerprint requires {len(required_nodes)} "
+            "custom nodes; the v4 single-node deployment attestation "
+            "cannot close that requirement set.",
+            status_code=503,
+        )
+    required_name, required_commit = next(iter(required_nodes.items()))
+    attestation = load_live_attestation(
+        settings, expected_whitelist=(required_name,))
     if attestation.comfyui_commit != rr.get("comfyui_commit"):
         raise SoloRingError(
             ErrorCode.EXECUTION_MODEL_INCOMPATIBLE,
@@ -238,15 +285,12 @@ def verify_schema3_runtime_environment(fingerprint_doc: dict,
             f"{rr.get('comfyui_commit')}.",
             status_code=503,
         )
-    wrapper = (rr.get("custom_nodes") or {}).get(
-        "ComfyUI-WanVideoWrapper")
-    if wrapper is not None and attestation.gguf_commit != wrapper:
-        # the v4 attestation's single whitelisted custom-node commit slot
-        # carries the WanVideoWrapper commit for the M10 deployment
+    if attestation.gguf_commit != required_commit:
         raise SoloRingError(
             ErrorCode.EXECUTION_MODEL_INCOMPATIBLE,
-            f"Live executor custom-node commit {attestation.gguf_commit} "
-            f"disagrees with the captured WanVideoWrapper pin {wrapper}.",
+            f"Live executor custom-node {required_name!r} commit "
+            f"{attestation.gguf_commit} disagrees with the captured pin "
+            f"{required_commit}.",
             status_code=503,
         )
     verify_attested_process_live(attestation, settings)
@@ -448,17 +492,10 @@ async def _drive(
                     execute_schema3_derived_inputs,
                 )
 
-                if _spec_hash(spec) != generation.workflow_spec_hash:
-                    raise internal_invariant(
-                        "Stored schema-3 workflow spec bytes disagree with "
-                        "the persisted workflow_spec_hash."
-                    )
-                # E-106 B3a / corruption cell 20: the STORED BYTES must
-                # themselves be canonical — a semantically equal but
-                # noncanonical (reordered/pretty-printed) document is
-                # historical corruption, not an accepted equivalence.
-                _verify_schema3_stored_spec_canonical(
-                    spec, generation.workflow_spec_json)
+                # E-080 cells 18/19/20 through ONE production seam: parse
+                # stored bytes, verify canonical hash, verify stored bytes
+                # ARE canonical.
+                spec = _load_verified_schema3_workflow_spec(generation)
                 manifest = parse_manifest_v3(
                     manifest_bytes.decode("utf-8")
                 )

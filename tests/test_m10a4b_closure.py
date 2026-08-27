@@ -58,7 +58,7 @@ async def test_schema3_worker_uploads_exact_retained_bytes(
     # the uploaded bytes ARE the retained physical Blob bytes
     assert hashlib.sha256(data).hexdigest() == ids["blob"]
     assert filename.startswith("world_depth_") and subfolder.startswith(
-        "soloring-der-")
+        "soloring_gen_")
     assert verified[0].execution_reference == f"{subfolder}/{filename}"
 
 

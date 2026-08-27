@@ -106,16 +106,25 @@ async def execute_schema3_derived_inputs(
     verified physical Blob path. A retained D0 Blob that parses as
     concatenated PNG frames is uploaded frame-per-file (the certified
     consumption shape); any other content is uploaded whole."""
-    from pathlib import Path as _Path
-
+    from soloring.executors.comfy.input_materializer import (
+        attempt_namespace,
+        validate_returned_reference,
+    )
     from soloring.executors.comfy.translate import comfy_input_reference
 
     verified = await load_verified_derived_inputs(
         session, store, generation_id=generation_id,
         workflow_spec=workflow_spec, manifest_v3=manifest_v3)
     for v in verified:
-        subfolder = (f"soloring-der-{generation_id[:8]}"
-                     f"-{attempt_id[:8]}")
+        # R4 §2.4 / E-106 B4: the predecessor's FULL-identity attempt
+        # namespace (complete generation + attempt ids under the bounded
+        # namespace policy — never a truncated 8-char prefix) and the
+        # predecessor's hostile validation of the returned upload
+        # reference: a hostile/incorrect upload response cannot escape
+        # the requested attempt namespace.
+        namespace = attempt_namespace(generation_id, attempt_id)
+        from pathlib import Path as _Path
+
         data = _Path(v.local_path).read_bytes()
         frames = _split_png_frames(data)
         if frames and len(frames) > 1:
@@ -123,7 +132,8 @@ async def execute_schema3_derived_inputs(
             for i, frame in enumerate(frames):
                 filename = f"{v.input_key}_{v.blob_hash[:16]}_{i:03d}.png"
                 name, sub = await client.upload_bytes(
-                    data=frame, filename=filename, subfolder=subfolder)
+                    data=frame, filename=filename, subfolder=namespace)
+                validate_returned_reference(name, sub, namespace)
                 refs.append(comfy_input_reference(name, sub))
             v.frame_references = tuple(refs)
         else:
@@ -131,7 +141,8 @@ async def execute_schema3_derived_inputs(
             filename = f"{v.input_key}_{v.blob_hash[:16]}{ext}"
             name, sub = await client.upload(
                 source_path=_Path(v.local_path), filename=filename,
-                subfolder=subfolder)
+                subfolder=namespace)
+            validate_returned_reference(name, sub, namespace)
             v.execution_reference = comfy_input_reference(name, sub)
     return verified
 
@@ -181,6 +192,17 @@ async def load_verified_derived_inputs(
                     "Captured spatial authority hash disagrees with the "
                     "Generation's ShotRevision spatial history.")
     project_id = ctx["project_id"]
+
+    # E-106 B3 round 2 / cells 22+51: the STRICT historical semantic
+    # validator runs BEFORE the dict conversion consumes list order —
+    # structured_bindings emptiness, list-order == canonical position
+    # order, uniqueness, world-at-zero, no pending: identities.
+    from soloring.spatial.spec3 import (
+        validate_spatial_realization_block_history,
+    )
+
+    validate_spatial_realization_block_history(
+        workflow_spec.get("spatial_realization"))
 
     # E-106 B3b: the immutable WorkflowSpec's derived identities are
     # cross-checked against the sibling rows AND the provenance before

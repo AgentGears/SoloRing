@@ -93,34 +93,64 @@ async def test_authority_mutation_during_realization_changes_nothing(
         [r["blob_hash"] for r in baseline_rows]
 
 
-def _barrier_after(engine, marker_prefix: str):
-    """Deterministic contested-order barrier (E-081/APR-033): returns an
-    asyncio.Event that fires exactly when the FIRST statement starting
-    with ``marker_prefix`` reaches the cursor — the second contender
-    awaits it before starting, so its write attempt necessarily meets
-    the first contender's OPEN write unit at the real SQLite seam (WAL
-    single-writer serializes them). No sleeps; contention is forced."""
-    from sqlalchemy import event
+def _park_after_statement(engine, statement_prefix: str):
+    """Deterministic contested-order PARKING seam (E-081/APR-033): wraps
+    ``AsyncConnection.exec_driver_sql`` so the FIRST execution of a
+    driver statement starting with ``statement_prefix`` runs FOR REAL,
+    signals ``acquired`` only AFTER successful execution, and then PARKS
+    (awaits ``release``) with the transaction still open. The follower
+    starts between ``acquired`` and ``release`` — contention with an
+    OPEN predecessor unit is mechanically unavoidable, not scheduled."""
+    from sqlalchemy.ext.asyncio import AsyncConnection
 
-    fired = asyncio.Event()
+    acquired = asyncio.Event()
+    release = asyncio.Event()
+    real = AsyncConnection.exec_driver_sql
+    state = {"armed": True}
 
-    def _spy(conn, cursor, statement, parameters, context,
-             executemany=False):
-        if not fired.is_set() and statement.strip().startswith(
-                marker_prefix):
-            fired.set()
+    async def _parked(self, statement, *args, **kwargs):
+        result = await real(self, statement, *args, **kwargs)
+        if (state["armed"] and isinstance(statement, str)
+                and statement.strip().startswith(statement_prefix)):
+            state["armed"] = False
+            acquired.set()
+            await release.wait()
+        return result
 
-    event.listen(engine.sync_engine, "before_cursor_execute", _spy)
-    return fired, lambda: event.remove(engine.sync_engine,
-                                       "before_cursor_execute", _spy)
+    AsyncConnection.exec_driver_sql = _parked
+    return acquired, release, lambda: setattr(
+        AsyncConnection, "exec_driver_sql", real)
+
+
+async def _park_after_generation_insert():
+    """The same parking discipline at the Generation INSERT: the real
+    INSERT..RETURNING executes, signals, and parks before the commit."""
+    from soloring.generation import repository as repo
+
+    acquired = asyncio.Event()
+    release = asyncio.Event()
+    real = repo._execute_generation_insert
+    state = {"armed": True}
+
+    async def _parked(session, params):
+        row = await real(session, params)
+        if state["armed"]:
+            state["armed"] = False
+            acquired.set()
+            await release.wait()
+        return row
+
+    repo._execute_generation_insert = _parked
+    return acquired, release, lambda: setattr(
+        repo, "_execute_generation_insert", real)
 
 
 async def test_concurrent_identical_registrations_converge(
         factory, engine, settings):
     """§22.3/E-084: two real concurrent registrations of the same
-    prepared artifact converge on one identity through the real
-    BEGIN IMMEDIATE seam — the second contender is RELEASED only once
-    the first holds the write lock (deterministic barrier)."""
+    prepared artifact converge on one identity. The LEADER is parked
+    AFTER its BEGIN IMMEDIATE has actually executed (transaction open);
+    the follower starts while the leader's unit is still open."""
     pid = "00000000-0000-4000-8000-0000000000c0"
     await _project(factory, pid)
     store = BlobStore(settings)
@@ -136,14 +166,19 @@ async def test_concurrent_identical_registrations_converge(
             return await register_derived_artifact(
                 session, store, pid, prepared)
 
-    fired, detach = _barrier_after(engine, "BEGIN IMMEDIATE")
+    acquired, release, restore = _park_after_statement(
+        engine, "BEGIN IMMEDIATE")
     try:
         first = asyncio.create_task(_register())
-        await asyncio.wait_for(fired.wait(), timeout=30)
+        await asyncio.wait_for(acquired.wait(), timeout=30)
+        # leader's BEGIN IMMEDIATE has EXECUTED and the connection is
+        # parked inside the open unit — start the follower NOW
         second = asyncio.create_task(_register())
+        await asyncio.sleep(0)  # yield one loop tick: follower is in flight
+        release.set()
         a, b = await asyncio.gather(first, second)
     finally:
-        detach()
+        restore()
     assert a == b
     async with engine.connect() as conn:
         n = (await conn.execute(text(
@@ -155,9 +190,8 @@ async def test_concurrent_divergent_registration_fails_nondeterministic(
         factory, engine, settings):
     """§22.3: same spec/runtime + different Blob → exactly one identity
     survives; the loser fails DERIVED_SPATIAL_NONDETERMINISTIC. BOTH
-    commit orders are forced deterministically (barrier at the write
-    seam): each round releases the second contender only after the first
-    holds BEGIN IMMEDIATE."""
+    commit orders are forced: each round parks the leader inside its
+    OPEN write unit and starts the follower before release."""
     store = BlobStore(settings)
     blob = await _mkblob(store, b"race-control-bytes")
     other = await _mkblob(store, b"divergent-control-bytes")
@@ -172,25 +206,30 @@ async def test_concurrent_divergent_registration_fails_nondeterministic(
     assert divergent.spec_hash == first.spec_hash
     assert divergent.blob_hash != first.blob_hash
 
-    async def _register(p):
-        async with factory() as session:
-            return await register_derived_artifact(session, store, _pid, p)
-
-    for leader, follower in ((first, divergent), (divergent, first)):
-        _pid = "00000000-0000-4000-8000-0000000000c%d" % (
-            1 if leader is first else 2)
-        await _project(factory, _pid)
+    for leader, follower, pid in (
+            (first, divergent, "00000000-0000-4000-8000-0000000000c1"),
+            (divergent, first, "00000000-0000-4000-8000-0000000000c2")):
+        await _project(factory, pid)
         for h in (leader.blob_hash, follower.blob_hash):
             await _blob_row(factory, store, h)
-        fired, detach = _barrier_after(engine, "BEGIN IMMEDIATE")
+
+        async def _register(p, target_pid=pid):
+            async with factory() as session:
+                return await register_derived_artifact(
+                    session, store, target_pid, p)
+
+        acquired, release, restore = _park_after_statement(
+            engine, "BEGIN IMMEDIATE")
         try:
             lead_task = asyncio.create_task(_register(leader))
-            await asyncio.wait_for(fired.wait(), timeout=30)
+            await asyncio.wait_for(acquired.wait(), timeout=30)
             follow_task = asyncio.create_task(_register(follower))
+            await asyncio.sleep(0)
+            release.set()
             results = await asyncio.gather(lead_task, follow_task,
                                            return_exceptions=True)
         finally:
-            detach()
+            restore()
         ok = [r for r in results if not isinstance(r, Exception)]
         bad = [r for r in results if isinstance(r, Exception)]
         assert len(ok) == 1 and len(bad) == 1, results
@@ -199,29 +238,31 @@ async def test_concurrent_divergent_registration_fails_nondeterministic(
         async with engine.connect() as conn:
             n = (await conn.execute(text(
                 "SELECT COUNT(*) FROM derived_spatial_artifacts "
-                "WHERE project_id = :p"), {"p": _pid})).scalar()
+                "WHERE project_id = :p"), {"p": pid})).scalar()
         assert n == 1
 
 
 async def test_concurrent_generation_creations_each_atomic(
         factory, engine, settings, tmp_path):
     """§22.4: concurrent schema-3 creations for the same Shot create
-    distinct attempts sharing convergent derived identities; no queued
-    Generation exists with missing spatial siblings. The second creation
-    is released only after the first contender's Generation INSERT is
-    in-flight (deterministic barrier at the write seam)."""
+    distinct attempts sharing convergent derived identities. The FIRST
+    creation is parked AFTER its Generation INSERT..RETURNING has
+    executed (transaction open, siblings not yet written); the second
+    creation starts before release."""
     pkg = await _schema3_package(tmp_path)
     seed = await _spatial_seed(factory, staged=2, extents=_EXTENTS)
     s = _spatial_settings(settings, pkg)
 
-    fired, detach = _barrier_after(engine, "INSERT INTO generations")
+    acquired, release, restore = await _park_after_generation_insert()
     try:
         g1_task = asyncio.create_task(_create(factory, s, seed))
-        await asyncio.wait_for(fired.wait(), timeout=60)
+        await asyncio.wait_for(acquired.wait(), timeout=60)
         g2_task = asyncio.create_task(_create(factory, s, seed))
+        await asyncio.sleep(0)
+        release.set()
         g1, g2 = await asyncio.gather(g1_task, g2_task)
     finally:
-        detach()
+        restore()
     assert g1.id != g2.id
     r1 = await _siblings(engine, g1.id)
     r2 = await _siblings(engine, g2.id)

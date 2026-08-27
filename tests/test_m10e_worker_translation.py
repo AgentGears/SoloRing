@@ -395,9 +395,9 @@ async def test_transport_splits_retained_d0_blob_into_exact_frames(
     assert b"".join(data for _, _, data in uploads) == blob_content
     assert all(name.endswith(".png")
                for name, _, _ in uploads)
+    ns = f"soloring_gen_{ids['generation_id']}_att_"         f"11111111-1111-4111-8111-111111111114"
     assert [ref for ref in verified[0].frame_references] == [
-        f"soloring-der-{ids['generation_id'][:8]}"
-        f"-11111111/{name}"
+        f"{ns}/{name}"
         for name, _, _ in uploads]
 
 
@@ -517,3 +517,63 @@ async def test_b2_live_runtime_closure_pass_and_drifts(tmp_path,
     with pytest.raises(SoloRingError) as ei:
         cp6.verify_schema3_runtime_environment(fp6, settings6)
     assert ei.value.code == ErrorCode.EXECUTION_MODEL_INCOMPATIBLE
+
+
+
+
+# ------------- E-106 round-2: attestation custom-node identity (B2) ------
+
+async def test_b2_wrong_whitelist_name_with_correct_commit_rejected(
+        tmp_path, monkeypatch):
+    """A correct wrapper COMMIT attached to the WRONG whitelisted node
+    is a wrong executable extension set: the schema-3 closure derives
+    the required node NAME from the captured fingerprint and rejects
+    the mismatch (hermetic; the live smoke exercises the real chain)."""
+    from soloring.errors import ErrorCode, SoloRingError
+    from soloring.worker import comfy_pipeline as cp
+
+    cp, settings1, fp1 = await _closure_env(tmp_path / "a", monkeypatch)
+    cp.verify_schema3_runtime_environment(fp1, settings1)  # positive
+
+    # same commits + model bytes + live-process proof, but the
+    # attestation whitelists the WRONG node name
+    doc2 = _attestation_doc(comfy="b" * 40, wrapper="c" * 40,
+                            origin="http://127.0.0.1:8199")
+    doc2["attestation"]["custom_node_policy"]["whitelist"] = ["WrongNode"]
+    _, settings2, fp2 = await _closure_env(
+        tmp_path / "b", monkeypatch, attestation=doc2)
+    with pytest.raises(SoloRingError) as ei:
+        cp.verify_schema3_runtime_environment(fp2, settings2)
+    assert ei.value.code == ErrorCode.EXECUTION_MODEL_INCOMPATIBLE
+
+
+def test_m5_predecessor_wrong_singleton_whitelist_rejected(tmp_path):
+    """The frozen M5 v4 contract: the DEFAULT loader requires exactly
+    ComfyUI-GGUF; a wrong single-node whitelist is rejected for the
+    predecessor path (schema-3 supplies its captured name explicitly)."""
+    import json as _json
+
+    from soloring.executors.comfy.capability_record import (
+        CapabilityRecordInvalid,
+        load_deployment_attestation,
+    )
+
+    d = tmp_path / "comfy-fingerprint"
+    d.mkdir(parents=True)
+    doc = _attestation_doc(origin="http://127.0.0.1:8188")
+    doc["attestation"]["custom_node_policy"]["whitelist"] = ["ComfyUI-GGUF"]
+    (d / "deployment_attestation.json").write_text(_json.dumps(doc))
+    # the GGUF-shaped default is accepted…
+    load_deployment_attestation(tmp_path)
+    # …and the wrong singleton is rejected
+    doc["attestation"]["custom_node_policy"]["whitelist"] = ["WrongNode"]
+    (d / "deployment_attestation.json").write_text(_json.dumps(doc))
+    import pytest as _pytest
+
+    with _pytest.raises(CapabilityRecordInvalid, match="whitelist"):
+        load_deployment_attestation(tmp_path)
+    # the M10E caller supplies the captured name explicitly
+    load_deployment_attestation(tmp_path,
+                                expected_whitelist=("WrongNode",))
+
+

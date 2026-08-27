@@ -237,7 +237,13 @@ async def test_cell21_pending_identity_in_workflow_spec_rejected(
                 session, BlobStore(settings),
                 generation_id=ids["generation_id"], workflow_spec=spec,
                 manifest_v3=_manifest_doc())
-    assert ei.value.code == ec.DERIVED_SPATIAL_PROVENANCE_MISMATCH
+    # the STRICT history validator fires first (semantic identity
+    # violation) — either closed class is fail-closed per §20
+    from soloring.errors import ErrorCode as _EC
+
+    assert ei.value.code in (
+        ec.DERIVED_SPATIAL_PROVENANCE_MISMATCH,
+        _EC.SPATIAL_REALIZATION_BINDING_INVALID)
 
 
 async def test_cell37_project_ownership_mismatch(factory, engine, settings):
@@ -321,32 +327,40 @@ def _new_uuid() -> str:
 # --------------------------------------------------------------- append ----
 
 async def test_cells3to5_descriptor_hash_disagreements(settings, tmp_path):
-    """Cells 3/4/5: descriptor<->template/profile/fingerprint hash
-    disagreements are incoherent at Stage-0 capture."""
+    """Cells 3/4/5 — full five-step E-080 cycle: positive capture ->
+    member tamper -> PackageIntegrity -> exact byte restoration ->
+    restored positive capture."""
     from soloring.realization.packages import (
         PackageIntegrity,
         capture_current_release,
     )
     from tests.test_m10e_package3_production import _schema3_package, \
         _settings_for
-    import json as _json
-
-    from soloring.domain.canonical import canonical_json_str
 
     for member in ("workflow.json", "realization-profile.json",
                    "execution-model-fingerprint.json"):
         d = await _schema3_package(tmp_path / member.replace(".", "_"))
-        doc = _json.loads((d / member).read_bytes())
-        if isinstance(doc, dict):
-            doc["mutated"] = True
-        (d / member).write_bytes(canonical_json_str(doc).encode())
+        # positive control
+        release = await capture_current_release(
+            _settings_for(settings, d))
+        assert release.schema_version == 3
+        original = (d / member).read_bytes()
+        tampered = bytearray(original)
+        tampered[-8:] = b"tampered"
+        (d / member).write_bytes(bytes(tampered))
         with pytest.raises(PackageIntegrity):
             await capture_current_release(_settings_for(settings, d))
+        # exact restoration -> restored positive control
+        (d / member).write_bytes(original)
+        release2 = await capture_current_release(
+            _settings_for(settings, d))
+        assert release2.manifest_hash == release.manifest_hash
 
 
 def test_cells13_15_manifest_grammar_corruptions():
-    """Cell 13: unknown spatial role; cell 15: duplicate/incompatible
-    entity binding — both rejected by the frozen manifest-v3 grammar."""
+    """Cells 13/15 — five-step cycles at the frozen parser seam: valid
+    document (positive) -> isolated corruption -> Package3Invalid ->
+    restoration (fresh valid copy) -> restored positive."""
     import json as _json
 
     from soloring.spatial.package3 import Package3Invalid, parse_manifest_v3
@@ -359,12 +373,20 @@ def test_cells13_15_manifest_grammar_corruptions():
                             "node": "101", "field": "control_images",
                             "format": "soloring.spatial.v1"}}}
 
+    # positive control
+    assert parse_manifest_v3(
+        _json.loads(_json.dumps(base)))["schema_version"] == "3"
+
+    # cell 13: unknown spatial role
     bad_role = _json.loads(_json.dumps(base))
     bad_role["spatial_bindings"]["world_depth"]["artifact_role"] = \
         "spatial.bogus"
     with pytest.raises(Package3Invalid, match="artifact_role"):
         parse_manifest_v3(bad_role)
+    # restored positive (fresh untampered copy)
+    assert parse_manifest_v3(_json.loads(_json.dumps(base))) is not None
 
+    # cell 15: three entity bindings (capacity 2 exceeded)
     dup = _json.loads(_json.dumps(base))
     for key, node in (("e1", "111"), ("e2", "121"), ("e3", "131")):
         dup["inputs"][key] = {}
@@ -373,6 +395,8 @@ def test_cells13_15_manifest_grammar_corruptions():
             "field": "control_images", "format": "soloring.spatial.v1"}
     with pytest.raises(Package3Invalid, match="entity_depth"):
         parse_manifest_v3(dup)
+    # restored positive
+    assert parse_manifest_v3(_json.loads(_json.dumps(base))) is not None
 
 
 async def test_cell32_blob_db_row_missing(factory, engine, settings):
@@ -494,3 +518,158 @@ async def test_cells42_43_extra_missing_sibling_vs_spec(factory, engine,
             {"g": ids["generation_id"], "a": ids["artifact"],
              "b": ids["blob"]})
     assert len(await _verify(factory, settings, ids)) == 1
+
+
+
+
+# ------------------- E-106 round-2: cells 22/51 + duplicate shadow -------
+
+async def test_cell22_nonempty_structured_bindings_rejected(
+        factory, engine, settings):
+    """Cell 22 as HISTORICAL corruption: a stored WorkflowSpec tampered
+    with non-empty structured_bindings (rehashed consistently) is
+    rejected by the strict history validator before any consumption."""
+    ids = await _seed_spatial_generation(factory, engine, settings)
+    assert len(await _verify(factory, settings, ids)) == 1
+    spec = _spec(ids["continuity"], ids)
+    spec["spatial_realization"]["structured_bindings"] = [
+        {"anything": "non-empty"}]
+    async with factory() as session:
+        with pytest.raises(SoloRingError) as ei:
+            await load_verified_derived_inputs(
+                session, BlobStore(settings),
+                generation_id=ids["generation_id"], workflow_spec=spec,
+                manifest_v3=_manifest_doc())
+    from soloring.errors import ErrorCode as _EC
+
+    assert ei.value.code == _EC.SPATIAL_REALIZATION_BINDING_INVALID
+
+
+async def test_cell51_list_order_violation_rejected(
+        factory, engine, settings, tmp_path):
+    """Cell 51 as HISTORICAL corruption: rotating the derived_artifacts
+    LIST while keeping every row coordinate correct is invisible to a
+    dict-based check — the strict history validator enforces list order
+    == canonical position order before the dict conversion. Full five-step
+    cycle against a REAL service-created generation."""
+    from soloring.spatial import production_package as prod
+    from soloring.spatial.package3 import parse_manifest_v3
+
+    from tests.test_m10e_generation import (
+        _EXTENTS,
+        _create,
+        _schema3_package,
+        _spatial_seed,
+        _spatial_settings,
+    )
+
+    pkg = await _schema3_package(tmp_path)
+    seed = await _spatial_seed(factory, staged=2, extents=_EXTENTS)
+    gen = await _create(factory, _spatial_settings(settings, pkg), seed)
+    manifest_v3 = parse_manifest_v3(prod.production_manifest_v3())
+
+    async with engine.connect() as conn:
+        stored = (await conn.execute(text(
+            "SELECT workflow_spec_json FROM generations WHERE id=:g"),
+            {"g": gen.id})).scalar()
+    import json as _json
+
+    spec = _json.loads(stored)
+
+    async def _load(spec_obj):
+        async with factory() as session:
+            return await load_verified_derived_inputs(
+                session, BlobStore(settings), generation_id=gen.id,
+                workflow_spec=spec_obj, manifest_v3=manifest_v3)
+
+    assert len(await _load(spec)) == 3  # positive control
+
+    arts = spec["spatial_realization"]["derived_artifacts"]
+    spec["spatial_realization"]["derived_artifacts"] = [
+        arts[2], arts[0], arts[1]]  # coordinates all correct, order not
+    with pytest.raises(SoloRingError) as ei:
+        await _load(spec)
+    from soloring.errors import ErrorCode as _EC
+
+    assert ei.value.code == _EC.SPATIAL_REALIZATION_BINDING_INVALID
+
+    # restore exact bytes and re-prove the positive control
+    assert len(await _load(_json.loads(stored))) == 3
+
+
+async def test_duplicate_input_key_shadow_rejected(factory, engine,
+                                                   settings):
+    """A duplicate input_key entry that a dict comprehension would
+    silently shadow is rejected by the strict history validator."""
+    ids = await _seed_spatial_generation(factory, engine, settings)
+    assert len(await _verify(factory, settings, ids)) == 1
+    spec = _spec(ids["continuity"], ids)
+    arts = spec["spatial_realization"]["derived_artifacts"]
+    spec["spatial_realization"]["derived_artifacts"] = [arts[0], arts[0]]
+    async with factory() as session:
+        with pytest.raises(SoloRingError) as ei:
+            await load_verified_derived_inputs(
+                session, BlobStore(settings),
+                generation_id=ids["generation_id"], workflow_spec=spec,
+                manifest_v3=_manifest_doc())
+    from soloring.errors import ErrorCode as _EC
+
+    assert ei.value.code == _EC.SPATIAL_REALIZATION_BINDING_INVALID
+
+
+# ----------------- E-080 five-step cycles for cells 18/19/20 (real fn) ---
+
+class _Gen:
+    def __init__(self, spec_json: str, spec_hash: str) -> None:
+        self.workflow_spec_json = spec_json
+        self.workflow_spec_hash = spec_hash
+
+
+async def test_cells18_19_20_five_step_cycle():
+    """Positive control → isolated corruption → fail-closed → exact
+    restoration → restored positive, through the REAL production loader
+    (parse + hash + canonical-bytes)."""
+    import json as _json
+
+    from soloring.domain.canonical import canonical_hash, canonical_json_str
+    from soloring.errors import SoloRingError
+    from soloring.worker.comfy_pipeline import (
+        _load_verified_schema3_workflow_spec,
+    )
+
+    spec = _spec("9" * 64, {"artifact": "x", "blob": "ab" * 32,
+                            "spec_hash": "cd" * 32,
+                            "runtime_hash": "ef" * 32})
+    good_json = canonical_json_str(spec)
+    good_hash = canonical_hash(spec)
+    # positive control
+    assert _load_verified_schema3_workflow_spec(
+        _Gen(good_json, good_hash)) == spec
+
+    # cell 18: malformed stored JSON
+    with pytest.raises(SoloRingError, match="not valid JSON"):
+        _load_verified_schema3_workflow_spec(
+            _Gen("{broken", good_hash))
+    # restored positive
+    assert _load_verified_schema3_workflow_spec(
+        _Gen(good_json, good_hash)) == spec
+
+    # cell 19: stored hash disagreement (content kept, hash wrong)
+    with pytest.raises(SoloRingError, match="disagree"):
+        _load_verified_schema3_workflow_spec(
+            _Gen(good_json, "00" * 32))
+    assert _load_verified_schema3_workflow_spec(
+        _Gen(good_json, good_hash)) == spec
+
+    # cell 20: noncanonical but semantically equal bytes (hash of the
+    # canonical object still matches — only the BYTES differ)
+    reordered = _json.dumps(spec, sort_keys=True, indent=1)
+    if reordered == good_json:
+        reordered = _json.dumps(
+            {k: spec[k] for k in reversed(list(spec))}, indent=1)
+    with pytest.raises(SoloRingError, match="not canonical"):
+        _load_verified_schema3_workflow_spec(
+            _Gen(reordered, good_hash))
+    # restored positive
+    assert _load_verified_schema3_workflow_spec(
+        _Gen(good_json, good_hash)) == spec

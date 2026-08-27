@@ -14,7 +14,7 @@ acceptance test that asserts the same fact (isolation/invariance).
 |---|---|---|
 | 1 | schema-3 descriptor malformed | TEST tests/test_m10e_package3_production.py::test_descriptor_malformed_fails |
 | 2 | descriptor/manifest hash disagreement | TEST …::test_descriptor_hash_disagreement_fails |
-| 3 | descriptor/template hash disagreement | TEST tests/test_m10e_corruption.py::test_cells3to5_descriptor_hash_disagreements |
+| 3 | descriptor/template hash disagreement | TEST …::test_cells3to5_descriptor_hash_disagreements (five-step cycle: positive capture → tamper → fail → restore → positive) |
 | 4 | descriptor/profile hash disagreement | TEST …::test_cells3to5_descriptor_hash_disagreements |
 | 5 | descriptor/fingerprint hash disagreement | TEST …::test_cells3to5_descriptor_hash_disagreements |
 | 6 | historical manifest bytes missing | INHERITED tests/test_m5a3_artifacts.py::test_missing_historical_manifest_and_template |
@@ -29,11 +29,11 @@ acceptance test that asserts the same fact (isolation/invariance).
 | 15 | manifest duplicate/incompatible entity binding | TEST …::test_cells13_15… + INHERITED …::test_manifest_three_entity_streams_rejected |
 | 16 | manifest binding node missing from template | TEST tests/test_m10e_package3_production.py::test_binding_node_missing_from_template_fails |
 | 17 | manifest binding field missing from node | TEST …::test_binding_field_missing_from_template_node_fails |
-| 18 | WorkflowSpec stored JSON malformed | PROOF worker pipeline parses `workflow_spec_json` before the schema-3 branch; malformed bytes fail the drive closed (M6/M9D `spec-hash tamper` precedent; schema-3 branch re-verifies) |
-| 19 | WorkflowSpec stored hash disagreement | PROOF comfy_pipeline schema-3 branch `_spec_hash(spec) != workflow_spec_hash` → INTERNAL_INVARIANT (source-verified; same seam as cell 20's dedicated test) |
+| 18 | WorkflowSpec stored JSON malformed | TEST tests/test_m10e_corruption.py::test_cells18_19_20_five_step_cycle (real production loader; full five-step cycle) |
+| 19 | WorkflowSpec stored hash disagreement | TEST …::test_cells18_19_20_five_step_cycle (same real seam, five-step cycle) |
 | 20 | WorkflowSpec non-canonical bytes | TEST tests/test_m10e_corruption.py::test_cell20_noncanonical_stored_spec_bytes_rejected (real production function) |
 | 21 | persisted `pending:` derived artifact ID | TEST …::test_cell21_pending_identity_in_workflow_spec_rejected |
-| 22 | non-empty structured_bindings in Path B | INHERITED tests/test_m10a4_package.py::test_profile_no_structured_camera_role + spec3.build_spatial_realization_block frozen rejection |
+| 22 | non-empty structured_bindings in Path B | TEST tests/test_m10e_corruption.py::test_cell22_nonempty_structured_bindings_rejected (historical, rehashed tamper) + INHERITED creation-time rejection |
 | 23 | derived spec JSON malformed | INHERITED tests/test_m10a_derived.py (parse_derived_spec → DERIVED_SPATIAL_SPEC_INVALID) |
 | 24 | derived spec non-canonical bytes | INHERITED tests/test_m10a_derived.py (validate_derived_provenance_row canonical-bytes check) |
 | 25 | derived spec hash disagreement | INHERITED tests/test_m10a_derived.py (projection `spec_hash` vs canonical) |
@@ -62,13 +62,13 @@ acceptance test that asserts the same fact (isolation/invariance).
 | 48 | current M10 authority changed after creation | PROOF same test (world/track/plan mutation) |
 | 49 | current changes before Exact Rerun | PROOF same test (rerun leg) |
 | 50 | same spec/runtime different Blob | TEST tests/test_m10e_races.py::test_concurrent_divergent_registration_fails_nondeterministic (both forced orders) |
-| 51 | derived_artifacts order/position vs canonical | PROOF E-022 canonical-order tests + worker spec↔row position check (cell-3b family) |
+| 51 | derived_artifacts list order/position vs canonical | TEST tests/test_m10e_corruption.py::test_cell51_list_order_violation_rejected (historical rotation, five-step cycle) |
 | 52 | ordinary/M9 key collides with derived key | TEST tests/test_m10e_atomic_persistence.py::test_cross_family_key_collision_fails_in_unit |
 | 53 | unrelated Project identity at production binding | TEST …::test_cell53_unrelated_project_identity_fails_closed |
 
-Cells 18/19 are the only PROOF-class entries without a dedicated
-negative test at the schema-3 seam; their enforcement is the same
-pipeline precondition immediately preceding cell 20's tested production
-function, and the M9D schema-2 tamper tests pin the identical pattern at
-the shared seam. If the reviewer requires dedicated negatives, they are
-a two-line addition to the cell-20 test through the same function.
+All 53 cells are TEST-class cycles through real production seams or
+STRUCTURAL storage-layer proofs; cells inherited from frozen predecessor
+suites remain binding regression coverage. Cells 22/51 additionally have
+dedicated HISTORICAL-corruption tests through the strict
+validate_spatial_realization_block_history seam (tampered + consistently
+rehashed stored spec, exact restoration, restored positive).
