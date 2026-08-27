@@ -180,17 +180,43 @@ def validate_schema3_fingerprint_template(fingerprint_v3: dict,
        exists on disk.
     """
     rr = (fingerprint_v3 or {}).get("m10_spatial_runtime") or {}
-    artifacts = rr.get("artifacts") or []
-    keys = [a.get("artifact_key") for a in artifacts
-            if isinstance(a, dict)]
+    artifacts = rr.get("artifacts")
+    if not isinstance(artifacts, list) or len(artifacts) != 4:
+        raise _bad(
+            "m10_spatial_runtime.artifacts must be a list of exactly the "
+            "four frozen model artifacts; got "
+            f"{0 if artifacts is None else len(artifacts)} entries")
+    keys: list[str] = []
+    for a in artifacts:
+        if not isinstance(a, dict):
+            raise _bad("fingerprint artifact entries must be objects")
+        keys.append(a.get("artifact_key"))
+        _exact_keys(a, {"artifact_key", "storage_root_key", "node",
+                        "field", "declared_name", "sha256"},
+                    f"fingerprint artifact {a.get('artifact_key')!r}")
+        for field in ("storage_root_key", "node", "field",
+                      "declared_name"):
+            _require_str(a.get(field),
+                         f"fingerprint artifact "
+                         f"{a.get('artifact_key')!r}.{field}")
+        sha = a.get("sha256")
+        if not isinstance(sha, str) or len(sha) != 64 \
+                or not set(sha) <= set("0123456789abcdef"):
+            raise _bad(
+                f"fingerprint artifact {a.get('artifact_key')!r}.sha256 "
+                "must be a lowercase 64-hex digest — an artifact without "
+                "immutable byte identity is not a hard-component "
+                "closure")
     required = {"wan_base", "depth_controlnet", "umt5_text_encoder",
                 "wan_vae"}
-    missing = sorted(required - set(keys))
-    extra = sorted(set(keys) - required)
-    if missing or extra:
+    if set(keys) != required or len(set(keys)) != len(keys):
+        missing = sorted(required - set(keys))
+        extra = sorted(set(keys) - required)
+        dupes = sorted({k for k in keys if keys.count(k) > 1})
         raise _bad(
             f"m10_spatial_runtime.artifacts must be exactly the frozen "
-            f"four {sorted(required)}; missing={missing}, extra={extra}")
+            f"four {sorted(required)} with unique artifact keys; "
+            f"missing={missing}, extra={extra}, duplicated={dupes}")
     if not isinstance(template, dict) or not template:
         raise _bad("captured workflow template is empty or malformed")
     for a in artifacts:

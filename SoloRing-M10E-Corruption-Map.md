@@ -52,18 +52,18 @@ regression coverage.
 | 38 | sibling role/scope mismatch | TEST …::test_cell38_role_scope_mismatch (five-step: positive create → corrupt binding → rollback → restored positive) |
 | 39 | sibling world position not zero | TEST …::test_cells39_40_sibling_coordinate_violations (five-step) |
 | 40 | sibling position gap | TEST …::test_cells39_40_sibling_coordinate_violations (five-step) |
-| 41 | sibling canonical entity order violation | TEST tests/test_m10e_atomic_persistence.py::test_entity_order_violation_fails |
+| 41 | sibling canonical entity order violation | TEST …::test_entity_order_violation_fails (five-step: positive create → swapped order → rollback → restored positive) |
 | 42 | extra sibling row versus WorkflowSpec | TEST …::test_cells42_43_extra_missing_sibling_vs_spec |
 | 43 | missing sibling row versus WorkflowSpec | TEST …::test_cells42_43_extra_missing_sibling_vs_spec |
 | 44 | sibling input key mismatch vs manifest/spec | TEST …::test_cell44_input_key_mismatch_vs_manifest |
-| 45 | derived upload reference missing at translation | TEST tests/test_m10e_worker_translation.py::test_missing_upload_reference_fails (now: no uploaded frame refs) |
-| 46 | extra derived upload reference at translation | TEST …::test_extra_derived_reference_fails |
+| 45 | derived upload reference missing at translation | TEST …::test_missing_upload_reference_fails (positive → missing → fail → restored positive) |
+| 46 | extra derived upload reference at translation | TEST …::test_extra_derived_reference_fails (positive → extra → fail → restored positive) |
 | 47 | current package changed after creation | TEST tests/test_m10e_rerun.py::test_current_authority_mutation_cannot_change_rerun_identity (five-step: positive rerun → mutation → unchanged → exact restoration → restored-positive rerun) |
 | 48 | current M10 authority changed after creation | TEST …::test_current_authority_mutation_cannot_change_rerun_identity (world/track/plan mutation leg of the five-step cycle) |
 | 49 | current changes before Exact Rerun | TEST …::test_current_authority_mutation_cannot_change_rerun_identity (rerun-under-mutation + restored legs) |
 | 50 | same spec/runtime different Blob | TEST tests/test_m10e_races.py::test_concurrent_divergent_registration_fails_nondeterministic (both forced orders) |
 | 51 | derived_artifacts list order/position vs canonical | TEST tests/test_m10e_corruption.py::test_cell51_list_order_violation_rejected (historical rotation, five-step cycle) |
-| 52 | ordinary/M9 key collides with derived key | TEST tests/test_m10e_atomic_persistence.py::test_cross_family_key_collision_fails_in_unit |
+| 52 | ordinary/M9 key collides with derived key | TEST …::test_cross_family_key_collision_fails_in_unit (five-step: positive → collision → rollback → restored positive) |
 | 53 | unrelated Project identity at production binding | TEST …::test_cell53_unrelated_project_identity_fails_closed (five-step: positive → cross-Project rebind → fail → exact restore → positive) |
 
 All 53 cells are TEST-class cycles through real production seams or

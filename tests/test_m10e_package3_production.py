@@ -325,13 +325,79 @@ async def test_missing_umt5_and_vae_artifacts_fail(settings, tmp_path):
     original = (d / "execution-model-fingerprint.json").read_bytes()
     d2 = await _schema3_package(tmp_path / "mut", mutate=_mutate)
     release2 = await capture_current_release(_settings_for(settings, d2))
-    with pytest.raises(Package3Invalid, match="umt5_text_encoder"):
+    with pytest.raises(Package3Invalid, match="exactly the four"):
         validate_package(release2)
     (d2 / "execution-model-fingerprint.json").write_bytes(original)
     (d2 / "workflow-package.json").write_bytes(
         (d / "workflow-package.json").read_bytes())
     release3 = await capture_current_release(_settings_for(settings, d2))
     validate_package(release3)  # restored positive
+
+
+async def test_fingerprint_artifact_grammar_violations(settings,
+                                                        tmp_path):
+    """Closed artifact grammar (review r5): five entries with a duplicate
+    wan_base, a missing sha256, and a missing storage_root_key — each
+    descriptor-coherent — are ALL rejected by the real package authority.
+    Five-step cycle per variant."""
+    import copy
+
+    def _base_fp():
+        fp = json.loads(canonical_json_str(
+            prod.production_fingerprint_document()))
+        return fp
+
+    d = await _schema3_package(tmp_path)
+    validate_package(await capture_current_release(
+        _settings_for(settings, d)))  # positive
+
+    # 1. duplicate wan_base (five entries)
+    def _dup(docs):
+        fp = _base_fp()
+        arts = fp["m10_spatial_runtime"]["artifacts"]
+        extra = copy.deepcopy(
+            next(a for a in arts if a["artifact_key"] == "wan_base"))
+        arts.append(extra)
+        fp["m10_spatial_runtime"]["artifacts"] = arts
+        docs["execution-model-fingerprint.json"] = fp
+        return docs
+
+    d2 = await _schema3_package(tmp_path / "dup", mutate=_dup)
+    with pytest.raises(Package3Invalid, match="exactly the four"):
+        validate_package(await capture_current_release(
+            _settings_for(settings, d2)))
+
+    # 2. umt5 present, sha256 removed
+    def _nosha(docs):
+        fp = _base_fp()
+        for a in fp["m10_spatial_runtime"]["artifacts"]:
+            if a["artifact_key"] == "umt5_text_encoder":
+                del a["sha256"]
+        docs["execution-model-fingerprint.json"] = fp
+        return docs
+
+    d3 = await _schema3_package(tmp_path / "nosha", mutate=_nosha)
+    with pytest.raises(Package3Invalid, match="sha256"):
+        validate_package(await capture_current_release(
+            _settings_for(settings, d3)))
+
+    # 3. wan_vae present, storage_root_key removed
+    def _noroot(docs):
+        fp = _base_fp()
+        for a in fp["m10_spatial_runtime"]["artifacts"]:
+            if a["artifact_key"] == "wan_vae":
+                del a["storage_root_key"]
+        docs["execution-model-fingerprint.json"] = fp
+        return docs
+
+    d4 = await _schema3_package(tmp_path / "noroot", mutate=_noroot)
+    with pytest.raises(Package3Invalid, match="storage_root_key"):
+        validate_package(await capture_current_release(
+            _settings_for(settings, d4)))
+
+    # restored positive: the untampered package still validates
+    validate_package(await capture_current_release(
+        _settings_for(settings, d)))  # restored positive
 
 
 async def test_template_model_substitution_fails(settings, tmp_path):

@@ -155,16 +155,28 @@ def test_expansion_node_collision_fails():
 
 
 def test_missing_derived_reference_fails():
+    # positive control: the full three-stream translation succeeds
+    payload = _build(derived=_derived())
+    assert payload.prompt["121"]["inputs"]["control_images"] ==         ["entity_depth_2::load::0", 0]
     with pytest.raises(TranslationFailed, match="missing.*entity_depth_2"):
         _build(derived=_derived(2))
+    # restored positive: the full set translates again
+    assert _build(derived=_derived()).prompt["121"]["inputs"][
+        "control_images"] == ["entity_depth_2::load::0", 0]
 
 
 def test_extra_derived_reference_fails():
+    # positive control
+    assert _build(derived=_derived()).prompt["101"]["inputs"][
+        "control_images"] == ["world_depth::load::0", 0]
     with pytest.raises(TranslationFailed, match="extra"):
         d = _derived()
         d.append(_V("entity_depth_9", 3, "spatial.entity_depth", "n", "f",
                     "04" * 32, "p", "sub/x.png"))
         _build(derived=d)
+    # restored positive
+    assert _build(derived=_derived()).prompt["101"]["inputs"][
+        "control_images"] == ["world_depth::load::0", 0]
 
 
 def test_duplicate_derived_reference_fails():

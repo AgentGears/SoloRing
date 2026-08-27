@@ -451,6 +451,12 @@ async def test_cells39_40_sibling_coordinate_violations(factory, engine,
     seed = await _seed_world_rows(factory, engine, settings,
                                   entities=[_E1])
     good = list(_bindings_for(seed))
+    from soloring.generation import repository as _repo
+
+    async with factory() as session:
+        ok = await _repo.create_generation(
+            session, _draft(seed), (), derived_inputs=tuple(good))
+    assert ok.status == "queued"  # positive control
 
     swapped = [
         DerivedInputBinding(input_key=good[0].input_key, position=1,
@@ -484,7 +490,11 @@ async def test_cells39_40_sibling_coordinate_violations(factory, engine,
     async with engine.connect() as conn:
         n = (await conn.execute(text(
             "SELECT COUNT(*) FROM generations"))).scalar()
-    assert n == 0
+    assert n == 1  # only the positive control survived the rollbacks
+    async with factory() as session:
+        ok2 = await _repo.create_generation(
+            session, _draft(seed), (), derived_inputs=tuple(good))
+    assert ok2.status == "queued"  # restored positive
 
 
 def _bindings_for(seed):

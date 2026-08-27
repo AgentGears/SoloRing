@@ -299,6 +299,10 @@ async def test_cross_family_key_collision_fails_in_unit(
         session.add(Asset(id=aid, project_id=seed["pid"], blob_hash=bh,
                           kind="reference"))
         await session.commit()
+    async with factory() as session:
+        ok = await repo.create_generation(
+            session, _draft(seed), (), derived_inputs=_bindings(seed))
+    assert ok.status == "queued"  # positive control
     ordinary = (ResolvedGenerationInput(
         input_key="world_depth", position=0, asset_id=aid, blob_hash=bh,
         reference_role="primary"),)
@@ -308,7 +312,11 @@ async def test_cross_family_key_collision_fails_in_unit(
                 session, _draft(seed), ordinary,
                 derived_inputs=_bindings(seed))
     assert ei.value.code == ErrorCode.SPATIAL_REALIZATION_BINDING_INVALID
-    assert (await _counts(engine))["generations"] == 0
+    assert (await _counts(engine))["generations"] == 1  # positive control
+    async with factory() as session:
+        ok2 = await repo.create_generation(
+            session, _draft(seed), (), derived_inputs=_bindings(seed))
+    assert ok2.status == "queued"  # restored positive
 
 
 async def test_entity_order_violation_fails(
@@ -318,6 +326,10 @@ async def test_entity_order_violation_fails(
     seed = await _seed_world_rows(factory, engine, settings,
                                   entities=[_E1, _E2])
     b = list(_bindings(seed))
+    async with factory() as session:
+        ok = await repo.create_generation(
+            session, _draft(seed), (), derived_inputs=_bindings(seed))
+    assert ok.status == "queued"  # positive control
     # swap the two entity streams (positions stay contiguous; identity
     # order is what violates the canonical comparator)
     b[1], b[2] = b[2], b[1]
@@ -338,7 +350,11 @@ async def test_entity_order_violation_fails(
     from soloring.spatial.error_codes import DERIVED_SPATIAL_BINDING_INVALID
 
     assert ei.value.code == DERIVED_SPATIAL_BINDING_INVALID
-    assert (await _counts(engine))["generations"] == 0
+    assert (await _counts(engine))["generations"] == 1  # positive control
+    async with factory() as session:
+        ok2 = await repo.create_generation(
+            session, _draft(seed), (), derived_inputs=_bindings(seed))
+    assert ok2.status == "queued"  # restored positive
 
 
 async def test_pre_published_artifacts_survive_rollback(
