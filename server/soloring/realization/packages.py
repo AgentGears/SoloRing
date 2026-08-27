@@ -287,6 +287,7 @@ def validate_package(release: CapturedPackageRelease) -> ValidatedPackage:
             parse_manifest_v3,
             parse_profile_v2,
             validate_manifest_v3_template_bindings,
+            validate_schema3_fingerprint_template,
         )
 
         manifest_v3 = parse_manifest_v3(
@@ -338,6 +339,14 @@ def validate_package(release: CapturedPackageRelease) -> ValidatedPackage:
                 "Schema-3 profile runtime requirements not closed by the "
                 f"captured fingerprint/template: {unproven}"
             )
+        # R3 §6/E-012 full hard-component closure: the fingerprint must
+        # carry all four frozen model artifacts and every artifact binding
+        # must cross-check against the CAPTURED template (the schema-2
+        # cross_validate_fingerprint_template equivalent for schema 3) —
+        # a captured template loading an unpinned file fails here, before
+        # queueing.
+        validate_schema3_fingerprint_template(
+            fingerprint_v3, template_graph)
     else:
         manifest_v2 = parse_manifest_v2(
             release.manifest_bytes.decode("utf-8")

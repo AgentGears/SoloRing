@@ -146,6 +146,8 @@ PINS = {
          "689ce2b1c4391e80a250efd00252659354532b6e76e4e2ef261f268554d186e4")],
 }
 
+# Certified all-background artifact digest — Layer 3 ONLY (the Layer-2
+# offscreen assertion is decode-based and encoder-independent).
 _ALL_BACKGROUND = "8ab4aa08b961e0e4767e0c62eda742282d1e1898075673bc2300ed79290da474"
 
 
@@ -211,7 +213,20 @@ def test_layer2_role_differentials():
     cam = _compose("camera_motion").artifact_digests
     assert cam[0] != world["one_entity"] and cam[1] != one[1]
 
-    assert _compose("offscreen").artifact_digests[1] == _ALL_BACKGROUND
+    # E-036 Layer 2 (portable): the offscreen entity stream is asserted
+    # by DECODING the frames — PNG-L grammar with every pixel at the
+    # background value 255 — never by an encoder-dependent byte digest
+    # (the exact encoded digest is Layer 3, evidence-machine only).
+    from PIL import Image
+
+    offscreen_frames = _compose("offscreen").frames[1]
+    assert len(offscreen_frames) == pins.GRAMMAR_FRAMES
+    for data in offscreen_frames:
+        img = Image.open(io.BytesIO(data))
+        assert img.mode == pins.GRAMMAR_MODE
+        assert img.size == (pins.GRAMMAR_WIDTH, pins.GRAMMAR_HEIGHT)
+        assert img.getextrema() == (pins.GRAMMAR_BACKGROUND,
+                                    pins.GRAMMAR_BACKGROUND)
 
 
 def test_layer2_canonical_ordering():

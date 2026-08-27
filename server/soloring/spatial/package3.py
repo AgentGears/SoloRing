@@ -162,6 +162,61 @@ def _validate_runtime_requirements(reqs_raw: Any) -> None:
                                   f"runtime_requirements.{key}.proof.expected")
 
 
+def validate_schema3_fingerprint_template(fingerprint_v3: dict,
+                                          template: dict) -> None:
+    """Full hard-component closure for the schema-3 ExecutionModelFinger-
+    print against the CAPTURED package documents (R3 §6/§18, E-012):
+
+    1. the m10_spatial_runtime artifact set must carry exactly the four
+       frozen model artifacts (wan_base, depth_controlnet,
+       umt5_text_encoder, wan_vae) — removing UMT5 or the VAE leaves an
+       unclosable requirement and fails package validation;
+    2. every fingerprint artifact binding (node, field, declared_name)
+       must cross-check against the CAPTURED TEMPLATE: the template node
+       must exist, the field must exist, and the template's value at that
+       node/field must EQUAL the declared_name — a captured template that
+       instructs the executor to load a different, unpinned file is a
+       binding-invalid package even when the legitimate pinned file still
+       exists on disk.
+    """
+    rr = (fingerprint_v3 or {}).get("m10_spatial_runtime") or {}
+    artifacts = rr.get("artifacts") or []
+    keys = [a.get("artifact_key") for a in artifacts
+            if isinstance(a, dict)]
+    required = {"wan_base", "depth_controlnet", "umt5_text_encoder",
+                "wan_vae"}
+    missing = sorted(required - set(keys))
+    extra = sorted(set(keys) - required)
+    if missing or extra:
+        raise _bad(
+            f"m10_spatial_runtime.artifacts must be exactly the frozen "
+            f"four {sorted(required)}; missing={missing}, extra={extra}")
+    if not isinstance(template, dict) or not template:
+        raise _bad("captured workflow template is empty or malformed")
+    for a in artifacts:
+        node, field = a.get("node"), a.get("field")
+        declared = a.get("declared_name")
+        what = f"fingerprint artifact {a.get('artifact_key')!r}"
+        if not isinstance(node, str) or not node:
+            raise _bad(f"{what}: no template node binding")
+        if not isinstance(field, str) or not field:
+            raise _bad(f"{what}: no template field binding")
+        if not isinstance(declared, str) or not declared:
+            raise _bad(f"{what}: no declared_name")
+        node_doc = template.get(node)
+        if not isinstance(node_doc, dict):
+            raise _bad(f"{what}: template has no node {node!r}")
+        inputs = node_doc.get("inputs")
+        if not isinstance(inputs, dict) or field not in inputs:
+            raise _bad(f"{what}: node {node!r} has no input field "
+                       f"{field!r}")
+        if inputs[field] != declared:
+            raise _bad(
+                f"{what}: captured template carries {inputs[field]!r} at "
+                f"{node}/{field} but the fingerprint pins {declared!r} — "
+                "the template does not execute the pinned artifact")
+
+
 def check_runtime_closure(profile_spatial: dict, *, fingerprint: dict | None,
                           template: dict) -> list[str]:
     """Return the list of UNPROVEN runtime requirements (empty == closed).
@@ -464,5 +519,6 @@ __all__ = [
     "DESCRIPTOR_SCHEMA_VERSION_3", "Package3Invalid",
     "parse_profile_v2", "parse_manifest_v3", "parse_descriptor_v3",
     "manifest_binding_map", "resolve_derived_binding",
-    "validate_manifest_v3_template_bindings", "check_runtime_closure",
+    "validate_manifest_v3_template_bindings",
+    "validate_schema3_fingerprint_template", "check_runtime_closure",
 ]

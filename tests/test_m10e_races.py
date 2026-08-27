@@ -97,52 +97,35 @@ def _park_after_statement(engine, statement_prefix: str):
     """Deterministic contested-order PARKING seam (E-081/APR-033): wraps
     ``AsyncConnection.exec_driver_sql`` so the FIRST execution of a
     driver statement starting with ``statement_prefix`` runs FOR REAL,
-    signals ``acquired`` only AFTER successful execution, and then PARKS
-    (awaits ``release``) with the transaction still open. The follower
-    starts between ``acquired`` and ``release`` — contention with an
-    OPEN predecessor unit is mechanically unavoidable, not scheduled."""
+    signals ``leader_acquired`` only AFTER successful execution, and then
+    PARKS (awaits ``release``) with the transaction still open. The NEXT
+    matching invocation (the follower's) signals ``follower_at_seam``
+    BEFORE invoking the real contested operation — the test waits for
+    that event, proving the follower has ARRIVED at the seam while the
+    leader's unit is still open. No sleeps; no scheduler inference."""
     from sqlalchemy.ext.asyncio import AsyncConnection
 
-    acquired = asyncio.Event()
+    leader_acquired = asyncio.Event()
+    follower_at_seam = asyncio.Event()
     release = asyncio.Event()
     real = AsyncConnection.exec_driver_sql
-    state = {"armed": True}
+    state = {"invocations": 0}
 
     async def _parked(self, statement, *args, **kwargs):
-        result = await real(self, statement, *args, **kwargs)
-        if (state["armed"] and isinstance(statement, str)
+        if (isinstance(statement, str)
                 and statement.strip().startswith(statement_prefix)):
-            state["armed"] = False
-            acquired.set()
-            await release.wait()
-        return result
+            state["invocations"] += 1
+            if state["invocations"] == 1:
+                result = await real(self, statement, *args, **kwargs)
+                leader_acquired.set()
+                await release.wait()
+                return result
+            follower_at_seam.set()
+        return await real(self, statement, *args, **kwargs)
 
     AsyncConnection.exec_driver_sql = _parked
-    return acquired, release, lambda: setattr(
-        AsyncConnection, "exec_driver_sql", real)
-
-
-async def _park_after_generation_insert():
-    """The same parking discipline at the Generation INSERT: the real
-    INSERT..RETURNING executes, signals, and parks before the commit."""
-    from soloring.generation import repository as repo
-
-    acquired = asyncio.Event()
-    release = asyncio.Event()
-    real = repo._execute_generation_insert
-    state = {"armed": True}
-
-    async def _parked(session, params):
-        row = await real(session, params)
-        if state["armed"]:
-            state["armed"] = False
-            acquired.set()
-            await release.wait()
-        return row
-
-    repo._execute_generation_insert = _parked
-    return acquired, release, lambda: setattr(
-        repo, "_execute_generation_insert", real)
+    return (leader_acquired, follower_at_seam, release,
+            lambda: setattr(AsyncConnection, "exec_driver_sql", real))
 
 
 async def test_concurrent_identical_registrations_converge(
@@ -166,15 +149,15 @@ async def test_concurrent_identical_registrations_converge(
             return await register_derived_artifact(
                 session, store, pid, prepared)
 
-    acquired, release, restore = _park_after_statement(
+    acquired, at_seam, release, restore = _park_after_statement(
         engine, "BEGIN IMMEDIATE")
     try:
         first = asyncio.create_task(_register())
         await asyncio.wait_for(acquired.wait(), timeout=30)
-        # leader's BEGIN IMMEDIATE has EXECUTED and the connection is
-        # parked inside the open unit — start the follower NOW
         second = asyncio.create_task(_register())
-        await asyncio.sleep(0)  # yield one loop tick: follower is in flight
+        # the follower has ARRIVED at the contested seam (its BEGIN
+        # IMMEDIATE invocation) while the leader's unit is still open
+        await asyncio.wait_for(at_seam.wait(), timeout=30)
         release.set()
         a, b = await asyncio.gather(first, second)
     finally:
@@ -218,13 +201,13 @@ async def test_concurrent_divergent_registration_fails_nondeterministic(
                 return await register_derived_artifact(
                     session, store, target_pid, p)
 
-        acquired, release, restore = _park_after_statement(
+        acquired, at_seam, release, restore = _park_after_statement(
             engine, "BEGIN IMMEDIATE")
         try:
             lead_task = asyncio.create_task(_register(leader))
             await asyncio.wait_for(acquired.wait(), timeout=30)
             follow_task = asyncio.create_task(_register(follower))
-            await asyncio.sleep(0)
+            await asyncio.wait_for(at_seam.wait(), timeout=30)
             release.set()
             results = await asyncio.gather(lead_task, follow_task,
                                            return_exceptions=True)
@@ -253,12 +236,20 @@ async def test_concurrent_generation_creations_each_atomic(
     seed = await _spatial_seed(factory, staged=2, extents=_EXTENTS)
     s = _spatial_settings(settings, pkg)
 
-    acquired, release, restore = await _park_after_generation_insert()
+    # The load-bearing contested seam for a concurrent creation is the
+    # FIRST write unit of the creation flow — the derived-publication
+    # BEGIN IMMEDIATE (a creation parked at its Generation INSERT could
+    # never be met by the follower, whose earlier publication unit
+    # already blocks on the held write lock). The leader parks AFTER the
+    # real BEGIN IMMEDIATE with the unit open; the follower provably
+    # ARRIVES at its own BEGIN IMMEDIATE before release.
+    acquired, at_seam, release, restore = _park_after_statement(
+        engine, "BEGIN IMMEDIATE")
     try:
         g1_task = asyncio.create_task(_create(factory, s, seed))
         await asyncio.wait_for(acquired.wait(), timeout=60)
         g2_task = asyncio.create_task(_create(factory, s, seed))
-        await asyncio.sleep(0)
+        await asyncio.wait_for(at_seam.wait(), timeout=60)
         release.set()
         g1, g2 = await asyncio.gather(g1_task, g2_task)
     finally:

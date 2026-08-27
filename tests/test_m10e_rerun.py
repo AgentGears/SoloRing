@@ -126,8 +126,10 @@ async def test_rerun_zero_current_m10_reads_and_zero_rematerialization(
 
 async def test_current_authority_mutation_cannot_change_rerun_identity(
         factory, engine, settings, tmp_path):
-    """E-074/§22.5: after the source Generation is terminal, aggressive
-    current M10 mutation leaves the rerun's durable identity identical."""
+    """E-074/§22.5, five-step cycle (cells 47/48/49): positive rerun →
+    aggressive current-M10 mutation → rerun identities unchanged →
+    EXACT restoration of the mutated current state → restored-positive
+    rerun."""
     from soloring.generation import rerun
 
     gen, seed, _ = await _terminal_generation(
@@ -135,8 +137,28 @@ async def test_current_authority_mutation_cannot_change_rerun_identity(
     src_rows = await _siblings(engine, gen.id)
     src_spec = await _spec(engine, gen.id)
 
+    # positive control: an unmutated rerun carries identical identities
+    pre = await rerun.create_rerun(_session(factory), gen.id)
+    assert await _spec(engine, pre.id) == src_spec
+    assert await _siblings(engine, pre.id) == src_rows
+
+    saved: dict[str, object] = {}
     async with engine.connect() as conn:
         await conn.exec_driver_sql("BEGIN IMMEDIATE")
+        saved["plans"] = [dict(r) for r in (await conn.execute(text(
+            "SELECT shot_id, spatial_world_id, plan_hash, plan_json, "
+            "created_at, updated_at FROM "
+            "shot_spatial_plans WHERE shot_id = :s"),
+            {"s": seed["shot"]})).mappings().all()]
+        saved["wrevs"] = [dict(r) for r in (await conn.execute(text(
+            "SELECT id, snapshot_json, snapshot_hash FROM "
+            "spatial_world_revisions"))).mappings().all()]
+        saved["tracks"] = [dict(r) for r in (await conn.execute(text(
+            "SELECT id, deleted_at, requirement FROM spatial_tracks"
+        ))).mappings().all()]
+        saved["worlds"] = [dict(r) for r in (await conn.execute(text(
+            "SELECT id, requirement, deleted_at FROM spatial_worlds"
+        ))).mappings().all()]
         # wipe/rewrite every current M10 authority surface
         await conn.execute(text(
             "DELETE FROM shot_spatial_plans WHERE shot_id = :s"),
@@ -156,6 +178,42 @@ async def test_current_authority_mutation_cannot_change_rerun_identity(
     new = await rerun.create_rerun(_session(factory), gen.id)
     assert await _spec(engine, new.id) == src_spec
     assert await _siblings(engine, new.id) == src_rows
+
+    # exact restoration of every mutated surface
+    async with engine.connect() as conn:
+        await conn.exec_driver_sql("BEGIN IMMEDIATE")
+        for row in saved["plans"]:
+            await conn.execute(text(
+                "INSERT INTO shot_spatial_plans (shot_id, "
+                "spatial_world_id, plan_hash, plan_json, created_at, "
+                "updated_at) VALUES (:s, :w, :h, :j, :c, :u)"),
+                {"s": row["shot_id"], "w": row["spatial_world_id"],
+                 "h": row["plan_hash"], "j": row["plan_json"],
+                 "c": row["created_at"], "u": row["updated_at"]})
+        for row in saved["wrevs"]:
+            await conn.execute(text(
+                "UPDATE spatial_world_revisions SET snapshot_json = :j, "
+                "snapshot_hash = :h WHERE id = :i"),
+                {"j": row["snapshot_json"], "h": row["snapshot_hash"],
+                 "i": row["id"]})
+        for row in saved["tracks"]:
+            await conn.execute(text(
+                "UPDATE spatial_tracks SET deleted_at = :d, "
+                "requirement = :r WHERE id = :i"),
+                {"d": row["deleted_at"], "r": row["requirement"],
+                 "i": row["id"]})
+        for row in saved["worlds"]:
+            await conn.execute(text(
+                "UPDATE spatial_worlds SET requirement = :r, "
+                "deleted_at = :d WHERE id = :i"),
+                {"r": row["requirement"], "d": row["deleted_at"],
+                 "i": row["id"]})
+        await conn.exec_driver_sql("COMMIT")
+
+    # restored positive: the rerun still carries identical identities
+    post = await rerun.create_rerun(_session(factory), gen.id)
+    assert await _spec(engine, post.id) == src_spec
+    assert await _siblings(engine, post.id) == src_rows
 
 
 async def test_rerun_execution_fails_closed_on_corrupt_history(

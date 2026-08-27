@@ -405,7 +405,6 @@ async def _v3_parity_package(tmp_path: Path) -> Path:
     v4 = WORKFLOW_DIR_V4
     manifest_v2 = json.loads((v4 / "manifest.json").read_bytes())
     profile_v1 = json.loads((v4 / "realization-profile.json").read_bytes())
-    fingerprint_raw = (v4 / "execution-model-fingerprint.json").read_bytes()
     template = json.loads((v4 / "workflow.json").read_bytes())
 
     controlnet = {k: v for k, v in prod.production_template().items()
@@ -430,6 +429,40 @@ async def _v3_parity_package(tmp_path: Path) -> Path:
         "runtime_requirements": {}, "advisory_omissions": [],
     }
 
+    # The fingerprint must satisfy the schema-3 four-artifact
+    # fingerprint↔template closure (node/field/declared_name cross-check
+    # against THIS template's loader nodes), so it is an M10 extension
+    # document bound to the parity template's actual loader values —
+    # E-045's comparator is the realization block, which carries the
+    # fingerprint hash through the seam identically on both sides.
+    fingerprint_v3 = {
+        "schema_version": 1,
+        "m10_spatial_runtime": {
+            "comfyui_commit": "b" * 40,
+            "custom_nodes": {"ComfyUI-WanVideoWrapper": "c" * 40},
+            "artifacts": [
+                {"artifact_key": "wan_base", "storage_root_key":
+                    "diffusion_models", "node": "98",
+                 "field": "unet_name",
+                 "declared_name": template["98"]["inputs"]["unet_name"],
+                 "sha256": "1" * 64},
+                {"artifact_key": "depth_controlnet", "storage_root_key":
+                    "controlnet", "node": "100", "field": "model",
+                 "declared_name": template["100"]["inputs"]["model"],
+                 "sha256": "2" * 64},
+                {"artifact_key": "umt5_text_encoder", "storage_root_key":
+                    "text_encoders", "node": "97",
+                 "field": "clip_name",
+                 "declared_name": template["97"]["inputs"]["clip_name"],
+                 "sha256": "3" * 64},
+                {"artifact_key": "wan_vae", "storage_root_key": "vae",
+                 "node": "10", "field": "vae_name",
+                 "declared_name": template["10"]["inputs"]["vae_name"],
+                 "sha256": "4" * 64},
+            ],
+        },
+    }
+
     d = tmp_path / "pkg3_parity"
     d.mkdir(parents=True, exist_ok=True)
     (d / "manifest.json").write_bytes(
@@ -438,6 +471,7 @@ async def _v3_parity_package(tmp_path: Path) -> Path:
         canonical_json_str(template).encode())
     (d / "realization-profile.json").write_bytes(
         canonical_json_str(profile_v2).encode())
+    fingerprint_raw = canonical_json_str(fingerprint_v3).encode()
     (d / "execution-model-fingerprint.json").write_bytes(fingerprint_raw)
     (d / "workflow-package.json").write_bytes(canonical_json_str({
         "schema_version": 3,
@@ -561,8 +595,12 @@ async def test_m9_v2_to_v3_payload_parity(
         (v4 / "realization-profile.json").read_bytes()).model_dump()
     assert kw["manifest"].model_dump() == parse_manifest_v2(
         (v4 / "manifest.json").read_bytes()).model_dump()
+    # the fingerprint hash carried through the seam is the parity
+    # package's OWN captured artifact hash (a schema-3-valid M10
+    # extension document), and the embedded realization block equals the
+    # predecessor compiler output for those same seam inputs
     assert kw["execution_model_fingerprint_hash"] == hashlib.sha256(
-        (v4 / "execution-model-fingerprint.json").read_bytes()).hexdigest()
+        (pkg / "execution-model-fingerprint.json").read_bytes()).hexdigest()
 
     from soloring.domain.canonical import canonical_json_str as cjs
 

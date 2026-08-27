@@ -121,9 +121,13 @@ async def test_validate_schema3_production_package(settings, tmp_path):
 
 
 async def test_descriptor_hash_disagreement_fails(settings, tmp_path):
-    """Post-install member tamper: the descriptor still pins the original
-    manifest identity, so D1/declared-hash capture is incoherent."""
+    """Post-install member tamper, five-step cycle (cell 2): the
+    descriptor still pins the original manifest identity, so
+    D1/declared-hash capture is incoherent."""
     d = await _schema3_package(tmp_path)
+    release = await capture_current_release(_settings_for(settings, d))
+    assert release.schema_version == 3  # positive
+    original = (d / "manifest.json").read_bytes()
     manifest = json.loads(canonical_json_str(
         prod.production_manifest_v3()))
     manifest["version"] = 2
@@ -132,13 +136,23 @@ async def test_descriptor_hash_disagreement_fails(settings, tmp_path):
     with pytest.raises(PackageIntegrity) as ei:
         await capture_current_release(_settings_for(settings, d))
     assert "manifest" in ei.value.message
+    (d / "manifest.json").write_bytes(original)
+    release2 = await capture_current_release(_settings_for(settings, d))
+    assert release2.manifest_hash == release.manifest_hash  # restored
 
 
 async def test_descriptor_malformed_fails(settings, tmp_path):
+    """Five-step cycle (cell 1)."""
     d = await _schema3_package(tmp_path)
+    release = await capture_current_release(_settings_for(settings, d))
+    assert release.schema_version == 3  # positive
+    original = (d / "workflow-package.json").read_bytes()
     (d / "workflow-package.json").write_bytes(b"{not json")
     with pytest.raises(PackageIntegrity):
         await capture_current_release(_settings_for(settings, d))
+    (d / "workflow-package.json").write_bytes(original)
+    release2 = await capture_current_release(_settings_for(settings, d))
+    assert release2.manifest_hash == release.manifest_hash  # restored
 
 
 async def test_descriptor_schema4_rejected(settings, tmp_path):
@@ -169,6 +183,8 @@ async def test_manifest_v3_malformed_is_binding_invalid(
 
 
 async def test_profile_capacity_mutated_fails(settings, tmp_path):
+    """Five-step cycle (cell 11): the semantic mutation is descriptor-
+    coherent (hash re-pinned) and fails semantic validation."""
     def _mutate(docs):
         profile = json.loads(canonical_json_str(
             docs["realization-profile.json"]))
@@ -176,16 +192,22 @@ async def test_profile_capacity_mutated_fails(settings, tmp_path):
         docs["realization-profile.json"] = profile
         return docs
 
-    d = await _schema3_package(tmp_path, mutate=_mutate)
-    # descriptor still pins the ORIGINAL profile hash
+    d = await _schema3_package(tmp_path)
     release = await capture_current_release(_settings_for(settings, d))
+    validate_package(release)  # positive
+    d2 = await _schema3_package(tmp_path / "mut", mutate=_mutate)
+    release2 = await capture_current_release(_settings_for(settings, d2))
     with pytest.raises(Package3Invalid):
-        validate_package(release)
+        validate_package(release2)
+    # restoration: the untampered package validates again
+    validate_package(await capture_current_release(
+        _settings_for(settings, d)))
 
 
 async def test_runtime_requirement_unclosed_fails(settings, tmp_path):
-    """E-013: dropping the comfyui commit from the fingerprint leaves the
-    requirement unproven → semantic validation fails before queueing."""
+    """E-013, five-step cycle (cell 12): dropping the comfyui commit from
+    the fingerprint leaves the requirement unproven → semantic validation
+    fails before queueing."""
     def _mutate(docs):
         fp = json.loads(canonical_json_str(
             docs["execution-model-fingerprint.json"]))
@@ -193,10 +215,15 @@ async def test_runtime_requirement_unclosed_fails(settings, tmp_path):
         docs["execution-model-fingerprint.json"] = fp
         return docs
 
-    d = await _schema3_package(tmp_path, mutate=_mutate)
-    release = await capture_current_release(_settings_for(settings, d))
+    d = await _schema3_package(tmp_path)
+    validate_package(await capture_current_release(
+        _settings_for(settings, d)))  # positive
+    d2 = await _schema3_package(tmp_path / "mut", mutate=_mutate)
+    release2 = await capture_current_release(_settings_for(settings, d2))
     with pytest.raises(Package3Invalid, match="comfyui"):
-        validate_package(release)
+        validate_package(release2)
+    validate_package(await capture_current_release(
+        _settings_for(settings, d)))  # restored positive
 
 
 async def test_binding_node_missing_from_template_fails(
@@ -207,10 +234,15 @@ async def test_binding_node_missing_from_template_fails(
         docs["manifest.json"] = manifest
         return docs
 
-    d = await _schema3_package(tmp_path, mutate=_mutate)
-    release = await capture_current_release(_settings_for(settings, d))
+    d = await _schema3_package(tmp_path)
+    validate_package(await capture_current_release(
+        _settings_for(settings, d)))  # positive
+    d2 = await _schema3_package(tmp_path / "mut", mutate=_mutate)
+    release2 = await capture_current_release(_settings_for(settings, d2))
     with pytest.raises(Package3Invalid, match="999"):
-        validate_package(release)
+        validate_package(release2)
+    validate_package(await capture_current_release(
+        _settings_for(settings, d)))  # restored positive
 
 
 async def test_binding_field_missing_from_template_node_fails(
@@ -222,10 +254,15 @@ async def test_binding_field_missing_from_template_node_fails(
         docs["manifest.json"] = manifest
         return docs
 
-    d = await _schema3_package(tmp_path, mutate=_mutate)
-    release = await capture_current_release(_settings_for(settings, d))
+    d = await _schema3_package(tmp_path)
+    validate_package(await capture_current_release(
+        _settings_for(settings, d)))  # positive
+    d2 = await _schema3_package(tmp_path / "mut", mutate=_mutate)
+    release2 = await capture_current_release(_settings_for(settings, d2))
     with pytest.raises(Package3Invalid, match="not_a_field"):
-        validate_package(release)
+        validate_package(release2)
+    validate_package(await capture_current_release(
+        _settings_for(settings, d)))  # restored positive
 
 
 async def test_descriptor_changed_during_capture_fails(
@@ -265,3 +302,60 @@ async def test_workflow_identity_disagreement_fails(settings, tmp_path):
     with pytest.raises(SoloRingError) as ei:
         validate_package(release)
     assert ei.value.code == ErrorCode.REALIZATION_INPUT_BINDING_INVALID
+
+
+async def test_missing_umt5_and_vae_artifacts_fail(settings, tmp_path):
+    """F1/E-012: a coherent package whose fingerprint omits UMT5 and the
+    VAE (descriptor hash re-pinned) is REJECTED by the real package
+    authority — the frozen four-model closure cannot be silently
+    narrowed. Five-step cycle: positive → remove → fail → restore →
+    positive."""
+    def _mutate(docs):
+        fp = json.loads(canonical_json_str(
+            docs["execution-model-fingerprint.json"]))
+        fp["m10_spatial_runtime"]["artifacts"] = [
+            a for a in fp["m10_spatial_runtime"]["artifacts"]
+            if a["artifact_key"] in ("wan_base", "depth_controlnet")]
+        docs["execution-model-fingerprint.json"] = fp
+        return docs
+
+    d = await _schema3_package(tmp_path)
+    release = await capture_current_release(_settings_for(settings, d))
+    validate_package(release)  # positive control
+    original = (d / "execution-model-fingerprint.json").read_bytes()
+    d2 = await _schema3_package(tmp_path / "mut", mutate=_mutate)
+    release2 = await capture_current_release(_settings_for(settings, d2))
+    with pytest.raises(Package3Invalid, match="umt5_text_encoder"):
+        validate_package(release2)
+    (d2 / "execution-model-fingerprint.json").write_bytes(original)
+    (d2 / "workflow-package.json").write_bytes(
+        (d / "workflow-package.json").read_bytes())
+    release3 = await capture_current_release(_settings_for(settings, d2))
+    validate_package(release3)  # restored positive
+
+
+async def test_template_model_substitution_fails(settings, tmp_path):
+    """F1/E-012: a captured template that instructs the executor to load
+    a DIFFERENT unpinned file at a fingerprint-bound node/field (node
+    1/model -> evil.safetensors, template hash re-pinned, fingerprint
+    untouched) is REJECTED — schema 3 now cross-checks every fingerprint
+    artifact binding against the captured template."""
+    def _mutate(docs):
+        template = json.loads(canonical_json_str(docs["workflow.json"]))
+        template["1"]["inputs"]["model"] = "evil.safetensors"
+        docs["workflow.json"] = template
+        return docs
+
+    d = await _schema3_package(tmp_path)
+    release = await capture_current_release(_settings_for(settings, d))
+    validate_package(release)  # positive
+    original = (d / "workflow.json").read_bytes()
+    d2 = await _schema3_package(tmp_path / "mut2", mutate=_mutate)
+    release2 = await capture_current_release(_settings_for(settings, d2))
+    with pytest.raises(Package3Invalid, match="evil.safetensors"):
+        validate_package(release2)
+    (d2 / "workflow.json").write_bytes(original)
+    (d2 / "workflow-package.json").write_bytes(
+        (d / "workflow-package.json").read_bytes())
+    release3 = await capture_current_release(_settings_for(settings, d2))
+    validate_package(release3)  # restored positive

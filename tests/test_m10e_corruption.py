@@ -153,8 +153,20 @@ async def test_cell38_role_scope_mismatch(factory, engine, settings):
         _seed_world_rows,
     )
 
+    from tests.test_m10e_atomic_persistence import (
+        _E1,
+        _bindings,
+        _draft,
+        _seed_world_rows,
+    )
+
     seed = await _seed_world_rows(factory, engine, settings,
                                   entities=[_E1])
+    async with factory() as session:
+        good = await repo.create_generation(
+            session, _draft(seed), (), derived_inputs=_bindings(seed))
+    assert good.status == 'queued'  # positive control
+
     bindings = list(_bindings(seed))
     # bind the position-0 WORLD role to the ENTITY-scope artifact: the
     # frozen coordinate validator passes (still 1 world + 1 entity role),
@@ -172,7 +184,13 @@ async def test_cell38_role_scope_mismatch(factory, engine, settings):
     async with engine.connect() as conn:
         n = (await conn.execute(text(
             "SELECT COUNT(*) FROM generations"))).scalar()
-    assert n == 0
+    # the corrupt write rolled back; the positive control remains and a
+    # fresh valid create succeeds again (restored positive)
+    assert n == 1
+    async with factory() as session:
+        good2 = await repo.create_generation(
+            session, _draft(seed), (), derived_inputs=_bindings(seed))
+    assert good2.status == "queued"
 
 
 async def test_cell44_input_key_mismatch_vs_manifest(factory, engine,
@@ -244,6 +262,8 @@ async def test_cell21_pending_identity_in_workflow_spec_rejected(
     assert ei.value.code in (
         ec.DERIVED_SPATIAL_PROVENANCE_MISMATCH,
         _EC.SPATIAL_REALIZATION_BINDING_INVALID)
+    # restored positive: the untampered spec verifies again
+    assert len(await _verify(factory, settings, ids)) == 1
 
 
 async def test_cell37_project_ownership_mismatch(factory, engine, settings):
@@ -543,6 +563,8 @@ async def test_cell22_nonempty_structured_bindings_rejected(
     from soloring.errors import ErrorCode as _EC
 
     assert ei.value.code == _EC.SPATIAL_REALIZATION_BINDING_INVALID
+    # restored positive: the untampered spec verifies again
+    assert len(await _verify(factory, settings, ids)) == 1
 
 
 async def test_cell51_list_order_violation_rejected(

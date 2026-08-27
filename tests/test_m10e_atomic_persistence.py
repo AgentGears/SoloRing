@@ -262,6 +262,10 @@ async def test_fault_at_derived_binding_rolls_back_all(
         derived_spatial_artifact_id=str(uuid.uuid4()),  # missing artifact
         blob_hash=bindings[1].blob_hash)
     async with factory() as session:
+        good = await repo.create_generation(
+            session, _draft(seed), (), derived_inputs=_bindings(seed))
+    assert good.status == "queued"  # positive control
+    async with factory() as session:
         with pytest.raises(SoloRingError) as ei:
             await repo.create_generation(
                 session, _draft(seed), (), derived_inputs=tuple(bindings))
@@ -271,8 +275,14 @@ async def test_fault_at_derived_binding_rolls_back_all(
 
     assert ei.value.code == DERIVED_SPATIAL_PROVENANCE_MISMATCH
     counts = await _counts(engine)
-    assert counts == {"generations": 0, "inputs": 0, "siblings": 0,
+    # the corrupt write rolled back completely; only the positive
+    # control's Generation (with its 2 valid siblings) remains
+    assert counts == {"generations": 1, "inputs": 0, "siblings": 2,
                       "artifacts": 2}
+    async with factory() as session:
+        good2 = await repo.create_generation(
+            session, _draft(seed), (), derived_inputs=_bindings(seed))
+    assert good2.status == "queued"  # restored positive
 
 
 async def test_cross_family_key_collision_fails_in_unit(
@@ -381,6 +391,10 @@ async def test_cell53_unrelated_project_identity_fails_closed(
 
     seed = await _seed_world_rows(factory, engine, settings,
                                   entities=[_E1])
+    async with factory() as session:
+        ok = await repo.create_generation(
+            session, _draft(seed), (), derived_inputs=_bindings(seed))
+    assert ok.status == "queued"  # positive control
     other = str(uuid.uuid4())
     async with factory() as session:
         async with session.begin():
@@ -398,4 +412,16 @@ async def test_cell53_unrelated_project_identity_fails_closed(
             await repo.create_generation(
                 session, _draft(seed), (), derived_inputs=_bindings(seed))
     assert ei.value.code == DERIVED_SPATIAL_PROVENANCE_MISMATCH
-    assert (await _counts(engine))["generations"] == 0
+    counts = await _counts(engine)
+    assert counts["generations"] == 1  # only the positive control
+    # exact restoration: rebind the artifacts to the Shot's Project and
+    # re-prove the positive create
+    async with factory() as session:
+        await session.execute(text(
+            "UPDATE derived_spatial_artifacts SET project_id = :p"),
+            {"p": seed["pid"]})
+        await session.commit()
+    async with factory() as session:
+        ok2 = await repo.create_generation(
+            session, _draft(seed), (), derived_inputs=_bindings(seed))
+    assert ok2.status == "queued"  # restored positive
