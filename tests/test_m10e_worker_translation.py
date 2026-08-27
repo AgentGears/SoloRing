@@ -216,11 +216,29 @@ def test_unsupported_binding_format_fails():
 
 
 def test_missing_upload_reference_fails():
-    d = _derived()
-    d[0] = _V("world_depth", 0, "spatial.world_depth", "n", "f",
-              "01" * 32, "p", None)
+    """Cell 45 (derived reference PRESENT but its uploaded execution
+    reference missing), literal five-step cycle: positive translation →
+    exactly one corrupted fact (execution_reference=None) → fail closed
+    → exact restoration → restored-positive translation."""
+    import dataclasses
+
+    # positive
+    good = _derived()
+    prompt = _build(derived=good).prompt
+    assert prompt["101"]["inputs"]["control_images"] == \
+        ["world_depth::load::0", 0]
+
+    # isolated corruption: ONLY execution_reference changes
+    bad = list(good)
+    bad[0] = dataclasses.replace(bad[0], execution_reference=None)
     with pytest.raises(TranslationFailed, match="no uploaded"):
-        _build(derived=d)
+        _build(derived=bad)
+
+    # exact restored-positive
+    restored = list(good)
+    prompt2 = _build(derived=restored).prompt
+    assert prompt2["101"]["inputs"]["control_images"] == \
+        ["world_depth::load::0", 0]
 
 
 def test_spatial_key_never_enters_ordinary_materialization():
