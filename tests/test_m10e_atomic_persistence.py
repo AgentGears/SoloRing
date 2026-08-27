@@ -367,3 +367,35 @@ async def test_pre_published_artifacts_survive_rollback(
         n = (await conn.execute(text(
             "SELECT COUNT(*) FROM derived_spatial_artifacts"))).scalar()
     assert n == 2  # convergence, not duplication
+
+
+async def test_cell53_unrelated_project_identity_fails_closed(
+        factory, engine, settings, monkeypatch):
+    """§21 cell 53: production registration handed an unrelated Project
+    identity — the repository binding fails rather than creating an
+    executable cross-project Generation."""
+    from soloring.generation import repository as repo
+    from soloring.spatial.error_codes import (
+        DERIVED_SPATIAL_PROVENANCE_MISMATCH,
+    )
+
+    seed = await _seed_world_rows(factory, engine, settings,
+                                  entities=[_E1])
+    other = str(uuid.uuid4())
+    async with factory() as session:
+        async with session.begin():
+            await session.execute(text(
+                "INSERT INTO projects (id, name, created_at, updated_at) "
+                "VALUES (:p, 'Other', 't', 't')"), {"p": other})
+    # re-register the same artifacts under the UNRELATED project
+    async with factory() as session:
+        await session.execute(text(
+            "UPDATE derived_spatial_artifacts SET project_id = :p"),
+            {"p": other})
+        await session.commit()
+    async with factory() as session:
+        with pytest.raises(SoloRingError) as ei:
+            await repo.create_generation(
+                session, _draft(seed), (), derived_inputs=_bindings(seed))
+    assert ei.value.code == DERIVED_SPATIAL_PROVENANCE_MISMATCH
+    assert (await _counts(engine))["generations"] == 0

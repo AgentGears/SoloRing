@@ -89,14 +89,17 @@ async def execute_schema3_derived_inputs(
     store: BlobStore,
     *,
     generation_id: str,
+    attempt_id: str,
     workflow_spec: dict,
     manifest_v3: dict,
     client,
 ) -> list[VerifiedDerivedInput]:
     """Full worker schema-3 derived-input path: verify (this module) then
     upload the EXACT retained historical Blob bytes to the executor's
-    attempt-scoped input namespace, recording the executor-local
-    reference for the manifest's exact node/field translation.
+    ATTEMPT-scoped input namespace (R4 §2.4: generation AND attempt
+    identity — two attempts of the same Generation are isolated),
+    recording the executor-local reference for the manifest's exact
+    node/field translation.
 
     ``client`` is the worker's ClientUploader (upload(source_path=…,
     filename=…, subfolder=…)); the bytes uploaded are read from the
@@ -111,7 +114,8 @@ async def execute_schema3_derived_inputs(
         session, store, generation_id=generation_id,
         workflow_spec=workflow_spec, manifest_v3=manifest_v3)
     for v in verified:
-        subfolder = f"soloring-der-{generation_id[:8]}"
+        subfolder = (f"soloring-der-{generation_id[:8]}"
+                     f"-{attempt_id[:8]}")
         data = _Path(v.local_path).read_bytes()
         frames = _split_png_frames(data)
         if frames and len(frames) > 1:
@@ -163,16 +167,52 @@ async def load_verified_derived_inputs(
         "WHERE gdsi.generation_id = :gid ORDER BY gdsi.position"),
         {"gid": generation_id})).mappings().all()
 
-    srsw = (await session.execute(text(
-        "SELECT srsw.spatial_continuity_hash "
+    # E-106 B3c: artifact Project ownership is verified against the
+    # Generation's Shot-owning Project, not merely selected.
+    ctx = (await session.execute(text(
+        "SELECT s.project_id, srsw.spatial_continuity_hash "
         "FROM generations g "
-        "JOIN shot_revision_spatial_worlds srsw "
+        "JOIN shots s ON s.id = g.shot_id "
+        "LEFT JOIN shot_revision_spatial_worlds srsw "
         "  ON srsw.shot_revision_id = g.shot_revision_id "
-        "WHERE g.id = :gid"), {"gid": generation_id})).first()
-    if srsw is None or srsw[0] != captured_hash:
+        "WHERE g.id = :gid"), {"gid": generation_id})).mappings().one_or_none()
+    if ctx is None or ctx["spatial_continuity_hash"] != captured_hash:
         raise _fail(ec.DERIVED_SPATIAL_PROVENANCE_MISMATCH,
                     "Captured spatial authority hash disagrees with the "
                     "Generation's ShotRevision spatial history.")
+    project_id = ctx["project_id"]
+
+    # E-106 B3b: the immutable WorkflowSpec's derived identities are
+    # cross-checked against the sibling rows AND the provenance before
+    # ANY upload — one exact projection, every identity-bearing field.
+    spec_entries = {
+        e["input_key"]: e
+        for e in (workflow_spec.get("spatial_realization") or {}).get(
+            "derived_artifacts") or []
+    }
+    row_keys = {row["input_key"] for row in rows}
+    if spec_entries.keys() != row_keys:
+        raise _fail(ec.DERIVED_SPATIAL_BINDING_INVALID,
+                    f"WorkflowSpec derived entries {sorted(spec_entries)} "
+                    f"disagree with sibling rows {sorted(row_keys)}.")
+    for row in rows:
+        entry = spec_entries[row["input_key"]]
+        for field in ("derived_spatial_artifact_id", "blob_hash"):
+            if entry.get(field) != row[field]:
+                raise _fail(
+                    ec.DERIVED_SPATIAL_PROVENANCE_MISMATCH,
+                    f"WorkflowSpec {field!r} disagrees with the sibling "
+                    f"row for {row['input_key']!r}.")
+        for field in ("position", "artifact_role"):
+            if entry.get(field) != row[field]:
+                raise _fail(ec.DERIVED_SPATIAL_BINDING_INVALID,
+                            f"WorkflowSpec {field!r} disagrees with the "
+                            f"sibling row for {row['input_key']!r}.")
+        if str(entry.get("derived_spatial_artifact_id", "")).startswith(
+                "pending:"):
+            raise _fail(ec.DERIVED_SPATIAL_PROVENANCE_MISMATCH,
+                        f"WorkflowSpec carries a provisional pending: "
+                        f"identity for {row['input_key']!r}.")
 
     verified: list[VerifiedDerivedInput] = []
     for row in rows:
@@ -205,6 +245,19 @@ async def load_verified_derived_inputs(
         if art["blob_hash"] != row["blob_hash"]:
             raise _fail(ec.DERIVED_SPATIAL_PROVENANCE_MISMATCH,
                         "Derived input Blob identity disagrees with provenance.")
+        # E-106 B3b/B3c: provenance ↔ WorkflowSpec ↔ Project agreement
+        entry = spec_entries[row["input_key"]]
+        if art["spec_hash"] != entry.get("spec_hash") or \
+                art["runtime_fingerprint_hash"] != entry.get(
+                    "runtime_fingerprint_hash"):
+            raise _fail(ec.DERIVED_SPATIAL_PROVENANCE_MISMATCH,
+                        f"Derived provenance spec/runtime identity "
+                        f"disagrees with the WorkflowSpec entry for "
+                        f"{row['input_key']!r}.")
+        if art["project_id"] != project_id:
+            raise _fail(ec.DERIVED_SPATIAL_PROVENANCE_MISMATCH,
+                        "Derived artifact Project ownership disagrees "
+                        "with the Generation's Shot-owning Project.")
 
         # exact manifest binding (no graph heuristics)
         input_key, node, field = resolve_derived_binding(

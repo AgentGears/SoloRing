@@ -364,12 +364,16 @@ def _bind_schema3_control_stream(
     if not refs:
         raise TranslationFailed(
             f"{what} has no uploaded executor reference")
-    for nid in (f"{key}::load::0", f"{key}::batch::0"):
-        if nid in graph:
-            raise TranslationFailed(
-                f"{what}: generated expansion node id {nid!r} collides "
-                "with the captured template"
-            )
+    # R4 §2.6: the COMPLETE generated-id set is checked against the
+    # captured template BEFORE any graph mutation — load::0..N-1 and
+    # batch::1..N-1 (batch::0 is never generated).
+    generated = [f"{key}::load::{i}" for i in range(len(refs))]
+    generated += [f"{key}::batch::{i}" for i in range(1, len(refs))]
+    clash = [nid for nid in generated if nid in graph]
+    if clash:
+        raise TranslationFailed(
+            f"{what}: generated expansion node ids collide with the "
+            f"captured template: {clash}")
     for i, ref in enumerate(refs):
         graph[f"{key}::load::{i}"] = {
             "class_type": "LoadImage", "inputs": {"image": ref}}

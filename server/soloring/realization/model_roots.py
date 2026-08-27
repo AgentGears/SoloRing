@@ -13,7 +13,11 @@ from pathlib import Path
 from soloring.errors import ErrorCode, SoloRingError
 from soloring.settings import Settings
 
-ROOT_KEYS = ("unet", "vae", "clip", "clip_vision")
+ROOT_KEYS = ("unet", "vae", "clip", "clip_vision",
+             # M10E additive keys (R3 §6 fingerprint artifact vocabulary):
+             # the Wan deployment's ComfyUI model directories. The M9
+             # vocabulary and semantics are untouched.
+             "diffusion_models", "controlnet", "text_encoders")
 
 
 class ModelIncompatible(SoloRingError):
@@ -35,6 +39,9 @@ def root_for_key(settings: Settings, root_key: str) -> Path:
         "vae": settings.comfy_model_root_vae,
         "clip": settings.comfy_model_root_clip,
         "clip_vision": settings.comfy_model_root_clip_vision,
+        "diffusion_models": settings.comfy_model_root_diffusion_models,
+        "controlnet": settings.comfy_model_root_controlnet,
+        "text_encoders": settings.comfy_model_root_text_encoders,
     }[root_key]
     if value is None:
         raise ModelIncompatible(

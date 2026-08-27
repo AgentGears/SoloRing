@@ -50,7 +50,8 @@ async def test_schema3_worker_uploads_exact_retained_bytes(
         verified = await execute_schema3_derived_inputs(
             session, BlobStore(settings),
             generation_id=ids["generation_id"],
-            workflow_spec=_spec(ids["continuity"]),
+            attempt_id="11111111-1111-4111-8111-111111111111",
+            workflow_spec=_spec(ids["continuity"], ids),
             manifest_v3=_manifest_doc(), client=uploader)
     assert len(uploader.uploads) == 1
     filename, subfolder, data = uploader.uploads[0]
@@ -76,7 +77,7 @@ async def test_schema3_pipeline_branch_integration(
     from soloring.workflows.artifact_store import WorkflowArtifactStore
 
     ids = await _seed_spatial_generation(factory, engine, settings)
-    spec = _spec(ids["continuity"])
+    spec = _spec(ids["continuity"], ids)
     spec["spatial_realization"]["realization_profile_hash"] = (
         hashlib.sha256(json.dumps({
             "schema_version": 2, "profile_id": "p", "profile_version": 1,
@@ -193,6 +194,7 @@ async def test_schema3_pipeline_branch_integration(
             schema3_derived = await execute_schema3_derived_inputs(
                 session, blob_store,
                 generation_id=_Gen.id,
+                attempt_id="11111111-1111-4111-8111-111111111112",
                 workflow_spec=json.loads(spec_json),
                 manifest_v3=manifest, client=uploader)
         assert schema3_derived and uploader.uploads

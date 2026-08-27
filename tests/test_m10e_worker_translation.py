@@ -140,11 +140,18 @@ def test_multi_frame_control_expands_certified_chain():
 
 
 def test_expansion_node_collision_fails():
+    """R4 §2.6 / E-106 B1: the COMPLETE generated-id set is checked —
+    collisions at ANY load/batch index (not just load::0) fail before
+    any graph mutation."""
     d = _derived()
-    template = _template()
-    template["world_depth::load::0"] = {"class_type": "X", "inputs": {}}
-    with pytest.raises(TranslationFailed, match="collides"):
-        _build(derived=d, template=template)
+    d[0].frame_references = tuple(f"sub/w_{i:03d}.png" for i in range(17))
+    for clash in ("world_depth::load::5", "world_depth::batch::3",
+                  "world_depth::load::16", "world_depth::batch::16",
+                  "world_depth::load::0"):
+        template = _template()
+        template[clash] = {"class_type": "X", "inputs": {}}
+        with pytest.raises(TranslationFailed, match="collide"):
+            _build(derived=d, template=template)
 
 
 def test_missing_derived_reference_fails():
@@ -380,7 +387,8 @@ async def test_transport_splits_retained_d0_blob_into_exact_frames(
     async with factory() as session:
         verified = await execute_schema3_derived_inputs(
             session, store, generation_id=ids["generation_id"],
-            workflow_spec=_spec(ids["continuity"]),
+            attempt_id="11111111-1111-4111-8111-111111111114",
+            workflow_spec=_spec(ids["continuity"], {**ids, "blob": real_hash}),
             manifest_v3=parse_manifest_v3(prod.production_manifest_v3()),
             client=_Rec())
     assert len(uploads) == 17
@@ -388,5 +396,124 @@ async def test_transport_splits_retained_d0_blob_into_exact_frames(
     assert all(name.endswith(".png")
                for name, _, _ in uploads)
     assert [ref for ref in verified[0].frame_references] == [
-        f"soloring-der-{ids['generation_id'][:8]}/{name}"
+        f"soloring-der-{ids['generation_id'][:8]}"
+        f"-11111111/{name}"
         for name, _, _ in uploads]
+
+
+# ------------------------------ E-106 B2: live runtime closure (hermetic) ---
+
+import uuid as _uuid
+
+
+def _attestation_doc(*, comfy="b" * 40, wrapper="c" * 40, origin,
+                     pid=1234, start="2026-01-01T00:00:00.0000000+00:00"):
+    from soloring.executors.comfy.capability_record import (
+        ATTESTATION_SCHEMA_VERSION as _ASV,
+    )
+
+    return {"schema_version": _ASV, "attestation": {
+        "comfyui_commit": comfy, "gguf_commit": wrapper,
+        "executor_origin": origin,
+        "custom_node_policy": {"disable_all": True,
+                               "whitelist": ["ComfyUI-WanVideoWrapper"]},
+        "pid": pid, "process_start_fingerprint": start,
+        "launched_at": "2026-08-27T00:00:00+00:00"}}
+
+
+async def _closure_env(tmp_path, monkeypatch, *, comfy="b" * 40,
+                       wrapper="c" * 40, model_bytes=b"tiny-model",
+                       attestation=None):
+    """Hermetic environment for verify_schema3_runtime_environment: a
+    v4-format attestation in the data dir, matching model roots with real
+    hashed files, and the Windows CIM/port liveness seam stubbed (the
+    pinned live smoke exercises the real process check end-to-end)."""
+    import hashlib
+    import json as _json
+
+    from soloring.settings import Settings
+    from soloring.worker import comfy_pipeline as cp
+
+    data_dir = tmp_path / "data"
+    (data_dir / "comfy-fingerprint").mkdir(parents=True)
+    origin = "http://127.0.0.1:8199"
+    doc = attestation if attestation is not None else _attestation_doc(
+        comfy=comfy, wrapper=wrapper, origin=origin)
+    (data_dir / "comfy-fingerprint" / "deployment_attestation.json"
+     ).write_text(_json.dumps(doc, indent=2))
+    roots = {}
+    artifacts = []
+    for i, key in enumerate(("diffusion_models", "controlnet",
+                             "text_encoders", "vae")):
+        root = tmp_path / key
+        root.mkdir()
+        name = f"m{i}.safetensors"
+        (root / name).write_bytes(model_bytes if i == 0 else
+                                  f"{key}".encode())
+        roots[key] = root
+        artifacts.append({"artifact_key": f"a{i}", "storage_root_key": key,
+                          "node": "1", "field": "f",
+                          "declared_name": name,
+                          "sha256": hashlib.sha256(
+                              (root / name).read_bytes()).hexdigest()})
+    settings = Settings(
+        data_dir=data_dir, comfy_base_url=origin,
+        comfy_model_root_diffusion_models=roots["diffusion_models"],
+        comfy_model_root_controlnet=roots["controlnet"],
+        comfy_model_root_text_encoders=roots["text_encoders"],
+        comfy_model_root_vae=roots["vae"])
+    monkeypatch.setattr(
+        "soloring.executors.comfy.capability_record.verify_live_process",
+        lambda att, port=8188: True, raising=True)
+    fingerprint = {"schema_version": 1, "m10_spatial_runtime": {
+        "comfyui_commit": comfy,
+        "custom_nodes": {"ComfyUI-WanVideoWrapper": wrapper},
+        "artifacts": artifacts}}
+    return cp, settings, fingerprint
+
+
+async def test_b2_live_runtime_closure_pass_and_drifts(tmp_path,
+                                                        monkeypatch):
+    from soloring.errors import ErrorCode, SoloRingError
+
+    cp, settings, fp = await _closure_env(tmp_path, monkeypatch)
+    cp.verify_schema3_runtime_environment(fp, settings)  # positive
+
+    # ComfyUI commit drift
+    _, settings2, _ = await _closure_env(
+        tmp_path / "x1", monkeypatch, comfy="d" * 40)
+    with pytest.raises(SoloRingError) as ei:
+        cp.verify_schema3_runtime_environment(fp, settings2)
+    assert ei.value.code == ErrorCode.EXECUTION_MODEL_INCOMPATIBLE
+
+    # WanVideoWrapper commit drift
+    _, settings3, _ = await _closure_env(
+        tmp_path / "x2", monkeypatch, wrapper="e" * 40)
+    with pytest.raises(SoloRingError) as ei:
+        cp.verify_schema3_runtime_environment(fp, settings3)
+    assert ei.value.code == ErrorCode.EXECUTION_MODEL_INCOMPATIBLE
+
+    # live model bytes drift: same config, mutated file
+    cp4, settings4, fp4 = await _closure_env(tmp_path / "x3", monkeypatch)
+    m0 = (tmp_path / "x3" / "diffusion_models" / "m0.safetensors")
+    m0.write_bytes(b"tampered-bytes")
+    with pytest.raises(SoloRingError) as ei:
+        cp4.verify_schema3_runtime_environment(fp4, settings4)
+    assert ei.value.code == ErrorCode.EXECUTION_MODEL_INCOMPATIBLE
+
+    # missing attestation → closed
+    cp5, settings5, fp5 = await _closure_env(tmp_path / "x4", monkeypatch)
+    (tmp_path / "x4" / "data" / "comfy-fingerprint" /
+     "deployment_attestation.json").unlink()
+    with pytest.raises(SoloRingError) as ei:
+        cp5.verify_schema3_runtime_environment(fp5, settings5)
+    assert ei.value.code == ErrorCode.EXECUTION_MODEL_INCOMPATIBLE
+
+    # stale process (liveness seam reports dead) → closed
+    cp6, settings6, fp6 = await _closure_env(tmp_path / "x5", monkeypatch)
+    monkeypatch.setattr(
+        "soloring.executors.comfy.capability_record.verify_live_process",
+        lambda att, port=8188: False)
+    with pytest.raises(SoloRingError) as ei:
+        cp6.verify_schema3_runtime_environment(fp6, settings6)
+    assert ei.value.code == ErrorCode.EXECUTION_MODEL_INCOMPATIBLE

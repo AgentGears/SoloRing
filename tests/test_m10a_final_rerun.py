@@ -34,8 +34,11 @@ async def _full_schema3_generation(factory, engine, settings):
     block = {**out.spatial_realization_block,
              "spatial_continuity_hash": ids["continuity"]}
     block["derived_artifacts"] = [
-        {**a, "blob_hash": ids["blob"]} for a in
-        block["derived_artifacts"]]
+        {**a, "blob_hash": ids["blob"],
+         "derived_spatial_artifact_id": ids["artifact"],
+         "spec_hash": ids["spec_hash"],
+         "runtime_fingerprint_hash": ids["runtime_hash"]}
+        for a in block["derived_artifacts"]]
     out = out.__class__(  # same shape, seeded identities
         specs=out.specs, spec_hashes=out.spec_hashes,
         runtime_fingerprint=out.runtime_fingerprint,
@@ -97,6 +100,7 @@ async def test_rerun_with_materializer_unavailable(factory, engine, settings,
     async with factory() as session:
         verified = await execute_schema3_derived_inputs(
             session, BlobStore(settings), generation_id=new_id,
+            attempt_id="11111111-1111-4111-8111-111111111113",
             workflow_spec=ids["spec"], manifest_v3=_manifest_doc(),
             client=uploader)
     import hashlib

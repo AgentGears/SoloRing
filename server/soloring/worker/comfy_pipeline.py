@@ -195,6 +195,70 @@ async def resolve_capability(
     )
 
 
+def _verify_schema3_stored_spec_canonical(spec: dict,
+                                           stored_json: str) -> None:
+    """E-106 B3a / corruption cell 20: the stored schema-3 WorkflowSpec
+    BYTES must be canonical — semantic hash equality alone would accept a
+    reordered/pretty-printed document as history."""
+    from soloring.domain.canonical import canonical_json_str
+
+    if canonical_json_str(spec) != stored_json:
+        raise SoloRingError(
+            ErrorCode.INTERNAL_INVARIANT_VIOLATION,
+            "Stored schema-3 workflow spec bytes are not canonical.",
+            status_code=500,
+        )
+
+
+def verify_schema3_runtime_environment(fingerprint_doc: dict,
+                                       settings) -> None:
+    """R3 §18 / E-106 B2: validate the CAPTURED schema-3
+    ExecutionModelFingerprint against the ACTUAL execution environment:
+    the live v4 deployment attestation proves the serving-process
+    identity (pid + process-start fingerprint on the configured origin)
+    and carries the launched ComfyUI commit + the whitelisted custom-node
+    commit; the M10 fingerprint's artifact list is live-verified by
+    streaming SHA-256 against the configured model roots. Failure is
+    EXECUTION_MODEL_INCOMPATIBLE before any upload or submission. This
+    NEVER compares against application constants — only captured identity
+    vs live process/bytes."""
+    from soloring.realization.model_roots import verify_live_model_bytes
+    from soloring.realization.runtime import (
+        load_live_attestation,
+        verify_attested_process_live,
+    )
+
+    rr = fingerprint_doc.get("m10_spatial_runtime") or {}
+    attestation = load_live_attestation(settings)
+    if attestation.comfyui_commit != rr.get("comfyui_commit"):
+        raise SoloRingError(
+            ErrorCode.EXECUTION_MODEL_INCOMPATIBLE,
+            f"Live executor ComfyUI commit {attestation.comfyui_commit} "
+            f"disagrees with the captured fingerprint "
+            f"{rr.get('comfyui_commit')}.",
+            status_code=503,
+        )
+    wrapper = (rr.get("custom_nodes") or {}).get(
+        "ComfyUI-WanVideoWrapper")
+    if wrapper is not None and attestation.gguf_commit != wrapper:
+        # the v4 attestation's single whitelisted custom-node commit slot
+        # carries the WanVideoWrapper commit for the M10 deployment
+        raise SoloRingError(
+            ErrorCode.EXECUTION_MODEL_INCOMPATIBLE,
+            f"Live executor custom-node commit {attestation.gguf_commit} "
+            f"disagrees with the captured WanVideoWrapper pin {wrapper}.",
+            status_code=503,
+        )
+    verify_attested_process_live(attestation, settings)
+    artifacts = rr.get("artifacts") or []
+    if artifacts:
+        verify_live_model_bytes(settings, [
+            (a["artifact_key"], a["storage_root_key"], a["declared_name"],
+             a["sha256"])
+            for a in artifacts
+        ])
+
+
 async def drive_comfy_generation(
     engine: AsyncEngine,
     settings: Settings,
@@ -389,6 +453,12 @@ async def _drive(
                         "Stored schema-3 workflow spec bytes disagree with "
                         "the persisted workflow_spec_hash."
                     )
+                # E-106 B3a / corruption cell 20: the STORED BYTES must
+                # themselves be canonical — a semantically equal but
+                # noncanonical (reordered/pretty-printed) document is
+                # historical corruption, not an accepted equivalence.
+                _verify_schema3_stored_spec_canonical(
+                    spec, generation.workflow_spec_json)
                 manifest = parse_manifest_v3(
                     manifest_bytes.decode("utf-8")
                 )
@@ -418,10 +488,20 @@ async def _drive(
                         "Schema-3 profile runtime requirements not closed "
                         f"by captured fingerprint/template: {unproven}"
                     )
+                # R3 §18 / E-106 B2: the CAPTURED ExecutionModelFingerprint
+                # must be validated against the ACTUAL execution
+                # environment before any upload/submission — live
+                # deployment attestation (serving-process identity +
+                # ComfyUI/WanVideoWrapper commits) plus live model-byte
+                # verification. Never a comparison against application
+                # constants.
+                verify_schema3_runtime_environment(
+                    fingerprint_doc, settings)
                 async with factory() as session:
                     schema3_derived = await execute_schema3_derived_inputs(
                         session, blob_store,
                         generation_id=generation_id,
+                        attempt_id=attempt_id,
                         workflow_spec=spec,
                         manifest_v3=manifest,
                         client=ClientUploader(client),
@@ -858,10 +938,14 @@ class ClientUploader:
     ) -> tuple[str, str]:
         """Upload in-memory bytes through the same executor input
         namespace (M10E: per-frame D0 uploads — the bytes are exact
-        slices of the verified retained Blob, never re-encoded)."""
+        slices of the verified retained Blob, never re-encoded). The
+        temp path is uniquely keyed (uuid): concurrent attempts sharing
+        a convergent derived Blob must never race one pathname."""
         import tempfile
+        import uuid
 
-        tmp = Path(tempfile.gettempdir()) / f"soloring-up-{filename}"
+        tmp = Path(tempfile.gettempdir()) / (
+            f"soloring-up-{uuid.uuid4().hex}-{filename}")
         tmp.write_bytes(data)
         try:
             return await self.upload(

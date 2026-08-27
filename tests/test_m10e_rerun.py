@@ -271,6 +271,7 @@ async def test_rerun_transport_references_are_nondurable(
         async with factory() as session:
             verified = await execute_schema3_derived_inputs(
                 session, BlobStore(settings), generation_id=generation_id,
+                attempt_id="11111111-1111-4111-8111-111111111115",
                 workflow_spec=json.loads(src_row["workflow_spec_json"]),
                 manifest_v3=manifest_v3, client=uploader)
         assert [v.blob_hash for v in verified] == \
@@ -298,3 +299,62 @@ async def test_rerun_transport_references_are_nondurable(
             joined = b"".join(parts)
             assert joined in blob_bytes.values(), (
                 f"stream {key} uploads are not the exact retained bytes")
+
+
+async def test_same_generation_attempts_get_isolated_transport(
+        factory, engine, settings, tmp_path):
+    """E-106 B4 / R4 §2.4: TWO EXECUTION ATTEMPTS OF THE SAME GENERATION
+    receive disjoint attempt-scoped upload namespaces while every durable
+    identity stays identical — attempt locality is not merely
+    generation locality."""
+    from soloring.assets.blob_store import BlobStore
+    from soloring.spatial.package3 import parse_manifest_v3
+    from soloring.spatial import production_package as prod
+    from soloring.spatial.worker_inputs import execute_schema3_derived_inputs
+
+    class _Rec:
+        def __init__(self) -> None:
+            self.uploads: list[tuple[str, str, bytes]] = []
+
+        async def upload(self, *, source_path, filename, subfolder):
+            data = source_path.read_bytes()
+            self.uploads.append((filename, subfolder, data))
+            return filename, subfolder
+
+        async def upload_bytes(self, *, data, filename, subfolder):
+            self.uploads.append((filename, subfolder, data))
+            return filename, subfolder
+
+    gen, _, _ = await _terminal_generation(
+        factory, engine, settings, tmp_path, staged=2)
+    sib = await _siblings(engine, gen.id)
+    spec = await _spec(engine, gen.id)
+    manifest_v3 = parse_manifest_v3(prod.production_manifest_v3())
+
+    attempt_a = "aaaaaaaa-0000-4000-8000-00000000000a"
+    attempt_b = "bbbbbbbb-0000-4000-8000-00000000000b"
+    ups = {}
+    for label, attempt in (("a", attempt_a), ("b", attempt_b)):
+        recorder = _Rec()
+        async with factory() as session:
+            verified = await execute_schema3_derived_inputs(
+                session, BlobStore(settings), generation_id=gen.id,
+                attempt_id=attempt, workflow_spec=spec,
+                manifest_v3=manifest_v3, client=recorder)
+        ups[label] = recorder.uploads
+        assert [v.blob_hash for v in verified] == \
+            [r["blob_hash"] for r in sib]
+
+    subs_a = {sub for _, sub, _ in ups["a"]}
+    subs_b = {sub for _, sub, _ in ups["b"]}
+    assert subs_a and subs_b
+    assert not (subs_a & subs_b), (
+        "attempts of the SAME generation must not share a transport "
+        "namespace")
+    assert all(sub.startswith(f"soloring-der-{gen.id[:8]}")
+               for sub in subs_a | subs_b)
+    # identical durable inputs: same frame sets, byte-for-byte
+    assert sorted(f for f, _, _ in ups["a"]) == \
+        sorted(f for f, _, _ in ups["b"])
+    assert sorted(d for _, _, d in ups["a"]) == \
+        sorted(d for _, _, d in ups["b"])

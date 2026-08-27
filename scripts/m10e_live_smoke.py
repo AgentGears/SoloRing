@@ -58,7 +58,22 @@ ENV = {
     "SOLORING_EXECUTOR": "comfy",
     "SOLORING_COMFY_BASE_URL": COMFY,
     "SOLORING_WORKFLOW_PACKAGE_DIR": str(PKG_DIR),
+    # live model-byte verification roots (B2): the certified executor's
+    # ComfyUI model directories
+    "SOLORING_COMFY_MODEL_ROOT_DIFFUSION_MODELS": str(
+        Path(r"C:/AI/M10R3-evidence/executor/comfy/models/"
+             "diffusion_models")),
+    "SOLORING_COMFY_MODEL_ROOT_CONTROLNET": str(
+        Path(r"C:/AI/M10R3-evidence/executor/comfy/models/controlnet")),
+    "SOLORING_COMFY_MODEL_ROOT_TEXT_ENCODERS": str(
+        Path(r"C:/AI/M10R3-evidence/executor/comfy/models/text_encoders")),
+    "SOLORING_COMFY_MODEL_ROOT_VAE": str(
+        Path(r"C:/AI/M10R3-evidence/executor/comfy/models/vae")),
 }
+
+COMFY_DIR = Path(r"C:/AI/M10R3-evidence/executor/comfy")
+COMFY_EXE = Path(r"C:/AI/ComfyUI/venv/Scripts/python.exe")
+COMFY_PYDEPS = Path(r"C:/AI/M10R3-evidence/executor/pydeps")
 
 
 def http(method: str, url: str, body: dict | None = None):
@@ -277,12 +292,80 @@ def _download_input(ref: str) -> bytes:
     return comfy_get(url, timeout=120)
 
 
+def _launch_attested_executor() -> dict:
+    """Launch the certified pinned executor and write the v4 deployment
+    attestation into the smoke data dir (B2): the worker's live runtime
+    closure then proves serving-process identity + ComfyUI/WanVideoWrapper
+    commits + live model bytes against the CAPTURED fingerprint."""
+    import subprocess as _sp
+
+    def _rev(path: Path) -> str:
+        out = _sp.run(["git", "-C", str(path), "rev-parse", "HEAD"],
+                      capture_output=True, text=True, timeout=30)
+        if out.returncode != 0:
+            raise SystemExit(f"cannot read git rev of {path}")
+        return out.stdout.strip()
+
+    comfy_commit = _rev(COMFY_DIR)
+    wrapper_commit = _rev(COMFY_DIR / "custom_nodes"
+                          / "ComfyUI-WanVideoWrapper")
+    # stop anything already on 8199
+    _sp.run(["powershell", "-NoProfile", "-Command",
+             "Get-NetTCPConnection -LocalPort 8199 -State Listen "
+             "-ErrorAction SilentlyContinue | Select-Object -ExpandProperty "
+             "OwningProcess | ForEach-Object { Stop-Process -Id $_ -Force }"],
+            capture_output=True, timeout=30)
+    log = open(SMOKE_ROOT / "comfy-boot.log", "wb")
+    proc = _sp.Popen(
+        [str(COMFY_EXE), "main.py", "--listen", "127.0.0.1", "--port",
+         "8199", "--disable-all-custom-nodes",
+         "--whitelist-custom-nodes", "ComfyUI-WanVideoWrapper",
+         "--output-directory", "output"],
+        cwd=COMFY_DIR,
+        env={**os.environ, "PYTHONPATH": str(COMFY_PYDEPS)},
+        creationflags=_sp.CREATE_NEW_PROCESS_GROUP,
+        stdout=log, stderr=_sp.STDOUT)
+    if not wait_http(f"{COMFY}/system_stats", 120):
+        raise SystemExit("certified executor did not become ready")
+    out = _sp.run(
+        ["powershell", "-NoProfile", "-Command",
+         "Get-NetTCPConnection -LocalPort 8199 -State Listen | "
+         "Select-Object -First 1 -ExpandProperty OwningProcess"],
+        capture_output=True, text=True, timeout=30)
+    pid = int(out.stdout.strip())
+    from soloring.executors.comfy.capability_record import (
+        build_deployment_attestation,
+        capture_process_start_fingerprint,
+    )
+
+    doc = build_deployment_attestation(
+        comfyui_commit=comfy_commit,
+        gguf_commit=wrapper_commit,  # the single whitelisted custom node
+        launched_at=time.strftime("%Y-%m-%dT%H:%M:%S+00:00"),
+        pid=pid,
+        process_start_fingerprint=capture_process_start_fingerprint(pid),
+        executor_origin="http://127.0.0.1:8199")
+    att_dir = DATA_DIR / "comfy-fingerprint"
+    att_dir.mkdir(parents=True, exist_ok=True)
+    (att_dir / "deployment_attestation.json").write_text(
+        json.dumps(doc, indent=2))
+    return {"comfyui_commit": comfy_commit,
+            "wanvideo_wrapper_commit": wrapper_commit, "pid": pid}
+
+
 async def main() -> int:
     EVIDENCE.mkdir(parents=True, exist_ok=True)
     report: dict = {"started": time.strftime("%Y-%m-%dT%H:%M:%S"),
                     "comfy": COMFY, "server": SERVER}
     server = worker = None
     try:
+        step(0, "launching the certified pinned executor (attested)")
+        pins = _launch_attested_executor()
+        report["executor_pins"] = pins
+        print(f"        comfy {pins['comfyui_commit'][:12]}… wrapper "
+              f"{pins['wanvideo_wrapper_commit'][:12]}… pid "
+              f"{pins['pid']}")
+
         step(1, "installing the frozen schema-3 production package")
         install_package()
 
@@ -474,6 +557,10 @@ async def main() -> int:
         step(12, "recording executor/runtime identities")
         stats = json.loads(comfy_get("/system_stats", 30))
         report["executor_system"] = stats.get("system", {})
+        report["live_runtime_closure"] = (
+            "product-enforced: v4 attestation (serving pid + commits) + "
+            "live model-byte SHA-256 vs the CAPTURED fingerprint; "
+            "verified by the worker before upload")
         report["output_pixels_are_authority"] = False  # downstream only
 
         report["finished"] = time.strftime("%Y-%m-%dT%H:%M:%S")
@@ -485,6 +572,14 @@ async def main() -> int:
     finally:
         _stop(worker)
         _stop(server)
+        import subprocess as _sp
+
+        _sp.run(["powershell", "-NoProfile", "-Command",
+                 "Get-NetTCPConnection -LocalPort 8199 -State Listen "
+                 "-ErrorAction SilentlyContinue | Select-Object "
+                 "-ExpandProperty OwningProcess | ForEach-Object { "
+                 "Stop-Process -Id $_ -Force }"],
+                capture_output=True, timeout=30)
 
 
 if __name__ == "__main__":

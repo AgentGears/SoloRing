@@ -198,15 +198,23 @@ def load_deployment_attestation(data_dir: Path) -> DeploymentAttestation:
     # all custom nodes disabled except the pinned whitelist. Imported
     # custom-node code is ordinary Python; an attestation without this
     # policy does not fingerprint what the process actually executes.
+    # The whitelist VALUE is deployment-specific (M5B: ComfyUI-GGUF;
+    # M10E: ComfyUI-WanVideoWrapper) — the frozen v4 SHAPE is strict:
+    # disable_all + exactly ONE whitelisted custom node, whose commit is
+    # pinned in the attestation's custom-node commit slot.
     policy = att.get("custom_node_policy")
+    whitelist = (policy or {}).get("whitelist")
     if (not isinstance(policy, dict)
             or set(policy) != {"disable_all", "whitelist"}
             or policy.get("disable_all") is not True
-            or policy.get("whitelist") != ["ComfyUI-GGUF"]):
+            or not isinstance(whitelist, list)
+            or len(whitelist) != 1
+            or not isinstance(whitelist[0], str)
+            or not whitelist[0]):
         raise CapabilityRecordInvalid(
             "attestation custom_node_policy must be exactly "
-            '{"disable_all": true, "whitelist": ["ComfyUI-GGUF"]}; got '
-            f"{policy!r}")
+            '{"disable_all": true, "whitelist": [<one custom node>]}; '
+            f"got {policy!r}")
     pid = att.get("pid")
     if not isinstance(pid, int) or pid <= 0:
         raise CapabilityRecordInvalid("attestation pid missing/invalid")

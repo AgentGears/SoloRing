@@ -93,6 +93,12 @@ class Settings(BaseSettings):
     comfy_model_root_vae: Path | None = None
     comfy_model_root_clip: Path | None = None
     comfy_model_root_clip_vision: Path | None = None
+    # M10E additive Wan-deployment model roots (R3 §6 fingerprint
+    # artifact vocabulary — ComfyUI's directory names). Additive only;
+    # the M9 keys above are unchanged.
+    comfy_model_root_diffusion_models: Path | None = None
+    comfy_model_root_controlnet: Path | None = None
+    comfy_model_root_text_encoders: Path | None = None
 
     # --- Workflow package selection (M9 §56/§58) -----------------
     # The ONE configured workflow package directory. None = the
