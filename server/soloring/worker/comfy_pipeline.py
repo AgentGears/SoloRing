@@ -593,6 +593,18 @@ async def _drive(
                                 or {}),
                              "artifacts": surviving,
                          }}, settings)
+                    # realization-backed GenerationInput projection
+                    # cross-check (§10.2.1.3): persisted input rows must
+                    # project the spec's realization channels exactly
+                    from soloring.realization.runtime import (
+                        validate_realization_input_projection as _proj,
+                    )
+
+                    async with factory() as session:
+                        _lower_v2_rows = await list_generation_inputs(
+                            session, generation_id
+                        )
+                    _proj(spec=spec, input_rows=_lower_v2_rows)
                 manifest = lower.manifest
                 template_graph = json.loads(json.dumps(lower.template))
                 schema3_lower = lower

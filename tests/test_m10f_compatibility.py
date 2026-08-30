@@ -650,6 +650,99 @@ async def test_lower_v1_has_no_profile_fingerprint_liveness_dependency(
     assert fetched == [], fetched  # zero profile/fingerprint retrieval
 
 
+async def test_lower_v2_realization_input_projection_corruption_fails(
+        client, factory, engine, settings, tmp_path):
+    """R6 §10.2.1.3 / Q44+Q87: corrupting a realization-backed
+    GenerationInput row on a retained-schema3/logical-v2 Generation
+    fails BEFORE materialization/submission — the WorkflowSpec hash,
+    package documents, and profile all remain valid; only the persisted
+    input binding is tampered."""
+    from soloring.generation.service import create_generation_request
+    from tests.test_m10e_generation import _v3_parity_package
+    from tests.test_m9c_generation import _m9_shot
+
+    pid = str(uuid.uuid4())
+    async with factory() as s:
+        await s.execute(text(
+            "INSERT INTO projects (id, name, created_at, updated_at) "
+            "VALUES (:p, 'P', 't', 't')"), {"p": pid})
+        await s.commit()
+    shot, _assets = await _m9_shot(client, factory, engine, settings, pid)
+
+    pkg = await _v3_parity_package(tmp_path)
+    settings.executor = "comfy"
+    settings.workflow_package_dir = pkg
+    async with factory() as session:
+        gen = await create_generation_request(session, shot, settings=settings)
+    gen_id = gen.id
+
+    # corrupt ONE realization-backed input row: point it at a different
+    # blob hash (the WorkflowSpec realization block still names the
+    # original — a valid spec + corrupt projection = must fail)
+    async with engine.connect() as c:
+        row = (await c.execute(text(
+            "SELECT input_key, position, blob_hash FROM "
+            "generation_inputs WHERE generation_id = :g LIMIT 1"),
+            {"g": gen_id})).mappings().one()
+    bad_hash = "e" * 64
+    async with engine.connect() as c:
+        # register the fake blob so the FK passes (the projection check
+        # compares the binding, not the FK)
+        await c.execute(text(
+            "INSERT OR IGNORE INTO blobs (hash, path, size_bytes) "
+            "VALUES (:h, :p, 1)"),
+            {"h": bad_hash, "p": f"sha256/e{'e'}/e{'e'}/{bad_hash}"})
+        await c.execute(text(
+            "UPDATE generation_inputs SET blob_hash = :bad "
+            "WHERE generation_id = :g AND input_key = :k "
+            "AND position = :pos"),
+            {"bad": bad_hash, "g": gen_id, "k": row["input_key"],
+             "pos": row["position"]})
+        await c.commit()
+
+    # stub live attestation so the structural checks run without a
+    # real executor deployment (the failure we're proving is the input
+    # projection corruption, not attestation absence)
+    import soloring.realization.model_roots as model_roots_mod
+    import soloring.realization.runtime as runtime_mod
+
+    class _Att:
+        comfyui_commit = "b" * 40
+        gguf_commit = "c" * 40
+
+    import pytest as _pytest
+
+    with _pytest.MonkeyPatch.context() as mp:
+        mp.setattr(runtime_mod, "load_live_attestation",
+                   lambda s, expected_whitelist=None: _Att())
+        mp.setattr(runtime_mod, "verify_attested_process_live",
+                   lambda a, s: None)
+        mp.setattr(model_roots_mod, "verify_live_model_bytes",
+                   lambda s, entries: {})
+
+        # claim + drive: the worker must fail BEFORE any submission
+        fake = _FakeExecutorClient(b"x" * 40, "15", "images")
+        result = await _drive_hermetic(
+            engine, settings, mp, gen_id, fake)
+    assert result == "failed", (
+        f"corrupted input projection must fail: {result}")
+    async with engine.connect() as c:
+        err = (await c.execute(text(
+            "SELECT error_code FROM generations WHERE id = :g"),
+            {"g": gen_id})).scalar()
+    assert err == "INTERNAL_INVARIANT_VIOLATION", err
+    assert fake.payloads == []  # zero submissions reached the executor
+
+
+class _no_monkeypatch:
+    """Minimal monkeypatch stand-in for the drive helper."""
+    def setattr(self, obj, name, value):
+        pass
+
+    def undo(self):
+        pass
+
+
 async def test_corrected_schema3_v3_output_contract_imports_video_zero(
         factory, engine, settings, tmp_path, monkeypatch):
     """Q79/Q84 hermetic half: a NEW M10-only logical-v3 Generation from
