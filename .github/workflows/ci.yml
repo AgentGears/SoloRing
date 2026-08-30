@@ -34,6 +34,9 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
 
+      - name: Validate proof map
+        run: python scripts/m10f_validate_proof_map.py
+
       - name: Run backend tests
         run: python -m pytest -q
 

@@ -540,6 +540,284 @@ def parse_descriptor_v3(raw: Any) -> dict:
     return doc
 
 
+# --------------------------------------------------------------------------
+# M10F PD-1B — canonical lower-logical execution view (R6 §10.2.1)
+# --------------------------------------------------------------------------
+
+
+class LowerLogicalExecutionView:
+    """One canonical interpretation of a RETAINED schema-3 package as a
+    logical WorkflowSpec v1 or v2 (R6 §10.2.1). In-memory only: no
+    projected bytes/hash is persisted and no new package schema exists —
+    durable identity remains the ORIGINAL captured schema-3 hashes."""
+
+    __slots__ = ("logical_schema_version", "manifest", "template",
+                 "workflow_template", "retained_manifest_v3")
+
+    def __init__(self, logical_schema_version, manifest, template,
+                 workflow_template, retained_manifest_v3):
+        self.logical_schema_version = logical_schema_version
+        self.manifest = manifest
+        self.template = template
+        self.workflow_template = workflow_template
+        self.retained_manifest_v3 = retained_manifest_v3
+
+
+def _lower_bad(message: str) -> SoloRingError:
+    return SoloRingError(ErrorCode.SPATIAL_REALIZATION_BINDING_INVALID,
+                         message, status_code=422)
+
+
+def _project_lower_manifest(manifest_v3: dict, logical_schema_version: int):
+    """§10.2.1.1 manifest projection. Inherited parameters/outputs are
+    retained exactly — never synthesized; an empty inherited outputs map
+    is non-representable for the lower path and fails closed."""
+    from soloring.workflows.manifest import (
+        parse_manifest,
+        parse_manifest_v2,
+    )
+
+    spatial_keys = set(manifest_v3["spatial_bindings"])
+    inherited_inputs = {
+        k: v for k, v in manifest_v3["inputs"].items()
+        if k not in spatial_keys
+    }
+
+    if logical_schema_version == 2:
+        doc = {k: v for k, v in manifest_v3.items()
+               if k != "spatial_bindings"}
+        doc["inputs"] = inherited_inputs
+        doc["schema_version"] = "2"
+        return parse_manifest_v2(doc)
+
+    # logical v1: a TRUE schema-1 manifest view
+    doc = {k: v for k, v in manifest_v3.items() if k != "spatial_bindings"}
+    inputs_v1: dict = {}
+    for key, decl in inherited_inputs.items():
+        if not isinstance(decl, dict):
+            raise _lower_bad(f"manifest input {key!r} is not an object.")
+        source = decl.get("source")
+        decl_v1 = {k: v for k, v in decl.items() if k != "source"}
+        if source is None:
+            inputs_v1[key] = decl_v1  # source-less prompt/ordinary input
+            continue
+        if not isinstance(source, dict):
+            raise _lower_bad(
+                f"manifest input {key!r} has a malformed source object.")
+        kind = source.get("kind")
+        if kind == "shot_reference":
+            role = source.get("role")
+            if not isinstance(role, str) or not role:
+                raise _lower_bad(
+                    f"manifest input {key!r} shot_reference lacks a role.")
+            decl_v1["source_role"] = role
+            inputs_v1[key] = decl_v1
+        elif kind == "realization_channel":
+            continue  # realization channels are not representable in v1
+        else:
+            raise _lower_bad(
+                f"manifest input {key!r} source kind {kind!r} cannot be "
+                "represented in the lower schema-1 grammar.")
+    doc["inputs"] = inputs_v1
+    doc["schema_version"] = "1"
+    return parse_manifest(doc)
+
+
+def _project_lower_template(manifest_v3: dict, retained_template: dict,
+                            projected_manifest) -> dict:
+    """§10.2.1.2 execution-only template projection (R6 pseudo-algorithm):
+    deterministically remove the spatial ControlNet chain from a deep
+    copy of the RETAINED template, rewiring each removed target to its
+    captured model predecessor in reverse topological order."""
+    import copy
+
+    from soloring.executors.comfy.bindings import (
+        validate_manifest_template_bindings,
+        validate_manifest_template_bindings_v2,
+    )
+
+    view = copy.deepcopy(retained_template)
+    bindings = manifest_v3["spatial_bindings"]
+
+    targets: dict[str, dict] = {}
+    for key, binding in bindings.items():
+        node_id = binding["node"]
+        node = view.get(node_id)
+        if not isinstance(node, dict) or node.get("class_type") != \
+                "WanVideoControlnet":
+            raise _lower_bad(
+                f"spatial binding {key!r} target node {node_id!r} is not "
+                "the certified WanVideoControlnet shape.")
+        model_link = node.get("inputs", {}).get("model")
+        if not isinstance(model_link, list) or len(model_link) != 2:
+            raise _lower_bad(
+                f"spatial target {node_id!r} lacks a captured model "
+                "predecessor link.")
+        controlnet_link = node.get("inputs", {}).get("controlnet")
+        if not isinstance(controlnet_link, list) or len(controlnet_link) != 2:
+            raise _lower_bad(
+                f"spatial target {node_id!r} lacks its controlnet loader "
+                "link.")
+        targets[str(node_id)] = {
+            "model": model_link,
+            "loader": str(controlnet_link[0]),
+        }
+
+    # dependency order among targets via captured model links; reject
+    # cycles, then remove downstream-to-upstream
+    remaining = set(targets)
+    order: list[str] = []
+    while remaining:
+        progressed = False
+        for t in sorted(remaining):
+            predecessor = str(targets[t]["model"][0])
+            if predecessor not in remaining:
+                order.append(t)
+                remaining.discard(t)
+                progressed = True
+        if not progressed:
+            raise _lower_bad(
+                "Spatial ControlNet model chain is cyclic; cannot project.")
+
+    removed: set[str] = set()
+    # `order` is upstream-first (a target is emitted once its model
+    # predecessor is resolved); removal runs downstream-to-upstream so
+    # each rewiring target still exists when its links move up the chain.
+    for t in reversed(order):
+        entry = targets[t]
+        predecessor = entry["model"]
+        for node in view.values():
+            if not isinstance(node, dict):
+                continue
+            inputs = node.get("inputs")
+            if not isinstance(inputs, dict):
+                continue
+            for field, value in list(inputs.items()):
+                if (isinstance(value, list) and len(value) == 2
+                        and str(value[0]) == t):
+                    inputs[field] = list(predecessor)
+        loader = entry["loader"]
+        loader_referenced = any(
+            isinstance(node, dict)
+            and any(
+                isinstance(value, list) and len(value) == 2
+                and str(value[0]) == loader
+                for value in (node.get("inputs") or {}).values()
+            )
+            for key, node in view.items() if key not in (t, loader)
+        )
+        if loader_referenced:
+            raise _lower_bad(
+                f"ControlNet loader {loader!r} is referenced outside the "
+                "spatial chain; cannot project safely.")
+        view.pop(t, None)
+        view.pop(loader, None)
+        removed.update({t, loader})
+
+    # post-conditions: no dangling links, no spatial placeholders, no
+    # surviving spatial nodes from the bindings
+    for node_id, node in view.items():
+        if not isinstance(node, dict):
+            continue
+        inputs = node.get("inputs")
+        if not isinstance(inputs, dict):
+            continue
+        for field, value in inputs.items():
+            if isinstance(value, list) and len(value) == 2:
+                if str(value[0]) in removed:
+                    raise _lower_bad(
+                        f"projected node {node_id!r} field {field!r} still "
+                        "links a removed spatial node.")
+                if str(value[0]) not in view:
+                    raise _lower_bad(
+                        f"projected node {node_id!r} field {field!r} links "
+                        f"unknown node {value[0]!r}.")
+            if value == ["__INPUT__", 0]:
+                raise _lower_bad(
+                    f"projected node {node_id!r} field {field!r} retains an "
+                    "unresolved spatial control placeholder.")
+    for node_id in (str(b["node"]) for b in bindings.values()):
+        if node_id in view:
+            raise _lower_bad(
+                f"spatial target {node_id!r} survived the projection.")
+
+    # structural-only binding validation against the projected graph
+    if projected_manifest.__class__.__name__ == "ManifestDocumentV2":
+        validate_manifest_template_bindings_v2(projected_manifest, view)
+    else:
+        validate_manifest_template_bindings(projected_manifest, view)
+    return view
+
+
+def project_lower_logical_execution_view(
+    manifest_v3: dict,
+    retained_template: dict,
+    original_manifest_hash: str,
+    original_template_hash: str,
+    logical_schema_version: int,
+) -> LowerLogicalExecutionView:
+    """The ONE canonical lower-logical execution view (R6 §10.2.1.5):
+    retained manifest schema 3 interpreted as logical WorkflowSpec 1/2.
+    Creation, worker submission, and terminal output resolution all
+    consume this helper; no second downgrade path may exist."""
+    if logical_schema_version not in (1, 2):
+        raise _lower_bad(
+            f"logical_schema_version must be 1 or 2, got "
+            f"{logical_schema_version!r}.")
+    validated = parse_manifest_v3(manifest_v3)
+    if not validated.get("outputs"):
+        raise _lower_bad(
+            "The retained schema-3 manifest declares no ordinary output "
+            "contract; it is non-representable on the lower-logical "
+            "compatibility path (PD-1C supplies it for the certified "
+            "release).")
+
+    projected_manifest = _project_lower_manifest(
+        validated, logical_schema_version)
+    projected_template = _project_lower_template(
+        validated, retained_template, projected_manifest)
+
+    if logical_schema_version == 2:
+        from soloring.workflows.manifest import build_template_v2
+
+        workflow_template = build_template_v2(
+            projected_manifest, original_manifest_hash,
+            original_template_hash)
+    else:
+        from soloring.workflows.manifest import build_template
+
+        workflow_template = build_template(
+            projected_manifest, original_manifest_hash,
+            original_template_hash)
+
+    view = LowerLogicalExecutionView(
+        logical_schema_version=logical_schema_version,
+        manifest=projected_manifest,
+        template=projected_template,
+        workflow_template=workflow_template,
+        retained_manifest_v3=validated,
+    )
+
+    # §10.2.1.2 step 8: the frozen lower template's output contract equals
+    # the projected manifest's, and the certified prompt declaration (when
+    # present) still targets its captured node/field.
+    manifest_output_names = set(projected_manifest.outputs)
+    template_output_names = {o.name for o in workflow_template.outputs}
+    if manifest_output_names != template_output_names:
+        raise _lower_bad(
+            "The projected manifest output contract disagrees with the "
+            "frozen lower WorkflowTemplate outputs.")
+    prompt_decl = projected_manifest.inputs.get("prompt")
+    certified = validated.get("inputs", {}).get("prompt")
+    if certified is not None and prompt_decl is not None:
+        if (prompt_decl.node != certified["node"]
+                or prompt_decl.field != certified["field"]):
+            raise _lower_bad(
+                "The certified prompt declaration did not survive the "
+                "lower projection intact.")
+    return view
+
+
 __all__ = [
     "PROFILE_SCHEMA_VERSION_2", "MANIFEST_SCHEMA_VERSION_3",
     "DESCRIPTOR_SCHEMA_VERSION_3", "Package3Invalid",
@@ -547,4 +825,5 @@ __all__ = [
     "manifest_binding_map", "resolve_derived_binding",
     "validate_manifest_v3_template_bindings",
     "validate_schema3_fingerprint_template", "check_runtime_closure",
+    "LowerLogicalExecutionView", "project_lower_logical_execution_view",
 ]

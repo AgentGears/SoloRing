@@ -472,7 +472,131 @@ async def _drive(
             template_graph = json.loads(template_bytes.decode("utf-8"))
             schema3_derived = None
             schema2_pending = None
-            if spec.get("schema_version") == 3:
+            schema3_lower = None
+            # M10F PD-1B (R6 §10.2.1): historical dispatch is keyed by the
+            # pair (retained manifest schema, logical WorkflowSpec schema)
+            # — never by the logical schema alone. A logical v1/v2
+            # Generation may retain a schema-3 package.
+            retained_manifest_schema = None
+            try:
+                retained_manifest_schema = json.loads(
+                    manifest_bytes.decode("utf-8")).get("schema_version")
+            except ValueError:
+                retained_manifest_schema = None
+            if (retained_manifest_schema == "3"
+                    and spec.get("schema_version") in (1, 2)):
+                from soloring.spatial.package3 import (
+                    check_runtime_closure,
+                    parse_manifest_v3,
+                    parse_profile_v2,
+                    project_lower_logical_execution_view,
+                )
+
+                manifest_v3_doc = parse_manifest_v3(
+                    manifest_bytes.decode("utf-8"))
+                lower = project_lower_logical_execution_view(
+                    manifest_v3_doc, template_graph,
+                    generation.manifest_hash,
+                    generation.workflow_template_hash,
+                    logical_schema_version=spec["schema_version"],
+                )
+                if spec["schema_version"] == 2:
+                    # §10.2.1.3 historical/structural checks (complete):
+                    # the FULL retained package is validated against the
+                    # ORIGINAL captured documents. Live execution
+                    # availability follows the PROJECTED graph only.
+                    from soloring.domain.canonical import (
+                        canonical_hash as _spec_hash,
+                    )
+
+                    if _spec_hash(spec) != generation.workflow_spec_hash:
+                        raise internal_invariant(
+                            "Stored lower-logical-v2 workflow spec bytes "
+                            "disagree with the persisted "
+                            "workflow_spec_hash."
+                        )
+                    profile = parse_profile_v2(
+                        (await artifact_store.get_profile(
+                            spec["realization"]["profile"]["hash"]
+                        )).decode("utf-8"))
+                    fingerprint_doc = json.loads(
+                        (await artifact_store.get_fingerprint(
+                            spec["model"][
+                                "execution_model_fingerprint_hash"]
+                        )).decode("utf-8"))
+                    # full schema-3 fingerprint grammar + original
+                    # fingerprint↔template hard-component closure
+                    from soloring.spatial.package3 import (
+                        validate_schema3_fingerprint_template,
+                    )
+
+                    validate_schema3_fingerprint_template(
+                        fingerprint_doc, template_graph)
+                    unproven = check_runtime_closure(
+                        profile["spatial"], fingerprint=fingerprint_doc,
+                        template=template_graph)
+                    if unproven:
+                        raise internal_invariant(
+                            "Schema-3 profile runtime requirements not "
+                            "closed by captured fingerprint/template: "
+                            f"{unproven}")
+                    # derive the inherited M9 profile view; cross-check
+                    # WorkflowSpec model/profile identities vs Generation
+                    # columns (§10.2.1.3 historical/structural half)
+                    from soloring.realization.profile import (
+                        parse_profile as _parse_m9_profile,
+                    )
+
+                    m9_profile_view = _parse_m9_profile(
+                        {k: v for k, v in profile.items()
+                         if k != "spatial"} | {"schema_version": 1})
+                    if (spec.get("model", {}).get("id")
+                            != generation.model
+                            or spec.get("model", {}).get("version")
+                            != generation.model_version):
+                        raise internal_invariant(
+                            "Lower-logical-v2 Generation model columns "
+                            "disagree with the spec."
+                        )
+                    if (m9_profile_view.model.id
+                            != spec.get("model", {}).get("id")
+                            or m9_profile_view.model.version
+                            != spec.get("model", {}).get("version")):
+                        raise internal_invariant(
+                            "Lower-logical-v2 historical profile model "
+                            "identity disagrees with the spec."
+                        )
+                    if (spec.get("realization", {})
+                            .get("profile", {}).get("hash") is None
+                            or spec.get("model", {}).get(
+                                "execution_model_fingerprint_hash")
+                            is None):
+                        raise internal_invariant(
+                            "Lower-logical-v2 spec lacks captured "
+                            "profile/model identity."
+                        )
+                    # …but live execution availability follows the
+                    # PROJECTED graph: only fingerprint artifacts whose
+                    # captured (node, field) loader binding survives the
+                    # projection are live-verified (the removed depth
+                    # ControlNet is not an execution-time requirement).
+                    surviving = [
+                        a for a in (
+                            fingerprint_doc.get("m10_spatial_runtime")
+                            or {}).get("artifacts", [])
+                        if a.get("node") in lower.template
+                    ]
+                    verify_schema3_runtime_environment(
+                        {**fingerprint_doc,
+                         "m10_spatial_runtime": {
+                             **(fingerprint_doc.get("m10_spatial_runtime")
+                                or {}),
+                             "artifacts": surviving,
+                         }}, settings)
+                manifest = lower.manifest
+                template_graph = json.loads(json.dumps(lower.template))
+                schema3_lower = lower
+            elif spec.get("schema_version") == 3:
                 # M10 frozen r3 §2.2/§48: schema-3 historical execution
                 # reads captured state ONLY. The v3 manifest/profile/
                 # fingerprint artifacts are retrieved by CAPTURED hash,
@@ -880,7 +1004,35 @@ async def _drive(
     # parse here was a latent shared-path defect for both). One manifest
     # authority, schema-dispatched parse; resolve_comfy_outputs consumes
     # only the outputs declarations, identical across schemas.
-    if spec.get("schema_version") == 3:
+    retained_manifest_schema = None
+    try:
+        retained_manifest_schema = json.loads(
+            (await artifact_store.get_manifest(generation.manifest_hash))
+            .decode("utf-8")).get("schema_version")
+    except ValueError:
+        retained_manifest_schema = None
+    if (retained_manifest_schema == "3"
+            and spec.get("schema_version") in (1, 2)):
+        # M10F PD-1B: one canonical lower-logical view owns output
+        # interpretation for retained schema-3 packages on logical v1/v2.
+        from soloring.spatial.package3 import (
+            parse_manifest_v3,
+            project_lower_logical_execution_view,
+        )
+
+        manifest_v3_doc = parse_manifest_v3(
+            (await artifact_store.get_manifest(generation.manifest_hash))
+            .decode("utf-8")
+        )
+        template_graph = json.loads(
+            (await artifact_store.get_template(
+                generation.workflow_template_hash)).decode("utf-8"))
+        manifest = project_lower_logical_execution_view(
+            manifest_v3_doc, template_graph,
+            generation.manifest_hash, generation.workflow_template_hash,
+            logical_schema_version=spec["schema_version"],
+        ).manifest
+    elif spec.get("schema_version") == 3:
         from soloring.spatial.package3 import parse_manifest_v3
         from soloring.workflows.manifest import parse_manifest_v2
 
