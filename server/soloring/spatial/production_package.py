@@ -139,11 +139,25 @@ def production_profile_v2() -> dict:
 
 
 def production_manifest_v3() -> dict:
+    """The certified schema-3 manifest, carrying the inherited ordinary
+    prompt/output contract (M10F PD-1C, R6 §5.5).
+
+    The retained template executes WanVideoTextEncode at node 3
+    (positive_prompt) and SaveAnimatedWEBP at node 80; declaring those
+    ordinary bindings is the truthful contract. Historical M10E schema-3
+    manifests that captured the outputless form remain immutable history
+    and are never backfilled. accepted_media_types stays null: the frozen
+    media detector recognizes only JPEG/PNG and M10F does not widen it.
+    """
     return {
         "schema_version": "3",
         "version": 1,
         "workflow_id": "wan21_spatial_v1",
         "inputs": {
+            "prompt": {
+                "node": "3", "field": "positive_prompt", "kind": "string",
+                "required": True,
+            },
             "world_depth": {
                 "node": "101", "field": "control_images", "kind": "image",
                 "required": True, "cardinality": 1,
@@ -161,7 +175,12 @@ def production_manifest_v3() -> dict:
             },
         },
         "parameters": {},
-        "outputs": {},
+        "outputs": {
+            "video": {
+                "node": "80", "field": "images", "kind": "video",
+                "expected_count": 1, "accepted_media_types": None,
+            },
+        },
         "spatial_bindings": {
             "world_depth": {
                 "artifact_role": "spatial.world_depth", "node": "101",
