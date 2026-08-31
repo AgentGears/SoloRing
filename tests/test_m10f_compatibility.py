@@ -743,6 +743,92 @@ class _no_monkeypatch:
         pass
 
 
+async def test_lower_v2_position_gap_corruption_fails(
+        client, factory, engine, settings, tmp_path):
+    """R6 §10.2.1.3 frozen ordering/cardinality: a self-consistent
+    WorkflowSpec + generation_inputs pair with a binding-position GAP
+    (0,2 instead of 0,1) is rejected even though both sides agree —
+    the positions must be zero-based contiguous. The WorkflowSpec hash
+    is recomputed to be internally valid; only the frozen cardinality
+    invariant fires."""
+    from soloring.domain.canonical import canonical_hash, canonical_json_str
+    from soloring.generation.service import create_generation_request
+    from tests.test_m10e_generation import _v3_parity_package
+    from tests.test_m9c_generation import _m9_shot
+
+    pid = str(uuid.uuid4())
+    async with factory() as s:
+        await s.execute(text(
+            "INSERT INTO projects (id, name, created_at, updated_at) "
+            "VALUES (:p, 'P', 't', 't')"), {"p": pid})
+        await s.commit()
+    shot, _assets = await _m9_shot(client, factory, engine, settings, pid)
+
+    pkg = await _v3_parity_package(tmp_path)
+    settings.executor = "comfy"
+    settings.workflow_package_dir = pkg
+    async with factory() as session:
+        gen = await create_generation_request(session, shot, settings=settings)
+    gen_id = gen.id
+
+    # Read the spec and the input row
+    async with engine.connect() as c:
+        spec = json.loads((await c.execute(text(
+            "SELECT workflow_spec_json FROM generations WHERE id = :g"),
+            {"g": gen_id})).scalar())
+        row = (await c.execute(text(
+            "SELECT input_key, position, asset_id, blob_hash, "
+            "reference_role FROM generation_inputs WHERE generation_id = "
+            ":g LIMIT 1"), {"g": gen_id})).mappings().one()
+
+    # Corrupt: set binding_position to 2 in the spec AND position to 2
+    # in generation_inputs (self-consistent but non-contiguous)
+    for channel in spec.get("realization", {}).get("channels", []):
+        for b in channel.get("bindings", []):
+            if b["binding_position"] == row["position"]:
+                b["binding_position"] = 2
+    new_hash = canonical_hash(spec)
+    async with engine.connect() as c:
+        await c.execute(text(
+            "UPDATE generation_inputs SET position = 2 "
+            "WHERE generation_id = :g AND input_key = :k"),
+            {"g": gen_id, "k": row["input_key"]})
+        await c.execute(text(
+            "UPDATE generations SET workflow_spec_json = :j, "
+            "workflow_spec_hash = :h WHERE id = :g"),
+            {"j": canonical_json_str(spec), "h": new_hash, "g": gen_id})
+        await c.commit()
+
+    # Stub attestation, claim + drive: the frozen contiguous-position
+    # invariant must fire before any submission
+    import soloring.realization.model_roots as model_roots_mod
+    import soloring.realization.runtime as runtime_mod
+    import pytest as _pytest
+
+    class _Att:
+        comfyui_commit = "b" * 40
+        gguf_commit = "c" * 40
+
+    with _pytest.MonkeyPatch.context() as mp:
+        mp.setattr(runtime_mod, "load_live_attestation",
+                   lambda s, expected_whitelist=None: _Att())
+        mp.setattr(runtime_mod, "verify_attested_process_live",
+                   lambda a, s: None)
+        mp.setattr(model_roots_mod, "verify_live_model_bytes",
+                   lambda s, entries: {})
+        fake = _FakeExecutorClient(b"x" * 40, "15", "images")
+        result = await _drive_hermetic(
+            engine, settings, mp, gen_id, fake)
+    assert result == "failed", result
+    async with engine.connect() as c:
+        err = (await c.execute(text(
+            "SELECT error_code, error_message FROM generations "
+            "WHERE id = :g"), {"g": gen_id})).mappings().one()
+    assert err["error_code"] == "INTERNAL_INVARIANT_VIOLATION", err
+    assert "contiguous" in (err["error_message"] or ""), err
+    assert fake.payloads == []  # zero submissions
+
+
 async def test_corrected_schema3_v3_output_contract_imports_video_zero(
         factory, engine, settings, tmp_path, monkeypatch):
     """Q79/Q84 hermetic half: a NEW M10-only logical-v3 Generation from
