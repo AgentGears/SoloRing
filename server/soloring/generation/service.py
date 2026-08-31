@@ -232,7 +232,8 @@ async def _realize_spatial_inputs(
                     _text(f"INSERT OR IGNORE INTO blobs (hash, path, "
                           f"size_bytes, created_at) VALUES (:h, :p, :s, "
                           f"{_NOW})"),
-                    {"h": digest, "p": str(store.path_for_hash(digest)),
+                    {"h": digest,
+                     "p": store.relative_path_for_hash(digest),
                      "s": len(content)})
             await _pub.exec_driver_sql("COMMIT")
         except Exception:
@@ -401,6 +402,33 @@ async def create_generation_request(
                 package.release.workflow_template_hash,
             )
 
+    # M10F PD-1A (R6 §10.2): with empty captured M10 authority a
+    # schema-3-capable package executes through its canonical LOWER-LOGICAL
+    # view instead of being blocked. The retained release stays schema 3;
+    # only the logical WorkflowSpec becomes v1 (no M8) or v2 (non-empty
+    # M8, subject to the frozen M9 readiness rules). `package_is_schema3`
+    # keeps naming the RETAINED package family after the template value
+    # object is replaced by the lower view.
+    package_is_schema3 = getattr(template, "is_schema3", False)
+    authority_nonempty = bool(
+        (snapshot.get("visual_reference_pack") or {}).get("anchors")
+    )
+    if package_is_schema3 and spatial_pack is None:
+        from soloring.spatial.package3 import (
+            project_lower_logical_execution_view,
+        )
+
+        lower_view = project_lower_logical_execution_view(
+            package.manifest_v3,
+            package.template_graph,
+            package.release.manifest_hash,
+            package.release.workflow_template_hash,
+            logical_schema_version=2 if authority_nonempty else 1,
+        )
+        template = lower_view.workflow_template
+    else:
+        lower_view = None
+
     # Deterministic input mapping from the CAPTURED revision snapshot
     # (`template` already holds the captured-bytes workflow for comfy).
     # The snapshot was loaded above (M10E §7.1 spatial-plane decision).
@@ -417,12 +445,9 @@ async def create_generation_request(
     model = None
     model_version = None
     profile_overrides: dict = {}
-    authority_nonempty = bool(
-        (snapshot.get("visual_reference_pack") or {}).get("anchors")
-    )
     if executor == "comfy" and not (
             getattr(template, "is_schema2", False)
-            or getattr(template, "is_schema3", False)):
+            or package_is_schema3):
         # §11.3: non-empty captured M8 authority may never be silently
         # ignored — a schema-1 package is insufficient.
         if authority_nonempty:
@@ -433,8 +458,7 @@ async def create_generation_request(
                 "contract).",
                 status_code=409,
             )
-    if getattr(template, "is_schema2", False) or getattr(
-            template, "is_schema3", False):
+    if getattr(template, "is_schema2", False) or package_is_schema3:
         release = package.release
         if not authority_nonempty:
             # §11.2/§16.3: empty effective M8 authority → exact spec v1
@@ -448,7 +472,7 @@ async def create_generation_request(
             )
             from soloring.realization.compiler import compile_realization
 
-            if getattr(template, "is_schema3", False):
+            if package_is_schema3:
                 # M10E §9.2: the inherited M9 portion of the schema-3
                 # documents is re-parsed through the FROZEN M9 parsers —
                 # the exact same compiler seam as schema 2, never a fork.
@@ -526,7 +550,7 @@ async def create_generation_request(
                 )
                 for p in result.inputs
             ]
-            if getattr(template, "is_schema3", False):
+            if package_is_schema3:
                 model = package.profile_v2["model"]["id"]
                 model_version = package.profile_v2["model"]["version"]
             else:
@@ -537,7 +561,7 @@ async def create_generation_request(
     derived_bindings: tuple = ()
     spatial_block: dict | None = None
     if spatial_pack is not None:
-        if not getattr(template, "is_schema3", False):
+        if not package_is_schema3:
             # Fail-closed M10 capability posture (§4.4): captured spatial
             # authority exists but the selected package is not a schema-3
             # spatial package — no hard spatial component may be silently
@@ -558,21 +582,10 @@ async def create_generation_request(
             manifest_v3=package.manifest_v3,
             realization_profile_hash=package.release.realization_profile_hash,
         )
-    elif getattr(template, "is_schema3", False):
-        # A schema-3 package is a spatial package: with no captured M10
-        # authority there is no executable spatial realization, and no
-        # empty spec v3 exists (spec3 §2.1).
-        raise SoloRingError(
-            ErrorCode.SPATIAL_REALIZATION_UNSUPPORTED,
-            "The selected schema-3 spatial package requires captured "
-            "spatial continuity authority; this ShotRevision captures "
-            "none.",
-            status_code=409,
-        )
 
     # M10-only v3 retains the real captured model identity even when the
     # M9 realization is absent (spec3 §2.1; no fake M9 block is invented).
-    if getattr(template, "is_schema3", False) and model is None:
+    if package_is_schema3 and spatial_pack is not None and model is None:
         model = package.profile_v2["model"]["id"]
         model_version = package.profile_v2["model"]["version"]
 
@@ -622,7 +635,7 @@ async def create_generation_request(
                     "final captured parameters."
                 )
     spec = build_workflow_spec(template, inputs, compiled_prompt, parameters)
-    if getattr(template, "is_schema3", False):
+    if spatial_block is not None:
         # M10E §16: spec v3 is composed exactly once, only after every
         # real immutable derived identity exists (spatial_block was built
         # from registered artifact UUIDs — never the provisional
@@ -659,7 +672,7 @@ async def create_generation_request(
         spec["realization"] = realization_spec
     spec_json = canonical_json_str(spec)
     spec_hash = canonical_hash(spec)
-    if getattr(template, "is_schema3", False) and "pending:" in spec_json:
+    if spatial_block is not None and "pending:" in spec_json:
         # E-041 defense at the composition seam itself.
         raise internal_invariant(
             "Provisional derived-artifact identity reached schema-3 "

@@ -108,6 +108,56 @@ def load_live_attestation(settings, *,
         ) from exc
 
 
+def validate_realization_input_projection(
+    *, spec: dict, input_rows: list,
+) -> None:
+    """Schema-neutral realization-backed GenerationInput projection
+    cross-check (R6 §10.2.1.3): the persisted input rows for the spec's
+    realization channels must project the captured RealizationSpec
+    exactly — contiguous, ordered, no extras, no divergent bindings.
+    Shared by ordinary schema-2 and retained-schema3/logical-v2."""
+
+    def _corrupt(message: str) -> SoloRingError:
+        return SoloRingError(
+            ErrorCode.INTERNAL_INVARIANT_VIOLATION, message, status_code=500
+        )
+
+    realization = spec.get("realization") or {}
+    expected: dict[str, list[tuple[int, str, str, str]]] = {}
+    for channel in realization.get("channels", []):
+        for b in channel["bindings"]:
+            expected.setdefault(channel["input_key"], []).append(
+                (b["binding_position"], b["item"]["asset_id"],
+                 b["item"]["blob_hash"], b["item"]["role"])
+            )
+    for key in expected:
+        expected[key].sort()
+
+    realization_keys = set(expected)
+    actual: dict[str, list[tuple[int, str, str, str]]] = {}
+    for row in input_rows:
+        if row.input_key not in realization_keys:
+            continue
+        actual.setdefault(row.input_key, []).append(
+            (row.position, row.asset_id, row.blob_hash, row.reference_role)
+        )
+    for key in actual:
+        actual[key].sort()
+
+    if expected != actual:
+        raise _corrupt(
+            "Persisted realization-backed GenerationInputs disagree "
+            "with the captured RealizationSpec."
+        )
+    for key, rows in expected.items():
+        positions = sorted(p for p, *_ in rows)
+        if positions != list(range(len(rows))):
+            raise _corrupt(
+                f"Realization input positions for {key!r} are not "
+                "zero-based contiguous."
+            )
+
+
 def validate_schema2_historical_state(
     *,
     spec: dict,
@@ -153,42 +203,7 @@ def validate_schema2_historical_state(
     ) is None:
         raise _corrupt("Schema-2 spec lacks captured profile/model identity.")
 
-    expected: dict[str, list[tuple[int, str, str, str]]] = {}
-    for channel in realization.get("channels", []):
-        for b in channel["bindings"]:
-            expected.setdefault(channel["input_key"], []).append(
-                (
-                    b["binding_position"],
-                    b["item"]["asset_id"],
-                    b["item"]["blob_hash"],
-                    b["item"]["role"],
-                )
-            )
-    for key in expected:
-        expected[key].sort()
-
-    # §19: legacy shot_reference rows on OTHER input keys legally coexist
-    # with realization rows; only the realization projection is compared.
-    realization_keys = set(expected)
-    actual: dict[str, list[tuple[int, str, str, str]]] = {}
-    for row in input_rows:
-        if row.input_key not in realization_keys:
-            continue
-        actual.setdefault(row.input_key, []).append(
-            (row.position, row.asset_id, row.blob_hash, row.reference_role)
-        )
-    for key in actual:
-        actual[key].sort()
-
-    if expected != actual:
-        raise _corrupt(
-            "Persisted realization-backed GenerationInputs disagree with "
-            "the captured RealizationSpec."
-        )
-    for key, rows in expected.items():
-        positions = sorted(p for p, *_ in rows)
-        if positions != list(range(len(rows))):
-            raise _corrupt(
-                f"Realization input positions for {key!r} are not "
-                "zero-based contiguous."
-            )
+    # R6 §10.2.1.3: the realization-input projection comparison reuses
+    # the ONE frozen shared helper — no duplicated ordering/cardinality
+    # algorithm exists between ordinary schema-2 and lower-v2.
+    validate_realization_input_projection(spec=spec, input_rows=input_rows)

@@ -414,8 +414,18 @@ async def _v3_parity_package(tmp_path: Path) -> Path:
     prod_manifest = prod.production_manifest_v3()
     manifest_v3 = dict(manifest_v2)
     manifest_v3["schema_version"] = "3"
-    manifest_v3["inputs"] = {**manifest_v2["inputs"],
-                             **prod_manifest["inputs"]}
+    # M10F PD-1C re-pin: the certified schema-3 manifest now declares the
+    # ordinary prompt/output contract against the Wan template (node 3),
+    # which this V4-template parity package does not contain. The parity
+    # contract (E-045: inherited M9 portion equals the V2 documents
+    # object-for-object) requires overlaying ONLY the spatial inputs; the
+    # ordinary inputs stay the V4 manifest's own.
+    spatial_inputs = {
+        k: v for k, v in prod_manifest["inputs"].items()
+        if k in prod_manifest["spatial_bindings"]
+    }
+    manifest_v3["inputs"] = {**manifest_v2["inputs"], **spatial_inputs}
+    manifest_v3["outputs"] = manifest_v2["outputs"]
     manifest_v3["spatial_bindings"] = prod_manifest["spatial_bindings"]
 
     profile_v2 = dict(profile_v1)
