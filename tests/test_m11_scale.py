@@ -290,14 +290,16 @@ async def test_readiness_query_class_independent_of_total_project_assets(
     assert r.ready
     asset_touching = [
         q for q in counter.statements
-        if "FROM assets" in q and "JOIN" not in q.upper()
+        if "from assets" in q.lower() and "join" not in q.lower()
     ]
     # No statement enumerates the asset table: the candidate is resolved by
-    # identity, never by scanning Project Assets.
+    # identity (WHERE a.id = or an identity-bound JOIN ON a.id =), never by
+    # scanning Project Assets.
     for q in counter.statements:
         low = q.lower()
-        if low.startswith("select") and "assets" in low:
-            assert "where a.id =" in low or "where assets.id" in low, q[:120]
+        if low.startswith("select") and " assets" in low:
+            assert "a.id = " in low or "assets.id" in low, q[:120]
+    assert asset_touching == []  # no un-joined asset-table reads at all
     assert counter.count < 10  # bounded query family, not 20k-cardinality
 
 
