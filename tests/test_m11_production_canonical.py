@@ -83,6 +83,56 @@ def test_different_blob_or_interpretation_changes_snapshot_hash():
     assert len({base, other_blob, other_size, other_media}) == 4
 
 
+def test_schema1_hash_excludes_source_and_display_provenance():
+    """M11-ID:03 — Asset/object/filename/path/display metadata never enter."""
+    # The builder accepts ONLY the closure; publication of the same closure
+    # from any Asset, object name, filename, or path yields identical bytes.
+    h1 = production_revision_snapshot_hash(FIXTURE)
+    import hashlib
+
+    for variant in (
+        RetainedBlobClosure(blob_hash="a" * 64, size_bytes=3, media_type=None),
+        RetainedBlobClosure(blob_hash="a" * 64, size_bytes=3, media_type=None),
+    ):
+        assert production_revision_snapshot_hash(variant) == h1
+    # Structurally: the frozen canonical bytes contain only the five facts.
+    doc = build_production_revision_snapshot(FIXTURE)
+    assert set(doc) == {"schema_version", "consumption"}
+    assert set(doc["consumption"]) == {
+        "contract_key", "contract_version", "blob_hash", "size_bytes", "media_type",
+    }
+    assert h1 == hashlib.sha256(FIXTURE_BYTES).hexdigest()
+
+
+async def test_same_blob_on_two_objects_produces_distinct_revision_ids(
+    engine, factory, settings
+):
+    """M11-ID:02 — Blob identity does not collapse Production Objects."""
+    from soloring.assets.blob_store import BlobStore
+    from soloring.production.service import (
+        create_production_object,
+        publish_production_revision,
+    )
+    from tests.test_m11_publication import _seed_blob_asset, _seed_project
+
+    blob_store = BlobStore(settings)
+
+    pid = await _seed_project(factory)
+    data = b"shared-object-bytes"
+    aid, bh = await _seed_blob_asset(factory, blob_store, pid, data=data)
+    async with factory() as s:
+        obj_x = await create_production_object(s, pid, name="Object X")
+        obj_y = await create_production_object(s, pid, name="Object Y")
+        rx, cx = await publish_production_revision(
+            s, blob_store, production_object_id=obj_x["id"], source_asset_id=aid)
+        ry, cy = await publish_production_revision(
+            s, blob_store, production_object_id=obj_y["id"], source_asset_id=aid)
+    assert cx and cy
+    assert rx["revision_id"] != ry["revision_id"]
+    assert rx["closure"]["blob_hash"] == ry["closure"]["blob_hash"] == bh
+    assert rx["snapshot_hash"] == ry["snapshot_hash"]  # same closure content
+
+
 async def test_duplicate_object_names_have_distinct_uuid_identity(
     engine, factory
 ):

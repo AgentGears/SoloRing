@@ -13,6 +13,7 @@ import hashlib
 import logging
 import os
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 from soloring.settings import Settings
@@ -21,6 +22,21 @@ log = logging.getLogger("soloring.assets.blobs")
 
 # Plan §45:  data/blobs/sha256/aa/bb/<full-hash>
 BLOB_TREE = "sha256"
+
+
+@dataclass(frozen=True)
+class BlobPhysicalVerification:
+    """Result of verifying retained physical bytes against a registered Blob.
+
+    ``ok`` is True only when the file exists, its bounded-chunk SHA-256 equals
+    the registered hash, and its byte count equals the registered size. Any
+    failure carries a stable ``reason`` for the caller's corruption report.
+    """
+
+    ok: bool
+    reason: str | None = None
+    actual_hash: str | None = None
+    actual_size: int | None = None
 
 
 class BlobStore:
@@ -137,3 +153,36 @@ class BlobStore:
             return False
 
         return await asyncio.to_thread(_place)
+
+    async def verify_physical_bytes(
+        self, blob_hash: str, expected_size: int
+    ) -> BlobPhysicalVerification:
+        """Verify retained physical bytes for a registered Blob (M11 §7.1).
+
+        Reuses the hash-derived path and bounded-chunk hashing discipline; no
+        repair is performed. Blocking hashing runs off the event loop.
+        """
+        if not self.validate_hash(blob_hash):
+            return BlobPhysicalVerification(
+                False, reason="invalid_hash", actual_size=expected_size
+            )
+
+        def _verify() -> BlobPhysicalVerification:
+            path = self.path_for_hash(blob_hash)
+            actual = BlobStore._hash_file(path)
+            if actual is None:
+                return BlobPhysicalVerification(False, reason="missing")
+            size = path.stat().st_size
+            if actual != blob_hash:
+                return BlobPhysicalVerification(
+                    False, reason="hash_mismatch", actual_hash=actual, actual_size=size
+                )
+            if size != expected_size:
+                return BlobPhysicalVerification(
+                    False, reason="size_mismatch", actual_hash=actual, actual_size=size
+                )
+            return BlobPhysicalVerification(
+                True, actual_hash=actual, actual_size=size
+            )
+
+        return await asyncio.to_thread(_verify)
