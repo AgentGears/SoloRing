@@ -37,8 +37,18 @@ from soloring.domain.canonical import canonical_json_bytes, canonical_hash
 from soloring.settings import Settings
 from soloring.workflows.artifact_store import WorkflowArtifactStore
 
-EXPECTED_ALEMBIC_HEAD = "0011_m10_derived_spatial_execution"
+EXPECTED_ALEMBIC_HEAD = "0012_m11_reusable_production_revisions"
 BACKUP_MANIFEST_SCHEMA_VERSION = 1
+
+# M11 (frozen R3 §14): restore is head-dispatched. Current backup creation
+# certifies only the 0012 head; a valid pre-M11 0011 backup-manifest-v1
+# remains restorable under its own frozen six-path policy, and unknown
+# heads fail closed.
+PRE_M11_ALEMBIC_HEAD = "0011_m10_derived_spatial_execution"
+SUPPORTED_RESTORE_ALEMBIC_HEADS = frozenset({
+    PRE_M11_ALEMBIC_HEAD,
+    EXPECTED_ALEMBIC_HEAD,
+})
 
 ARTIFACT_KINDS = (
     "execution_model_fingerprints",
@@ -60,7 +70,7 @@ ARTIFACT_KINDS = (
 # expectation on its first real run; the inventory below is the
 # source-true exhaustive set. Omitting the M8 paths would silently drop
 # anchor-image bytes from every backup.
-EXPECTED_BLOB_FK_COLUMNS = frozenset({
+PRE_M11_BLOB_FK_COLUMNS = frozenset({
     ("assets", "blob_hash"),
     ("derived_spatial_artifacts", "blob_hash"),
     ("generation_derived_spatial_inputs", "blob_hash"),
@@ -68,6 +78,23 @@ EXPECTED_BLOB_FK_COLUMNS = frozenset({
     ("shot_revision_visual_anchor_items", "blob_hash"),
     ("visual_anchor_revision_items", "blob_hash"),
 })
+
+# M11 adds the seventh durable Blob-reference path (frozen R3 §14.2): the
+# immutable retained_blob/v1 closure projection. The 0012 policy is exactly
+# seven paths; the 0011 restore policy stays exactly the six above.
+M11_BLOB_FK_COLUMNS = frozenset(
+    set(PRE_M11_BLOB_FK_COLUMNS)
+    | {("production_revision_closures", "blob_hash")}
+)
+
+
+def _blob_fk_policy_for_head(head: str) -> frozenset:
+    """Exact head-specific Blob-FK inventory (frozen R3 §14.2)."""
+    if head == PRE_M11_ALEMBIC_HEAD:
+        return PRE_M11_BLOB_FK_COLUMNS
+    if head == EXPECTED_ALEMBIC_HEAD:
+        return M11_BLOB_FK_COLUMNS
+    raise RecoveryCorruption(f"unsupported recovery head {head!r}.")
 
 _HEX = set("0123456789abcdef")
 _CHUNK = 1 << 20
@@ -216,7 +243,7 @@ def _drop_sidecar_files(staged_db: Path) -> None:
             side.unlink()
 
 
-def _verify_staged_db(staged_db: Path) -> None:
+def _verify_staged_db(staged_db: Path, expected_head: str = EXPECTED_ALEMBIC_HEAD) -> None:
     con = sqlite3.connect(str(staged_db))
     try:
         row = con.execute("PRAGMA quick_check").fetchone()
@@ -236,10 +263,10 @@ def _verify_staged_db(staged_db: Path) -> None:
                 "staged DB has no alembic_version table; cannot prove the "
                 "migration head."
             ) from exc
-        if versions != [EXPECTED_ALEMBIC_HEAD]:
+        if versions != [expected_head]:
             raise RecoveryCorruption(
                 f"staged DB migration head is {versions!r}; recovery "
-                f"requires exactly [{EXPECTED_ALEMBIC_HEAD!r}]."
+                f"requires exactly [{expected_head!r}]."
             )
     finally:
         con.close()
@@ -403,23 +430,23 @@ def _blob_relative_path(blob_hash: str) -> str:
     return f"sha256/{blob_hash[0:2]}/{blob_hash[2:4]}/{blob_hash}"
 
 
-def _enumerate_liveness(staged_db: Path) -> _Liveness:
+def _enumerate_liveness(staged_db: Path, expected_columns: frozenset = M11_BLOB_FK_COLUMNS) -> _Liveness:
     """Exact Blob + workflow-artifact liveness from the staged DB only."""
     con = sqlite3.connect(str(staged_db))
     con.row_factory = sqlite3.Row
     try:
         inventory = _blob_fk_inventory(con)
-        if inventory != set(EXPECTED_BLOB_FK_COLUMNS):
+        if inventory != set(expected_columns):
             raise RecoveryCorruption(
-                "Blob FK inventory drifted from the frozen four-path set "
-                f"{sorted(EXPECTED_BLOB_FK_COLUMNS)}: found "
+                "Blob FK inventory drifted from the frozen head-specific "
+                f"exact set {sorted(expected_columns)}: found "
                 f"{sorted(inventory)}. A new durable Blob-reference path "
                 "requires a plan revision before recovery can certify "
                 "completeness."
             )
 
         blob_hashes: set[str] = set()
-        for table, _col in sorted(EXPECTED_BLOB_FK_COLUMNS):
+        for table, _col in sorted(expected_columns):
             for row in con.execute(f'SELECT DISTINCT blob_hash FROM "{table}"'):
                 blob_hashes.add(_hex_or_corrupt(
                     row[0], f"{table}.blob_hash entry"))
@@ -709,9 +736,10 @@ def parse_backup_manifest_v1(raw: bytes) -> dict:
             or isinstance(doc["schema_version"], bool)
             or doc["schema_version"] != BACKUP_MANIFEST_SCHEMA_VERSION):
         raise _reject_manifest("schema_version must be the integer 1.")
-    if doc["alembic_version"] != EXPECTED_ALEMBIC_HEAD:
+    if doc["alembic_version"] not in SUPPORTED_RESTORE_ALEMBIC_HEADS:
         raise _reject_manifest(
-            f"alembic_version must be {EXPECTED_ALEMBIC_HEAD!r}.")
+            f"alembic_version must be one of "
+            f"{sorted(SUPPORTED_RESTORE_ALEMBIC_HEADS)}.")
     if not _is_hash(doc["database_sha256"]):
         raise _reject_manifest("database_sha256 is not 64-lowercase-hex.")
 
@@ -890,10 +918,11 @@ def _verify_manifest_files(root: Path, manifest: dict) -> None:
 
 def _verify_liveness_equal(db_path: Path, manifest: dict) -> None:
     """Re-enumerate DB liveness and require exact manifest equality."""
+    head = manifest["alembic_version"]
     _normalize_staged_wal(db_path)
     _drop_sidecar_files(db_path)
-    _verify_staged_db(db_path)
-    live = _enumerate_liveness(db_path)
+    _verify_staged_db(db_path, expected_head=head)
+    live = _enumerate_liveness(db_path, _blob_fk_policy_for_head(head))
     if live.blob_hashes != manifest["blob_hashes"]:
         raise RecoveryCorruption(
             "re-enumerated Blob liveness differs from the manifest."
@@ -933,6 +962,154 @@ def _verify_backup_tree(root: Path, full_liveness: bool) -> dict:
     if full_liveness:
         _verify_liveness_equal(root / "soloring.db", manifest)
     return manifest
+
+
+# ---------------------------------------------------------------------------
+# M11 immutable production-state verification (frozen R3 §14.4)
+# ---------------------------------------------------------------------------
+
+
+def _verify_m11_production_state(staged_db: Path) -> None:
+    """Verify every M11 Production Revision in a staged 0012 DB.
+
+    Read-only with respect to the staged authoritative DB; runs before
+    physical liveness copying on backup and after DB copy on restore. Does
+    NOT require live ``blobs.detected_media_type`` equality — the closure's
+    ``media_type`` is publication-time historical interpretation metadata.
+    """
+    from soloring.production.canonical import (
+        RetainedBlobClosure,
+        build_production_revision_snapshot,
+    )
+    from soloring.production.readiness import _media_type_valid
+
+    con = sqlite3.connect(str(staged_db))
+    con.row_factory = sqlite3.Row
+    try:
+        revisions = con.execute(
+            "SELECT id, snapshot_json, snapshot_hash FROM production_revisions"
+        ).fetchall()
+        for rev in revisions:
+            rid = rev["id"]
+            try:
+                parsed = json.loads(rev["snapshot_json"])
+            except ValueError as exc:
+                raise RecoveryCorruption(
+                    f"production revision {rid} snapshot_json is not JSON: {exc}"
+                ) from exc
+            if not isinstance(parsed, dict) or parsed.get("schema_version") != 1:
+                raise RecoveryCorruption(
+                    f"production revision {rid} snapshot schema_version is not 1."
+                )
+            consumption = parsed.get("consumption")
+            if not isinstance(consumption, dict):
+                raise RecoveryCorruption(
+                    f"production revision {rid} snapshot has no consumption object."
+                )
+            if canonical_json_bytes(parsed) != rev["snapshot_json"].encode("utf-8"):
+                raise RecoveryCorruption(
+                    f"production revision {rid} snapshot_json is not canonical."
+                )
+            if canonical_hash(parsed) != rev["snapshot_hash"]:
+                raise RecoveryCorruption(
+                    f"production revision {rid} snapshot_hash mismatch."
+                )
+            closures = con.execute(
+                "SELECT contract_key, contract_version, blob_hash, size_bytes, "
+                "media_type FROM production_revision_closures "
+                "WHERE production_revision_id = ?", (rid,),
+            ).fetchall()
+            if len(closures) != 1:
+                raise RecoveryCorruption(
+                    f"production revision {rid} has {len(closures)} closure rows."
+                )
+            c = closures[0]
+            rebuilt = build_production_revision_snapshot(
+                RetainedBlobClosure(
+                    blob_hash=c["blob_hash"],
+                    size_bytes=c["size_bytes"],
+                    media_type=c["media_type"],
+                )
+            )["consumption"]
+            for key in ("contract_key", "contract_version", "blob_hash",
+                        "size_bytes", "media_type"):
+                if c[key] != rebuilt[key]:
+                    raise RecoveryCorruption(
+                        f"production revision {rid} closure diverges from the "
+                        f"canonical consumption object at {key!r}."
+                    )
+            if not _media_type_valid(c["media_type"]):
+                raise RecoveryCorruption(
+                    f"production revision {rid} closure media_type violates "
+                    "the schema-1 grammar."
+                )
+            blob = con.execute(
+                "SELECT hash, size_bytes FROM blobs WHERE hash = ?",
+                (c["blob_hash"],),
+            ).fetchone()
+            if blob is None:
+                raise RecoveryCorruption(
+                    f"production revision {rid} closure Blob row missing."
+                )
+            if blob["size_bytes"] != c["size_bytes"]:
+                raise RecoveryCorruption(
+                    f"production revision {rid} closure/Blob size identity "
+                    "mismatch."
+                )
+            obj = con.execute(
+                "SELECT project_id FROM production_objects WHERE id = "
+                "(SELECT production_object_id FROM production_revisions "
+                "WHERE id = ?)", (rid,),
+            ).fetchone()
+            if obj is None:
+                raise RecoveryCorruption(
+                    f"production revision {rid} has no owning Production Object."
+                )
+            links = con.execute(
+                "SELECT prsa.asset_id, a.project_id AS project_id, "
+                "a.blob_hash AS blob_hash "
+                "FROM production_revision_source_assets prsa "
+                "JOIN assets a ON a.id = prsa.asset_id "
+                "WHERE prsa.production_revision_id = ?", (rid,),
+            ).fetchall()
+            if not links:
+                raise RecoveryCorruption(
+                    f"production revision {rid} has no source provenance link."
+                )
+            for link in links:
+                if link["project_id"] != obj["project_id"]:
+                    raise RecoveryCorruption(
+                        f"production revision {rid} provenance link "
+                        f"{link['asset_id']} contradicts the owning Project."
+                    )
+                if link["blob_hash"] != c["blob_hash"]:
+                    raise RecoveryCorruption(
+                        f"production revision {rid} provenance link "
+                        f"{link['asset_id']} contradicts the closure Blob."
+                    )
+    finally:
+        con.close()
+
+
+def _prove_no_m11_state(staged_db: Path) -> None:
+    """A restored pre-M11 0011 root invents no M11 authority (§14.6)."""
+    con = sqlite3.connect(str(staged_db))
+    try:
+        tables = {
+            r[0] for r in con.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'")
+        }
+        m11_tables = {
+            "production_objects", "production_revisions",
+            "production_revision_closures", "production_revision_source_assets",
+        }
+        if tables & m11_tables:
+            raise RecoveryCorruption(
+                "0011 restore invented M11 tables: "
+                f"{sorted(tables & m11_tables)}."
+            )
+    finally:
+        con.close()
 
 
 # ---------------------------------------------------------------------------
@@ -981,6 +1158,9 @@ async def backup(
         staged_meta = await asyncio.to_thread(_normalize_staged_wal, staged_db)
         await asyncio.to_thread(_drop_sidecar_files, staged_db)
         await asyncio.to_thread(_verify_staged_db, staged_db)
+        # M11 §14.4: immutable production state is verified in the staged
+        # DB before any liveness copying or certification.
+        await asyncio.to_thread(_verify_m11_production_state, staged_db)
         liveness = await asyncio.to_thread(_enumerate_liveness, staged_db)
 
         blob_root = Path(settings.blob_dir)
@@ -1101,7 +1281,15 @@ async def restore(backup_root: Path, dest: Path) -> dict:
         )
         await asyncio.to_thread(_normalize_staged_wal, staged_db)
         await asyncio.to_thread(_drop_sidecar_files, staged_db)
-        await asyncio.to_thread(_verify_staged_db, staged_db)
+        # Head-dispatched restore (frozen R3 §14.6): the staged DB is
+        # verified at the head its own manifest recorded, never silently
+        # migrated during restore.
+        head = manifest["alembic_version"]
+        await asyncio.to_thread(_verify_staged_db, staged_db, expected_head=head)
+        if head == PRE_M11_ALEMBIC_HEAD:
+            await asyncio.to_thread(_prove_no_m11_state, staged_db)
+        else:
+            await asyncio.to_thread(_verify_m11_production_state, staged_db)
 
         # Step 9: exact liveness equality with the manifest (the restored
         # DATA root is not a backup artifact; verify against the parsed
