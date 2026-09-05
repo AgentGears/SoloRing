@@ -15,6 +15,7 @@ from soloring.api.deps import get_session
 from soloring.api.schemas.production import (
     ClosureRead,
     ProductionObjectCreate,
+    ProductionObjectDetail,
     ProductionObjectPatch,
     ProductionObjectRead,
     PublicationReadinessRead,
@@ -72,14 +73,19 @@ async def list_production_objects(
 
 @router.get(
     "/production-objects/{production_object_id}",
-    response_model=ProductionObjectRead,
+    response_model=ProductionObjectDetail,
 )
 async def get_production_object(
     production_object_id: str, session: AsyncSession = Depends(get_session)
-) -> ProductionObjectRead:
-    return _object_read(
-        await prod.get_production_object(session, production_object_id)
-    )
+) -> ProductionObjectDetail:
+    o = await prod.get_production_object(session, production_object_id)
+    revisions = [
+        RevisionSummary(**r)
+        for r in await prod.list_production_revisions(
+            session, production_object_id
+        )
+    ]
+    return ProductionObjectDetail(**o, revisions=revisions)
 
 
 @router.patch(
@@ -152,6 +158,7 @@ async def publish_revision(
     sources = await _sources(session, detail["revision_id"])
     payload = {
         **detail,
+        "created": created,
         "blob_url": blob_url,
         "sources": sources,
         "physical_integrity": "not_full_hash_verified_in_this_view",

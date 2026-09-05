@@ -305,7 +305,9 @@ async def test_corrupt_m11_closure_blob_fails_backup(env, tmp_path):
 async def test_m11_snapshot_or_closure_corruption_fails_backup_semantic_verifier(
     env, tmp_path
 ):
-    """M11-RECOVERY:06 — backup does not certify malformed authority."""
+    """M11-RECOVERY:06 — backup does not certify malformed authority, AND a
+    self-consistent snapshot/hash that CONTRADICTS a legal closure row is
+    rejected (closure ↔ snapshot equality, not closure self-agreement)."""
     con = _db(env["src"])
     rid = con.execute("SELECT id FROM production_revisions LIMIT 1").fetchone()[0]
     con.execute(
@@ -315,6 +317,41 @@ async def test_m11_snapshot_or_closure_corruption_fails_backup_semantic_verifier
     con.close()
     with pytest.raises(RecoveryCorruption):
         await rb.backup(env["settings"], tmp_path / "b")
+
+    # Negative: rewrite the snapshot to a DIFFERENT but fully self-consistent
+    # canonical document/hash pair (different blob), leaving the closure row
+    # legal on its own terms. Only the direct snapshot↔closure comparison
+    # can catch this.
+    env2_src = tmp_path / "src2" / "data"
+    shutil.copytree(env["src"], env2_src)
+    from soloring.domain.canonical import canonical_json_bytes, canonical_hash
+
+    from soloring.production.canonical import RetainedBlobClosure
+    from soloring.production.canonical import (
+        production_revision_snapshot_json as snap_json,
+    )
+
+    contradictory = RetainedBlobClosure(
+        blob_hash="e" * 64, size_bytes=999, media_type="image/webp")
+    doc = {
+        "schema_version": 1,
+        "consumption": {
+            "contract_key": "retained_blob",
+            "contract_version": 1,
+            "blob_hash": contradictory.blob_hash,
+            "size_bytes": contradictory.size_bytes,
+            "media_type": contradictory.media_type,
+        },
+    }
+    con = _db(env2_src)
+    con.execute(
+        "UPDATE production_revisions SET snapshot_json = ?, snapshot_hash = ? "
+        "WHERE id = ?",
+        (snap_json(contradictory), canonical_hash(doc), rid))
+    con.commit()
+    con.close()
+    with pytest.raises(RecoveryCorruption, match="closure row diverges"):
+        await rb.backup(Settings(data_dir=env2_src), tmp_path / "b3")
 
 
 async def test_m11_source_provenance_corruption_fails_backup_semantic_verifier(

@@ -64,8 +64,10 @@ async def create_production_object(
     d = _normalize_description(description)
     obj_id = new_uuid()
     async with session.bind.connect() as conn:
-        await _require_active_project(conn, project_id)
         await conn.exec_driver_sql("BEGIN IMMEDIATE")
+        # Active-Project check INSIDE the writer fence: a concurrent Project
+        # soft-delete cannot slip between the check and the INSERT (§11.1).
+        await _require_active_project(conn, project_id)
         await conn.execute(
             text(
                 "INSERT INTO production_objects "

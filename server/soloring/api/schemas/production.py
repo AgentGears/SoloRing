@@ -79,3 +79,15 @@ class RevisionDetail(BaseModel):
     blob_url: str
     sources: list[SourceAssetSummary]
     physical_integrity: str
+
+
+class ProductionObjectDetail(ProductionObjectRead):
+    """Frozen R3 §11.1: object metadata plus revision summaries ASC."""
+
+    revisions: list[RevisionSummary]
+
+
+class PublishResult(RevisionDetail):
+    """Frozen R3 §11.3: revision detail plus the explicit created flag."""
+
+    created: bool

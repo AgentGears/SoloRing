@@ -977,10 +977,6 @@ def _verify_m11_production_state(staged_db: Path) -> None:
     NOT require live ``blobs.detected_media_type`` equality — the closure's
     ``media_type`` is publication-time historical interpretation metadata.
     """
-    from soloring.production.canonical import (
-        RetainedBlobClosure,
-        build_production_revision_snapshot,
-    )
     from soloring.production.readiness import _media_type_valid
 
     con = sqlite3.connect(str(staged_db))
@@ -1024,19 +1020,16 @@ def _verify_m11_production_state(staged_db: Path) -> None:
                     f"production revision {rid} has {len(closures)} closure rows."
                 )
             c = closures[0]
-            rebuilt = build_production_revision_snapshot(
-                RetainedBlobClosure(
-                    blob_hash=c["blob_hash"],
-                    size_bytes=c["size_bytes"],
-                    media_type=c["media_type"],
-                )
-            )["consumption"]
+            # §14.4: closure ↔ SNAPSHOT equality. The parsed canonical
+            # document's consumption object is compared DIRECTLY to the
+            # normalized closure row — never rebuilt from the closure itself,
+            # which would prove nothing about their agreement.
             for key in ("contract_key", "contract_version", "blob_hash",
                         "size_bytes", "media_type"):
-                if c[key] != rebuilt[key]:
+                if c[key] != consumption.get(key):
                     raise RecoveryCorruption(
-                        f"production revision {rid} closure diverges from the "
-                        f"canonical consumption object at {key!r}."
+                        f"production revision {rid} closure row diverges from "
+                        f"the canonical snapshot consumption at {key!r}."
                     )
             if not _media_type_valid(c["media_type"]):
                 raise RecoveryCorruption(

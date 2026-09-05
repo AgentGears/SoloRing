@@ -527,3 +527,75 @@ async def test_different_closure_state_publishes_distinct_revision_number(
     assert r1["revision_id"] != r2["revision_id"]
     assert {r1["revision_number"], r2["revision_number"]} == {1, 2}
     assert r1["snapshot_hash"] != r2["snapshot_hash"]
+
+
+async def test_creation_under_soft_deleted_project_is_refused(
+    engine, factory, blob_store
+):
+    """F4 regression — the active-Project check sits inside the writer
+    fence: a project already soft-deleted never admits a new object."""
+    pid = await _seed_project(factory)
+    async with factory() as s:
+        async with s.bind.connect() as conn:
+            await conn.exec_driver_sql("BEGIN IMMEDIATE")
+            await conn.execute(
+                text("UPDATE projects SET deleted_at = :n WHERE id = :p"),
+                {"n": NOW, "p": pid})
+            await conn.exec_driver_sql("COMMIT")
+        with pytest.raises(SoloRingError) as ei:
+            await create_production_object(s, pid, name="Ghost")
+        assert ei.value.code == "PROJECT_NOT_FOUND"
+    async with factory() as s:
+        async with s.bind.connect() as conn:
+            n = (await conn.execute(
+                text("SELECT COUNT(*) FROM production_objects"))).scalar_one()
+    assert n == 0
+
+
+async def test_readiness_uses_one_coherent_joined_read(
+    engine, factory, blob_store
+):
+    """F4 regression — §8.1 coherent read: Project deletion mid-resolver can
+    no longer yield a ready=true from two snapshots. The resolver performs
+    exactly ONE SELECT touching production_objects."""
+    from sqlalchemy import event
+
+    pid = await _seed_project(factory)
+    aid, _ = await _seed_blob_asset(factory, blob_store, pid, data=b"coherent")
+    async with factory() as s:
+        obj = await create_production_object(s, pid, name="Desk")
+
+    selects: list[str] = []
+
+    @event.listens_for(engine.sync_engine, "before_cursor_execute")
+    def _spy(conn, cursor, statement, parameters, context, executemany):
+        if statement.lstrip().lower().startswith("select"):
+            selects.append(statement)
+
+    try:
+        async with factory() as s:
+            r = await resolve_publication_readiness(
+                s, blob_store,
+                production_object_id=obj["id"], source_asset_id=aid)
+            assert r.ready
+        touching = [q for q in selects if "production_objects" in q]
+        assert len(touching) == 1, touching
+        assert "JOIN assets" in touching[0] and "JOIN projects" in touching[0]
+
+        # Behavioral: a soft-deleted project is refused before any readiness
+        # result, never evaluated from a mixed snapshot.
+        selects.clear()
+        async with factory() as s:
+            async with s.bind.connect() as conn:
+                await conn.exec_driver_sql("BEGIN IMMEDIATE")
+                await conn.execute(
+                    text("UPDATE projects SET deleted_at = :n WHERE id = :p"),
+                    {"n": NOW, "p": pid})
+                await conn.exec_driver_sql("COMMIT")
+            with pytest.raises(SoloRingError) as ei:
+                await resolve_publication_readiness(
+                    s, blob_store,
+                    production_object_id=obj["id"], source_asset_id=aid)
+            assert ei.value.code == "PRODUCTION_OBJECT_NOT_FOUND"
+    finally:
+        event.remove(engine.sync_engine, "before_cursor_execute", _spy)

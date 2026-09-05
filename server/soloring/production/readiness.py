@@ -72,16 +72,26 @@ async def resolve_publication_readiness(
     """One deterministic readiness computation (preview and publish alike)."""
     issues: list[ProductionPublicationIssue] = []
 
+    # §8.1: ONE explicit coherent read over active Project + Production
+    # Object + source Asset + registered Blob — a single joined SELECT on a
+    # single connection, so the frozen facts come from one SQLite snapshot
+    # and can never describe a state that did not coexist.
     async with session.bind.connect() as conn:
         row = (
             await conn.execute(
                 text(
                     "SELECT po.id AS object_id, po.project_id AS object_project_id, "
-                    "p.deleted_at AS project_deleted_at "
-                    "FROM production_objects po JOIN projects p ON p.id = po.project_id "
+                    "p.deleted_at AS project_deleted_at, "
+                    "a.id AS asset_id, a.project_id AS asset_project_id, "
+                    "a.blob_hash AS blob_hash, b.size_bytes AS size_bytes, "
+                    "b.detected_media_type AS media_type "
+                    "FROM production_objects po "
+                    "JOIN projects p ON p.id = po.project_id "
+                    "LEFT JOIN assets a ON a.id = :aid "
+                    "LEFT JOIN blobs b ON b.hash = a.blob_hash "
                     "WHERE po.id = :oid"
                 ),
-                {"oid": production_object_id},
+                {"oid": production_object_id, "aid": source_asset_id},
             )
         ).first()
     if row is None or row.project_deleted_at is not None:
@@ -90,25 +100,13 @@ async def resolve_publication_readiness(
             f"production object {production_object_id!r} not found",
         )
 
-    async with session.bind.connect() as conn:
-        asset = (
-            await conn.execute(
-                text(
-                    "SELECT a.id AS asset_id, a.project_id AS asset_project_id, "
-                    "a.blob_hash AS blob_hash, b.size_bytes AS size_bytes, "
-                    "b.detected_media_type AS media_type "
-                    "FROM assets a JOIN blobs b ON b.hash = a.blob_hash "
-                    "WHERE a.id = :aid"
-                ),
-                {"aid": source_asset_id},
-            )
-        ).first()
-    if asset is None:
+    if row.asset_id is None or row.blob_hash is None:
         # Existing contract: unresolvable Asset identity is ASSET_NOT_FOUND.
         raise not_found(
             ErrorCode.ASSET_NOT_FOUND,
             f"asset {source_asset_id!r} not found",
         )
+    asset = row
 
     if not BlobStore.validate_hash(asset.blob_hash):
         raise internal_invariant(
