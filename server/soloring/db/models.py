@@ -69,6 +69,12 @@ from soloring.continuity.models import (  # noqa: E402,F401
     VehicleRevisionSpec,
 )
 from soloring.narrative.models import Scene, Sequence  # noqa: E402,F401
+from soloring.production.models import (  # noqa: E402,F401
+    ProductionObject,
+    ProductionRevision,
+    ProductionRevisionClosure,
+    ProductionRevisionSourceAsset,
+)
 from soloring.visual.models import (  # noqa: E402,F401
     ShotRevisionVisualAnchor,
     ShotRevisionVisualAnchorItem,
@@ -146,4 +152,8 @@ __all__ = [
     "ShotRevisionSpatialPlan",
     "DerivedSpatialArtifact",
     "GenerationDerivedSpatialInput",
+    "ProductionObject",
+    "ProductionRevision",
+    "ProductionRevisionClosure",
+    "ProductionRevisionSourceAsset",
 ]
