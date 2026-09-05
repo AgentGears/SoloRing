@@ -83,7 +83,9 @@ async def resolve_publication_readiness(
                     "SELECT po.id AS object_id, po.project_id AS object_project_id, "
                     "p.deleted_at AS project_deleted_at, "
                     "a.id AS asset_id, a.project_id AS asset_project_id, "
-                    "a.blob_hash AS blob_hash, b.size_bytes AS size_bytes, "
+                    "a.blob_hash AS asset_blob_hash, "
+                    "b.hash AS registered_blob_hash, "
+                    "b.size_bytes AS size_bytes, "
                     "b.detected_media_type AS media_type "
                     "FROM production_objects po "
                     "JOIN projects p ON p.id = po.project_id "
@@ -100,18 +102,29 @@ async def resolve_publication_readiness(
             f"production object {production_object_id!r} not found",
         )
 
-    if row.asset_id is None or row.blob_hash is None:
+    if row.asset_id is None or row.asset_blob_hash is None:
         # Existing contract: unresolvable Asset identity is ASSET_NOT_FOUND.
         raise not_found(
             ErrorCode.ASSET_NOT_FOUND,
             f"asset {source_asset_id!r} not found",
         )
+    if row.registered_blob_hash is None:
+        # §7.2: an Asset referencing a missing Blob row is corruption, never
+        # a readiness issue and never an ASSET_NOT_FOUND result.
+        raise internal_invariant(
+            "Asset references missing Blob row",
+            details={
+                "reason": "missing_blob_row",
+                "asset_id": row.asset_id,
+                "asset_blob_hash": row.asset_blob_hash,
+            },
+        )
     asset = row
 
-    if not BlobStore.validate_hash(asset.blob_hash):
+    if not BlobStore.validate_hash(asset.asset_blob_hash):
         raise internal_invariant(
             "registered blob hash is not canonical",
-            details={"blob_hash": asset.blob_hash},
+            details={"blob_hash": asset.asset_blob_hash},
         )
 
     if asset.asset_project_id != row.object_project_id:
@@ -154,13 +167,13 @@ async def resolve_publication_readiness(
 
     # Physical verification outside the DB read; corruption fails closed.
     verification = await blob_store.verify_physical_bytes(
-        asset.blob_hash, asset.size_bytes
+        asset.asset_blob_hash, asset.size_bytes
     )
     if not verification.ok:
         raise internal_invariant(
             "registered Blob physical bytes failed verification",
             details={
-                "blob_hash": asset.blob_hash,
+                "blob_hash": asset.asset_blob_hash,
                 "expected_size": asset.size_bytes,
                 "reason": verification.reason,
                 "actual_hash": verification.actual_hash,
@@ -169,7 +182,7 @@ async def resolve_publication_readiness(
         )
 
     closure = RetainedBlobClosure(
-        blob_hash=asset.blob_hash,
+        blob_hash=asset.asset_blob_hash,
         size_bytes=asset.size_bytes,
         media_type=asset.media_type,
     )

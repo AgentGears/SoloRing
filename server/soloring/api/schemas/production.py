@@ -86,8 +86,3 @@ class ProductionObjectDetail(ProductionObjectRead):
 
     revisions: list[RevisionSummary]
 
-
-class PublishResult(RevisionDetail):
-    """Frozen R3 §11.3: revision detail plus the explicit created flag."""
-
-    created: bool

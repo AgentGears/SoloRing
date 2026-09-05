@@ -599,3 +599,38 @@ async def test_readiness_uses_one_coherent_joined_read(
             assert ei.value.code == "PRODUCTION_OBJECT_NOT_FOUND"
     finally:
         event.remove(engine.sync_engine, "before_cursor_execute", _spy)
+
+
+async def test_asset_referencing_missing_blob_row_is_corruption(
+    engine, factory, blob_store
+):
+    """F5 regression (frozen §7.2) — an Asset whose Blob row is absent is
+    corruption (INTERNAL_INVARIANT_VIOLATION), never ASSET_NOT_FOUND, a
+    TypeError, or a readiness issue. The state is constructed with FK
+    enforcement deliberately bypassed for the fixture; it is unreachable
+    through normal writes."""
+    import sqlite3
+
+    pid = await _seed_project(factory)
+    aid, bh = await _seed_blob_asset(factory, blob_store, pid, data=b"orphan")
+    async with factory() as s:
+        obj = await create_production_object(s, pid, name="Desk")
+
+    # Remove the Blob row with FKs off: Asset now dangles.
+    import sqlite3 as sq
+
+    settings_blob = blob_store.settings
+    con = sq.connect(str(settings_blob.db_path))
+    con.execute("PRAGMA foreign_keys=OFF")
+    con.execute("DELETE FROM blobs WHERE hash = ?", (bh,))
+    con.commit()
+    con.close()
+
+    async with factory() as s:
+        with pytest.raises(SoloRingError) as ei:
+            await resolve_publication_readiness(
+                s, blob_store,
+                production_object_id=obj["id"], source_asset_id=aid)
+        assert ei.value.code == "INTERNAL_INVARIANT_VIOLATION"
+        assert ei.value.status_code == 500
+        assert ei.value.details["reason"] == "missing_blob_row"
