@@ -734,3 +734,67 @@ export async function getRealizationReadiness(
     `${BASE}/shots/${shotId}/realization-readiness`,
   );
 }
+
+// --- M11 Production Library (frozen R3 plan §11) -----------------------------
+
+import type {
+  ProductionObject,
+  ProductionRevisionDetail,
+  ProductionRevisionSummary,
+  PublicationReadiness,
+} from "./types";
+
+export async function listProductionObjects(
+  projectId: string,
+): Promise<ProductionObject[]> {
+  return fetchJson<ProductionObject[]>(
+    `${BASE}/projects/${projectId}/production-objects`,
+  );
+}
+
+export async function createProductionObject(
+  projectId: string,
+  name: string,
+  description: string | null,
+): Promise<ProductionObject> {
+  return fetchJson<ProductionObject>(
+    `${BASE}/projects/${projectId}/production-objects`,
+    { method: "POST", body: JSON.stringify({ name, description }) },
+  );
+}
+
+export async function getPublicationReadiness(
+  productionObjectId: string,
+  assetId: string,
+): Promise<PublicationReadiness> {
+  return fetchJson<PublicationReadiness>(
+    `${BASE}/production-objects/${productionObjectId}/publication-readiness`,
+    { method: "POST", body: JSON.stringify({ asset_id: assetId }) },
+  );
+}
+
+export async function publishProductionRevision(
+  productionObjectId: string,
+  assetId: string,
+): Promise<ProductionRevisionDetail> {
+  return fetchJson<ProductionRevisionDetail>(
+    `${BASE}/production-objects/${productionObjectId}/revisions`,
+    { method: "POST", body: JSON.stringify({ asset_id: assetId }) },
+  );
+}
+
+export async function listProductionRevisions(
+  productionObjectId: string,
+): Promise<ProductionRevisionSummary[]> {
+  return fetchJson<ProductionRevisionSummary[]>(
+    `${BASE}/production-objects/${productionObjectId}/revisions`,
+  );
+}
+
+export async function getProductionRevision(
+  revisionId: string,
+): Promise<ProductionRevisionDetail> {
+  return fetchJson<ProductionRevisionDetail>(
+    `${BASE}/production-revisions/${revisionId}`,
+  );
+}

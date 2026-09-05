@@ -128,6 +128,9 @@ export default async function ProjectPage({
     return (
       <main>
         <h1>Project</h1>
+        <p>
+          <Link href={`/projects/${id}/production`}>Production Library →</Link>
+        </p>
         <div className="empty">
           {loadError.code} — {loadError.message}
         </div>
