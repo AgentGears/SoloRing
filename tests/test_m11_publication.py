@@ -102,34 +102,98 @@ async def test_publish_reference_asset_creates_immutable_revision_and_closure(
     assert rev["snapshot_hash"] == hashlib.sha256(rev["snapshot_json"].encode()).hexdigest()
 
 
+async def _seed_output_asset(factory, blob_store, pid) -> str:
+    """A minimum LEGAL predecessor output Asset: Generation → Take →
+    Asset(kind='output'), seeded directly (no execution pipeline needed —
+    M11 proves behavior against an existing legal output Asset)."""
+    from soloring.domain.ids import new_uuid as _uuid
+
+    data = b"rendered-output"
+    bh = hashlib.sha256(data).hexdigest()
+    p = blob_store.path_for_hash(bh)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_bytes(data)
+
+    shot_id, rev_id, gen_id, take_id, aid = (_uuid() for _ in range(5))
+    async with factory() as s:
+        async with s.bind.connect() as conn:
+            await conn.execute(
+                text("INSERT INTO shots (id, project_id, shot_number, subject, "
+                     "created_at, updated_at) VALUES (:i, :p, 1, 'Render shot', "
+                     ":n, :n)"),
+                {"i": shot_id, "p": pid, "n": NOW})
+            await conn.execute(
+                text("INSERT INTO shot_revisions (id, shot_id, revision_number, "
+                     "snapshot_hash, snapshot_json, created_at) VALUES "
+                     "(:i, :s, 1, :h, '{\"schema_version\": 1}', :n)"),
+                {"i": rev_id, "s": shot_id, "h": "a" * 64, "n": NOW})
+            await conn.execute(
+                text("INSERT INTO generations (id, shot_id, shot_revision_id, "
+                     "generation_number, status, operation, executor, workflow_id, "
+                     "workflow_version, workflow_template_hash, manifest_hash, "
+                     "compiled_prompt, prompt_compiler_version, parameters_json, "
+                     "workflow_spec_json, workflow_spec_hash, created_at, updated_at) "
+                     "VALUES (:i, :s, :r, 1, 'succeeded', 'generate', 'fake', "
+                     "'fixture-workflow', 1, :th, :mh, 'prompt', '1', '{}', '{}', "
+                     ":sh, :n, :n)"),
+                {"i": gen_id, "s": shot_id, "r": rev_id,
+                 "th": "b" * 64, "mh": "c" * 64, "sh": "d" * 64, "n": NOW})
+            await conn.execute(
+                text("INSERT INTO takes (id, shot_id, generation_id, output_key) "
+                     "VALUES (:i, :s, :g, 'video:0')"),
+                {"i": take_id, "s": shot_id, "g": gen_id})
+            await conn.execute(
+                text("INSERT OR IGNORE INTO blobs (hash, path, size_bytes, "
+                     "detected_media_type, created_at) VALUES (:h, :p, :sz, "
+                     "'image/png', :n)"),
+                {"h": bh, "p": f"sha256/{bh[:2]}/{bh[2:4]}/{bh}",
+                 "sz": len(data), "n": NOW})
+            await conn.execute(
+                text("INSERT INTO assets (id, project_id, take_id, blob_hash, kind, "
+                     "created_at) VALUES (:a, :p, :t, :h, 'output', :n)"),
+                {"a": aid, "p": pid, "t": take_id, "h": bh, "n": NOW})
+            await conn.commit()
+    return aid
+
+
 async def test_publish_output_asset_preserves_asset_provenance_kind(
     engine, factory, blob_store
 ):
-    """M11-PUB:02 — candidate provenance is not rewritten or re-parented.
+    """M11-PUB:02 — generated/output provenance is not rewritten or re-parented.
 
-    Building a full Generation/Take chain is out of M11 test scope; the claim
-    is proven by full-row invariance of the Asset across publication (every
-    column, including kind and take linkage) plus the structural fact that
-    the M11 production package never writes to ``assets``.
+    A legal predecessor output Asset (kind='output', Take-linked) is
+    published as the candidate; the COMPLETE Asset row must be value-equal
+    before and after, with kind/take/project/blob and every provenance
+    field unchanged. A structural no-writes check on the production package
+    stands as supporting evidence.
     """
     from pathlib import Path
 
     pid = await _seed_project(factory)
-    aid, _ = await _seed_blob_asset(factory, blob_store, pid, data=b"render")
+    aid = await _seed_output_asset(factory, blob_store, pid)
     async with factory() as s:
         async with s.bind.connect() as conn:
             before = (await conn.execute(
                 text("SELECT * FROM assets WHERE id=:a"), {"a": aid}
             )).one()
+        assert before.kind == "output" and before.take_id is not None
+
         obj = await create_production_object(s, pid, name="Rendered Prop")
         rev, created = await publish_production_revision(
             s, blob_store, production_object_id=obj["id"], source_asset_id=aid)
         assert created
+        assert rev["closure"]["blob_hash"] == before.blob_hash
+
         async with s.bind.connect() as conn:
             after = (await conn.execute(
                 text("SELECT * FROM assets WHERE id=:a"), {"a": aid}
             )).one()
-    assert tuple(before) == tuple(after) and before.kind == "reference"
+    # Complete-row value equality: nothing was rewritten or re-parented.
+    assert tuple(before) == tuple(after)
+    assert after.kind == "output"
+    assert after.take_id == before.take_id
+    assert after.project_id == before.project_id == pid
+    assert after.blob_hash == before.blob_hash
 
     import soloring.production.service as prod_service
     import soloring.production.readiness as prod_readiness

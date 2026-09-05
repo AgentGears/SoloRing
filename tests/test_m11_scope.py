@@ -115,8 +115,10 @@ def test_no_execution_source_delta_in_m11_owned_diff():
     offenders = sorted(
         p for p in changed
         if any(m in p.lower() for m in forbidden_markers)
-        # the proof-mapping validator itself is an allowed test/CI artifact
-        and not p.startswith(("tests/", "scripts/"))
+        # authorized M11 artifacts: test/validator/CI-proof-map seams
+        # (§20.0; M11-PROOF:04 requires the ci.yml validator step) — the
+        # claim under test is that no executor/live-render SOURCE changed
+        and not p.startswith(("tests/", "scripts/", ".github/"))
     )
     assert offenders == [], f"execution source touched by M11: {offenders}"
 
