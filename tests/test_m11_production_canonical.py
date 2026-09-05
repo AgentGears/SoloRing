@@ -161,5 +161,10 @@ async def test_duplicate_object_names_have_distinct_uuid_identity(
         assert a["id"] != b["id"]
         assert a["name"] == b["name"] == "Reception Desk"  # trim; no uniqueness
         listed = await list_production_objects(session, pid)
-        assert [o["id"] for o in listed] == [a["id"], b["id"]]
+        # Deterministic (created_at, id) order — creation order is NOT the
+        # contract when timestamps tie; stable id ordering is.
+        ids = [o["id"] for o in listed]
+        assert sorted(ids) == sorted([a["id"], b["id"]])
+        keyed = [(o["created_at"], o["id"]) for o in listed]
+        assert keyed == sorted(keyed)
 
