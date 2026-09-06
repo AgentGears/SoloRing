@@ -27,14 +27,21 @@ _SOURCE_KINDS = ("production_revision", "composition_revision")
 _HEX64 = set("0123456789abcdef")
 
 # Frozen R3: persisted/fixture identifiers obey the predecessor lowercase
-# canonical 36-character UUID grammar, version-agnostic.
+# canonical 36-character UUID grammar, version-agnostic. fullmatch (not
+# match/$) so a trailing newline can never sneak past the exact length.
 _UUID_RE = re.compile(
-    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 )
 
 
 def _is_uuid(value: object) -> bool:
-    return isinstance(value, str) and bool(_UUID_RE.match(value))
+    return isinstance(value, str) and _UUID_RE.fullmatch(value) is not None
+
+
+def _is_plain_int(value: object) -> bool:
+    """Exact JSON integer grammar — bool is NOT an integer here, and a
+    float like 8.0 never equals its way past the gate."""
+    return isinstance(value, int) and not isinstance(value, bool)
 
 
 def _is_hex64(value: object) -> bool:
@@ -113,11 +120,21 @@ def validate_operation_evidence(
         "working_version_before", "working_version_after",
         "request_fingerprint", "impact_fingerprint", "sources", "targets",
     }, "operation evidence keys invalid")
-    _check(parsed["schema_version"] == 1, "operation schema_version != 1")
+    # exact integer JSON grammar — True==1 and 8.0==8 must never pass
+    _check(_is_plain_int(parsed["schema_version"])
+           and parsed["schema_version"] == 1,
+           "operation schema_version must be integer 1")
     # kind grammar BEFORE indexing CARDINALITY/_TERMINATES
     _check(isinstance(parsed["kind"], str)
            and parsed["kind"] in CARDINALITY,
            "operation kind not in the frozen domain")
+    _check(_is_plain_int(parsed["working_version_before"])
+           and parsed["working_version_before"] >= 0,
+           "operation working_version_before must be a nonnegative integer")
+    _check(_is_plain_int(parsed["working_version_after"])
+           and parsed["working_version_after"]
+           == parsed["working_version_before"] + 1,
+           "operation working_version_after grammar invalid")
     # row-field equivalence — grammar gates run FIRST so a malformed
     # identifier is reported as grammar corruption, never as a row mismatch
     _check(_is_uuid(parsed["composition_id"]),

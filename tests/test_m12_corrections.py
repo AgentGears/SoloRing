@@ -769,3 +769,54 @@ def test_evidence_rejects_normalized_termination_outside_01_domain():
                 normalized_targets=["00000000-0000-0000-0000-000000000002"],
                 row_composition_id="22222222-2222-2222-2222-222222222222",
                 row_kind="replace_as_new", row_before=8, row_after=9)
+
+
+# --- F5 micro: fullmatch UUID + exact integer JSON grammar ------------------
+
+
+def test_evidence_rejects_uuid_with_trailing_newline():
+    import copy
+
+    doc = copy.deepcopy(_valid_evidence())
+    doc["composition_id"] = doc["composition_id"] + "\n"
+    with pytest.raises(ValueError, match="canonical lowercase UUID"):
+        _validate(doc)
+    doc2 = copy.deepcopy(_valid_evidence())
+    doc2["sources"][0]["occurrence_id"] += "\n"
+    with pytest.raises(ValueError, match="canonical lowercase UUID"):
+        _validate(doc2)
+
+
+def test_evidence_rejects_non_integer_numeric_fields():
+    import copy
+
+    for bad_schema in (True, 1.0):
+        doc = copy.deepcopy(_valid_evidence())
+        doc["schema_version"] = bad_schema
+        with pytest.raises(ValueError, match="schema_version must be integer"):
+            _validate(doc)
+
+    doc = copy.deepcopy(_valid_evidence())
+    doc["working_version_before"] = 8.0
+    with pytest.raises(ValueError, match="nonnegative integer"):
+        _validate(doc)
+
+    doc2 = copy.deepcopy(_valid_evidence())
+    doc2["working_version_after"] = 9.0
+    with pytest.raises(ValueError, match="working_version_after grammar"):
+        _validate(doc2)
+
+    # self-consistent float pair: before=8.0/after=9.0 satisfies after ==
+    # before + 1 numerically — the plain-int gate must still reject it
+    doc3 = copy.deepcopy(_valid_evidence())
+    doc3["working_version_before"] = 8.0
+    doc3["working_version_after"] = 9.0
+    with pytest.raises(ValueError, match="nonnegative integer"):
+        _validate(doc3)
+
+    # True as working_version_before (True == 1 numerically)
+    doc4 = copy.deepcopy(_valid_evidence())
+    doc4["working_version_before"] = True
+    doc4["working_version_after"] = 2
+    with pytest.raises(ValueError, match="nonnegative integer"):
+        _validate(doc4)
