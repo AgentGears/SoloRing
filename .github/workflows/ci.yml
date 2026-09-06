@@ -42,6 +42,8 @@ jobs:
         run: python scripts/m10f_validate_proof_map.py
       - name: Validate M11 proof map
         run: python scripts/m11_validate_proof_map.py
+      - name: Validate M12 proof map
+        run: python scripts/m12_validate_proof_map.py
 
       - name: Run backend tests
         run: python -m pytest -q

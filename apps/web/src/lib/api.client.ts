@@ -798,3 +798,110 @@ export async function getProductionRevision(
     `${BASE}/production-revisions/${revisionId}`,
   );
 }
+
+// --- M12 Composition authority (frozen R3 §14) --------------------------------
+
+import type {
+  Composition,
+  CompositionRevisionSummary,
+  IdentityPreview,
+  OccurrenceRow,
+  PublishOutcome,
+} from "./types";
+
+export async function listCompositions(
+  projectId: string,
+): Promise<Composition[]> {
+  return fetchJson<Composition[]>(
+    `${BASE}/projects/${projectId}/compositions`);
+}
+
+export async function createComposition(
+  projectId: string,
+  name: string,
+  description: string | null,
+): Promise<Composition> {
+  return fetchJson<Composition>(
+    `${BASE}/projects/${projectId}/compositions`,
+    { method: "POST", body: JSON.stringify({ name, description }) });
+}
+
+export async function listOccurrences(
+  compositionId: string,
+): Promise<OccurrenceRow[]> {
+  return fetchJson<OccurrenceRow[]>(
+    `${BASE}/compositions/${compositionId}/occurrences`);
+}
+
+export interface MintInput {
+  scope: string;
+  expected_working_version: number;
+  display_name: string;
+  source: { kind: string; revision_id: string };
+  visible: boolean;
+  transform: { translation_mm: number[]; rotation_udeg: number[] };
+}
+
+export async function mintOccurrence(
+  compositionId: string,
+  body: MintInput,
+): Promise<{ occurrence_id: string; working_version: number }> {
+  return fetchJson(`${BASE}/compositions/${compositionId}/occurrences`, {
+    method: "POST", body: JSON.stringify(body),
+  });
+}
+
+export async function patchOccurrence(
+  compositionId: string,
+  occurrenceId: string,
+  body: Partial<MintInput>,
+): Promise<{ occurrence_id: string; working_version: number }> {
+  return fetchJson(
+    `${BASE}/compositions/${compositionId}/occurrences/${occurrenceId}`,
+    { method: "PATCH", body: JSON.stringify(body) });
+}
+
+export async function previewIdentityOperation(
+  compositionId: string,
+  body: { scope: string; request: unknown },
+): Promise<IdentityPreview> {
+  return fetchJson<IdentityPreview>(
+    `${BASE}/compositions/${compositionId}/identity-operations/preview`,
+    { method: "POST", body: JSON.stringify(body) });
+}
+
+export async function applyIdentityOperation(
+  compositionId: string,
+  body: {
+    scope: string;
+    expected_working_version: number;
+    expected_request_fingerprint: string;
+    expected_impact_fingerprint: string;
+    request: unknown;
+  },
+): Promise<{
+  operation_id: string;
+  kind: string;
+  working_version: number;
+  target_occurrence_ids: string[];
+}> {
+  return fetchJson(
+    `${BASE}/compositions/${compositionId}/identity-operations`,
+    { method: "POST", body: JSON.stringify(body) });
+}
+
+export async function publishComposition(
+  compositionId: string,
+  expectedWorkingVersion: number,
+): Promise<PublishOutcome> {
+  return fetchJson<PublishOutcome>(
+    `${BASE}/compositions/${compositionId}/publish`,
+    { method: "POST", body: JSON.stringify({ expected_working_version: expectedWorkingVersion }) });
+}
+
+import { fetchJson as sharedFetchJson } from "./api.shared";
+
+/** GET helper for read endpoints (lists/details/history). */
+export async function getJson<T>(url: string): Promise<T> {
+  return sharedFetchJson<T>(url);
+}

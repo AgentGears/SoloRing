@@ -191,7 +191,7 @@ def template(tmp_path_factory):
     data_dir.mkdir()
     settings = Settings(data_dir=data_dir)
     seeded = _seed_m11_state(data_dir, settings)
-    _stamp_head(data_dir, "0012_m11_reusable_production_revisions")
+    _stamp_head(data_dir, "0013_m12_composition_occurrences")
     backup_root = base / "backup"
     evidence = asyncio.run(rb.backup(settings, backup_root))
     return {"data_dir": data_dir, "settings": settings, "seed": seeded,
@@ -215,12 +215,15 @@ def env(template, tmp_path):
 
 
 def test_current_backup_expected_head_is_0012(template):
-    """M11-RECOVERY:01 — new backups certify only the current head."""
-    assert rb.EXPECTED_ALEMBIC_HEAD == "0012_m11_reusable_production_revisions"
+    """M11-RECOVERY:01 — new backups certify only the current head.
+
+    M12 repin: the current head advanced to 0013; M11's production state
+    remains verified at every certified head."""
+    assert rb.EXPECTED_ALEMBIC_HEAD == "0013_m12_composition_occurrences"
     manifest = json.loads(
         (template["backup_root"] / "backup-manifest.json").read_text()
     )
-    assert manifest["alembic_version"] == "0012_m11_reusable_production_revisions"
+    assert manifest["alembic_version"] == "0013_m12_composition_occurrences"
 
 
 def test_recovery_blob_fk_inventory_is_six_for_0011_and_seven_for_0012():
@@ -499,7 +502,9 @@ async def test_backup_manifest_v1_field_grammar_is_unchanged_for_0011_and_0012(
     # The strict parser accepts both supported heads and rejects new fields.
     raw0012 = (env["backup"] / "backup-manifest.json").read_bytes()
     doc = rb.parse_backup_manifest_v1(raw0012)
-    assert doc["alembic_version"] == "0012_m11_reusable_production_revisions"
+    # M12 repin: template backup now certifies the 0013 head; the parser's
+    # supported-head set still includes both M11 heads.
+    assert doc["alembic_version"] == "0013_m12_composition_occurrences"
     bad = dict(doc)
     bad["m11_diagnostics"] = []
     from soloring.domain.canonical import canonical_json_bytes

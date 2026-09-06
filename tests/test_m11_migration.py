@@ -264,5 +264,5 @@ def test_migration_head_is_0012(tmp_path, monkeypatch):
     ver = con.execute("SELECT version_num FROM alembic_version").fetchone()[0]
     files = sorted(p.name for p in VERSIONS.glob("0*.py"))
     con.close()
-    assert ver == "0012_m11_reusable_production_revisions"
-    assert files[-1] == "0012_m11_reusable_production_revisions.py"
+    assert ver == "0013_m12_composition_occurrences"  # M12 advances the head
+    assert files[-1] == "0013_m12_composition_occurrences.py"

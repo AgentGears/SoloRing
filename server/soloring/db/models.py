@@ -69,6 +69,18 @@ from soloring.continuity.models import (  # noqa: E402,F401
     VehicleRevisionSpec,
 )
 from soloring.narrative.models import Scene, Sequence  # noqa: E402,F401
+from soloring.composition.models import (  # noqa: E402,F401
+    Composition,
+    CompositionIdentityOperation,
+    CompositionIdentityOperationSource,
+    CompositionIdentityOperationTarget,
+    CompositionOccurrence,
+    CompositionRevision,
+    CompositionRevisionNestedDependency,
+    CompositionRevisionOccurrence,
+    CompositionRevisionProductionDependency,
+    CompositionWorkingOccurrence,
+)
 from soloring.production.models import (  # noqa: E402,F401
     ProductionObject,
     ProductionRevision,
@@ -156,4 +168,14 @@ __all__ = [
     "ProductionRevision",
     "ProductionRevisionClosure",
     "ProductionRevisionSourceAsset",
+    "Composition",
+    "CompositionOccurrence",
+    "CompositionRevision",
+    "CompositionWorkingOccurrence",
+    "CompositionRevisionOccurrence",
+    "CompositionRevisionProductionDependency",
+    "CompositionRevisionNestedDependency",
+    "CompositionIdentityOperation",
+    "CompositionIdentityOperationSource",
+    "CompositionIdentityOperationTarget",
 ]

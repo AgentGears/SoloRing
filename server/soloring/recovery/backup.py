@@ -37,16 +37,16 @@ from soloring.domain.canonical import canonical_json_bytes, canonical_hash
 from soloring.settings import Settings
 from soloring.workflows.artifact_store import WorkflowArtifactStore
 
-EXPECTED_ALEMBIC_HEAD = "0012_m11_reusable_production_revisions"
+EXPECTED_ALEMBIC_HEAD = "0013_m12_composition_occurrences"
 BACKUP_MANIFEST_SCHEMA_VERSION = 1
 
-# M11 (frozen R3 §14): restore is head-dispatched. Current backup creation
-# certifies only the 0012 head; a valid pre-M11 0011 backup-manifest-v1
-# remains restorable under its own frozen six-path policy, and unknown
-# heads fail closed.
+# M12 (frozen R3 §16): restore is head-dispatched across three heads. M12
+# adds no Blob FK, so the 0013 policy is exactly the seven M11 paths.
 PRE_M11_ALEMBIC_HEAD = "0011_m10_derived_spatial_execution"
+M11_ALEMBIC_HEAD = "0012_m11_reusable_production_revisions"
 SUPPORTED_RESTORE_ALEMBIC_HEADS = frozenset({
     PRE_M11_ALEMBIC_HEAD,
+    M11_ALEMBIC_HEAD,
     EXPECTED_ALEMBIC_HEAD,
 })
 
@@ -89,10 +89,11 @@ M11_BLOB_FK_COLUMNS = frozenset(
 
 
 def _blob_fk_policy_for_head(head: str) -> frozenset:
-    """Exact head-specific Blob-FK inventory (frozen R3 §14.2)."""
+    """Exact head-specific Blob-FK inventory (frozen §§14.2/16.2)."""
     if head == PRE_M11_ALEMBIC_HEAD:
         return PRE_M11_BLOB_FK_COLUMNS
-    if head == EXPECTED_ALEMBIC_HEAD:
+    if head in (M11_ALEMBIC_HEAD, EXPECTED_ALEMBIC_HEAD):
+        # M12 adds no Blob FK; 0012 and 0013 share the exact seven paths.
         return M11_BLOB_FK_COLUMNS
     raise RecoveryCorruption(f"unsupported recovery head {head!r}.")
 
@@ -1105,7 +1106,305 @@ def _prove_no_m11_state(staged_db: Path) -> None:
         con.close()
 
 
-# ---------------------------------------------------------------------------
+def _prove_no_m12_state(staged_db: Path) -> None:
+    """A restored 0012 root invents no M12 authority (frozen R3 §16.5)."""
+    con = sqlite3.connect(str(staged_db))
+    try:
+        tables = {
+            r[0] for r in con.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'")
+        }
+        m12_tables = {
+            "compositions", "composition_occurrences", "composition_revisions",
+            "composition_working_occurrences",
+            "composition_revision_occurrences",
+            "composition_revision_production_dependencies",
+            "composition_revision_nested_dependencies",
+            "composition_identity_operations",
+            "composition_identity_operation_sources",
+            "composition_identity_operation_targets",
+        }
+        if tables & m12_tables:
+            raise RecoveryCorruption(
+                "0012 restore invented M12 tables: "
+                f"{sorted(tables & m12_tables)}."
+            )
+    finally:
+        con.close()
+
+
+def _verify_m12_composition_state(staged_db: Path) -> None:
+    """Verify every M12 immutable Composition state row (frozen R3 §16.6).
+
+    Read-only with respect to the staged DB. Reuses the publication
+    reader's invariants where possible; validates canonical bytes/hash,
+    projection equality, transform grammar, independently rederived
+    dependency closure, and the complete lineage temporal/liveness rules.
+    """
+    con = sqlite3.connect(str(staged_db))
+    con.row_factory = sqlite3.Row
+    try:
+        _verify_m12_revisions(con)
+        _verify_m12_lineage(con)
+    finally:
+        con.close()
+
+
+def _verify_m12_revisions(con) -> None:
+    # The async reader invariants are re-implemented synchronously here
+    # against the same frozen contract: recovery must not run an event loop
+    # inside the staged verifier.
+    revisions = con.execute(
+        "SELECT id, composition_id FROM composition_revisions").fetchall()
+    for rev in revisions:
+        _verify_m12_revision_sync(con, rev["id"], rev["composition_id"])
+
+
+def _verify_m12_revision_sync(con, revision_id: str, composition_id: str) -> None:
+    import json as _json
+
+    from soloring.domain.canonical import canonical_hash, canonical_json_bytes
+    from soloring.spatial.math import JS_SAFE_MIN, JS_SAFE_MAX, UDEG_MIN
+
+    rev = con.execute(
+        "SELECT snapshot_json, snapshot_hash FROM composition_revisions "
+        "WHERE id = ?", (revision_id,),
+    ).fetchone()
+    if rev is None:
+        raise RecoveryCorruption(f"composition revision {revision_id} missing")
+    try:
+        parsed = _json.loads(rev["snapshot_json"])
+    except ValueError as exc:
+        raise RecoveryCorruption(
+            f"composition revision {revision_id} snapshot not JSON: {exc}")
+    if parsed.get("schema_version") != 1:
+        raise RecoveryCorruption(
+            f"composition revision {revision_id} unknown schema version")
+    if canonical_json_bytes(parsed) != rev["snapshot_json"].encode("utf-8"):
+        raise RecoveryCorruption(
+            f"composition revision {revision_id} snapshot not canonical")
+    if canonical_hash(parsed) != rev["snapshot_hash"]:
+        raise RecoveryCorruption(
+            f"composition revision {revision_id} hash mismatch")
+
+    proj = con.execute(
+        "SELECT * FROM composition_revision_occurrences "
+        "WHERE composition_revision_id = ? ORDER BY occurrence_id",
+        (revision_id,),
+    ).fetchall()
+    occurrences = parsed.get("occurrences", [])
+    if len(proj) != len(occurrences):
+        raise RecoveryCorruption(
+            f"composition revision {revision_id} projection count mismatch")
+    direct_prod, direct_nested = set(), set()
+    for row, occ in zip(proj, occurrences):
+        if row["occurrence_id"] != occ["occurrence_id"]:
+            raise RecoveryCorruption(
+                f"composition revision {revision_id} projection identity drift")
+        if row["source_kind"] == "production_revision":
+            rid = row["production_revision_id"]
+            direct_prod.add(rid)
+            expected = {
+                "display_name": row["display_name"],
+                "source": {"kind": "production_revision", "revision_id": rid},
+                "visible": bool(row["visible"]),
+            }
+        else:
+            rid = row["nested_composition_revision_id"]
+            direct_nested.add(rid)
+            expected = {
+                "display_name": row["display_name"],
+                "source": {"kind": "composition_revision", "revision_id": rid},
+                "visible": bool(row["visible"]),
+            }
+        got = {k: occ[k] for k in expected}
+        if got != expected:
+            raise RecoveryCorruption(
+                f"composition revision {revision_id} projection/snapshot "
+                f"mismatch at {row['occurrence_id']}")
+        if occ["transform"]["translation_mm"] != [
+                row["x_mm"], row["y_mm"], row["z_mm"]]:
+            raise RecoveryCorruption(
+                f"composition revision {revision_id} translation mismatch")
+        if occ["transform"]["rotation_udeg"] != [
+                row["yaw_udeg"], row["pitch_udeg"], row["roll_udeg"]]:
+            raise RecoveryCorruption(
+                f"composition revision {revision_id} rotation mismatch")
+        for v in (row["x_mm"], row["y_mm"], row["z_mm"],
+                  row["yaw_udeg"], row["pitch_udeg"], row["roll_udeg"]):
+            if not (JS_SAFE_MIN <= v <= JS_SAFE_MAX):
+                raise RecoveryCorruption(
+                    f"composition revision {revision_id} transform outside "
+                    "JS-safe domain")
+        for v in (row["yaw_udeg"], row["pitch_udeg"], row["roll_udeg"]):
+            if not (UDEG_MIN <= v < UDEG_MIN + 360_000_000):
+                raise RecoveryCorruption(
+                    f"composition revision {revision_id} rotation not "
+                    "canonically normalized")
+        # lineage coherence: occurrence belongs to this composition
+        owner = con.execute(
+            "SELECT composition_id FROM composition_occurrences WHERE id = ?",
+            (row["occurrence_id"],),
+        ).fetchone()
+        if owner is None or owner["composition_id"] != composition_id:
+            raise RecoveryCorruption(
+                f"composition revision {revision_id} occurrence lineage drift")
+
+    # independently rederive the closure (set-oriented, frozen §18)
+    exp_prod, exp_nested = set(direct_prod), set(direct_nested)
+    if direct_nested:
+        ph = ",".join("?" for _ in direct_nested)
+        for (d,) in con.execute(
+            "SELECT production_revision_id FROM "
+            "composition_revision_production_dependencies "
+            f"WHERE composition_revision_id IN ({ph})",
+            tuple(direct_nested),
+        ):
+            exp_prod.add(d)
+        for (d,) in con.execute(
+            "SELECT nested_composition_revision_id FROM "
+            "composition_revision_nested_dependencies "
+            f"WHERE composition_revision_id IN ({ph})",
+            tuple(direct_nested),
+        ):
+            exp_nested.add(d)
+    deps = parsed.get("dependencies", {})
+    if (sorted(exp_prod) != deps.get("production_revision_ids")
+            or sorted(exp_nested) != deps.get("composition_revision_ids")):
+        raise RecoveryCorruption(
+            f"composition revision {revision_id} dependency arrays differ "
+            "from independently rederived closure")
+    stored_prod = {r[0] for r in con.execute(
+        "SELECT production_revision_id FROM "
+        "composition_revision_production_dependencies "
+        "WHERE composition_revision_id = ?", (revision_id,))}
+    stored_nested = {r[0] for r in con.execute(
+        "SELECT nested_composition_revision_id FROM "
+        "composition_revision_nested_dependencies "
+        "WHERE composition_revision_id = ?", (revision_id,))}
+    if stored_prod != exp_prod or stored_nested != exp_nested:
+        raise RecoveryCorruption(
+            f"composition revision {revision_id} dependency rows differ "
+            "from independently rederived closure")
+    clash = con.execute(
+        "SELECT COUNT(*) FROM composition_revision_nested_dependencies d "
+        "JOIN composition_revisions cr ON cr.id = d.nested_composition_revision_id "
+        "WHERE d.composition_revision_id = ? AND cr.composition_id = ?",
+        (revision_id, composition_id),
+    ).fetchone()[0]
+    if clash:
+        raise RecoveryCorruption(
+            f"composition revision {revision_id} transitive same-lineage "
+            "embedding")
+
+
+def _verify_m12_lineage(con) -> None:
+    """Complete frozen §12.2/§16.6 lineage verification over the staged DB.
+
+    This is the full semantic checklist: operation-field equivalence with
+    the canonical evidence (composition_id, kind, versions, fingerprints),
+    normalized terminates_identity agreement, termination-by-kind,
+    embedded target-spec grammar, birth-before-use, no post-termination
+    use, unique intervals, and active-occurrence ↔ working-membership
+    equality in BOTH directions.
+    """
+    import json as _json
+
+    from soloring.domain.canonical import canonical_hash, canonical_json_bytes
+
+    # The evidence grammar is owned solely by composition.evidence —
+    # no second (dormant) interpretation survives here.
+
+    compositions = con.execute("SELECT id, working_version FROM compositions")
+    for comp in compositions.fetchall():
+        cid, cur_wv = comp["id"], comp["working_version"]
+        before_seen: set[int] = set()
+        birth: dict[str, int] = {}
+        terminated_at: dict[str, int] = {}
+        ops = con.execute(
+            "SELECT * FROM composition_identity_operations "
+            "WHERE composition_id = ? ORDER BY working_version_before",
+            (cid,),
+        ).fetchall()
+        for op in ops:
+            if op["working_version_before"] in before_seen:
+                raise RecoveryCorruption("duplicate operation version interval")
+            before_seen.add(op["working_version_before"])
+            if op["working_version_after"] != op["working_version_before"] + 1:
+                raise RecoveryCorruption("operation version step != +1")
+            if op["working_version_after"] > cur_wv:
+                raise RecoveryCorruption(
+                    "operation after exceeds current working_version")
+            try:
+                parsed = _json.loads(op["operation_json"])
+            except ValueError:
+                raise RecoveryCorruption("operation_json not parseable")
+            if canonical_json_bytes(parsed) != op["operation_json"].encode():
+                raise RecoveryCorruption("operation_json not canonical")
+            if canonical_hash(parsed) != op["operation_hash"]:
+                raise RecoveryCorruption("operation_hash mismatch")
+            # THE one shared evidence checklist — identical contract to
+            # the async historical verifier via composition.evidence.
+            sources = con.execute(
+                "SELECT occurrence_id, terminates_identity FROM "
+                "composition_identity_operation_sources WHERE operation_id = ? "
+                "ORDER BY occurrence_id", (op["id"],)).fetchall()
+            targets = con.execute(
+                "SELECT occurrence_id FROM "
+                "composition_identity_operation_targets WHERE operation_id = ? "
+                "ORDER BY occurrence_id", (op["id"],)).fetchall()
+            from soloring.composition.evidence import (
+                validate_operation_evidence as _validate_evidence,
+            )
+            try:
+                _validate_evidence(
+                    parsed,
+                    row_composition_id=cid,
+                    row_kind=op["operation_kind"],
+                    row_before=op["working_version_before"],
+                    row_after=op["working_version_after"],
+                    row_request_fingerprint=op["request_fingerprint"],
+                    row_impact_fingerprint=op["impact_fingerprint"],
+                    normalized_sources=[
+                        (r["occurrence_id"], r["terminates_identity"])
+                        for r in sources],
+                    normalized_targets=[r["occurrence_id"] for r in targets],
+                )
+            except ValueError as exc:
+                raise RecoveryCorruption(str(exc))
+            for s in sources:
+                oid = s["occurrence_id"]
+                if oid not in birth:
+                    raise RecoveryCorruption("source used before birth")
+                if oid in terminated_at:
+                    raise RecoveryCorruption("post-termination source use")
+                if s["terminates_identity"]:
+                    if oid in terminated_at:
+                        raise RecoveryCorruption("double termination")
+                    terminated_at[oid] = op["working_version_before"]
+            for t in targets:
+                if t["occurrence_id"] in birth:
+                    raise RecoveryCorruption("double birth")
+                birth[t["occurrence_id"]] = op["working_version_before"]
+        all_occ = [r[0] for r in con.execute(
+            "SELECT id FROM composition_occurrences WHERE composition_id = ?",
+            (cid,))]
+        for oid in all_occ:
+            if oid not in birth:
+                raise RecoveryCorruption("occurrence without birth operation")
+        working = [r[0] for r in con.execute(
+            "SELECT occurrence_id FROM composition_working_occurrences "
+            "WHERE composition_id = ?", (cid,))]
+        for oid in working:
+            if oid in terminated_at:
+                raise RecoveryCorruption(
+                    "terminated occurrence remains in working state")
+        # active-occurrence ↔ working-membership equality (frozen §12.3):
+        # a live, nonterminated occurrence must BE in working membership.
+        active = {o for o in all_occ if o not in terminated_at}
+        if active != set(working):
+            raise RecoveryCorruption(
+                "active occurrence set differs from working membership")
 # Public operation: backup (§7.4)
 # ---------------------------------------------------------------------------
 
@@ -1154,6 +1453,9 @@ async def backup(
         # M11 §14.4: immutable production state is verified in the staged
         # DB before any liveness copying or certification.
         await asyncio.to_thread(_verify_m11_production_state, staged_db)
+        # M12 §16.3: immutable composition/occurrence state is verified in
+        # the staged DB before liveness enumeration/certification.
+        await asyncio.to_thread(_verify_m12_composition_state, staged_db)
         liveness = await asyncio.to_thread(_enumerate_liveness, staged_db)
 
         blob_root = Path(settings.blob_dir)
@@ -1281,8 +1583,12 @@ async def restore(backup_root: Path, dest: Path) -> dict:
         await asyncio.to_thread(_verify_staged_db, staged_db, expected_head=head)
         if head == PRE_M11_ALEMBIC_HEAD:
             await asyncio.to_thread(_prove_no_m11_state, staged_db)
-        else:
+        elif head == M11_ALEMBIC_HEAD:
             await asyncio.to_thread(_verify_m11_production_state, staged_db)
+            await asyncio.to_thread(_prove_no_m12_state, staged_db)
+        else:  # 0013
+            await asyncio.to_thread(_verify_m11_production_state, staged_db)
+            await asyncio.to_thread(_verify_m12_composition_state, staged_db)
 
         # Step 9: exact liveness equality with the manifest (the restored
         # DATA root is not a backup artifact; verify against the parsed
