@@ -377,7 +377,7 @@ class CompositionIdentityOperationSource(Base):
         ),
         Index("ix_cios_occurrence", "occurrence_id"),
         Index(
-            "uq_cios_terminating_occurrence", "occurrence_id",
+            "uq_cios_terminating_occurrence", "occurrence_id", unique=True,
             sqlite_where=text("terminates_identity = 1"),
         ),
     )

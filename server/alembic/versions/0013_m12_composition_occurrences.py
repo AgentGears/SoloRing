@@ -284,7 +284,8 @@ def upgrade() -> None:
         ["occurrence_id"])
     op.create_index(
         "uq_cios_terminating_occurrence", "composition_identity_operation_sources",
-        ["occurrence_id"], sqlite_where=sa.text("terminates_identity = 1"))
+        ["occurrence_id"], unique=True,
+        sqlite_where=sa.text("terminates_identity = 1"))
 
     op.create_table(
         "composition_identity_operation_targets",
