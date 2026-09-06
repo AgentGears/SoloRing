@@ -135,7 +135,7 @@ async def test_api_identity_preview_then_apply_requires_both_fingerprints(
     }
     p = (await client.post(
         f"/compositions/{cid}/identity-operations/preview",
-        json=request)).json()
+        json={"scope": SCOPE, "request": request})).json()
     assert p["allowed"] and p["request_fingerprint"] and p["impact_fingerprint"]
 
     r = await client.post(
@@ -269,7 +269,7 @@ async def test_api_identity_preview_then_apply_requires_request_and_impact_finge
                "target_working_specs": []}
     p = (await client.post(
         f"/compositions/{cid}/identity-operations/preview",
-        json=request)).json()
+        json={"scope": SCOPE, "request": request})).json()
     assert p["request_fingerprint"] and p["impact_fingerprint"]
     r = await client.post(
         f"/compositions/{cid}/identity-operations",

@@ -1,0 +1,465 @@
+"""M12 source-review correction proofs (F2–F7).
+
+One adversarial owner per finding: fenced metadata CAS under a real
+competing writer; explicit-null description semantics; publish zero-commit
+negatives under working corruption and project soft-delete; transform
+cardinality; normalized-vs-immutable lineage evidence divergence; and
+many-direct-nested readiness through the real resolver.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import json
+
+import pytest
+from sqlalchemy import event, text
+
+from soloring.composition.readiness import (
+    publish_composition_revision,
+    resolve_publication_readiness,
+)
+from soloring.composition.service import (
+    CLEAR_DESCRIPTION,
+    EditConflict,
+    create_composition,
+    mint_occurrence,
+    patch_composition_metadata,
+    patch_working_occurrence,
+)
+from soloring.composition.impacts import verify_identity_history
+from soloring.errors import SoloRingError
+from soloring.domain.ids import new_uuid
+
+NOW = "2026-01-01T00:00:00.000Z"
+SCOPE = "composition_working_state"
+
+
+async def _seed_project(factory) -> str:
+    pid = new_uuid()
+    async with factory() as s:
+        async with s.bind.connect() as conn:
+            await conn.execute(
+                text("INSERT INTO projects (id, name, created_at, updated_at) "
+                     "VALUES (:id, 'P', :n, :n)"), {"id": pid, "n": NOW})
+            await conn.commit()
+    return pid
+
+
+async def _seed_production(factory, pid, salt="c") -> str:
+    bh = hashlib.sha256(f"m12-fix-{salt}".encode()).hexdigest()
+    rid, obj = new_uuid(), new_uuid()
+    async with factory() as s:
+        async with s.bind.connect() as conn:
+            await conn.execute(
+                text("INSERT INTO blobs (hash, path, size_bytes, "
+                     "detected_media_type, created_at) VALUES "
+                     "(:h, :p, 8, NULL, :n)"),
+                {"h": bh, "p": f"sha256/{bh[:2]}/{bh[2:4]}/{bh}", "n": NOW})
+            await conn.execute(
+                text("INSERT INTO production_objects (id, project_id, name, "
+                     "created_at, updated_at) VALUES (:o, :p, 'Obj', :n, :n)"),
+                {"o": obj, "p": pid, "n": NOW})
+            await conn.execute(
+                text("INSERT INTO production_revisions (id, "
+                     "production_object_id, revision_number, snapshot_json, "
+                     "snapshot_hash, created_at) VALUES "
+                     "(:r, :o, 1, '{}', :h, :n)"),
+                {"r": rid, "o": obj, "h": "0" * 64, "n": NOW})
+            await conn.execute(
+                text("INSERT INTO production_revision_closures "
+                     "(production_revision_id, contract_key, "
+                     "contract_version, blob_hash, size_bytes, media_type) "
+                     "VALUES (:r, 'retained_blob', 1, :bh, 8, NULL)"),
+                {"r": rid, "bh": bh})
+            await conn.commit()
+    return rid
+
+
+def _spec(rid, name="Chair", pos=(0, 0, 0)) -> dict:
+    return {
+        "display_name": name,
+        "source": {"kind": "production_revision", "revision_id": rid},
+        "visible": True,
+        "transform": {"translation_mm": list(pos), "rotation_udeg": [0, 0, 0]},
+    }
+
+
+async def _comp(factory, pid, name="L") -> str:
+    return (await create_composition(factory(), pid, name=name,
+                                     description=None))["id"]
+
+
+async def _mint(factory, cid, spec, version) -> str:
+    return (await mint_occurrence(
+        factory(), cid, scope=SCOPE, expected_working_version=version,
+        spec=spec))["occurrence_id"]
+
+
+# --- F2a: competing metadata writers under a real parked fence ---------------
+
+
+async def test_competing_metadata_writers_only_one_commits(engine, factory):
+    """Two concurrent metadata PATCHes at the same expected version: the
+    loser must fail with stale_metadata_version/fence_race, never silently
+    overwrite — the CAS runs under the writer fence."""
+    pid = await _seed_project(factory)
+    cid = await _comp(factory, pid)
+    leader_acquired = asyncio.Event()
+    follower_at_seam = asyncio.Event()
+
+    @event.listens_for(engine.sync_engine, "before_cursor_execute")
+    def _seam(conn, cursor, statement, parameters, context, executemany):
+        if "BEGIN IMMEDIATE" in statement and leader_acquired.is_set():
+            follower_at_seam.set()
+
+    leader = await engine.connect()
+    try:
+        await leader.exec_driver_sql("BEGIN IMMEDIATE")
+        leader_acquired.set()
+
+        async def follower_patch():
+            return await patch_composition_metadata(
+                factory(), cid, expected_metadata_version=0, name="Follower")
+
+        task = asyncio.ensure_future(follower_patch())
+        await asyncio.wait_for(follower_at_seam.wait(), timeout=10)
+        await asyncio.sleep(0)
+        # leader commits its own metadata PATCH first
+        await leader.execute(
+            text("UPDATE compositions SET name = 'Leader', "
+                 "metadata_version = 1 WHERE id = :c"), {"c": cid})
+        await leader.exec_driver_sql("COMMIT")
+        with pytest.raises(EditConflict) as ei:
+            await asyncio.wait_for(task, timeout=30)
+        assert ei.value.details["reason"] in (
+            "stale_metadata_version", "fence_race")
+    finally:
+        event.remove(engine.sync_engine, "before_cursor_execute", _seam)
+        await leader.close()
+    async with factory() as s:
+        async with s.bind.connect() as conn:
+            row = (await conn.execute(
+                text("SELECT name, metadata_version FROM compositions "
+                     "WHERE id = :c"), {"c": cid})).first()
+    assert row.name == "Leader" and row.metadata_version == 1
+
+
+# --- F2b: explicit null clears, omission leaves unchanged --------------------
+
+
+async def test_explicit_null_clears_description_but_omission_keeps_it(
+    engine, factory
+):
+    pid = await _seed_project(factory)
+    cid = (await create_composition(factory(), pid, name="L",
+                                    description="original"))["id"]
+    out = await patch_composition_metadata(
+        factory(), cid, expected_metadata_version=0,
+        description=CLEAR_DESCRIPTION)
+    assert out["description"] is None
+    out2 = await patch_composition_metadata(
+        factory(), cid, expected_metadata_version=1, name="Renamed")
+    assert out2["description"] is None  # omitted → unchanged (still None)
+    out3 = await patch_composition_metadata(
+        factory(), cid, expected_metadata_version=2, description="set again")
+    assert out3["description"] == "set again"
+    out4 = await patch_composition_metadata(
+        factory(), cid, expected_metadata_version=3, name="NoDescChange")
+    assert out4["description"] == "set again"  # omission never clears
+
+
+async def test_api_explicit_null_vs_omitted_description(client):
+    from tests.test_m12_api import _seed
+
+    pid, _ = await _seed(client)
+    r = await client.post(f"/projects/{pid}/compositions",
+                          json={"name": "L", "description": "original"})
+    cid = r.json()["id"]
+    r = await client.patch(f"/compositions/{cid}",
+                           json={"expected_metadata_version": 0,
+                                 "description": None})
+    assert r.json()["description"] is None
+    r = await client.patch(f"/compositions/{cid}",
+                           json={"expected_metadata_version": 1, "name": "R"})
+    assert r.json()["description"] is None
+
+
+# --- F3: publish zero-commit negatives ---------------------------------------
+
+
+async def test_publish_rejects_transitive_self_lineage_working_corruption_before_commit(  # noqa: E501
+    engine, factory
+):
+    """A corrupt working row referencing a nested revision whose closure
+    contains the parent lineage is refused BEFORE any revision is committed."""
+    pid = await _seed_project(factory)
+    rid = await _seed_production(factory, pid, "a")
+    a = await _comp(factory, pid, name="A")
+    await _mint(factory, a, _spec(rid), 0)
+    a_rev, _ = await publish_composition_revision(
+        factory(), a, expected_working_version=1)
+    b = await _comp(factory, pid, name="B")
+    await _mint(factory, b, {
+        "display_name": "A mod",
+        "source": {"kind": "composition_revision",
+                   "revision_id": a_rev["revision_id"]},
+        "visible": True,
+        "transform": {"translation_mm": [0, 0, 0], "rotation_udeg": [0, 0, 0]},
+    }, 0)
+    b_rev, _ = await publish_composition_revision(
+        factory(), b, expected_working_version=1)
+    # corrupt: place B rev1 into A's working state directly (FK-bypassed)
+    import sqlite3
+
+    db_path = engine.url.database
+    occ = new_uuid()
+    con = sqlite3.connect(db_path)
+    con.execute("PRAGMA foreign_keys=OFF")
+    con.execute(
+        "INSERT INTO composition_occurrences (id, composition_id, created_at) "
+        "VALUES (?, ?, ?)", (occ, a, NOW))
+    con.execute(
+        "INSERT INTO composition_working_occurrences (composition_id, "
+        "occurrence_id, display_name, source_kind, "
+        "nested_composition_revision_id, visible, x_mm, y_mm, z_mm, yaw_udeg, "
+        "pitch_udeg, roll_udeg, updated_at) VALUES "
+        "(?, ?, 'B mod', 'composition_revision', ?, 1, 0, 0, 0, 0, 0, 0, ?)",
+        (a, occ, b_rev["revision_id"], NOW))
+    con.commit()
+    con.close()
+    with pytest.raises(SoloRingError) as ei:
+        await publish_composition_revision(
+            factory(), a, expected_working_version=1)
+    assert ei.value.code == "INTERNAL_INVARIANT_VIOLATION"
+    async with factory() as s:
+        async with s.bind.connect() as conn:
+            n = (await conn.execute(
+                text("SELECT COUNT(*) FROM composition_revisions "
+                     "WHERE composition_id = :c"), {"c": a})).scalar_one()
+    assert n == 1  # only the original valid revision: ZERO corrupt commits
+
+
+async def test_publish_refused_after_project_soft_delete_without_version_change(
+    engine, factory
+):
+    """Project soft-deleted between freeze and fence (working_version
+    unchanged) → publish refuses, nothing committed."""
+    pid = await _seed_project(factory)
+    rid = await _seed_production(factory, pid, "b")
+    cid = await _comp(factory, pid)
+    await _mint(factory, cid, _spec(rid), 0)
+    async with factory() as s:
+        async with s.bind.connect() as conn:
+            await conn.exec_driver_sql("BEGIN IMMEDIATE")
+            await conn.execute(
+                text("UPDATE projects SET deleted_at = :n WHERE id = :p"),
+                {"n": NOW, "p": pid})
+            await conn.exec_driver_sql("COMMIT")
+    with pytest.raises(SoloRingError) as ei:
+        await publish_composition_revision(
+            factory(), cid, expected_working_version=1)
+    assert ei.value.code == "COMPOSITION_NOT_FOUND"
+    async with factory() as s:
+        async with s.bind.connect() as conn:
+            n = (await conn.execute(
+                text("SELECT COUNT(*) FROM composition_revisions "
+                     "WHERE composition_id = :c"), {"c": cid})).scalar_one()
+    assert n == 0
+
+
+async def test_working_patch_refused_after_project_soft_delete(engine, factory):
+    pid = await _seed_project(factory)
+    rid = await _seed_production(factory, pid, "c")
+    cid = await _comp(factory, pid)
+    occ = await _mint(factory, cid, _spec(rid), 0)
+    async with factory() as s:
+        async with s.bind.connect() as conn:
+            await conn.exec_driver_sql("BEGIN IMMEDIATE")
+            await conn.execute(
+                text("UPDATE projects SET deleted_at = :n WHERE id = :p"),
+                {"n": NOW, "p": pid})
+            await conn.exec_driver_sql("COMMIT")
+    with pytest.raises(SoloRingError) as ei:
+        await patch_working_occurrence(
+            factory(), cid, occ, scope=SCOPE, expected_working_version=1,
+            display_name="Ghost edit")
+    assert ei.value.code == "COMPOSITION_NOT_FOUND"
+
+
+# --- F4: transform cardinality negatives --------------------------------------
+
+
+async def test_transform_cardinality_is_exact_at_service_and_http(
+    engine, factory, client
+):
+    pid = await _seed_project(factory)
+    rid = await _seed_production(factory, pid, "d")
+    cid = await _comp(factory, pid)
+    for bad in (
+        {"translation_mm": [1, 2], "rotation_udeg": [0, 0, 0]},
+        {"translation_mm": [1, 2, 3, 4], "rotation_udeg": [0, 0, 0]},
+        {"translation_mm": [1, 2, 3], "rotation_udeg": [0, 0]},
+        {"translation_mm": [1, 2, 3], "rotation_udeg": [0, 0, 0, 0]},
+        {"translation_mm": [1, "x", 3], "rotation_udeg": [0, 0, 0]},
+    ):
+        spec = _spec(rid)
+        spec["transform"] = bad
+        with pytest.raises(SoloRingError) as ei:
+            await mint_occurrence(factory(), cid, scope=SCOPE,
+                                  expected_working_version=0, spec=spec)
+        assert ei.value.code == "VALIDATION_ERROR"
+
+    # HTTP level
+    from tests.test_m12_api import _seed, _mint_body
+
+    hpid, hprid = await _seed(client)
+    hcid = (await client.post(f"/projects/{hpid}/compositions",
+                              json={"name": "L"})).json()["id"]
+    body = _mint_body(hprid, 0)
+    body["transform"] = {"translation_mm": [1, 2],
+                         "rotation_udeg": [0, 0, 0]}
+    r = await client.post(f"/compositions/{hcid}/occurrences", json=body)
+    assert r.status_code == 422
+
+
+# --- F5: normalized evidence vs immutable evidence divergence ----------------
+
+
+async def test_lineage_verifier_detects_evidence_divergence(engine, factory):
+    """Perturb the NORMALIZED edges while leaving the canonical immutable
+    evidence intact: the complete field-equivalence verifier must fail."""
+    pid = await _seed_project(factory)
+    rid = await _seed_production(factory, pid, "e")
+    cid = await _comp(factory, pid)
+    occ = await _mint(factory, cid, _spec(rid), 0)
+    await verify_identity_history(factory(), cid)
+
+    async with factory() as s:
+        async with s.bind.connect() as conn:
+            op = (await conn.execute(
+                text("SELECT id FROM composition_identity_operations "
+                     "WHERE composition_id = :c"), {"c": cid})).scalar_one()
+            # divergence: flip the normalized terminates flag on a mint —
+            # mint has NO sources, so instead tamper the target edge set
+            await conn.exec_driver_sql("BEGIN IMMEDIATE")
+            await conn.execute(
+                text("DELETE FROM composition_identity_operation_targets "
+                     "WHERE operation_id = :o"), {"o": op})
+            await conn.exec_driver_sql("COMMIT")
+    with pytest.raises(SoloRingError) as ei:
+        await verify_identity_history(factory(), cid)
+    assert ei.value.code == "INTERNAL_INVARIANT_VIOLATION"
+
+
+async def test_lineage_verifier_requires_active_working_membership(engine, factory):
+    """A live nonterminated occurrence missing from working membership
+    (working row deleted) is corruption, not silence."""
+    pid = await _seed_project(factory)
+    rid = await _seed_production(factory, pid, "f")
+    cid = await _comp(factory, pid)
+    occ = await _mint(factory, cid, _spec(rid), 0)
+    async with factory() as s:
+        async with s.bind.connect() as conn:
+            await conn.exec_driver_sql("BEGIN IMMEDIATE")
+            await conn.execute(
+                text("DELETE FROM composition_working_occurrences "
+                     "WHERE occurrence_id = :o AND composition_id = :c"),
+                {"o": occ, "c": cid})
+            await conn.exec_driver_sql("COMMIT")
+    with pytest.raises(SoloRingError) as ei:
+        await verify_identity_history(factory(), cid)
+    assert ei.value.code == "INTERNAL_INVARIANT_VIOLATION"
+
+
+async def test_lineage_verifier_detects_operation_field_tamper(engine, factory):
+    """Row column tampered while canonical evidence intact → divergence."""
+    pid = await _seed_project(factory)
+    rid = await _seed_production(factory, pid, "g")
+    cid = await _comp(factory, pid)
+    await _mint(factory, cid, _spec(rid), 0)
+    async with factory() as s:
+        async with s.bind.connect() as conn:
+            await conn.exec_driver_sql("BEGIN IMMEDIATE")
+            await conn.execute(
+                text("UPDATE composition_identity_operations SET "
+                     "request_fingerprint = :rf WHERE composition_id = :c"),
+                {"rf": "f" * 64, "c": cid})
+            await conn.exec_driver_sql("COMMIT")
+    with pytest.raises(SoloRingError) as ei:
+        await verify_identity_history(factory(), cid)
+    assert ei.value.code == "INTERNAL_INVARIANT_VIOLATION"
+
+
+# --- F6: many-direct-nested readiness through the REAL resolver -------------
+
+
+async def test_many_direct_nested_sources_resolve_in_bounded_queries(
+    engine, factory
+):
+    """100 direct nested occurrences through the real readiness path must
+    use bounded (set-oriented) queries, not 2-per-nested-revision."""
+    pid = await _seed_project(factory)
+    leaf_rid = await _seed_production(factory, pid, "leaf")
+    # build 100 independently published modules
+    module_ids = []
+    for i in range(100):
+        m = await _comp(factory, pid, name=f"M{i}")
+        await _mint(factory, m, _spec(leaf_rid), 0)
+        rev, _ = await publish_composition_revision(
+            factory(), m, expected_working_version=1)
+        module_ids.append(rev["revision_id"])
+
+    outer = await _comp(factory, pid, name="Outer")
+    for i, mrev in enumerate(module_ids):
+        await _mint(factory, outer, {
+            "display_name": f"Mod {i}",
+            "source": {"kind": "composition_revision", "revision_id": mrev},
+            "visible": True,
+            "transform": {"translation_mm": [0, 0, 0],
+                          "rotation_udeg": [0, 0, 0]},
+        }, i)
+
+    from sqlalchemy import event as _event
+
+    selects: list[str] = []
+
+    @_event.listens_for(engine.sync_engine, "before_cursor_execute")
+    def _spy(conn, cursor, statement, parameters, context, executemany):
+        if statement.lstrip().lower().startswith("select"):
+            selects.append(statement)
+
+    try:
+        r = await resolve_publication_readiness(factory(), outer)
+    finally:
+        _event.remove(engine.sync_engine, "before_cursor_execute", _spy)
+    assert r["ready"] and r["occurrence_count"] == 100
+    assert r["flattened_nested_dependency_count"] == 100
+    assert r["flattened_production_dependency_count"] == 1
+    # bounded: integrity + closure + ownership resolved set-oriented
+    assert len(selects) < 30, len(selects)
+
+
+# --- F7: preview scope rejection ---------------------------------------------
+
+
+async def test_identity_preview_rejects_missing_shot_local_and_unknown_scope(
+    client
+):
+    from tests.test_m12_api import _seed, _mint_body
+
+    pid, prid = await _seed(client)
+    cid = (await client.post(f"/projects/{pid}/compositions",
+                             json={"name": "L"})).json()["id"]
+    occ = (await client.post(f"/compositions/{cid}/occurrences",
+                             json=_mint_body(prid, 0))).json()["occurrence_id"]
+    request = {"kind": "remove", "source_occurrence_ids": [occ],
+               "target_working_specs": []}
+    for bad_scope in (None, "shot_local", "story_state", "unknown_v2"):
+        body = {"request": request}
+        if bad_scope is not None:
+            body["scope"] = bad_scope
+        r = await client.post(
+            f"/compositions/{cid}/identity-operations/preview", json=body)
+        assert r.status_code == 422, (bad_scope, r.text)

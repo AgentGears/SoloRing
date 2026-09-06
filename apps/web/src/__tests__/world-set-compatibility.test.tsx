@@ -53,13 +53,14 @@ describe("WorldSetWorkspace compatibility language", () => {
     await screen.findByTestId("occurrence-list");
 
     // the action itself carries the warning
-    const updateBtn = screen.getByRole("button", { name: /Update source/ });
+    const updateBtn = screen.getByTestId("update-source-occ-7");
     expect(updateBtn.getAttribute("title")).toContain(
       "Identity is preserved");
     expect(updateBtn.getAttribute("title")).toContain(
       "not certified");
 
-    await userEvent.click(updateBtn);
+    window.prompt = vi.fn(() => "pr-2");
+    await userEvent.click(screen.getByTestId("update-source-occ-7"));
     await vi.waitFor(() =>
       expect(screen.getByTestId("ws-notice").textContent)
         .toContain("Identity is preserved"));

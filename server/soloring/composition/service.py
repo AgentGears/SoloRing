@@ -78,6 +78,14 @@ def _norm_transform(value: object) -> Transform:
             "transform must be exactly {translation_mm, rotation_udeg} "
             "and is never silently invented",
         )
+    for key in ("translation_mm", "rotation_udeg"):
+        vec = value[key]
+        if not isinstance(vec, list) or len(vec) != 3:
+            raise validation_error(
+                f"transform.{key} must be exactly 3 integers",)
+        if not all(isinstance(v, int) and not isinstance(v, bool)
+                   for v in vec):
+            raise validation_error(f"transform.{key} must be integers")
     try:
         return Transform(
             translation_mm=tuple(value["translation_mm"]),
@@ -288,6 +296,12 @@ async def list_compositions(session: AsyncSession, project_id: str) -> list[dict
     return [dict(r._mapping) for r in rows]
 
 
+# Sentinel distinguishing "description explicitly set to null" from "field
+# omitted" (frozen §7.2). The router sets CLEAR_DESCRIPTION for explicit
+# JSON null; omission arrives as the default None.
+CLEAR_DESCRIPTION = object()
+
+
 async def patch_composition_metadata(
     session: AsyncSession, composition_id: str, *,
     expected_metadata_version: int, name: object = None,
@@ -304,30 +318,39 @@ async def patch_composition_metadata(
     if name is not None:
         params["name"] = _norm_name(name, "name")
         sets.append("name = :name")
-    if description is not None:
-        # explicit description clears; omitted means unchanged (§7.2)
+    if description is CLEAR_DESCRIPTION:
+        sets.append("description = NULL")
+    elif description is not None:
         if not isinstance(description, str):
-            raise validation_error("description must be a string")
+            raise validation_error("description must be a string or null")
         params["desc"] = description.strip() or None
         sets.append("description = :desc")
 
+    # The CAS runs entirely under the writer fence: compare the version and
+    # verify exactly one affected row, so a competing metadata writer can
+    # never be silently overwritten (frozen §7.2).
     async with session.bind.connect() as conn:
+        await conn.exec_driver_sql("BEGIN IMMEDIATE")
         comp = await _require_composition(conn, composition_id)
         if comp["metadata_version"] != expected_metadata_version:
             raise EditConflict(
                 "stale_metadata_version",
                 "composition metadata changed since read; refetch and retry",
             )
-        await conn.exec_driver_sql("BEGIN IMMEDIATE")
-        await conn.execute(
+        cur = await conn.execute(
             text(
                 "UPDATE compositions SET " + ", ".join(sets)
-                + f", metadata_version = metadata_version + 1, "
+                + ", metadata_version = metadata_version + 1, "
                 f"updated_at = {DB_NOW_SQL} "
                 "WHERE id = :cid AND metadata_version = :mv"
             ),
             params,
         )
+        if cur.rowcount != 1:
+            raise EditConflict(
+                "fence_race",
+                "metadata version changed at the fence; refetch and retry",
+            )
         await conn.exec_driver_sql("COMMIT")
     return await get_composition(session, composition_id)
 
@@ -579,8 +602,9 @@ async def patch_working_occurrence(
                 owner_rows = (await conn.execute(
                     text(
                         "SELECT id, production_object_id FROM production_revisions "
-                        "WHERE id IN ('" + row.production_revision_id + "', '"
-                        + source["revision_id"] + "')"),
+                        "WHERE id IN (:a, :b)"),
+                    {"a": row.production_revision_id,
+                     "b": source["revision_id"]},
                 )).fetchall()
                 owners = {r.id: r.production_object_id for r in owner_rows}
                 old_owner = owners.get(row.production_revision_id)
@@ -602,8 +626,9 @@ async def patch_working_occurrence(
                 owner_rows = (await conn.execute(
                     text(
                         "SELECT id, composition_id FROM composition_revisions "
-                        "WHERE id IN ('" + row.nested_composition_revision_id
-                        + "', '" + source["revision_id"] + "')"),
+                        "WHERE id IN (:a, :b)"),
+                    {"a": row.nested_composition_revision_id,
+                     "b": source["revision_id"]},
                 )).fetchall()
                 owners = {r.id: r.composition_id for r in owner_rows}
                 old_owner = owners.get(row.nested_composition_revision_id)
@@ -630,12 +655,41 @@ async def patch_working_occurrence(
                      "source_kind = :skind"]
             params["skind"] = source["kind"]
 
+        # The mutation runs entirely under the writer fence (frozen §7.4):
+        # active-Project revalidation, termination check, and version CAS
+        # all happen after BEGIN IMMEDIATE.
         await conn.exec_driver_sql("BEGIN IMMEDIATE")
-        cur = (await conn.execute(
-            text("SELECT working_version FROM compositions WHERE id = :cid"),
+        fenced = (await conn.execute(
+            text(
+                "SELECT c.working_version, p.deleted_at AS project_deleted_at "
+                "FROM compositions c JOIN projects p ON p.id = c.project_id "
+                "WHERE c.id = :cid"
+            ),
             {"cid": composition_id},
-        )).scalar_one()
-        if cur != expected_working_version:
+        )).first()
+        if fenced is None or fenced.project_deleted_at is not None:
+            raise not_found(
+                ErrorCode.COMPOSITION_NOT_FOUND,
+                f"composition {composition_id!r} not found or inactive at fence",
+            )
+        still_row = (await conn.execute(
+            text("SELECT 1 FROM composition_working_occurrences "
+                 "WHERE composition_id = :cid AND occurrence_id = :oid"),
+            {"cid": composition_id, "oid": occurrence_id},
+        )).first()
+        if still_row is None:
+            raise not_found(
+                ErrorCode.COMPOSITION_OCCURRENCE_NOT_FOUND,
+                f"occurrence {occurrence_id!r} left working state before fence",
+            )
+        still_terminated = await _terminated_ids(
+            conn, composition_id, [occurrence_id])
+        if still_terminated:
+            raise internal_invariant(
+                "terminated identity remains in working state",
+                details={"occurrence_id": occurrence_id},
+            )
+        if fenced.working_version != expected_working_version:
             raise EditConflict("fence_race", "working version changed at the fence")
         await conn.execute(
             text(

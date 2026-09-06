@@ -898,3 +898,10 @@ export async function publishComposition(
     `${BASE}/compositions/${compositionId}/publish`,
     { method: "POST", body: JSON.stringify({ expected_working_version: expectedWorkingVersion }) });
 }
+
+import { fetchJson as sharedFetchJson } from "./api.shared";
+
+/** GET helper for read endpoints (lists/details/history). */
+export async function getJson<T>(url: string): Promise<T> {
+  return sharedFetchJson<T>(url);
+}

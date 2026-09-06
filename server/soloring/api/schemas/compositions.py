@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+# frozen §14.5: limit is bounded on BOTH ends (no negative limits)
+
 
 class CompositionCreate(BaseModel):
     name: str
@@ -90,6 +92,11 @@ class IdentityOperationRequest(BaseModel):
     kind: str
     source_occurrence_ids: list[str]
     target_working_specs: list[dict]
+
+
+class PreviewRequest(BaseModel):
+    scope: str
+    request: IdentityOperationRequest
 
 
 class PreviewResult(BaseModel):

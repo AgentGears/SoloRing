@@ -67,20 +67,35 @@ describe("WorldSetWorkspace identity actions", () => {
     await screen.findByTestId("occurrence-list");
 
     // same-identity source update goes through PATCH with the same id
+    window.prompt = vi.fn(() => OCC.production_revision_id ?? "pr-2");
     await userEvent.click(
-      screen.getByRole("button", { name: /Update source/ }));
+      screen.getByTestId(`update-source-${OCC.occurrence_id}`));
     await vi.waitFor(() => expect(patchOccurrence).toHaveBeenCalled());
     expect(patchOccurrence.mock.calls[0][1]).toBe("occ-7");
 
     // replace-as-new goes through identity preview/apply — a distinct path
+    // (with a real target spec per the frozen cardinality contract)
     await userEvent.click(screen.getByTestId("replace-occ-7"));
+    await screen.findByTestId("replace-dialog");
+    previewIdentityOperation.mockResolvedValue({
+      allowed: true, working_version: 1,
+      normalized_request: {}, request_fingerprint: "f".repeat(64),
+      impact_fingerprint: "e".repeat(64),
+      source_occurrence_summaries: [],
+      historical_reference_counts: {}, live_blocking_references: [],
+    });
+    await userEvent.click(screen.getByTestId("replace-confirm"));
     await vi.waitFor(() =>
       expect(previewIdentityOperation).toHaveBeenCalledWith(
         COMP.id,
         expect.objectContaining({ kind: "replace_as_new" })));
     await vi.waitFor(() => expect(applyIdentityOperation).toHaveBeenCalled());
+    const previewReq = previewIdentityOperation.mock.calls[0][1];
+    expect(previewReq.kind).toBe("replace_as_new");
+    expect(previewReq.target_working_specs).toHaveLength(1);  // real backend accepts
     const applyBody = applyIdentityOperation.mock.calls[0][1];
     expect(applyBody.request.kind).toBe("replace_as_new");
+    expect(applyBody.request.target_working_specs).toHaveLength(1);
     // distinct UI labels
     expect(
       screen.getByRole("button", { name: "Update this occurrence" }),

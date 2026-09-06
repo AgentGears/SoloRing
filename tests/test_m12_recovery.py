@@ -247,14 +247,29 @@ def test_restore_0013_rejects_terminated_occurrence_in_working_state(
                 "WHERE id = (SELECT composition_id FROM "
                 "composition_working_occurrences LIMIT 1)")
     from soloring.composition.canonical import (
+        build_impact_value,
         build_operation_value,
+        build_request_value,
+        impact_fingerprint as _ifp,
         operation_hash as _oh,
         operation_json as _oj,
+        request_fingerprint as _rfp,
     )
+    req_v = build_request_value(
+        composition_id=cid, kind="remove",
+        source_occurrence_ids=[occ], target_specs=[])
+    imp_v = build_impact_value(
+        composition_id=cid, working_version=1,
+        source_occurrence_ids=[occ],
+        source_dispositions=[
+            {"occurrence_id": occ, "active": True,
+             "in_working_state": True}],
+        live_blocking_references=[])
+    req_fp, imp_fp = _rfp(req_v), _ifp(imp_v)
     fake_value = build_operation_value(
         composition_id=cid, kind="remove",
         working_version_before=1, working_version_after=2,
-        request_fp="9" * 64, impact_fp="8" * 64,
+        request_fp=req_fp, impact_fp=imp_fp,
         sources=[{"occurrence_id": occ, "terminates_identity": True}],
         targets=[],
     )
@@ -264,7 +279,7 @@ def test_restore_0013_rejects_terminated_occurrence_in_working_state(
         "request_fingerprint, impact_fingerprint, operation_json, "
         "operation_hash, created_at) VALUES (?, ?, 'remove', 1, 2, ?, ?, "
         "?, ?, ?)",
-        (op, cid, "9" * 64, "8" * 64, _oj(fake_value), _oh(fake_value), NOW))
+        (op, cid, req_fp, imp_fp, _oj(fake_value), _oh(fake_value), NOW))
     con.execute(
         "INSERT INTO composition_identity_operation_sources (composition_id, "
         "operation_id, occurrence_id, terminates_identity) "

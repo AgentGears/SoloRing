@@ -34,6 +34,7 @@ from soloring.composition.service import (
 from soloring.db.timeutil import DB_NOW_SQL
 from soloring.domain.ids import new_uuid
 from soloring.errors import ErrorCode, SoloRingError, internal_invariant, validation_error
+from soloring.spatial.math import Transform as _Transform
 
 # Frozen §8.1 — the mechanically discovered FK consumer set at 0013, with
 # impact classification. A structural test re-derives this from PRAGMA and
@@ -430,6 +431,31 @@ async def verify_identity_history(
                 raise internal_invariant(
                     "operation_hash mismatch",
                     details={"operation_id": op.id})
+            # complete operation-field equivalence with the row (§12.2)
+            if parsed.get("composition_id") != composition_id:
+                raise internal_invariant(
+                    "operation JSON composition_id differs from row",
+                    details={"operation_id": op.id})
+            if parsed.get("kind") != op.operation_kind:
+                raise internal_invariant(
+                    "operation JSON kind differs from operation_kind",
+                    details={"operation_id": op.id})
+            if parsed.get("working_version_before") != op.working_version_before:
+                raise internal_invariant(
+                    "operation JSON working_version_before differs from row",
+                    details={"operation_id": op.id})
+            if parsed.get("working_version_after") != op.working_version_after:
+                raise internal_invariant(
+                    "operation JSON working_version_after differs from row",
+                    details={"operation_id": op.id})
+            if parsed.get("request_fingerprint") != op.request_fingerprint:
+                raise internal_invariant(
+                    "operation JSON request_fingerprint differs from row",
+                    details={"operation_id": op.id})
+            if parsed.get("impact_fingerprint") != op.impact_fingerprint:
+                raise internal_invariant(
+                    "operation JSON impact_fingerprint differs from row",
+                    details={"operation_id": op.id})
             sources = (
                 await conn.execute(
                     text("SELECT occurrence_id, terminates_identity FROM "
@@ -455,6 +481,78 @@ async def verify_identity_history(
                     t.occurrence_id for t in targets]:
                 raise internal_invariant(
                     "normalized target edges differ from operation evidence",
+                    details={"operation_id": op.id})
+            for js, rs in zip(parsed["sources"], sources):
+                if bool(js.get("terminates_identity")) != bool(
+                        rs.terminates_identity):
+                    raise internal_invariant(
+                        "normalized terminates_identity differs from evidence",
+                        details={"operation_id": op.id})
+            # termination-by-kind agreement (frozen §2.4)
+            expected_term = _TERMINATES[op.operation_kind]
+            for s in sources:
+                if bool(s.terminates_identity) != expected_term:
+                    raise internal_invariant(
+                        "termination behavior disagrees with operation kind",
+                        details={"operation_id": op.id})
+            # embedded target specs satisfy the frozen grammar and
+            # re-derive the stored request fingerprint
+            from soloring.composition.canonical import WorkingSpec
+
+            parsed_specs = []
+            for t in parsed["targets"]:
+                spec_val = t.get("working_spec")
+                if not isinstance(spec_val, dict) or set(spec_val) != {
+                    "display_name", "source", "visible", "transform"
+                }:
+                    raise internal_invariant(
+                        "embedded target spec grammar invalid",
+                        details={"operation_id": op.id})
+                src = spec_val["source"]
+                if not isinstance(src, dict) or set(src) != {
+                        "kind", "revision_id"}:
+                    raise internal_invariant(
+                        "embedded target spec source grammar invalid",
+                        details={"operation_id": op.id})
+                if not isinstance(spec_val["visible"], bool):
+                    raise internal_invariant(
+                        "embedded target spec visible grammar invalid",
+                        details={"operation_id": op.id})
+                tr = spec_val["transform"]
+                if not isinstance(tr, dict) or set(tr) != {
+                        "translation_mm", "rotation_udeg"}:
+                    raise internal_invariant(
+                        "embedded target spec transform grammar invalid",
+                        details={"operation_id": op.id})
+                for key in ("translation_mm", "rotation_udeg"):
+                    vec = tr[key]
+                    if not isinstance(vec, list) or len(vec) != 3 or not all(
+                            isinstance(v, int) and not isinstance(v, bool)
+                            for v in vec):
+                        raise internal_invariant(
+                            f"embedded target spec {key} grammar invalid",
+                            details={"operation_id": op.id})
+                try:
+                    parsed_specs.append(WorkingSpec(
+                        display_name=spec_val["display_name"],
+                        source_kind=src["kind"],
+                        revision_id=src["revision_id"],
+                        visible=spec_val["visible"],
+                        transform=_Transform(tuple(tr["translation_mm"]),
+                                             tuple(tr["rotation_udeg"])),
+                    ))
+                except Exception:
+                    raise internal_invariant(
+                        "embedded target spec fails frozen grammar",
+                        details={"operation_id": op.id})
+            rederived_request = build_request_value(
+                composition_id=composition_id, kind=op.operation_kind,
+                source_occurrence_ids=[s.occurrence_id for s in sources],
+                target_specs=parsed_specs)
+            if request_fingerprint(rederived_request) != op.request_fingerprint:
+                raise internal_invariant(
+                    "embedded target specs do not re-derive the stored "
+                    "request fingerprint",
                     details={"operation_id": op.id})
             _check_cardinality(op.operation_kind, len(sources), len(targets))
             for s in sources:
@@ -511,4 +609,11 @@ async def verify_identity_history(
                 raise internal_invariant(
                     "terminated occurrence remains in working state",
                     details={"occurrence_id": w.occurrence_id})
+        # active-occurrence ↔ working-membership equality (§12.3): a live
+        # nonterminated occurrence must BE in working membership.
+        active = {o.id for o in all_occ if o.id not in terminated_at}
+        if active != {w.occurrence_id for w in working}:
+            raise internal_invariant(
+                "active occurrence set differs from working membership",
+                details={"composition_id": composition_id})
     return out

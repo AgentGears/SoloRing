@@ -1250,19 +1250,22 @@ def _verify_m12_revision_sync(con, revision_id: str, composition_id: str) -> Non
             raise RecoveryCorruption(
                 f"composition revision {revision_id} occurrence lineage drift")
 
-    # independently rederive the closure
+    # independently rederive the closure (set-oriented, frozen §18)
     exp_prod, exp_nested = set(direct_prod), set(direct_nested)
-    for rid in direct_nested:
+    if direct_nested:
+        ph = ",".join("?" for _ in direct_nested)
         for (d,) in con.execute(
             "SELECT production_revision_id FROM "
             "composition_revision_production_dependencies "
-            "WHERE composition_revision_id = ?", (rid,),
+            f"WHERE composition_revision_id IN ({ph})",
+            tuple(direct_nested),
         ):
             exp_prod.add(d)
         for (d,) in con.execute(
             "SELECT nested_composition_revision_id FROM "
             "composition_revision_nested_dependencies "
-            "WHERE composition_revision_id = ?", (rid,),
+            f"WHERE composition_revision_id IN ({ph})",
+            tuple(direct_nested),
         ):
             exp_nested.add(d)
     deps = parsed.get("dependencies", {})
@@ -1296,12 +1299,70 @@ def _verify_m12_revision_sync(con, revision_id: str, composition_id: str) -> Non
 
 
 def _verify_m12_lineage(con) -> None:
-    """Frozen §12.2 lineage temporal/liveness rules over the staged DB."""
+    """Complete frozen §12.2/§16.6 lineage verification over the staged DB.
+
+    This is the full semantic checklist: operation-field equivalence with
+    the canonical evidence (composition_id, kind, versions, fingerprints),
+    normalized terminates_identity agreement, termination-by-kind,
+    embedded target-spec grammar, birth-before-use, no post-termination
+    use, unique intervals, and active-occurrence ↔ working-membership
+    equality in BOTH directions.
+    """
     import json as _json
 
     from soloring.domain.canonical import canonical_hash, canonical_json_bytes
 
-    from soloring.composition.impacts import CARDINALITY
+    from soloring.composition.canonical import (
+        WorkingSpec,
+        build_request_value,
+        request_fingerprint as _req_fp,
+    )
+    from soloring.composition.impacts import CARDINALITY, _TERMINATES
+    from soloring.spatial.math import Transform, JS_SAFE_MIN, JS_SAFE_MAX, UDEG_MIN
+
+    def _spec_from_value(value) -> WorkingSpec:
+        if not isinstance(value, dict) or set(value) != {
+            "display_name", "source", "visible", "transform"
+        }:
+            raise RecoveryCorruption("embedded target spec grammar invalid")
+        src = value["source"]
+        if not isinstance(src, dict) or set(src) != {"kind", "revision_id"}:
+            raise RecoveryCorruption("embedded target spec source grammar invalid")
+        if src["kind"] not in ("production_revision", "composition_revision"):
+            raise RecoveryCorruption("embedded target spec kind invalid")
+        if not isinstance(value["display_name"], str) or not (
+                1 <= len(value["display_name"].strip()) <= 500
+                and value["display_name"] == value["display_name"].strip()):
+            raise RecoveryCorruption("embedded target spec name grammar invalid")
+        if not isinstance(value["visible"], bool):
+            raise RecoveryCorruption("embedded target spec visible grammar invalid")
+        tr = value["transform"]
+        if not isinstance(tr, dict) or set(tr) != {
+            "translation_mm", "rotation_udeg"
+        }:
+            raise RecoveryCorruption("embedded target spec transform grammar")
+        for key in ("translation_mm", "rotation_udeg"):
+            vec = tr[key]
+            if not isinstance(vec, list) or len(vec) != 3:
+                raise RecoveryCorruption(
+                    f"embedded target spec {key} cardinality invalid")
+            for v in vec:
+                if not isinstance(v, int) or isinstance(v, bool):
+                    raise RecoveryCorruption(
+                        f"embedded target spec {key} non-integer")
+                if not (JS_SAFE_MIN <= v <= JS_SAFE_MAX):
+                    raise RecoveryCorruption(
+                        f"embedded target spec {key} outside JS-safe domain")
+        for v in tr["rotation_udeg"]:
+            if not (UDEG_MIN <= v < UDEG_MIN + 360_000_000):
+                raise RecoveryCorruption(
+                    "embedded target spec rotation not canonically normalized")
+        return WorkingSpec(
+            display_name=value["display_name"], source_kind=src["kind"],
+            revision_id=src["revision_id"], visible=value["visible"],
+            transform=Transform(tuple(tr["translation_mm"]),
+                                tuple(tr["rotation_udeg"])),
+        )
 
     compositions = con.execute("SELECT id, working_version FROM compositions")
     for comp in compositions.fetchall():
@@ -1331,6 +1392,25 @@ def _verify_m12_lineage(con) -> None:
                 raise RecoveryCorruption("operation_json not canonical")
             if canonical_hash(parsed) != op["operation_hash"]:
                 raise RecoveryCorruption("operation_hash mismatch")
+            # complete operation-field equivalence with the row (frozen §12.2)
+            if parsed.get("composition_id") != cid:
+                raise RecoveryCorruption(
+                    "operation JSON composition_id differs from row")
+            if parsed.get("kind") != op["operation_kind"]:
+                raise RecoveryCorruption(
+                    "operation JSON kind differs from operation_kind")
+            if parsed.get("working_version_before") != op["working_version_before"]:
+                raise RecoveryCorruption(
+                    "operation JSON working_version_before differs from row")
+            if parsed.get("working_version_after") != op["working_version_after"]:
+                raise RecoveryCorruption(
+                    "operation JSON working_version_after differs from row")
+            if parsed.get("request_fingerprint") != op["request_fingerprint"]:
+                raise RecoveryCorruption(
+                    "operation JSON request_fingerprint differs from row")
+            if parsed.get("impact_fingerprint") != op["impact_fingerprint"]:
+                raise RecoveryCorruption(
+                    "operation JSON impact_fingerprint differs from row")
             sources = con.execute(
                 "SELECT occurrence_id, terminates_identity FROM "
                 "composition_identity_operation_sources WHERE operation_id = ? "
@@ -1339,15 +1419,44 @@ def _verify_m12_lineage(con) -> None:
                 "SELECT occurrence_id FROM "
                 "composition_identity_operation_targets WHERE operation_id = ? "
                 "ORDER BY occurrence_id", (op["id"],)).fetchall()
-            if ([s["occurrence_id"] for s in parsed["sources"]]
+            json_sources = parsed.get("sources", [])
+            json_targets = parsed.get("targets", [])
+            if ([s["occurrence_id"] for s in json_sources]
                     != [s["occurrence_id"] for s in sources]):
                 raise RecoveryCorruption(
                     "source edges differ from operation evidence")
-            if ([t["occurrence_id"] for t in parsed["targets"]]
+            if ([t["occurrence_id"] for t in json_targets]
                     != [t["occurrence_id"] for t in targets]):
                 raise RecoveryCorruption(
                     "target edges differ from operation evidence")
-            texp = CARDINALITY[op["operation_kind"]][2]
+            for js, rs in zip(json_sources, sources):
+                if bool(js.get("terminates_identity")) != bool(
+                        rs["terminates_identity"]):
+                    raise RecoveryCorruption(
+                        "normalized terminates_identity differs from evidence")
+            kind = op["operation_kind"]
+            # termination-by-kind agreement (frozen §2.4)
+            expected_term = _TERMINATES[kind]
+            for s in sources:
+                if bool(s["terminates_identity"]) != expected_term:
+                    raise RecoveryCorruption(
+                        "termination behavior disagrees with operation kind")
+            # embedded target specs satisfy the frozen grammar; the specs
+            # also re-derive the request fingerprint stored on the row
+            parsed_specs = []
+            for t in json_targets:
+                if "working_spec" not in t:
+                    raise RecoveryCorruption("target evidence missing spec")
+                parsed_specs.append(_spec_from_value(t["working_spec"]))
+            request_value = build_request_value(
+                composition_id=cid, kind=kind,
+                source_occurrence_ids=[s["occurrence_id"] for s in sources],
+                target_specs=parsed_specs)
+            if _req_fp(request_value) != op["request_fingerprint"]:
+                raise RecoveryCorruption(
+                    "embedded target specs do not re-derive the stored "
+                    "request fingerprint")
+            texp = CARDINALITY[kind][2]
             n_targets = len(targets)
             if texp is None:
                 if n_targets < 2:
@@ -1368,19 +1477,25 @@ def _verify_m12_lineage(con) -> None:
                 if t["occurrence_id"] in birth:
                     raise RecoveryCorruption("double birth")
                 birth[t["occurrence_id"]] = op["working_version_before"]
-        for (oid,) in con.execute(
+        all_occ = [r[0] for r in con.execute(
             "SELECT id FROM composition_occurrences WHERE composition_id = ?",
-            (cid,),
-        ):
+            (cid,))]
+        for oid in all_occ:
             if oid not in birth:
                 raise RecoveryCorruption("occurrence without birth operation")
-        for (oid,) in con.execute(
+        working = [r[0] for r in con.execute(
             "SELECT occurrence_id FROM composition_working_occurrences "
-            "WHERE composition_id = ?", (cid,),
-        ):
+            "WHERE composition_id = ?", (cid,))]
+        for oid in working:
             if oid in terminated_at:
                 raise RecoveryCorruption(
                     "terminated occurrence remains in working state")
+        # active-occurrence ↔ working-membership equality (frozen §12.3):
+        # a live, nonterminated occurrence must BE in working membership.
+        active = {o for o in all_occ if o not in terminated_at}
+        if active != set(working):
+            raise RecoveryCorruption(
+                "active occurrence set differs from working membership")
 # Public operation: backup (§7.4)
 # ---------------------------------------------------------------------------
 

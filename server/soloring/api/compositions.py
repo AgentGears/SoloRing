@@ -26,6 +26,7 @@ from soloring.api.schemas.compositions import (
     OccurrencePatch,
     OccurrenceRead,
     PatchResult,
+    PreviewRequest,
     PreviewResult,
     PublishRequest,
     ReadinessResult,
@@ -79,7 +80,7 @@ async def create_composition(
 async def list_compositions(
     project_id: str,
     cursor: str | None = Query(default=None),
-    limit: int = Query(default=DEFAULT_LIMIT, le=MAX_LIMIT),
+    limit: int = Query(default=DEFAULT_LIMIT, ge=1, le=MAX_LIMIT),
     session: AsyncSession = Depends(get_session),
 ) -> list[CompositionRead]:
     async with session.bind.connect() as conn:
@@ -117,10 +118,18 @@ async def patch_composition(
     body: CompositionPatch,
     session: AsyncSession = Depends(get_session),
 ) -> CompositionDetail:
+    # explicit JSON null clears the description; field omission leaves it
+    # unchanged (frozen §7.2) — the sentinel keeps the two distinguishable.
+    from soloring.composition.service import CLEAR_DESCRIPTION
+    description = (
+        CLEAR_DESCRIPTION
+        if "description" in body.model_fields_set and body.description is None
+        else body.description
+    )
     return CompositionDetail(**await comp.patch_composition_metadata(
         session, composition_id,
         expected_metadata_version=body.expected_metadata_version,
-        name=body.name, description=body.description))
+        name=body.name, description=description))
 
 
 @router.get(
@@ -130,7 +139,7 @@ async def patch_composition(
 async def list_occurrences(
     composition_id: str,
     cursor: str | None = Query(default=None),
-    limit: int = Query(default=DEFAULT_LIMIT, le=MAX_LIMIT),
+    limit: int = Query(default=DEFAULT_LIMIT, ge=1, le=MAX_LIMIT),
     session: AsyncSession = Depends(get_session),
 ) -> list[OccurrenceRead]:
     async with session.bind.connect() as conn:
@@ -200,12 +209,16 @@ async def patch_occurrence(
 )
 async def preview_operation(
     composition_id: str,
-    body: IdentityOperationRequest,
+    body: PreviewRequest,
     session: AsyncSession = Depends(get_session),
 ) -> PreviewResult:
+    # frozen §14.5: scope is mandatory on preview too — omitted, shot_local,
+    # and unknown scopes are rejected, never coerced.
+    from soloring.composition.service import _require_scope
+    _require_scope(body.scope)
     return PreviewResult(**await preview_identity_operation(
         session, composition_id,
-        request=body.model_dump()))
+        request=body.request.model_dump()))
 
 
 @router.post(
@@ -233,13 +246,29 @@ async def apply_operation(
 async def identity_history(
     composition_id: str,
     cursor: str | None = Query(default=None),
-    limit: int = Query(default=DEFAULT_LIMIT, le=MAX_LIMIT),
+    limit: int = Query(default=DEFAULT_LIMIT, ge=1, le=MAX_LIMIT),
     session: AsyncSession = Depends(get_session),
 ) -> list[dict]:
+    # frozen §14.3: stable cursor over (created_at, id) via SQL, not an
+    # in-memory filter over the full verified history.
+    async with session.bind.connect() as conn:
+        await comp._require_composition(conn, composition_id)
+        sql = (
+            "SELECT o.id, o.operation_kind, o.working_version_before, "
+            "o.working_version_after, o.created_at FROM "
+            "composition_identity_operations o "
+            "WHERE o.composition_id = :cid"
+        )
+        params: dict = {"cid": composition_id, "lim": limit}
+        if cursor:
+            created, ident = cursor.split("|", 1)
+            sql += " AND (o.created_at, o.id) > (:c_created, :c_id)"
+            params.update({"c_created": created, "c_id": ident})
+        sql += " ORDER BY o.created_at, o.id LIMIT :lim"
+        rows = (await conn.execute(text(sql), params)).all()
     history = await verify_identity_history(session, composition_id)
-    if cursor:
-        history = [h for h in history if h["operation_id"] > cursor]
-    return history[:limit]
+    by_id = {h["operation_id"]: h for h in history}
+    return [by_id[r.id] for r in rows if r.id in by_id]
 
 
 @router.get(
@@ -277,7 +306,7 @@ async def publish(
 async def list_revisions(
     composition_id: str,
     cursor: str | None = Query(default=None),
-    limit: int = Query(default=DEFAULT_LIMIT, le=MAX_LIMIT),
+    limit: int = Query(default=DEFAULT_LIMIT, ge=1, le=MAX_LIMIT),
     session: AsyncSession = Depends(get_session),
 ) -> list[RevisionSummary]:
     async with session.bind.connect() as conn:
@@ -286,8 +315,9 @@ async def list_revisions(
                "composition_revisions WHERE composition_id = :cid")
         params: dict = {"cid": composition_id, "lim": limit}
         if cursor:
-            sql += " AND revision_number > :cur"
-            params["cur"] = int(cursor)
+            num, ident = cursor.split("|", 1)
+            sql += " AND (revision_number, id) > (:c_num, :c_id)"
+            params.update({"c_num": int(num), "c_id": ident})
         sql += " ORDER BY revision_number LIMIT :lim"
         rows = (await conn.execute(text(sql), params)).all()
     return [

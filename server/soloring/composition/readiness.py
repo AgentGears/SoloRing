@@ -103,38 +103,102 @@ async def _load_working(conn, composition_id: str):
 
 
 async def _derive_dependencies(conn, rows):
-    """Independently rederived direct + flattened closure (frozen §11.2/11.3)."""
+    """Independently rederived direct + flattened closure (frozen §11.2/11.3).
+
+    Set-oriented: all direct nested revision IDs are gathered first and
+    their frozen closure rows resolved in ONE bounded query per dependency
+    family — never per-nested-revision round trips (frozen §18).
+    """
     prod = set()
-    nested = set()
+    nested_ids = set()
     for r in rows:
         if r.source_kind == "production_revision":
             prod.add(r.production_revision_id)
         else:
-            rid = r.nested_composition_revision_id
-            nested.add(rid)
-            deps = (
-                await conn.execute(
-                    text(
-                        "SELECT production_revision_id FROM "
-                        "composition_revision_production_dependencies "
-                        "WHERE composition_revision_id = :r"
-                    ),
-                    {"r": rid},
-                )
-            ).fetchall()
-            prod.update(d[0] for d in deps)
-            ndeps = (
-                await conn.execute(
-                    text(
-                        "SELECT nested_composition_revision_id FROM "
-                        "composition_revision_nested_dependencies "
-                        "WHERE composition_revision_id = :r"
-                    ),
-                    {"r": rid},
-                )
-            ).fetchall()
-            nested.update(d[0] for d in ndeps)
-    return sorted(prod), sorted(nested)
+            nested_ids.add(r.nested_composition_revision_id)
+    if nested_ids:
+        ids = list(nested_ids)
+        ph = ",".join(f":n{i}" for i in range(len(ids)))
+        prod.update(r[0] for r in (await conn.execute(
+            text(
+                "SELECT d.production_revision_id FROM "
+                "composition_revision_production_dependencies d "
+                f"WHERE d.composition_revision_id IN ({ph})"
+            ),
+            {f"n{i}": v for i, v in enumerate(ids)},
+        )).fetchall())
+        nested_ids.update(r[0] for r in (await conn.execute(
+            text(
+                "SELECT d.nested_composition_revision_id FROM "
+                "composition_revision_nested_dependencies d "
+                f"WHERE d.composition_revision_id IN ({ph})"
+            ),
+            {f"n{i}": v for i, v in enumerate(ids)},
+        )).fetchall())
+    return sorted(prod), sorted(nested_ids)
+
+
+async def _validate_working_composition_integrity(
+    conn, composition_id: str, comp: dict, rows, terminated, ownership,
+) -> None:
+    """The one shared working-state integrity predicate (frozen §9.1).
+
+    Active Project, Composition ownership, every source exists and belongs
+    to the Project, direct AND transitive self-lineage forbidden,
+    terminated-working forbidden. Readiness, publish freeze, and the fenced
+    phase all call this so no path can commit invalid authority.
+    """
+    if terminated:
+        raise internal_invariant(
+            "terminated occurrence remains in working state",
+            details={"occurrence_ids": sorted(terminated)},
+        )
+    nested_ids = []
+    for r in rows:
+        rid = (r.production_revision_id
+               if r.source_kind == "production_revision"
+               else r.nested_composition_revision_id)
+        if rid is None or ownership.get(rid) != comp["project_id"]:
+            raise internal_invariant(
+                "working source row violates project coherence",
+                details={"occurrence_id": r.occurrence_id, "source": rid},
+            )
+        if r.source_kind == "composition_revision":
+            nested_ids.append(rid)
+    if nested_ids:
+        ph = ",".join(f":n{i}" for i in range(len(nested_ids)))
+        clash = (await conn.execute(
+            text(
+                "SELECT COUNT(*) FROM composition_revisions cr "
+                f"WHERE cr.id IN ({ph}) AND cr.composition_id = :cid"
+            ),
+            {**{f"n{i}": v for i, v in enumerate(nested_ids)},
+             "cid": composition_id},
+        )).scalar_one()
+        if clash:
+            raise internal_invariant(
+                "direct self-lineage nested source persisted",
+                details={"composition_id": composition_id},
+            )
+        # Transitive self-lineage: any revision in a nested source's frozen
+        # closure owned by THIS Composition (frozen §3.8/§11.5).
+        tclash = (await conn.execute(
+            text(
+                "SELECT COUNT(*) FROM "
+                "composition_revision_nested_dependencies d "
+                "JOIN composition_revisions cr "
+                "ON cr.id = d.nested_composition_revision_id "
+                f"WHERE d.composition_revision_id IN ({ph}) "
+                "AND cr.composition_id = :cid"
+            ),
+            {**{f"n{i}": v for i, v in enumerate(nested_ids)},
+             "cid": composition_id},
+        )).scalar_one()
+        if tclash:
+            raise internal_invariant(
+                "transitive same-lineage embedding in working state",
+                details={"composition_id": composition_id},
+            )
 
 
 async def resolve_publication_readiness(
@@ -153,32 +217,8 @@ async def resolve_publication_readiness(
                             "message": "empty working state cannot publish"}],
                 "proposed_snapshot_hash": None,
             }
-        if terminated:
-            raise internal_invariant(
-                "terminated occurrence remains in working state",
-                details={"occurrence_ids": sorted(terminated)},
-            )
-        for r in rows:
-            rid = (r.production_revision_id
-                   if r.source_kind == "production_revision"
-                   else r.nested_composition_revision_id)
-            if ownership.get(rid) != comp["project_id"]:
-                raise internal_invariant(
-                    "working source row violates project coherence",
-                    details={"occurrence_id": r.occurrence_id, "source": rid},
-                )
-            if r.source_kind == "composition_revision":
-                owner = (
-                    await conn.execute(
-                        text("SELECT composition_id FROM composition_revisions "
-                             "WHERE id = :r"), {"r": rid},
-                    )
-                ).scalar_one_or_none()
-                if owner == composition_id:
-                    raise internal_invariant(
-                        "direct self-lineage nested source persisted",
-                        details={"occurrence_id": r.occurrence_id},
-                    )
+        await _validate_working_composition_integrity(
+            conn, composition_id, comp, rows, terminated, ownership)
         prod_deps, nested_deps = await _derive_dependencies(conn, rows)
         specs = [_row_to_spec(r) for r in rows]
         value = build_snapshot_value(
@@ -213,11 +253,8 @@ async def publish_composition_revision(
                 status_code=409,
                 details={"issues": [{"code": COMPOSITION_EMPTY}]},
             )
-        if terminated:
-            raise internal_invariant(
-                "terminated occurrence remains in working state",
-                details={"occurrence_ids": sorted(terminated)},
-            )
+        await _validate_working_composition_integrity(
+            conn, composition_id, comp, rows, terminated, ownership)
         if comp["working_version"] != expected_working_version:
             raise EditConflict(
                 "stale_working_version",
@@ -233,6 +270,23 @@ async def publish_composition_revision(
 
     async with session.bind.connect() as conn:
         await conn.exec_driver_sql("BEGIN IMMEDIATE")
+        # Fenced revalidation (frozen §10.2): active Project, Composition
+        # existence, working_version — plus the full working-integrity
+        # predicate so no invalid authority can be committed even when a
+        # corrupt working row changed nothing observable to the freeze.
+        fenced_comp = await _require_composition(conn, composition_id)
+        fenced_rows, fenced_terminated, fenced_ownership = await _load_working(
+            conn, composition_id)
+        if not fenced_rows:
+            raise SoloRingError(
+                ErrorCode.COMPOSITION_NOT_READY,
+                "working state became empty at the fence",
+                status_code=409,
+                details={"issues": [{"code": COMPOSITION_EMPTY}]},
+            )
+        await _validate_working_composition_integrity(
+            conn, composition_id, fenced_comp, fenced_rows, fenced_terminated,
+            fenced_ownership)
         cur = (
             await conn.execute(
                 text("SELECT working_version FROM compositions WHERE id = :cid"),
@@ -243,6 +297,15 @@ async def publish_composition_revision(
             raise EditConflict(
                 "stale_working_version",
                 "working state changed at the fence; no stale snapshot published",
+            )
+        # The fenced working state must equal the frozen snapshot content
+        # (the integrity predicate above proves its legality; this proves
+        # it is the SAME state we canonicalized outside the fence).
+        if [r.occurrence_id for r in fenced_rows] != [
+                r.occurrence_id for r in rows]:
+            raise EditConflict(
+                "fence_race",
+                "working membership changed at the publish fence",
             )
         existing = (
             await conn.execute(
@@ -410,29 +473,28 @@ async def _verify_revision_invariants(conn, revision_id, composition_id) -> dict
             )
         _verify_transform_grammar(row)
 
-    # Independently rederive the closure from direct immutable sources.
+    # Independently rederive the closure from direct immutable sources
+    # (set-oriented: one bounded query per dependency family, frozen §18).
     direct_prod = {r.production_revision_id for r in proj_rows
                    if r.source_kind == "production_revision"}
     direct_nested = {r.nested_composition_revision_id for r in proj_rows
                      if r.source_kind == "composition_revision"}
     exp_prod, exp_nested = set(direct_prod), set(direct_nested)
-    for rid in direct_nested:
-        deps = (
-            await conn.execute(
-                text("SELECT production_revision_id FROM "
-                     "composition_revision_production_dependencies "
-                     "WHERE composition_revision_id = :r"), {"r": rid},
-            )
-        ).fetchall()
-        exp_prod.update(d[0] for d in deps)
-        ndeps = (
-            await conn.execute(
-                text("SELECT nested_composition_revision_id FROM "
-                     "composition_revision_nested_dependencies "
-                     "WHERE composition_revision_id = :r"), {"r": rid},
-            )
-        ).fetchall()
-        exp_nested.update(d[0] for d in ndeps)
+    if direct_nested:
+        ids = list(direct_nested)
+        ph = ",".join(f":n{i}" for i in range(len(ids)))
+        exp_prod.update(d[0] for d in (await conn.execute(
+            text("SELECT production_revision_id FROM "
+                 "composition_revision_production_dependencies "
+                 f"WHERE composition_revision_id IN ({ph})"),
+            {f"n{i}": v for i, v in enumerate(ids)},
+        )).fetchall())
+        exp_nested.update(d[0] for d in (await conn.execute(
+            text("SELECT nested_composition_revision_id FROM "
+                 "composition_revision_nested_dependencies "
+                 f"WHERE composition_revision_id IN ({ph})"),
+            {f"n{i}": v for i, v in enumerate(ids)},
+        )).fetchall())
     deps_block = parsed.get("dependencies", {})
     if (sorted(exp_prod) != deps_block.get("production_revision_ids")
             or sorted(exp_nested) != deps_block.get("composition_revision_ids")):
