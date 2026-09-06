@@ -1314,7 +1314,6 @@ def _verify_m12_lineage(con) -> None:
 
     # The evidence grammar is owned solely by composition.evidence —
     # no second (dormant) interpretation survives here.
-    from soloring.domain.canonical import canonical_hash, canonical_json_bytes
 
     compositions = con.execute("SELECT id, working_version FROM compositions")
     for comp in compositions.fetchall():

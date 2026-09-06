@@ -637,7 +637,8 @@ def test_evidence_rejects_malformed_target_object():
 
     doc3 = copy.deepcopy(_valid_evidence())
     doc3["targets"][0]["occurrence_id"] = 42  # non-string id
-    with pytest.raises(ValueError, match="occurrence_id must be a string"):
+    with pytest.raises(ValueError,
+                       match="occurrence_id must be a canonical lowercase"):
         _validate(doc3)
 
 
@@ -646,11 +647,11 @@ def test_evidence_rejects_non_string_revision_id():
 
     doc = copy.deepcopy(_valid_evidence())
     doc["targets"][0]["working_spec"]["source"]["revision_id"] = 12345
-    with pytest.raises(ValueError, match="revision_id must be"):
+    with pytest.raises(ValueError, match="canonical lowercase UUID"):
         _validate(doc)
     doc2 = copy.deepcopy(_valid_evidence())
     doc2["targets"][0]["working_spec"]["source"]["revision_id"] = ""
-    with pytest.raises(ValueError, match="revision_id must be"):
+    with pytest.raises(ValueError, match="canonical lowercase UUID"):
         _validate(doc2)
 
 
@@ -689,3 +690,82 @@ def test_recovery_local_spec_validator_is_gone():
 
     src = inspect.getsource(rb._verify_m12_lineage)
     assert "_spec_from_value" not in src
+
+
+# --- F5 final-final: UUID grammar + normalized 0/1 termination domain ------
+
+
+def test_evidence_rejects_non_uuid_historical_identifiers():
+    import copy
+
+    # baseline already uses UUID-shaped fixtures and passes
+    _validate(_valid_evidence())
+
+    doc = copy.deepcopy(_valid_evidence())
+    doc["targets"][0]["working_spec"]["source"]["revision_id"] = "garbage"
+    with pytest.raises(ValueError, match="canonical lowercase UUID"):
+        _validate(doc)
+
+    doc2 = copy.deepcopy(_valid_evidence())
+    doc2["sources"][0]["occurrence_id"] = "anything"
+    # also corrupt the normalized side consistently (self-consistent lie)
+    _validate_ns = [
+        ("anything", 1)]
+    from soloring.composition.evidence import validate_operation_evidence
+    with pytest.raises(ValueError, match="occurrence_id must be a canonical"):
+        validate_operation_evidence(
+            doc2,
+            row_request_fingerprint=doc2["request_fingerprint"],
+            row_impact_fingerprint=doc2["impact_fingerprint"],
+            normalized_sources=_validate_ns,
+            normalized_targets=["00000000-0000-0000-0000-000000000002"],
+            row_composition_id="22222222-2222-2222-2222-222222222222",
+            row_kind="replace_as_new", row_before=8, row_after=9)
+
+    doc3 = copy.deepcopy(_valid_evidence())
+    doc3["targets"][0]["occurrence_id"] = "not-a-uuid"
+    with pytest.raises(ValueError, match="canonical lowercase UUID"):
+        _validate(doc3)
+
+    doc4 = copy.deepcopy(_valid_evidence())
+    doc4["composition_id"] = "BAD-UUID"
+    with pytest.raises(ValueError, match="canonical lowercase UUID"):
+        _validate(doc4)
+
+    # uppercase UUID is NOT the canonical lowercase form (the fixture
+    # composition_id is all-digits, so craft a lettered one explicitly)
+    doc5 = copy.deepcopy(_valid_evidence())
+    doc5["composition_id"] = "AAAAAAA1-0000-0000-0000-00000000000A"
+    with pytest.raises(ValueError, match="canonical lowercase UUID"):
+        _validate(doc5)
+
+
+def test_evidence_rejects_normalized_termination_outside_01_domain():
+    """The exact complement to the JSON truthy tests: a corrupt normalized
+    row with terminates_identity=2 and intact JSON true must FAIL, not
+    agree through bool(2)==True."""
+    from soloring.composition.evidence import validate_operation_evidence
+
+    doc = _valid_evidence()  # JSON terminates_identity: true
+    with pytest.raises(ValueError, match=r"\{0,1\} domain"):
+        validate_operation_evidence(
+            doc,
+            row_request_fingerprint=doc["request_fingerprint"],
+            row_impact_fingerprint=doc["impact_fingerprint"],
+            normalized_sources=[(
+                "00000000-0000-0000-0000-000000000001", 2)],  # corrupt
+            normalized_targets=["00000000-0000-0000-0000-000000000002"],
+            row_composition_id="22222222-2222-2222-2222-222222222222",
+            row_kind="replace_as_new", row_before=8, row_after=9)
+    # also -1 and a truthy string
+    for bad in (-1, "1", True):
+        with pytest.raises(ValueError, match=r"\{0,1\} domain"):
+            validate_operation_evidence(
+                doc,
+                row_request_fingerprint=doc["request_fingerprint"],
+                row_impact_fingerprint=doc["impact_fingerprint"],
+                normalized_sources=[(
+                    "00000000-0000-0000-0000-000000000001", bad)],
+                normalized_targets=["00000000-0000-0000-0000-000000000002"],
+                row_composition_id="22222222-2222-2222-2222-222222222222",
+                row_kind="replace_as_new", row_before=8, row_after=9)

@@ -8,6 +8,8 @@ any violation.
 
 from __future__ import annotations
 
+import re
+
 from soloring.composition.canonical import (
     WorkingSpec,
     build_request_value,
@@ -23,6 +25,16 @@ from soloring.spatial.math import (
 
 _SOURCE_KINDS = ("production_revision", "composition_revision")
 _HEX64 = set("0123456789abcdef")
+
+# Frozen R3: persisted/fixture identifiers obey the predecessor lowercase
+# canonical 36-character UUID grammar, version-agnostic.
+_UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+)
+
+
+def _is_uuid(value: object) -> bool:
+    return isinstance(value, str) and bool(_UUID_RE.match(value))
 
 
 def _is_hex64(value: object) -> bool:
@@ -45,9 +57,8 @@ def validate_target_working_spec(value: object) -> WorkingSpec:
     _check(isinstance(src, dict) and set(src) == {"kind", "revision_id"},
            "target spec source keys must be exactly {kind, revision_id}")
     _check(src["kind"] in _SOURCE_KINDS, "target spec source kind invalid")
-    _check(isinstance(src["revision_id"], str)
-           and len(src["revision_id"]) > 0,
-           "target spec revision_id must be a nonempty string")
+    _check(_is_uuid(src["revision_id"]),
+           "target spec revision_id must be a canonical lowercase UUID")
     name = value["display_name"]
     _check(isinstance(name, str) and 1 <= len(name.strip()) <= 500
            and name == name.strip(),
@@ -107,7 +118,10 @@ def validate_operation_evidence(
     _check(isinstance(parsed["kind"], str)
            and parsed["kind"] in CARDINALITY,
            "operation kind not in the frozen domain")
-    # row-field equivalence
+    # row-field equivalence — grammar gates run FIRST so a malformed
+    # identifier is reported as grammar corruption, never as a row mismatch
+    _check(_is_uuid(parsed["composition_id"]),
+           "operation composition_id not a canonical lowercase UUID")
     _check(parsed["composition_id"] == row_composition_id,
            "operation JSON composition_id differs from row")
     _check(parsed["kind"] == row_kind,
@@ -139,8 +153,8 @@ def validate_operation_evidence(
         _check(set(s) == {"occurrence_id", "terminates_identity"},
                "source entry keys must be exactly "
                "{occurrence_id, terminates_identity}")
-        _check(isinstance(s["occurrence_id"], str),
-               "source occurrence_id must be a string")
+        _check(_is_uuid(s["occurrence_id"]),
+               "source occurrence_id must be a canonical lowercase UUID")
         _check(isinstance(s["terminates_identity"], bool),
                "source terminates_identity must be a JSON boolean")
     for t in json_targets:
@@ -148,15 +162,22 @@ def validate_operation_evidence(
         _check(set(t) == {"occurrence_id", "working_spec"},
                "target entry keys must be exactly "
                "{occurrence_id, working_spec}")
-        _check(isinstance(t["occurrence_id"], str),
-               "target occurrence_id must be a string")
+        _check(_is_uuid(t["occurrence_id"]),
+               "target occurrence_id must be a canonical lowercase UUID")
+    # normalized termination-row grammar BEFORE any truthiness comparison:
+    # the SQLite authority domain is exactly the integers 0/1 — a corrupt
+    # row value of 2 must fail as persisted corruption, never coerce.
+    for _, rs_term in normalized_sources:
+        _check(isinstance(rs_term, int) and not isinstance(rs_term, bool)
+               and rs_term in (0, 1),
+               "normalized terminates_identity outside {0,1} domain")
     _check([s["occurrence_id"] for s in json_sources]
            == [s[0] for s in normalized_sources],
            "source edges differ from operation evidence")
     _check([t["occurrence_id"] for t in json_targets] == normalized_targets,
            "target edges differ from operation evidence")
     for js, (_, rs_term) in zip(json_sources, normalized_sources):
-        _check(js["terminates_identity"] == bool(rs_term),
+        _check(js["terminates_identity"] == (rs_term == 1),
                "normalized terminates_identity differs from evidence")
     # source AND target cardinality per frozen §2.4
     kind = row_kind
@@ -169,10 +190,10 @@ def validate_operation_evidence(
         _check(n_targets >= 2, f"{kind} requires 2 or more targets")
     else:
         _check(n_targets == texp, f"{kind} target cardinality invalid")
-    # termination-by-kind agreement
+    # termination-by-kind agreement (typed: rs_term is already proven 0/1)
     expected_term = _TERMINATES[kind]
     for _, rs_term in normalized_sources:
-        _check(bool(rs_term) == expected_term,
+        _check((rs_term == 1) == expected_term,
                "termination behavior disagrees with operation kind")
     # embedded target-spec grammar + request fingerprint rederivation
     parsed_specs = []

@@ -47,7 +47,7 @@ const NESTED_OCC: OccurrenceRow = {
   occurrence_id: "occ-r1", display_name: "Reception Module",
   source_kind: "composition_revision",
   production_revision_id: null,
-  nested_composition_revision_id: "rev-module-4",
+  nested_composition_revision_id: "44444444-4444-4444-4444-444444444444",
   visible: 1, x_mm: 0, y_mm: 0, z_mm: 0,
   yaw_udeg: 0, pitch_udeg: 0, roll_udeg: 0,
   updated_at: "2026-01-01T00:00:00Z",
@@ -86,12 +86,12 @@ describe("WorldSetWorkspace nested identity", () => {
       HTMLSelectElement;
     await userEvent.selectOptions(kindSelect, "composition_revision");
     const input = screen.getByLabelText("Composition Revision ID");
-    await userEvent.type(input, "rev-module-5");
+    await userEvent.type(input, "55555555-5555-5555-5555-555555555555");
     await userEvent.click(screen.getByRole("button", { name: "Add occurrence" }));
     await vi.waitFor(() => expect(mintOccurrence).toHaveBeenCalled());
     const mintBody = mintOccurrence.mock.calls[0][1];
     expect(mintBody.source.kind).toBe("composition_revision");
-    expect(mintBody.source.revision_id).toBe("rev-module-5");
+    expect(mintBody.source.revision_id).toBe("55555555-5555-5555-5555-555555555555");
 
     // --- nested REPLACE keeps the composition_revision kind ---
     await userEvent.click(screen.getByTestId("replace-occ-r1"));
@@ -107,7 +107,7 @@ describe("WorldSetWorkspace nested identity", () => {
     expect(previewBody.request.target_working_specs).toHaveLength(1);
     const spec = previewBody.request.target_working_specs[0];
     expect(spec.source.kind).toBe("composition_revision");  // NOT production
-    expect(spec.source.revision_id).toBe("rev-module-4");  // exact nested UUID
+    expect(spec.source.revision_id).toBe("44444444-4444-4444-4444-444444444444");  // exact nested UUID
 
     await vi.waitFor(() =>
       expect(applyIdentityOperation).toHaveBeenCalled());
@@ -115,6 +115,6 @@ describe("WorldSetWorkspace nested identity", () => {
     expect(applyBody.request.target_working_specs[0].source.kind)
       .toBe("composition_revision");
     expect(applyBody.request.target_working_specs[0].source.revision_id)
-      .toBe("rev-module-4");
+      .toBe("44444444-4444-4444-4444-444444444444");
   });
 });
