@@ -73,26 +73,35 @@ describe("WorldSetWorkspace identity actions", () => {
     await vi.waitFor(() => expect(patchOccurrence).toHaveBeenCalled());
     expect(patchOccurrence.mock.calls[0][1]).toBe("occ-7");
 
-    // replace-as-new goes through identity preview/apply — a distinct path
-    // (with a real target spec per the frozen cardinality contract)
+    // replace-as-new goes through preview → IMPACT REVIEW → apply
     await userEvent.click(screen.getByTestId("replace-occ-7"));
     await screen.findByTestId("replace-dialog");
     previewIdentityOperation.mockResolvedValue({
       allowed: true, working_version: 1,
       normalized_request: {}, request_fingerprint: "f".repeat(64),
       impact_fingerprint: "e".repeat(64),
-      source_occurrence_summaries: [],
-      historical_reference_counts: {}, live_blocking_references: [],
+      source_occurrence_summaries: [
+        { occurrence_id: "occ-7", active: true, in_working_state: true }],
+      historical_reference_counts: { "occ-7": 3 },
+      live_blocking_references: [],
     });
     await userEvent.click(screen.getByTestId("replace-confirm"));
+    const review = await screen.findByTestId("impact-review");
+    expect(review.textContent).toContain("occ-7");
+    expect(review.textContent).toContain("3 published revision");
+    await userEvent.click(screen.getByTestId("impact-confirm"));
     await vi.waitFor(() =>
       expect(previewIdentityOperation).toHaveBeenCalledWith(
         COMP.id,
-        expect.objectContaining({ kind: "replace_as_new" })));
+        expect.objectContaining({
+          scope: "composition_working_state",
+          request: expect.objectContaining({ kind: "replace_as_new" }),
+        })));
     await vi.waitFor(() => expect(applyIdentityOperation).toHaveBeenCalled());
-    const previewReq = previewIdentityOperation.mock.calls[0][1];
-    expect(previewReq.kind).toBe("replace_as_new");
-    expect(previewReq.target_working_specs).toHaveLength(1);  // real backend accepts
+    const previewBody = previewIdentityOperation.mock.calls[0][1];
+    expect(previewBody.scope).toBe("composition_working_state");
+    expect(previewBody.request.kind).toBe("replace_as_new");
+    expect(previewBody.request.target_working_specs).toHaveLength(1);
     const applyBody = applyIdentityOperation.mock.calls[0][1];
     expect(applyBody.request.kind).toBe("replace_as_new");
     expect(applyBody.request.target_working_specs).toHaveLength(1);

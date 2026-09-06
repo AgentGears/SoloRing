@@ -214,23 +214,94 @@ async def test_api_has_no_occurrence_delete_endpoint(client):
 
 
 async def test_api_list_endpoints_use_stable_cursor_pagination(client):
-    """M12-API:07."""
+    """M12-API:07 — ALL FOUR frozen list families (Composition,
+    occurrence, revision, identity-history) page across boundaries with
+    stable ordering, no duplicates and no omissions.
+
+    Work-shape note: "bounded" here is the response-cardinality contract;
+    identity-history verifies full lineage integrity per request by design
+    (it is an authority-verification endpoint, not a plain list)."""
     pid, prid = await _seed(client)
     cid = (await client.post(f"/projects/{pid}/compositions",
                              json={"name": "Lobby"})).json()["id"]
+    # a second composition so the Composition list pages too
+    cid2 = (await client.post(f"/projects/{pid}/compositions",
+                              json={"name": "Other"})).json()["id"]
     for i in range(3):
         await client.post(
             f"/compositions/{cid}/occurrences",
             json=_mint_body(prid, i, name=f"Chair {i}"))
+    # two published revisions for revision pagination
+    await client.post(f"/compositions/{cid}/publish",
+                      json={"expected_working_version": 3})
+    # publication does not change working_version (identity-neutral), so
+    # the working version is still 3 when we edit for revision 2
+    occs = (await client.get(f"/compositions/{cid}/occurrences")).json()
+    await client.patch(
+        f"/compositions/{cid}/occurrences/{occs[0]['occurrence_id']}",
+        json={"scope": SCOPE, "expected_working_version": 3,
+              "display_name": "Changed"})
+    await client.post(f"/compositions/{cid}/publish",
+                      json={"expected_working_version": 4})
+
+    # --- family 1: Compositions ---
+    r = await client.get(f"/projects/{pid}/compositions?limit=1")
+    page1 = r.json()
+    assert len(page1) == 1
+    [c] = page1
+    cursor = f"{c['created_at']}|{c['id']}"
+    r2 = await client.get(
+        f"/projects/{pid}/compositions?limit=1&cursor={cursor}")
+    page2 = r2.json()
+    comp_ids = [c["id"] for c in page1 + page2]
+    assert len(set(comp_ids)) == len(comp_ids)  # no duplicates
+    assert {cid, cid2} <= set(comp_ids)  # no omissions
+
+    # --- family 2: occurrences ---
     r = await client.get(f"/compositions/{cid}/occurrences?limit=2")
     first_two = r.json()
     assert len(first_two) == 2
     cursor = first_two[-1]["occurrence_id"]
     r2 = await client.get(
         f"/compositions/{cid}/occurrences?limit=2&cursor={cursor}")
-    assert len(r2.json()) == 1
-    ids = [o["occurrence_id"] for o in first_two + r2.json()]
-    assert ids == sorted(ids)  # stable occurrence-id order
+    occ_ids = [o["occurrence_id"] for o in first_two + r2.json()]
+    assert len(set(occ_ids)) == 3
+    assert occ_ids == sorted(occ_ids)
+
+    # --- family 3: revisions (composite revision_number|id cursor) ---
+    r = await client.get(f"/compositions/{cid}/revisions?limit=1")
+    rev1 = r.json()
+    assert len(rev1) == 1 and rev1[0]["revision_number"] == 1
+    cursor = f"{rev1[0]['revision_number']}|{rev1[0]['revision_id']}"
+    r2 = await client.get(
+        f"/compositions/{cid}/revisions?limit=5&cursor={cursor}")
+    revs = [x["revision_number"] for x in rev1 + r2.json()]
+    assert revs == sorted(revs) and len(set(revs)) == len(revs)
+    assert 2 in revs  # no omissions across the boundary
+
+    # --- family 4: identity-history ((created_at,id) cursor) ---
+    r = await client.get(f"/compositions/{cid}/identity-history?limit=2")
+    h1 = r.json()
+    assert 1 <= len(h1) <= 2
+    last = h1[-1]
+    cursor = f"{last['created_at']}|{last['operation_id']}"
+    r2 = await client.get(
+        f"/compositions/{cid}/identity-history?limit=5&cursor={cursor}")
+    all_ids = [h["operation_id"] for h in h1 + r2.json()]
+    assert len(set(all_ids)) == len(all_ids)  # no duplicates across page
+    full = (await client.get(
+        f"/compositions/{cid}/identity-history?limit=100")).json()
+    assert set(all_ids) <= {h["operation_id"] for h in full}  # no invention
+
+    # negative limit is rejected on every list family
+    for path in (
+        f"/projects/{pid}/compositions",
+        f"/compositions/{cid}/occurrences",
+        f"/compositions/{cid}/revisions",
+        f"/compositions/{cid}/identity-history",
+    ):
+        r = await client.get(f"{path}?limit=-1")
+        assert r.status_code == 422, path
 
 
 async def test_metadata_patch_requires_metadata_version_and_does_not_advance_working_version(

@@ -863,11 +863,11 @@ export async function patchOccurrence(
 
 export async function previewIdentityOperation(
   compositionId: string,
-  request: unknown,
+  body: { scope: string; request: unknown },
 ): Promise<IdentityPreview> {
   return fetchJson<IdentityPreview>(
     `${BASE}/compositions/${compositionId}/identity-operations/preview`,
-    { method: "POST", body: JSON.stringify(request) });
+    { method: "POST", body: JSON.stringify(body) });
 }
 
 export async function applyIdentityOperation(

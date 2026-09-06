@@ -1392,25 +1392,8 @@ def _verify_m12_lineage(con) -> None:
                 raise RecoveryCorruption("operation_json not canonical")
             if canonical_hash(parsed) != op["operation_hash"]:
                 raise RecoveryCorruption("operation_hash mismatch")
-            # complete operation-field equivalence with the row (frozen §12.2)
-            if parsed.get("composition_id") != cid:
-                raise RecoveryCorruption(
-                    "operation JSON composition_id differs from row")
-            if parsed.get("kind") != op["operation_kind"]:
-                raise RecoveryCorruption(
-                    "operation JSON kind differs from operation_kind")
-            if parsed.get("working_version_before") != op["working_version_before"]:
-                raise RecoveryCorruption(
-                    "operation JSON working_version_before differs from row")
-            if parsed.get("working_version_after") != op["working_version_after"]:
-                raise RecoveryCorruption(
-                    "operation JSON working_version_after differs from row")
-            if parsed.get("request_fingerprint") != op["request_fingerprint"]:
-                raise RecoveryCorruption(
-                    "operation JSON request_fingerprint differs from row")
-            if parsed.get("impact_fingerprint") != op["impact_fingerprint"]:
-                raise RecoveryCorruption(
-                    "operation JSON impact_fingerprint differs from row")
+            # THE one shared evidence checklist — identical contract to
+            # the async historical verifier via composition.evidence.
             sources = con.execute(
                 "SELECT occurrence_id, terminates_identity FROM "
                 "composition_identity_operation_sources WHERE operation_id = ? "
@@ -1419,50 +1402,25 @@ def _verify_m12_lineage(con) -> None:
                 "SELECT occurrence_id FROM "
                 "composition_identity_operation_targets WHERE operation_id = ? "
                 "ORDER BY occurrence_id", (op["id"],)).fetchall()
-            json_sources = parsed.get("sources", [])
-            json_targets = parsed.get("targets", [])
-            if ([s["occurrence_id"] for s in json_sources]
-                    != [s["occurrence_id"] for s in sources]):
-                raise RecoveryCorruption(
-                    "source edges differ from operation evidence")
-            if ([t["occurrence_id"] for t in json_targets]
-                    != [t["occurrence_id"] for t in targets]):
-                raise RecoveryCorruption(
-                    "target edges differ from operation evidence")
-            for js, rs in zip(json_sources, sources):
-                if bool(js.get("terminates_identity")) != bool(
-                        rs["terminates_identity"]):
-                    raise RecoveryCorruption(
-                        "normalized terminates_identity differs from evidence")
-            kind = op["operation_kind"]
-            # termination-by-kind agreement (frozen §2.4)
-            expected_term = _TERMINATES[kind]
-            for s in sources:
-                if bool(s["terminates_identity"]) != expected_term:
-                    raise RecoveryCorruption(
-                        "termination behavior disagrees with operation kind")
-            # embedded target specs satisfy the frozen grammar; the specs
-            # also re-derive the request fingerprint stored on the row
-            parsed_specs = []
-            for t in json_targets:
-                if "working_spec" not in t:
-                    raise RecoveryCorruption("target evidence missing spec")
-                parsed_specs.append(_spec_from_value(t["working_spec"]))
-            request_value = build_request_value(
-                composition_id=cid, kind=kind,
-                source_occurrence_ids=[s["occurrence_id"] for s in sources],
-                target_specs=parsed_specs)
-            if _req_fp(request_value) != op["request_fingerprint"]:
-                raise RecoveryCorruption(
-                    "embedded target specs do not re-derive the stored "
-                    "request fingerprint")
-            texp = CARDINALITY[kind][2]
-            n_targets = len(targets)
-            if texp is None:
-                if n_targets < 2:
-                    raise RecoveryCorruption("split requires 2+ targets")
-            elif n_targets != texp:
-                raise RecoveryCorruption("operation target cardinality invalid")
+            from soloring.composition.evidence import (
+                validate_operation_evidence as _validate_evidence,
+            )
+            try:
+                _validate_evidence(
+                    parsed,
+                    row_composition_id=cid,
+                    row_kind=op["operation_kind"],
+                    row_before=op["working_version_before"],
+                    row_after=op["working_version_after"],
+                    row_request_fingerprint=op["request_fingerprint"],
+                    row_impact_fingerprint=op["impact_fingerprint"],
+                    normalized_sources=[
+                        (r["occurrence_id"], r["terminates_identity"])
+                        for r in sources],
+                    normalized_targets=[r["occurrence_id"] for r in targets],
+                )
+            except ValueError as exc:
+                raise RecoveryCorruption(str(exc))
             for s in sources:
                 oid = s["occurrence_id"]
                 if oid not in birth:

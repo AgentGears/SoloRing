@@ -145,8 +145,12 @@ async def _validate_working_composition_integrity(
 
     Active Project, Composition ownership, every source exists and belongs
     to the Project, direct AND transitive self-lineage forbidden,
-    terminated-working forbidden. Readiness, publish freeze, and the fenced
-    phase all call this so no path can commit invalid authority.
+    terminated-working forbidden, AND the persisted working-row grammar
+    (name/source/transform exact integer domains, JS-safe bounds,
+    already-canonical rotation) validates BEFORE any canonicalization —
+    so a corrupt raw row (e.g. yaw = +180000000) can never be copied into
+    immutable authority by publication. Readiness, publish freeze, and the
+    fenced phase all call this.
     """
     if terminated:
         raise internal_invariant(
@@ -155,6 +159,50 @@ async def _validate_working_composition_integrity(
         )
     nested_ids = []
     for r in rows:
+        # persisted grammar: exact XOR source columns
+        if r.source_kind == "production_revision":
+            if r.production_revision_id is None \
+                    or r.nested_composition_revision_id is not None:
+                raise internal_invariant(
+                    "working row violates source XOR grammar",
+                    details={"occurrence_id": r.occurrence_id})
+        elif r.source_kind == "composition_revision":
+            if r.production_revision_id is not None \
+                    or r.nested_composition_revision_id is None:
+                raise internal_invariant(
+                    "working row violates source XOR grammar",
+                    details={"occurrence_id": r.occurrence_id})
+        else:
+            raise internal_invariant(
+                "working row has unknown source_kind",
+                details={"occurrence_id": r.occurrence_id,
+                         "source_kind": r.source_kind})
+        # persisted grammar: normalized display name
+        name = r.display_name
+        if not isinstance(name, str) or not (
+                1 <= len(name.strip()) <= 500 and name == name.strip()):
+            raise internal_invariant(
+                "working row display_name violates grammar",
+                details={"occurrence_id": r.occurrence_id})
+        # persisted grammar: JS-safe integers + CANONICAL rotation — the
+        # raw stored values, before Transform re-normalizes them.
+        for v in (r.x_mm, r.y_mm, r.z_mm,
+                  r.yaw_udeg, r.pitch_udeg, r.roll_udeg):
+            if not isinstance(v, int) or not (JS_SAFE_MIN <= v <= JS_SAFE_MAX):
+                raise internal_invariant(
+                    "working row transform outside JS-safe domain",
+                    details={"occurrence_id": r.occurrence_id})
+        for v in (r.yaw_udeg, r.pitch_udeg, r.roll_udeg):
+            if not (UDEG_MIN <= v < UDEG_MIN + 360_000_000):
+                raise internal_invariant(
+                    "working row rotation not canonically normalized "
+                    "(e.g. +180000000 stored raw)",
+                    details={"occurrence_id": r.occurrence_id,
+                             "value": v})
+        if r.visible not in (0, 1):
+            raise internal_invariant(
+                "working row visible flag invalid",
+                details={"occurrence_id": r.occurrence_id})
         rid = (r.production_revision_id
                if r.source_kind == "production_revision"
                else r.nested_composition_revision_id)

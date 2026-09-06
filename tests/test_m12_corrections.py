@@ -463,3 +463,71 @@ async def test_identity_preview_rejects_missing_shot_local_and_unknown_scope(
         r = await client.post(
             f"/compositions/{cid}/identity-operations/preview", json=body)
         assert r.status_code == 422, (bad_scope, r.text)
+
+
+async def test_publish_rejects_raw_noncanonical_rotation_before_commit(
+    engine, factory
+):
+    """F3 residual: a raw working row with yaw=+180000000 (which Transform
+    would silently canonicalize to -180000000 in the snapshot) must be
+    refused BEFORE commit — proving COUNT(composition_revisions) unchanged."""
+    pid = await _seed_project(factory)
+    rid = await _seed_production(factory, pid, "raw180")
+    cid = await _comp(factory, pid)
+    occ = await _mint(factory, cid, _spec(rid), 0)
+    async with factory() as s:
+        async with s.bind.connect() as conn:
+            await conn.exec_driver_sql("BEGIN IMMEDIATE")
+            await conn.execute(
+                text("UPDATE composition_working_occurrences SET yaw_udeg = "
+                     "180000000 WHERE occurrence_id = :o AND composition_id "
+                     "= :c"), {"o": occ, "c": cid})
+            await conn.exec_driver_sql("COMMIT")
+    with pytest.raises(SoloRingError) as ei:
+        await publish_composition_revision(
+            factory(), cid, expected_working_version=1)
+    assert ei.value.code == "INTERNAL_INVARIANT_VIOLATION"
+    assert "canonical" in ei.value.message
+    async with factory() as s:
+        async with s.bind.connect() as conn:
+            n = (await conn.execute(
+                text("SELECT COUNT(*) FROM composition_revisions "
+                     "WHERE composition_id = :c"), {"c": cid})).scalar_one()
+    assert n == 0  # ZERO commits of invalid immutable authority
+
+
+async def test_readiness_rejects_raw_noncanonical_rotation(engine, factory):
+    pid = await _seed_project(factory)
+    rid = await _seed_production(factory, pid, "raw180b")
+    cid = await _comp(factory, pid)
+    occ = await _mint(factory, cid, _spec(rid), 0)
+    async with factory() as s:
+        async with s.bind.connect() as conn:
+            await conn.exec_driver_sql("BEGIN IMMEDIATE")
+            await conn.execute(
+                text("UPDATE composition_working_occurrences SET pitch_udeg ="
+                     " 180000000 WHERE occurrence_id = :o"),
+                {"o": occ})
+            await conn.exec_driver_sql("COMMIT")
+    with pytest.raises(SoloRingError) as ei:
+        await resolve_publication_readiness(factory(), cid)
+    assert ei.value.code == "INTERNAL_INVARIANT_VIOLATION"
+
+
+def test_lineage_evidence_validator_is_the_one_shared_contract():
+    """F5 residual: both verifiers consume composition.evidence — the
+    identical checklist cannot diverge again."""
+    import inspect
+
+    from soloring.composition import evidence, impacts
+    import importlib as _il
+
+    rb_mod = _il.import_module("soloring.recovery.backup")
+    imp_src = inspect.getsource(impacts.verify_identity_history)
+    rb_src = inspect.getsource(rb_mod._verify_m12_lineage)
+    assert "validate_operation_evidence" in imp_src
+    assert "validate_operation_evidence" in rb_src
+    # the shared contract enforces full source AND target cardinality
+    sig = inspect.signature(evidence.validate_operation_evidence)
+    assert "normalized_sources" in sig.parameters
+    assert "row_impact_fingerprint" in sig.parameters

@@ -431,31 +431,8 @@ async def verify_identity_history(
                 raise internal_invariant(
                     "operation_hash mismatch",
                     details={"operation_id": op.id})
-            # complete operation-field equivalence with the row (§12.2)
-            if parsed.get("composition_id") != composition_id:
-                raise internal_invariant(
-                    "operation JSON composition_id differs from row",
-                    details={"operation_id": op.id})
-            if parsed.get("kind") != op.operation_kind:
-                raise internal_invariant(
-                    "operation JSON kind differs from operation_kind",
-                    details={"operation_id": op.id})
-            if parsed.get("working_version_before") != op.working_version_before:
-                raise internal_invariant(
-                    "operation JSON working_version_before differs from row",
-                    details={"operation_id": op.id})
-            if parsed.get("working_version_after") != op.working_version_after:
-                raise internal_invariant(
-                    "operation JSON working_version_after differs from row",
-                    details={"operation_id": op.id})
-            if parsed.get("request_fingerprint") != op.request_fingerprint:
-                raise internal_invariant(
-                    "operation JSON request_fingerprint differs from row",
-                    details={"operation_id": op.id})
-            if parsed.get("impact_fingerprint") != op.impact_fingerprint:
-                raise internal_invariant(
-                    "operation JSON impact_fingerprint differs from row",
-                    details={"operation_id": op.id})
+            # THE one shared evidence checklist (§12.2) — consumed
+            # identically by recovery so the two verifiers cannot diverge.
             sources = (
                 await conn.execute(
                     text("SELECT occurrence_id, terminates_identity FROM "
@@ -472,89 +449,25 @@ async def verify_identity_history(
                     {"oid": op.id},
                 )
             ).fetchall()
-            if ([s["occurrence_id"] for s in parsed["sources"]]
-                    != [s.occurrence_id for s in sources]):
-                raise internal_invariant(
-                    "normalized source edges differ from operation evidence",
-                    details={"operation_id": op.id})
-            if [t["occurrence_id"] for t in parsed["targets"]] != [
-                    t.occurrence_id for t in targets]:
-                raise internal_invariant(
-                    "normalized target edges differ from operation evidence",
-                    details={"operation_id": op.id})
-            for js, rs in zip(parsed["sources"], sources):
-                if bool(js.get("terminates_identity")) != bool(
-                        rs.terminates_identity):
-                    raise internal_invariant(
-                        "normalized terminates_identity differs from evidence",
-                        details={"operation_id": op.id})
-            # termination-by-kind agreement (frozen §2.4)
-            expected_term = _TERMINATES[op.operation_kind]
-            for s in sources:
-                if bool(s.terminates_identity) != expected_term:
-                    raise internal_invariant(
-                        "termination behavior disagrees with operation kind",
-                        details={"operation_id": op.id})
-            # embedded target specs satisfy the frozen grammar and
-            # re-derive the stored request fingerprint
-            from soloring.composition.canonical import WorkingSpec
+            from soloring.composition.evidence import validate_operation_evidence
 
-            parsed_specs = []
-            for t in parsed["targets"]:
-                spec_val = t.get("working_spec")
-                if not isinstance(spec_val, dict) or set(spec_val) != {
-                    "display_name", "source", "visible", "transform"
-                }:
-                    raise internal_invariant(
-                        "embedded target spec grammar invalid",
-                        details={"operation_id": op.id})
-                src = spec_val["source"]
-                if not isinstance(src, dict) or set(src) != {
-                        "kind", "revision_id"}:
-                    raise internal_invariant(
-                        "embedded target spec source grammar invalid",
-                        details={"operation_id": op.id})
-                if not isinstance(spec_val["visible"], bool):
-                    raise internal_invariant(
-                        "embedded target spec visible grammar invalid",
-                        details={"operation_id": op.id})
-                tr = spec_val["transform"]
-                if not isinstance(tr, dict) or set(tr) != {
-                        "translation_mm", "rotation_udeg"}:
-                    raise internal_invariant(
-                        "embedded target spec transform grammar invalid",
-                        details={"operation_id": op.id})
-                for key in ("translation_mm", "rotation_udeg"):
-                    vec = tr[key]
-                    if not isinstance(vec, list) or len(vec) != 3 or not all(
-                            isinstance(v, int) and not isinstance(v, bool)
-                            for v in vec):
-                        raise internal_invariant(
-                            f"embedded target spec {key} grammar invalid",
-                            details={"operation_id": op.id})
-                try:
-                    parsed_specs.append(WorkingSpec(
-                        display_name=spec_val["display_name"],
-                        source_kind=src["kind"],
-                        revision_id=src["revision_id"],
-                        visible=spec_val["visible"],
-                        transform=_Transform(tuple(tr["translation_mm"]),
-                                             tuple(tr["rotation_udeg"])),
-                    ))
-                except Exception:
-                    raise internal_invariant(
-                        "embedded target spec fails frozen grammar",
-                        details={"operation_id": op.id})
-            rederived_request = build_request_value(
-                composition_id=composition_id, kind=op.operation_kind,
-                source_occurrence_ids=[s.occurrence_id for s in sources],
-                target_specs=parsed_specs)
-            if request_fingerprint(rederived_request) != op.request_fingerprint:
+            try:
+                validate_operation_evidence(
+                    parsed,
+                    row_composition_id=composition_id,
+                    row_kind=op.operation_kind,
+                    row_before=op.working_version_before,
+                    row_after=op.working_version_after,
+                    row_request_fingerprint=op.request_fingerprint,
+                    row_impact_fingerprint=op.impact_fingerprint,
+                    normalized_sources=[
+                        (s.occurrence_id, s.terminates_identity)
+                        for s in sources],
+                    normalized_targets=[t.occurrence_id for t in targets],
+                )
+            except ValueError as exc:
                 raise internal_invariant(
-                    "embedded target specs do not re-derive the stored "
-                    "request fingerprint",
-                    details={"operation_id": op.id})
-            _check_cardinality(op.operation_kind, len(sources), len(targets))
+                    str(exc), details={"operation_id": op.id}) from exc
             for s in sources:
                 if s.occurrence_id in terminated_at:
                     raise internal_invariant(
@@ -582,6 +495,7 @@ async def verify_identity_history(
                 "operation_id": op.id, "kind": op.operation_kind,
                 "working_version_before": op.working_version_before,
                 "working_version_after": op.working_version_after,
+                "created_at": op.created_at,  # (created_at,id) cursor key
                 "sources": [dict(s._mapping) for s in sources],
                 "targets": [t.occurrence_id for t in targets],
             })

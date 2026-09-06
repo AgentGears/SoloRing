@@ -64,6 +64,12 @@ export default function WorldSetWorkspace({ projectId }: { projectId: string }) 
   const [readiness, setReadiness] = useState<ReadinessLite | null>(null);
   const [newName, setNewName] = useState("");
   const [sourceInput, setSourceInput] = useState("");
+  const [sourceKind, setSourceKind] = useState<"production_revision" | "composition_revision">(
+    "production_revision");
+  const [pendingImpact, setPendingImpact] = useState<{
+    summary: string;
+    confirm: () => void;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -73,7 +79,11 @@ export default function WorldSetWorkspace({ projectId }: { projectId: string }) 
   } | null>(null);
   const [replaceTarget, setReplaceTarget] = useState<{
     occurrenceId: string;
-    spec: { display_name: string; revision_id: string };
+    spec: {
+      display_name: string;
+      revisionId: string;
+      kind: "production_revision" | "composition_revision";
+    };
   } | null>(null);
 
   const selected = useMemo(
@@ -139,8 +149,7 @@ export default function WorldSetWorkspace({ projectId }: { projectId: string }) 
         scope: SCOPE,
         expected_working_version: selected?.working_version ?? 0,
         display_name: "New occurrence",
-        source: { kind: "production_revision",
-                  revision_id: sourceInput.trim() },
+        source: { kind: sourceKind, revision_id: sourceInput.trim() },
         visible: true,
         transform: { translation_mm: [0, 0, 0], rotation_udeg: [0, 0, 0] },
       });
@@ -176,113 +185,168 @@ export default function WorldSetWorkspace({ projectId }: { projectId: string }) 
     }
   }
 
-  async function handleSourceUpdate(occurrenceId: string, revisionId: string) {
+  async function handleSourceUpdate(
+    occurrenceId: string,
+    kind: "production_revision" | "composition_revision",
+    revisionId: string,
+  ) {
     await handleFieldPatch(
       occurrenceId,
-      { source: { kind: "production_revision", revision_id: revisionId } },
+      { source: { kind, revision_id: revisionId } },
       "Identity is preserved. Physical/rig/spatial compatibility is not " +
         "certified by this milestone.",
     );
   }
 
-  async function handleReplaceConfirm() {
-    if (!selectedId || !replaceTarget) return;
-    setBusy(true);
-    setError(null);
-    try {
-      // frozen cardinality: replace_as_new carries exactly ONE target spec
-      const request = {
-        kind: "replace_as_new",
-        source_occurrence_ids: [replaceTarget.occurrenceId],
-        target_working_specs: [{
-          display_name: replaceTarget.spec.display_name,
-          source: {
-            kind: "production_revision",
-            revision_id: replaceTarget.spec.revision_id,
-          },
-          visible: true,
-          transform: { translation_mm: [0, 0, 0], rotation_udeg: [0, 0, 0] },
-        }],
-      };
-      const p = await previewIdentityOperation(selectedId, request);
-      const out = await applyIdentityOperation(selectedId, {
-        scope: SCOPE,
-        expected_working_version: p.working_version,
-        expected_request_fingerprint: p.request_fingerprint,
-        expected_impact_fingerprint: p.impact_fingerprint,
-        request,
-      });
-      setReplaceTarget(null);
-      await reload();
-      setNotice(
-        `Replaced as new occurrence ${out.target_occurrence_ids[0]} — ` +
-        "old identity terminated in lineage; compatibility not certified.",
-      );
-    } catch (e) {
-      setError(asApiError(e).message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function handleRemove(occurrenceId: string) {
-    if (!selectedId) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const request = { kind: "remove",
-                        source_occurrence_ids: [occurrenceId],
-                        target_working_specs: [] };
-      const p = await previewIdentityOperation(selectedId, request);
-      await applyIdentityOperation(selectedId, {
-        scope: SCOPE,
-        expected_working_version: p.working_version,
-        expected_request_fingerprint: p.request_fingerprint,
-        expected_impact_fingerprint: p.impact_fingerprint,
-        request,
-      });
-      await reload();
-      setNotice(`Removed occurrence ${occurrenceId} (terminated in lineage)`);
-    } catch (e) {
-      setError(asApiError(e).message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function handleFork(
-    occurrenceId: string, sourceRevisionId: string,
+  /** Preview an identity operation and present its impact for explicit
+   * filmmaker confirmation — Preview is a decision point, never a hidden
+   * handshake fed straight into Apply (frozen §15/§8.3). */
+  async function previewThenConfirm(
+    request: unknown,
+    summary: (p: {
+      source_occurrence_summaries: Array<Record<string, unknown>>;
+      historical_reference_counts: Record<string, number>;
+    }) => string,
+    onConfirm: (
+      p: { working_version: number; request_fingerprint: string;
+           impact_fingerprint: string }) => Promise<void>,
   ) {
     if (!selectedId) return;
     setBusy(true);
     setError(null);
     try {
-      const request = {
-        kind: "fork",
-        source_occurrence_ids: [occurrenceId],
-        target_working_specs: [{
-          display_name: `Fork of ${occurrenceId.slice(0, 8)}`,
-          source: { kind: "production_revision",
-                    revision_id: sourceRevisionId },
-          visible: true,
-          transform: { translation_mm: [0, 0, 0], rotation_udeg: [0, 0, 0] },
-        }],
-      };
-      const p = await previewIdentityOperation(selectedId, request);
-      await applyIdentityOperation(selectedId, {
-        scope: SCOPE,
-        expected_working_version: p.working_version,
-        expected_request_fingerprint: p.request_fingerprint,
-        expected_impact_fingerprint: p.impact_fingerprint,
-        request,
+      const p = await previewIdentityOperation(
+        selectedId, { scope: SCOPE, request });
+      setPendingImpact({
+        summary: summary(p),
+        confirm: () => {
+          void (async () => {
+            setBusy(true);
+            try {
+              await onConfirm({
+                working_version: p.working_version,
+                request_fingerprint: p.request_fingerprint,
+                impact_fingerprint: p.impact_fingerprint,
+              });
+              setPendingImpact(null);
+            } catch (e) {
+              setError(asApiError(e).message);
+            } finally {
+              setBusy(false);
+            }
+          })();
+        },
       });
-      await reload();
-      setNotice(`Forked occurrence ${occurrenceId}`);
     } catch (e) {
       setError(asApiError(e).message);
     } finally {
       setBusy(false);
     }
+  }
+
+  function impactSummary(p: {
+    source_occurrence_summaries: Array<Record<string, unknown>>;
+    historical_reference_counts: Record<string, number>;
+  }): string {
+    const states = p.source_occurrence_summaries.map(
+      (s) => {
+        const oid = String(s.occurrence_id ?? "?");
+        const active = s.active === true;
+        const inWs = s.in_working_state === true;
+        return `${oid} (${active ? "active" : "TERMINATED"}, ` +
+          `${inWs ? "in working set" : "not in working set"})`;
+      });
+    const refs = Object.entries(p.historical_reference_counts)
+      .map(([id, n]) => `${id} in ${n} published revision(s)`)
+      .join(", ");
+    return `Impact: ${states.join("; ") || "no sources"}` +
+      (refs ? ` — history references: ${refs}` : "");
+  }
+
+  async function handleReplaceConfirm() {
+    if (!selectedId || !replaceTarget) return;
+    // frozen cardinality: replace_as_new carries exactly ONE target spec
+    const request = {
+      kind: "replace_as_new",
+      source_occurrence_ids: [replaceTarget.occurrenceId],
+      target_working_specs: [{
+        display_name: replaceTarget.spec.display_name,
+        source: {
+          kind: "production_revision",
+          revision_id: replaceTarget.spec.revisionId,
+        },
+        visible: true,
+        transform: { translation_mm: [0, 0, 0], rotation_udeg: [0, 0, 0] },
+      }],
+    };
+    await previewThenConfirm(
+      request,
+      impactSummary,
+      async (p) => {
+        const out = await applyIdentityOperation(selectedId, {
+          scope: SCOPE,
+          expected_working_version: p.working_version,
+          expected_request_fingerprint: p.request_fingerprint,
+          expected_impact_fingerprint: p.impact_fingerprint,
+          request,
+        });
+        setReplaceTarget(null);
+        await reload();
+        setNotice(
+          `Replaced as new occurrence ${out.target_occurrence_ids[0]} — ` +
+          "old identity terminated in lineage; compatibility not certified.",
+        );
+      });
+  }
+
+  async function handleRemove(occurrenceId: string) {
+    if (!selectedId) return;
+    const request = { kind: "remove",
+                      source_occurrence_ids: [occurrenceId],
+                      target_working_specs: [] };
+    await previewThenConfirm(
+      request, impactSummary, async (p) => {
+        await applyIdentityOperation(selectedId, {
+          scope: SCOPE,
+          expected_working_version: p.working_version,
+          expected_request_fingerprint: p.request_fingerprint,
+          expected_impact_fingerprint: p.impact_fingerprint,
+          request,
+        });
+        await reload();
+        setNotice(
+          `Removed occurrence ${occurrenceId} (terminated in lineage)`);
+      });
+  }
+
+  async function handleFork(
+    occurrenceId: string,
+    sourceKind: "production_revision" | "composition_revision",
+    sourceRevisionId: string,
+  ) {
+    if (!selectedId) return;
+    const request = {
+      kind: "fork",
+      source_occurrence_ids: [occurrenceId],
+      target_working_specs: [{
+        display_name: `Fork of ${occurrenceId.slice(0, 8)}`,
+        source: { kind: sourceKind, revision_id: sourceRevisionId },
+        visible: true,
+        transform: { translation_mm: [0, 0, 0], rotation_udeg: [0, 0, 0] },
+      }],
+    };
+    await previewThenConfirm(
+      request, impactSummary, async (p) => {
+        await applyIdentityOperation(selectedId, {
+          scope: SCOPE,
+          expected_working_version: p.working_version,
+          expected_request_fingerprint: p.request_fingerprint,
+          expected_impact_fingerprint: p.impact_fingerprint,
+          request,
+        });
+        await reload();
+        setNotice(`Forked occurrence ${occurrenceId}`);
+      });
   }
 
   async function handlePublish() {
@@ -383,12 +447,26 @@ export default function WorldSetWorkspace({ projectId }: { projectId: string }) 
           )}
 
           <div>
-            <label htmlFor="source-revision">Production Revision ID</label>
+            <select
+              aria-label="Source kind"
+              value={sourceKind}
+              onChange={(e) => setSourceKind(
+                e.target.value as "production_revision" | "composition_revision")}
+              data-testid="source-kind-select">
+              <option value="production_revision">Production Revision</option>
+              <option value="composition_revision">Nested Composition Revision</option>
+            </select>
+            <label htmlFor="source-revision">
+              {sourceKind === "production_revision"
+                ? "Production Revision ID" : "Composition Revision ID"}
+            </label>
             <input
               id="source-revision"
               value={sourceInput}
               onChange={(e) => setSourceInput(e.target.value)}
-              placeholder="exact Production Revision UUID"
+              placeholder={sourceKind === "production_revision"
+                ? "exact Production Revision UUID"
+                : "published Composition Revision UUID"}
             />
             <button onClick={handleAddOccurrence}
                     disabled={busy || !sourceInput.trim()}>
@@ -444,10 +522,17 @@ export default function WorldSetWorkspace({ projectId }: { projectId: string }) 
                 </button>
                 <button
                   onClick={() => {
+                    const kind = o.source_kind === "composition_revision"
+                      ? "composition_revision" : "production_revision";
                     const rid = window.prompt(
-                      "same-lineage Production Revision ID",
-                      o.production_revision_id ?? "");
-                    if (rid) void handleSourceUpdate(o.occurrence_id, rid);
+                      kind === "production_revision"
+                        ? "same-lineage Production Revision ID"
+                        : "same-lineage Composition Revision ID",
+                      o.production_revision_id
+                        ?? o.nested_composition_revision_id ?? "");
+                    if (rid) {
+                      void handleSourceUpdate(o.occurrence_id, kind, rid);
+                    }
                   }}
                   title="Identity is preserved. Physical compatibility is not certified."
                   data-testid={`update-source-${o.occurrence_id}`}>
@@ -458,8 +543,12 @@ export default function WorldSetWorkspace({ projectId }: { projectId: string }) 
                     occurrenceId: o.occurrence_id,
                     spec: {
                       display_name: `${o.display_name} (new)`,
-                      revision_id:
-                        o.production_revision_id ?? sourceInput.trim(),
+                      revisionId:
+                        o.production_revision_id
+                        ?? o.nested_composition_revision_id
+                        ?? sourceInput.trim(),
+                      kind: o.source_kind === "composition_revision"
+                        ? "composition_revision" : "production_revision",
                     },
                   })}
                   data-testid={`replace-${o.occurrence_id}`}>
@@ -472,7 +561,11 @@ export default function WorldSetWorkspace({ projectId }: { projectId: string }) 
                 <button
                   onClick={() => void handleFork(
                     o.occurrence_id,
-                    o.production_revision_id ?? sourceInput.trim())}
+                    o.source_kind === "composition_revision"
+                      ? "composition_revision" : "production_revision",
+                    o.production_revision_id
+                      ?? o.nested_composition_revision_id
+                      ?? sourceInput.trim())}
                   data-testid={`fork-${o.occurrence_id}`}>
                   Fork
                 </button>
@@ -480,12 +573,27 @@ export default function WorldSetWorkspace({ projectId }: { projectId: string }) 
             ))}
           </ul>
 
+          {pendingImpact && (
+            <div data-testid="impact-review">
+              <h4>Identity operation impact</h4>
+              <p>{pendingImpact.summary}</p>
+              <button onClick={pendingImpact.confirm} disabled={busy}
+                      data-testid="impact-confirm">
+                Confirm identity operation
+              </button>
+              <button onClick={() => setPendingImpact(null)}
+                      data-testid="impact-cancel">
+                Cancel
+              </button>
+            </div>
+          )}
+
           {replaceTarget && (
             <div data-testid="replace-dialog">
               <p>
                 Replace {replaceTarget.occurrenceId} as a NEW occurrence with
                 target name &quot;{replaceTarget.spec.display_name}&quot;
-                sourcing revision {replaceTarget.spec.revision_id}. Identity
+                sourcing revision {replaceTarget.spec.revisionId}. Identity
                 will change; lineage is recorded.
               </p>
               <button onClick={handleReplaceConfirm} disabled={busy}
@@ -519,8 +627,7 @@ export default function WorldSetWorkspace({ projectId }: { projectId: string }) 
                 ).map((d) => (
                   <li key={d.occurrence_id}
                       data-testid={`diff-${d.occurrence_id}`}>
-                    {d.occurrence_id}: {d.same ? "SAME" : "CHANGED"} —{" "}
-                    {d.detail}
+                    {d.occurrence_id}: {d.state}
                   </li>
                 ))}
               </ul>
@@ -550,26 +657,43 @@ export default function WorldSetWorkspace({ projectId }: { projectId: string }) 
 }
 
 function diffOccurrences(
-  a: { occurrences: Array<{ occurrence_id: string; display_name: string;
-    source: { revision_id: string } }> },
-  b: { occurrences: Array<{ occurrence_id: string; display_name: string;
-    source: { revision_id: string } }> },
+  a: { occurrences: Array<Record<string, unknown> & { occurrence_id: string }> },
+  b: { occurrences: Array<Record<string, unknown> & { occurrence_id: string }> },
 ) {
+  // identity survives iff the occurrence_id persists; the STATE claim
+  // compares the complete frozen occurrence value (name, source, transform,
+  // visibility) so a moved/hidden chair is never labeled "same state".
   const byId = new Map(b.occurrences.map((o) => [o.occurrence_id, o]));
   return a.occurrences.map((oa) => {
     const ob = byId.get(oa.occurrence_id);
     if (!ob) {
-      return { occurrence_id: oa.occurrence_id, same: false,
-               detail: "removed in later revision" };
+      return { occurrence_id: oa.occurrence_id,
+               state: "REMOVED in later revision" };
     }
-    const same = oa.display_name === ob.display_name
-      && oa.source.revision_id === ob.source.revision_id;
+    const sameState = JSON.stringify(oa) === JSON.stringify(ob);
+    const changes: string[] = [];
+    if (oa.display_name !== ob.display_name) {
+      changes.push(`name "${oa.display_name}" to "${ob.display_name}"`);
+    }
+    const sa = oa.source as { kind: string; revision_id: string };
+    const sb = ob.source as { kind: string; revision_id: string };
+    if (sa.revision_id !== sb.revision_id || sa.kind !== sb.kind) {
+      changes.push(`source ${sa.revision_id.slice(0, 8)} to ` +
+        `${sb.revision_id.slice(0, 8)}`);
+    }
+    const ta = oa.transform as { translation_mm: number[] };
+    const tb = ob.transform as { translation_mm: number[] };
+    if (JSON.stringify(oa.transform) !== JSON.stringify(ob.transform)) {
+      changes.push(`transform ${JSON.stringify(ta.translation_mm)} to ` +
+        `${JSON.stringify(tb.translation_mm)}`);
+    }
+    if (oa.visible !== ob.visible) {
+      changes.push(`visible ${oa.visible} to ${ob.visible}`);
+    }
     return {
-      occurrence_id: oa.occurrence_id, same,
-      detail: same
-        ? `same occurrence, same state (${oa.display_name})`
-        : `source ${oa.source.revision_id.slice(0, 8)} → ` +
-          `${ob.source.revision_id.slice(0, 8)}`,
+      occurrence_id: oa.occurrence_id,
+      state: sameState ? "SAME identity and state" :
+        `SAME identity, changed: ${changes.join("; ")}`,
     };
   });
 }
