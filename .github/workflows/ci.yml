@@ -20,8 +20,12 @@ jobs:
     timeout-minutes: 15
 
     steps:
+      # Full history: the M11 BOUNDARY:05 proof diffs against the M10F
+      # baseline commit, which a shallow checkout does not contain.
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -36,6 +40,8 @@ jobs:
 
       - name: Validate proof map
         run: python scripts/m10f_validate_proof_map.py
+      - name: Validate M11 proof map
+        run: python scripts/m11_validate_proof_map.py
 
       - name: Run backend tests
         run: python -m pytest -q

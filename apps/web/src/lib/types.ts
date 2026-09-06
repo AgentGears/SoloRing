@@ -313,3 +313,63 @@ export interface RevisionContinuity {
    * explicitly separated in the payload and the UI. */
   visual?: import("./visualTypes").VisualProvenance | null;
 }
+
+// --- M11 Production Library (frozen R3 plan §11) -----------------------------
+
+export interface ProductionObject {
+  id: string;
+  project_id: string;
+  name: string;
+  description: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProductionClosure {
+  contract_key: string;
+  contract_version: number;
+  blob_hash: string;
+  size_bytes: number;
+  media_type: string | null;
+}
+
+export interface ProductionReadinessIssue {
+  code: string;
+  message: string;
+  details: Record<string, unknown>;
+}
+
+export interface PublicationReadiness {
+  production_object_id: string;
+  source_asset_id: string;
+  ready: boolean;
+  issues: ProductionReadinessIssue[];
+  proposed_snapshot_hash: string | null;
+  closure: ProductionClosure | null;
+}
+
+export interface ProductionRevisionSummary {
+  revision_id: string;
+  revision_number: number;
+  snapshot_hash: string;
+  created_at: string;
+}
+
+export interface ProductionSourceSummary {
+  asset_id: string;
+  created_at: string;
+}
+
+export interface ProductionRevisionDetail {
+  revision_id: string;
+  production_object_id: string;
+  project_id: string;
+  revision_number: number;
+  snapshot_json: string;
+  snapshot_hash: string;
+  created_at: string;
+  closure: ProductionClosure;
+  blob_url: string;
+  sources: ProductionSourceSummary[];
+  physical_integrity: string;
+}
