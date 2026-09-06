@@ -1312,57 +1312,9 @@ def _verify_m12_lineage(con) -> None:
 
     from soloring.domain.canonical import canonical_hash, canonical_json_bytes
 
-    from soloring.composition.canonical import (
-        WorkingSpec,
-        build_request_value,
-        request_fingerprint as _req_fp,
-    )
-    from soloring.composition.impacts import CARDINALITY, _TERMINATES
-    from soloring.spatial.math import Transform, JS_SAFE_MIN, JS_SAFE_MAX, UDEG_MIN
-
-    def _spec_from_value(value) -> WorkingSpec:
-        if not isinstance(value, dict) or set(value) != {
-            "display_name", "source", "visible", "transform"
-        }:
-            raise RecoveryCorruption("embedded target spec grammar invalid")
-        src = value["source"]
-        if not isinstance(src, dict) or set(src) != {"kind", "revision_id"}:
-            raise RecoveryCorruption("embedded target spec source grammar invalid")
-        if src["kind"] not in ("production_revision", "composition_revision"):
-            raise RecoveryCorruption("embedded target spec kind invalid")
-        if not isinstance(value["display_name"], str) or not (
-                1 <= len(value["display_name"].strip()) <= 500
-                and value["display_name"] == value["display_name"].strip()):
-            raise RecoveryCorruption("embedded target spec name grammar invalid")
-        if not isinstance(value["visible"], bool):
-            raise RecoveryCorruption("embedded target spec visible grammar invalid")
-        tr = value["transform"]
-        if not isinstance(tr, dict) or set(tr) != {
-            "translation_mm", "rotation_udeg"
-        }:
-            raise RecoveryCorruption("embedded target spec transform grammar")
-        for key in ("translation_mm", "rotation_udeg"):
-            vec = tr[key]
-            if not isinstance(vec, list) or len(vec) != 3:
-                raise RecoveryCorruption(
-                    f"embedded target spec {key} cardinality invalid")
-            for v in vec:
-                if not isinstance(v, int) or isinstance(v, bool):
-                    raise RecoveryCorruption(
-                        f"embedded target spec {key} non-integer")
-                if not (JS_SAFE_MIN <= v <= JS_SAFE_MAX):
-                    raise RecoveryCorruption(
-                        f"embedded target spec {key} outside JS-safe domain")
-        for v in tr["rotation_udeg"]:
-            if not (UDEG_MIN <= v < UDEG_MIN + 360_000_000):
-                raise RecoveryCorruption(
-                    "embedded target spec rotation not canonically normalized")
-        return WorkingSpec(
-            display_name=value["display_name"], source_kind=src["kind"],
-            revision_id=src["revision_id"], visible=value["visible"],
-            transform=Transform(tuple(tr["translation_mm"]),
-                                tuple(tr["rotation_udeg"])),
-        )
+    # The evidence grammar is owned solely by composition.evidence —
+    # no second (dormant) interpretation survives here.
+    from soloring.domain.canonical import canonical_hash, canonical_json_bytes
 
     compositions = con.execute("SELECT id, working_version FROM compositions")
     for comp in compositions.fetchall():

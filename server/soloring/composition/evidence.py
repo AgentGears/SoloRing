@@ -22,6 +22,12 @@ from soloring.spatial.math import (
 )
 
 _SOURCE_KINDS = ("production_revision", "composition_revision")
+_HEX64 = set("0123456789abcdef")
+
+
+def _is_hex64(value: object) -> bool:
+    return (isinstance(value, str) and len(value) == 64
+            and set(value) <= _HEX64)
 
 
 def _check(cond: bool, message: str) -> None:
@@ -39,6 +45,9 @@ def validate_target_working_spec(value: object) -> WorkingSpec:
     _check(isinstance(src, dict) and set(src) == {"kind", "revision_id"},
            "target spec source keys must be exactly {kind, revision_id}")
     _check(src["kind"] in _SOURCE_KINDS, "target spec source kind invalid")
+    _check(isinstance(src["revision_id"], str)
+           and len(src["revision_id"]) > 0,
+           "target spec revision_id must be a nonempty string")
     name = value["display_name"]
     _check(isinstance(name, str) and 1 <= len(name.strip()) <= 500
            and name == name.strip(),
@@ -94,6 +103,10 @@ def validate_operation_evidence(
         "request_fingerprint", "impact_fingerprint", "sources", "targets",
     }, "operation evidence keys invalid")
     _check(parsed["schema_version"] == 1, "operation schema_version != 1")
+    # kind grammar BEFORE indexing CARDINALITY/_TERMINATES
+    _check(isinstance(parsed["kind"], str)
+           and parsed["kind"] in CARDINALITY,
+           "operation kind not in the frozen domain")
     # row-field equivalence
     _check(parsed["composition_id"] == row_composition_id,
            "operation JSON composition_id differs from row")
@@ -103,6 +116,13 @@ def validate_operation_evidence(
            "operation JSON working_version_before differs from row")
     _check(parsed["working_version_after"] == row_after,
            "operation JSON working_version_after differs from row")
+    # frozen fingerprint grammars: exactly 64 lowercase hex, and equal to
+    # the row columns (request is also rederived below; impact is
+    # cross-checked here because this verifier does not recompute it)
+    _check(_is_hex64(parsed["request_fingerprint"]),
+           "operation request_fingerprint not 64-lowercase-hex")
+    _check(_is_hex64(parsed["impact_fingerprint"]),
+           "operation impact_fingerprint not 64-lowercase-hex")
     _check(parsed["request_fingerprint"] == row_request_fingerprint,
            "operation JSON request_fingerprint differs from row")
     _check(parsed["impact_fingerprint"] == row_impact_fingerprint,
@@ -112,13 +132,31 @@ def validate_operation_evidence(
     json_targets = parsed["targets"]
     _check(isinstance(json_sources, list), "sources must be a list")
     _check(isinstance(json_targets, list), "targets must be a list")
+    # exact entry grammar BEFORE indexing: every malformed-evidence
+    # condition below raises ValueError (never KeyError/TypeError).
+    for s in json_sources:
+        _check(isinstance(s, dict), "source entry must be an object")
+        _check(set(s) == {"occurrence_id", "terminates_identity"},
+               "source entry keys must be exactly "
+               "{occurrence_id, terminates_identity}")
+        _check(isinstance(s["occurrence_id"], str),
+               "source occurrence_id must be a string")
+        _check(isinstance(s["terminates_identity"], bool),
+               "source terminates_identity must be a JSON boolean")
+    for t in json_targets:
+        _check(isinstance(t, dict), "target entry must be an object")
+        _check(set(t) == {"occurrence_id", "working_spec"},
+               "target entry keys must be exactly "
+               "{occurrence_id, working_spec}")
+        _check(isinstance(t["occurrence_id"], str),
+               "target occurrence_id must be a string")
     _check([s["occurrence_id"] for s in json_sources]
            == [s[0] for s in normalized_sources],
            "source edges differ from operation evidence")
     _check([t["occurrence_id"] for t in json_targets] == normalized_targets,
            "target edges differ from operation evidence")
     for js, (_, rs_term) in zip(json_sources, normalized_sources):
-        _check(bool(js.get("terminates_identity")) == bool(rs_term),
+        _check(js["terminates_identity"] == bool(rs_term),
                "normalized terminates_identity differs from evidence")
     # source AND target cardinality per frozen §2.4
     kind = row_kind

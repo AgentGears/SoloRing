@@ -531,3 +531,161 @@ def test_lineage_evidence_validator_is_the_one_shared_contract():
     sig = inspect.signature(evidence.validate_operation_evidence)
     assert "normalized_sources" in sig.parameters
     assert "row_impact_fingerprint" in sig.parameters
+
+
+# --- F5 final: malformed evidence must fail the EXACT grammar gate --------
+
+
+def _valid_evidence() -> dict:
+    from soloring.composition.canonical import (
+        WorkingSpec,
+        build_request_value,
+        request_fingerprint as rfp,
+    )
+    from soloring.spatial.math import Transform
+
+    spec = WorkingSpec(
+        display_name="Chair 8", source_kind="production_revision",
+        revision_id="33333333-3333-3333-3333-333333333333", visible=True,
+        transform=Transform((1000, 0, 0), (0, 0, 0)))
+    req = build_request_value(
+        composition_id="22222222-2222-2222-2222-222222222222",
+        kind="replace_as_new",
+        source_occurrence_ids=["00000000-0000-0000-0000-000000000001"],
+        target_specs=[spec])
+    return {
+        "schema_version": 1,
+        "composition_id": "22222222-2222-2222-2222-222222222222",
+        "kind": "replace_as_new",
+        "working_version_before": 8,
+        "working_version_after": 9,
+        "request_fingerprint": rfp(req),
+        "impact_fingerprint": "b" * 64,
+        "sources": [{"occurrence_id": "00000000-0000-0000-0000-000000000001",
+                     "terminates_identity": True}],
+        "targets": [{
+            "occurrence_id": "00000000-0000-0000-0000-000000000002",
+            "working_spec": spec.canonical_value()}],
+    }
+
+
+_ROW = dict(
+    row_composition_id="22222222-2222-2222-2222-222222222222",
+    row_kind="replace_as_new",
+    row_before=8,
+    row_after=9,
+)
+_NORM_SOURCES = [("00000000-0000-0000-0000-000000000001", 1)]
+_NORM_TARGETS = ["00000000-0000-0000-0000-000000000002"]
+
+
+def _validate(doc):
+    from soloring.composition.evidence import validate_operation_evidence
+
+    validate_operation_evidence(
+        doc,
+        row_request_fingerprint=doc["request_fingerprint"],
+        row_impact_fingerprint=doc["impact_fingerprint"],
+        normalized_sources=_NORM_SOURCES,
+        normalized_targets=_NORM_TARGETS,
+        **_ROW)
+
+
+def test_evidence_rejects_missing_and_extra_source_keys():
+    import copy
+
+    doc = _valid_evidence()
+    assert_no_error = doc
+    _validate(assert_no_error)  # baseline: the pristine document passes
+
+    missing = copy.deepcopy(doc)
+    del missing["sources"][0]["terminates_identity"]
+    with pytest.raises(ValueError, match="source entry keys"):
+        _validate(missing)
+
+    extra = copy.deepcopy(doc)
+    extra["sources"][0]["note"] = "x"
+    with pytest.raises(ValueError, match="source entry keys"):
+        _validate(extra)
+
+
+def test_evidence_rejects_non_boolean_terminates_identity():
+    import copy
+
+    doc = _valid_evidence()
+    doc["sources"][0]["terminates_identity"] = "yes"  # truthy string
+    with pytest.raises(ValueError, match="JSON boolean"):
+        _validate(doc)
+    doc2 = _valid_evidence()
+    doc2["sources"][0]["terminates_identity"] = 1  # truthy int
+    with pytest.raises(ValueError, match="JSON boolean"):
+        _validate(doc2)
+
+
+def test_evidence_rejects_malformed_target_object():
+    import copy
+
+    doc = copy.deepcopy(_valid_evidence())
+    doc["targets"][0]["extra"] = "field"
+    with pytest.raises(ValueError, match="target entry keys"):
+        _validate(doc)
+
+    doc2 = copy.deepcopy(_valid_evidence())
+    doc2["targets"][0] = {"occurrence_id": "x"}  # missing working_spec
+    with pytest.raises(ValueError, match="target entry keys"):
+        _validate(doc2)
+
+    doc3 = copy.deepcopy(_valid_evidence())
+    doc3["targets"][0]["occurrence_id"] = 42  # non-string id
+    with pytest.raises(ValueError, match="occurrence_id must be a string"):
+        _validate(doc3)
+
+
+def test_evidence_rejects_non_string_revision_id():
+    import copy
+
+    doc = copy.deepcopy(_valid_evidence())
+    doc["targets"][0]["working_spec"]["source"]["revision_id"] = 12345
+    with pytest.raises(ValueError, match="revision_id must be"):
+        _validate(doc)
+    doc2 = copy.deepcopy(_valid_evidence())
+    doc2["targets"][0]["working_spec"]["source"]["revision_id"] = ""
+    with pytest.raises(ValueError, match="revision_id must be"):
+        _validate(doc2)
+
+
+def test_evidence_rejects_non_hex_impact_fingerprint():
+    import copy
+
+    doc = copy.deepcopy(_valid_evidence())
+    doc["impact_fingerprint"] = "Z" * 64  # equal-to-row is supplied, but hex
+    with pytest.raises(ValueError, match="impact_fingerprint not 64"):
+        _validate(doc)
+    doc2 = copy.deepcopy(_valid_evidence())
+    doc2["impact_fingerprint"] = "abc"  # wrong length
+    with pytest.raises(ValueError, match="impact_fingerprint not 64"):
+        _validate(doc2)
+    doc3 = copy.deepcopy(_valid_evidence())
+    doc3["request_fingerprint"] = "G" * 64
+    with pytest.raises(ValueError, match="request_fingerprint not 64"):
+        _validate(doc3)
+
+
+def test_evidence_rejects_unknown_kind_before_indexing():
+    import copy
+
+    doc = copy.deepcopy(_valid_evidence())
+    doc["kind"] = "explode"  # not in the frozen domain
+    with pytest.raises(ValueError, match="frozen domain"):
+        _validate(doc)
+
+
+def test_recovery_local_spec_validator_is_gone():
+    """The dormant second interpretation was removed."""
+    import importlib
+
+    rb = importlib.import_module("soloring.recovery.backup")
+    import inspect
+
+    src = inspect.getsource(rb._verify_m12_lineage)
+    assert "_spec_from_value" not in src

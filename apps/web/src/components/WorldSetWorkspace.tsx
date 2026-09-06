@@ -265,14 +265,17 @@ export default function WorldSetWorkspace({ projectId }: { projectId: string }) 
 
   async function handleReplaceConfirm() {
     if (!selectedId || !replaceTarget) return;
-    // frozen cardinality: replace_as_new carries exactly ONE target spec
+    // frozen cardinality: replace_as_new carries exactly ONE target spec;
+    // the target kind follows the CURRENT occurrence's source kind (a
+    // nested Composition occurrence replaces into a nested Composition
+    // Revision, never a Production-Revision-labeled UUID).
     const request = {
       kind: "replace_as_new",
       source_occurrence_ids: [replaceTarget.occurrenceId],
       target_working_specs: [{
         display_name: replaceTarget.spec.display_name,
         source: {
-          kind: "production_revision",
+          kind: replaceTarget.spec.kind,
           revision_id: replaceTarget.spec.revisionId,
         },
         visible: true,
