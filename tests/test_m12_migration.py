@@ -295,3 +295,38 @@ def test_composite_occurrence_fks_reject_cross_composition_rows(tmp_path, monkey
             "(?, ?, 'X', 'production_revision', 1, 0, 0, 0, 0, 0, 0, ?)",
             (c2, occ1, now))
     con.close()
+
+
+def test_nonempty_identity_history_without_revision_blocks_downgrade(
+    tmp_path, monkeypatch
+):
+    """M12-MIG:09 — authored identity operations alone block downgrade."""
+    _upgrade(tmp_path, monkeypatch, "head")
+    con = _con(tmp_path)
+    cid = "dddd0000-0000-0000-0000-00000000000c"
+    con.execute(
+        "INSERT INTO compositions (id, project_id, name, metadata_version, "
+        "working_version, created_at, updated_at) VALUES "
+        "(?, '11111111-1111-1111-1111-111111111111', 'C', 1, 1, ?, ?)",
+        (cid, "2026-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z"))
+    con.execute(
+        "INSERT INTO composition_occurrences (id, composition_id, created_at) "
+        "VALUES ('dddd0001-0000-0000-0000-00000000000c', ?, ?)",
+        (cid, "2026-01-01T00:00:00.000Z"))
+    con.execute(
+        "INSERT INTO composition_identity_operations (id, composition_id, "
+        "operation_kind, working_version_before, working_version_after, "
+        "request_fingerprint, impact_fingerprint, operation_json, "
+        "operation_hash, created_at) VALUES "
+        "('dddd0002-0000-0000-0000-00000000000c', ?, 'mint', 0, 1, ?, ?, "
+        "'{}', ?, ?)",
+        (cid, "1" * 64, "2" * 64, "3" * 64, "2026-01-01T00:00:00.000Z"))
+    con.commit()
+    con.close()
+    # no composition_revisions row exists at all
+    con = _con(tmp_path)
+    n = con.execute("SELECT COUNT(*) FROM composition_revisions").fetchone()[0]
+    con.close()
+    assert n == 0
+    with pytest.raises(RuntimeError, match="downgrade refused"):
+        _downgrade(tmp_path, monkeypatch, "0012_m11_reusable_production_revisions")

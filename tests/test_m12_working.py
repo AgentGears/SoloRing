@@ -344,3 +344,67 @@ async def test_transform_is_explicit_and_grammar_enforced(engine, factory):
                      "WHERE occurrence_id = :o"),
                 {"o": out["occurrence_id"]})).scalar_one()
     assert yaw == -180000000
+
+
+# --- frozen proof-map owner aliases (M12-WORK:05/:08/:10) -------------------
+
+
+async def test_stale_working_version_writes_nothing(engine, factory):
+    """Alias owner: stale edit produces zero partial writes."""
+    pid = await _seed_project(factory)
+    rid = await _seed_production_revision(factory, pid)
+    cid = await _composition(factory, pid)
+    occ = (await _mint(factory, cid, _spec_with_revision(rid), 0))["occurrence_id"]
+    with pytest.raises(EditConflict):
+        await patch_working_occurrence(
+            factory(), cid, occ, scope="composition_working_state",
+            expected_working_version=99, display_name="X")
+    async with factory() as s:
+        async with s.bind.connect() as conn:
+            row = (await conn.execute(
+                text("SELECT display_name FROM composition_working_occurrences "
+                     "WHERE occurrence_id = :o"), {"o": occ})).first()
+    assert row.display_name == "Chair 7"
+
+
+async def test_terminated_occurrence_cannot_return_to_working_state(
+    engine, factory
+):
+    """Alias owner: terminated identity refuses ordinary PATCH."""
+    from soloring.composition.impacts import (
+        apply_identity_operation,
+        preview_identity_operation,
+    )
+
+    pid = await _seed_project(factory)
+    rid = await _seed_production_revision(factory, pid)
+    cid = await _composition(factory, pid)
+    occ = (await _mint(factory, cid, _spec_with_revision(rid), 0))["occurrence_id"]
+    request = {"kind": "remove", "source_occurrence_ids": [occ],
+               "target_working_specs": []}
+    p = await preview_identity_operation(factory(), cid, request=request)
+    await apply_identity_operation(
+        factory(), cid, scope="composition_working_state",
+        expected_working_version=1,
+        expected_request_fingerprint=p["request_fingerprint"],
+        expected_impact_fingerprint=p["impact_fingerprint"],
+        request=request)
+    with pytest.raises(SoloRingError):
+        await patch_working_occurrence(
+            factory(), cid, occ, scope="composition_working_state",
+            expected_working_version=2, display_name="Zombie")
+
+
+async def test_stale_metadata_version_writes_nothing(engine, factory):
+    """Alias owner: stale metadata PATCH cannot overwrite newer metadata."""
+    pid = await _seed_project(factory)
+    rid = await _seed_production_revision(factory, pid)
+    cid = await _composition(factory, pid)
+    await _mint(factory, cid, _spec_with_revision(rid), 0)
+    await patch_composition_metadata(
+        factory(), cid, expected_metadata_version=0, name="First")
+    with pytest.raises(EditConflict):
+        await patch_composition_metadata(
+            factory(), cid, expected_metadata_version=0, name="Stale")
+    comp = await get_composition(factory(), cid)
+    assert comp["name"] == "First"

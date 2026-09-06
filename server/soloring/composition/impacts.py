@@ -40,9 +40,13 @@ from soloring.errors import ErrorCode, SoloRingError, internal_invariant, valida
 # fails closed on any unregistered FK.
 FK_CONSUMERS: dict[tuple[str, str], str] = {
     ("composition_working_occurrences", "occurrence_id"): "working/internal",
+    ("composition_working_occurrences", "composition_id"): "working/internal",
     ("composition_revision_occurrences", "occurrence_id"): "historical/non-blocking",
+    ("composition_revision_occurrences", "composition_id"): "historical/non-blocking",
     ("composition_identity_operation_sources", "occurrence_id"): "lineage/internal",
+    ("composition_identity_operation_sources", "composition_id"): "lineage/internal",
     ("composition_identity_operation_targets", "occurrence_id"): "lineage/internal",
+    ("composition_identity_operation_targets", "composition_id"): "lineage/internal",
 }
 
 # Explicit non-FK durable-consumer registry — empty in M12 (frozen §2.5).

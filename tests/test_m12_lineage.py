@@ -348,3 +348,139 @@ async def test_terminated_occurrence_cannot_return_to_working_state(
         await patch_working_occurrence(
             factory(), cid, occ, scope=SCOPE,
             expected_working_version=2, display_name="Zombie")
+
+
+# --- frozen proof-map owner aliases (M12-LINEAGE:03/:04/:09/:10/:12/:13/:14)
+
+
+async def test_split_terminates_one_and_mints_multiple_targets(engine, factory):
+    """Alias owner."""
+    pid = await _seed_project(factory)
+    rids = await _seed_production(factory, pid)
+    cid = await _composition(factory, pid)
+    occ = await _mint(factory, cid, _spec(rids[0]), 0)
+    out = await _preview_apply(
+        factory(), cid, "split", [occ],
+        [_spec(rids[0], name="Left"), _spec(rids[0], name="Right")], 1)
+    assert len(out["target_occurrence_ids"]) == 2
+    await verify_identity_history(factory(), cid)
+
+
+async def test_merge_terminates_multiple_and_mints_one_target(engine, factory):
+    """Alias owner."""
+    pid = await _seed_project(factory)
+    rids = await _seed_production(factory, pid)
+    cid = await _composition(factory, pid)
+    a = await _mint(factory, cid, _spec(rids[0], name="A"), 0)
+    b = await _mint(factory, cid, _spec(rids[0], name="B"), 1)
+    out = await _preview_apply(
+        factory(), cid, "merge", [a, b], [_spec(rids[0], name="Merged")], 2)
+    assert len(out["target_occurrence_ids"]) == 1
+    await verify_identity_history(factory(), cid)
+
+
+async def test_identity_operation_never_retargets_historical_revision_membership(
+    engine, factory
+):
+    """Alias owner: history retains old IDs after transformation."""
+    from soloring.composition.readiness import (
+        load_composition_revision_detail,
+        publish_composition_revision,
+    )
+
+    pid = await _seed_project(factory)
+    rids = await _seed_production(factory, pid)
+    cid = await _composition(factory, pid)
+    occ = await _mint(factory, cid, _spec(rids[0]), 0)
+    rev, _ = await publish_composition_revision(
+        factory(), cid, expected_working_version=1)
+    await _preview_apply(
+        factory(), cid, "remove", [occ], [], 1)
+    detail = await load_composition_revision_detail(
+        factory(), rev["revision_id"])
+    parsed = __import__("json").loads(detail["snapshot_json"])
+    assert parsed["occurrences"][0]["occurrence_id"] == occ
+
+
+async def test_request_fingerprint_binds_kind_sources_and_complete_target_specs(
+    engine, factory
+):
+    """Alias owner: distinct intent → distinct fingerprint."""
+    pid = await _seed_project(factory)
+    rids = await _seed_production(factory, pid)
+    cid = await _composition(factory, pid)
+    occ = await _mint(factory, cid, _spec(rids[0]), 0)
+    r1 = {"kind": "replace_as_new", "source_occurrence_ids": [occ],
+          "target_working_specs": [_spec(rids[1], name="X")]}
+    r2 = {"kind": "replace_as_new", "source_occurrence_ids": [occ],
+          "target_working_specs": [_spec(rids[1], name="Y")]}
+    p1 = await preview_identity_operation(factory(), cid, request=r1)
+    p2 = await preview_identity_operation(factory(), cid, request=r2)
+    assert p1["request_fingerprint"] != p2["request_fingerprint"]
+
+
+async def test_terminated_occurrence_cannot_be_future_operation_source(
+    engine, factory
+):
+    """Alias owner: post-termination source use impossible."""
+    pid = await _seed_project(factory)
+    rids = await _seed_production(factory, pid)
+    cid = await _composition(factory, pid)
+    occ = await _mint(factory, cid, _spec(rids[0]), 0)
+    await _preview_apply(factory(), cid, "remove", [occ], [], 1)
+    request = {"kind": "remove", "source_occurrence_ids": [occ],
+               "target_working_specs": []}
+    p = await preview_identity_operation(factory(), cid, request=request)
+    with pytest.raises(SoloRingError) as ei:
+        await apply_identity_operation(
+            factory(), cid, scope=SCOPE, expected_working_version=2,
+            expected_request_fingerprint=p["request_fingerprint"],
+            expected_impact_fingerprint=p["impact_fingerprint"],
+            request=request)
+    assert ei.value.code == "COMPOSITION_EDIT_CONFLICT"
+
+
+async def test_duplicate_identity_operation_version_interval_is_rejected(
+    engine, factory
+):
+    """Alias owner: DB unique constraint on (composition_id, before)."""
+    import sqlite3
+
+    pid = await _seed_project(factory)
+    rids = await _seed_production(factory, pid)
+    cid = await _composition(factory, pid)
+    await _mint(factory, cid, _spec(rids[0]), 0)  # mint owns before=0
+    db_path = engine.url.database
+    con = sqlite3.connect(db_path)
+    op = new_uuid()
+    try:
+        con.execute(
+            "INSERT INTO composition_identity_operations (id, "
+            "composition_id, operation_kind, working_version_before, "
+            "working_version_after, request_fingerprint, "
+            "impact_fingerprint, operation_json, operation_hash, "
+            "created_at) VALUES (?, ?, 'mint', 0, 1, ?, ?, '{}', ?, ?)",
+            (op, cid, "3" * 64, "4" * 64, "5" * 64, NOW))
+        con.commit()
+        raise AssertionError("duplicate interval accepted")
+    except sqlite3.IntegrityError:
+        pass
+    finally:
+        con.close()
+
+
+async def test_active_source_may_fork_multiple_times_without_termination(
+    engine, factory
+):
+    """Alias owner: repeated non-terminating forks legal."""
+    pid = await _seed_project(factory)
+    rids = await _seed_production(factory, pid)
+    cid = await _composition(factory, pid)
+    occ = await _mint(factory, cid, _spec(rids[0]), 0)
+    out1 = await _preview_apply(
+        factory(), cid, "fork", [occ], [_spec(rids[0], name="F1")], 1)
+    out2 = await _preview_apply(
+        factory(), cid, "fork", [occ], [_spec(rids[0], name="F2")], 2)
+    assert len({occ, *out1["target_occurrence_ids"],
+                *out2["target_occurrence_ids"]}) == 3
+    await verify_identity_history(factory(), cid)

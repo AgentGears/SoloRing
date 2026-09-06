@@ -420,3 +420,69 @@ def test_recovery_never_repairs_or_retargets_occurrence_identity(env):
     rb._verify_m12_composition_state(env["src"] / "soloring.db")
     after = (env["src"] / "soloring.db").read_bytes()
     assert before == after  # byte-identical: no repair/retarget writes
+
+
+def test_restore_0011_uses_frozen_six_path_policy_and_invents_no_m12(
+    tmp_path, monkeypatch
+):
+    """Alias owner for the 0011 leg of the historical-restore proof."""
+    from alembic import command
+    from alembic.config import Config
+
+    from soloring.settings import BASE_DIR
+    import soloring.settings as settings_mod
+
+    root = tmp_path / "p0011" / "data"
+    root.mkdir(parents=True)
+    monkeypatch.setenv("SOLORING_DATA_DIR", str(root))
+    monkeypatch.setattr(settings_mod, "_settings", None)
+    cfg = Config(str(BASE_DIR / "server" / "alembic.ini"))
+    cfg.set_main_option("script_location", str(BASE_DIR / "server" / "alembic"))
+    command.upgrade(cfg, "0011_m10_derived_spatial_execution")
+    backup_root = tmp_path / "b0011"
+    manifest = _assemble_backup(root, backup_root,
+                                "0011_m10_derived_spatial_execution")
+    assert manifest["alembic_version"] == "0011_m10_derived_spatial_execution"
+    assert rb._blob_fk_policy_for_head(
+        "0011_m10_derived_spatial_execution") == rb.PRE_M11_BLOB_FK_COLUMNS
+    dest = tmp_path / "r0011"
+    await_restore(backup_root, dest)
+    con = _db(dest)
+    tables = {r[0] for r in con.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'")}
+    con.close()
+    assert "compositions" not in tables
+    assert "production_objects" not in tables
+
+
+def test_restore_0012_uses_seven_path_policy_and_invents_no_m12(
+    tmp_path, monkeypatch
+):
+    """Alias owner for the 0012 leg of the historical-restore proof."""
+    from alembic import command
+    from alembic.config import Config
+
+    from soloring.settings import BASE_DIR
+    import soloring.settings as settings_mod
+
+    root = tmp_path / "p0012" / "data"
+    root.mkdir(parents=True)
+    monkeypatch.setenv("SOLORING_DATA_DIR", str(root))
+    monkeypatch.setattr(settings_mod, "_settings", None)
+    cfg = Config(str(BASE_DIR / "server" / "alembic.ini"))
+    cfg.set_main_option("script_location", str(BASE_DIR / "server" / "alembic"))
+    command.upgrade(cfg, "0012_m11_reusable_production_revisions")
+    backup_root = tmp_path / "b0012"
+    manifest = _assemble_backup(
+        root, backup_root, "0012_m11_reusable_production_revisions")
+    assert manifest["alembic_version"] == "0012_m11_reusable_production_revisions"
+    assert rb._blob_fk_policy_for_head(
+        "0012_m11_reusable_production_revisions") == rb.M11_BLOB_FK_COLUMNS
+    dest = tmp_path / "r0012"
+    await_restore(backup_root, dest)
+    con = _db(dest)
+    tables = {r[0] for r in con.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'")}
+    con.close()
+    assert "compositions" not in tables  # no empty M12 schema invented
+    assert "production_objects" in tables

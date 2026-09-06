@@ -395,3 +395,125 @@ async def test_projection_corruption_fails_internal_invariant(engine, factory):
     with pytest.raises(SoloRingError) as ei:
         await load_composition_revision_detail(factory(), rid)
     assert ei.value.code == "INTERNAL_INVARIANT_VIOLATION"
+
+
+# --- frozen proof-map owner aliases (M12-PUB:02/:03/:06/:08/:11/:12) --------
+
+
+async def test_publish_occurrence_order_is_canonical_by_id(engine, factory):
+    """Alias owner: array/list order cannot influence identity."""
+    from soloring.composition.canonical import build_snapshot_value
+
+    a = WorkingSpecStub("A", "11111111-1111-1111-1111-111111111111")
+    b = WorkingSpecStub("B", "11111111-1111-1111-1111-111111111111")
+    low = "00000000-0000-0000-0000-000000000001"
+    high = "ffffffff-ffff-ffff-ffff-ffffffffffff"
+    v1 = build_snapshot_value([b, a], [high, low], [], [])
+    v2 = build_snapshot_value([a, b], [low, high], [], [])
+    assert v1 == v2
+    assert v1["occurrences"][0]["occurrence_id"] == low
+
+
+class WorkingSpecStub:
+    def __init__(self, name, rid):
+        from soloring.composition.canonical import WorkingSpec
+        from soloring.spatial.math import Transform
+        self._spec = WorkingSpec(
+            display_name=name, source_kind="production_revision",
+            revision_id=rid, visible=True,
+            transform=Transform((0, 0, 0), (0, 0, 0)))
+
+    def canonical_value(self):
+        return self._spec.canonical_value()
+
+
+async def test_publish_fixture_bytes_hash_and_permutation_invariance_are_exact(
+    engine, factory
+):
+    """Alias owner: the 403-byte golden fixture is exact end-to-end."""
+    from tests.test_m12_canonical import (
+        FIXTURE_BYTES,
+        FIXTURE_SHA,
+        FIXTURE_SPEC,
+        OCC_ID,
+        PR_ID,
+        build_snapshot_value,
+    )
+
+    value = build_snapshot_value([FIXTURE_SPEC], [OCC_ID], [PR_ID, PR_ID], [])
+    from soloring.domain.canonical import canonical_json_bytes, canonical_hash
+
+    assert canonical_json_bytes(value) == FIXTURE_BYTES
+    assert canonical_hash(value) == FIXTURE_SHA
+
+
+async def test_publish_preserves_surviving_occurrence_ids(engine, factory):
+    """Alias owner: publication copies surviving IDs exactly."""
+    pid = await _seed_project(factory)
+    rids = await _seed_production(factory, pid)
+    cid = await _composition(factory, pid)
+    occ = (await _mint(factory, cid, _spec(rids[0]), 0))["occurrence_id"]
+    d1, _ = await publish_composition_revision(
+        factory(), cid, expected_working_version=1)
+    d2, created = await publish_composition_revision(
+        factory(), cid, expected_working_version=1)
+    assert not created
+    p1, p2 = json.loads(d1["snapshot_json"]), json.loads(d2["snapshot_json"])
+    assert [o["occurrence_id"] for o in p1["occurrences"]] == [occ]
+    assert [o["occurrence_id"] for o in p2["occurrences"]] == [occ]
+
+
+async def test_publish_does_not_change_metadata_or_working_versions(
+    engine, factory
+):
+    """Alias owner: publication mutates neither concurrency token."""
+    pid = await _seed_project(factory)
+    rids = await _seed_production(factory, pid)
+    cid = await _composition(factory, pid)
+    await _mint(factory, cid, _spec(rids[0]), 0)
+    await publish_composition_revision(factory(), cid,
+                                       expected_working_version=1)
+    async with factory() as s:
+        async with s.bind.connect() as conn:
+            row = (await conn.execute(
+                text("SELECT working_version, metadata_version FROM "
+                     "compositions WHERE id = :c"), {"c": cid})).first()
+    assert row.working_version == 1 and row.metadata_version == 0
+
+
+async def test_existing_winner_projection_corruption_fails_closed(
+    engine, factory
+):
+    """Alias owner: converged winner fully revalidated."""
+    pid = await _seed_project(factory)
+    rids = await _seed_production(factory, pid)
+    cid = await _composition(factory, pid)
+    await _mint(factory, cid, _spec(rids[0]), 0)
+    d1, _ = await publish_composition_revision(
+        factory(), cid, expected_working_version=1)
+    rid = d1["revision_id"]
+    async with factory() as s:
+        async with s.bind.connect() as conn:
+            await conn.exec_driver_sql("BEGIN IMMEDIATE")
+            await conn.execute(
+                text("UPDATE composition_revision_occurrences SET visible = 0 "
+                     "WHERE composition_revision_id = :r"), {"r": rid})
+            await conn.exec_driver_sql("COMMIT")
+    with pytest.raises(SoloRingError) as ei:
+        await publish_composition_revision(
+            factory(), cid, expected_working_version=1)
+    assert ei.value.code == "INTERNAL_INVARIANT_VIOLATION"
+
+
+def test_published_revision_rows_have_no_update_delete_path():
+    """Alias owner (STRUCTURAL claim under TEST owner): no service/API
+    mutation path exists for published projection rows."""
+    from pathlib import Path
+
+    for mod in ("service", "readiness", "impacts"):
+        src = Path(f"server/soloring/composition/{mod}.py").read_text()
+        for forbidden in ("UPDATE composition_revision_occurrences",
+                          "DELETE FROM composition_revision_occurrences",
+                          "UPDATE composition_revisions SET",
+                          "DELETE FROM composition_revisions"):
+            assert forbidden not in src, (mod, forbidden)

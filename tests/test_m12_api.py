@@ -254,3 +254,28 @@ async def test_metadata_patch_requires_metadata_version_and_does_not_advance_wor
         json={"expected_metadata_version": 0, "name": "Stale"})
     assert r.status_code == 409
     assert r.json()["details"]["reason"] == "stale_metadata_version"
+
+
+async def test_api_identity_preview_then_apply_requires_request_and_impact_fingerprints(
+    client
+):
+    """Alias owner (frozen §21 M12-API:03): both fingerprints mandatory."""
+    pid, prid = await _seed(client)
+    cid = (await client.post(f"/projects/{pid}/compositions",
+                             json={"name": "Lobby"})).json()["id"]
+    occ = (await client.post(f"/compositions/{cid}/occurrences",
+                             json=_mint_body(prid, 0))).json()["occurrence_id"]
+    request = {"kind": "remove", "source_occurrence_ids": [occ],
+               "target_working_specs": []}
+    p = (await client.post(
+        f"/compositions/{cid}/identity-operations/preview",
+        json=request)).json()
+    assert p["request_fingerprint"] and p["impact_fingerprint"]
+    r = await client.post(
+        f"/compositions/{cid}/identity-operations",
+        json={"scope": SCOPE, "expected_working_version": 1,
+              "expected_request_fingerprint": p["request_fingerprint"],
+              "expected_impact_fingerprint": p["impact_fingerprint"],
+              "request": request})
+    assert r.status_code == 200
+    assert r.json()["kind"] == "remove"
