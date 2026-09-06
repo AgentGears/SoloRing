@@ -373,3 +373,62 @@ export interface ProductionRevisionDetail {
   sources: ProductionSourceSummary[];
   physical_integrity: string;
 }
+
+// --- M12 Composition authority (frozen R3 §14) --------------------------------
+
+export interface Composition {
+  id: string;
+  project_id: string;
+  name: string;
+  description: string | null;
+  metadata_version: number;
+  working_version: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface OccurrenceRow {
+  occurrence_id: string;
+  display_name: string;
+  source_kind: string;
+  production_revision_id: string | null;
+  nested_composition_revision_id: string | null;
+  visible: number;
+  x_mm: number;
+  y_mm: number;
+  z_mm: number;
+  yaw_udeg: number;
+  pitch_udeg: number;
+  roll_udeg: number;
+  updated_at: string;
+}
+
+export interface CompositionRevisionSummary {
+  revision_id: string;
+  revision_number: number;
+  snapshot_hash: string;
+  created_at: string;
+}
+
+export interface IdentityPreview {
+  allowed: boolean;
+  working_version: number;
+  normalized_request: Record<string, unknown>;
+  request_fingerprint: string;
+  impact_fingerprint: string;
+  source_occurrence_summaries: Array<Record<string, unknown>>;
+  historical_reference_counts: Record<string, number>;
+  live_blocking_references: Array<Record<string, unknown>>;
+}
+
+export interface PublishOutcome {
+  created: boolean;
+  revision: {
+    revision_id: string;
+    composition_id: string;
+    revision_number: number;
+    snapshot_json: string;
+    snapshot_hash: string;
+    created_at: string;
+  };
+}
