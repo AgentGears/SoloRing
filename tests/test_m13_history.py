@@ -149,3 +149,54 @@ async def test_m13_history_10(client):
         f"/shot-revisions/{revision.id}/production-world")
     assert r.status_code == 500, r.text
     assert r.json()["error_code"] == "INTERNAL_INVARIANT_VIOLATION"
+
+
+async def test_m13_history_09_rerun(client):
+    """M13-HISTORY:09 (rerun half) — Exact Rerun of a schema-6 source
+    Generation performs ZERO reads of current M13 authoring tables (query
+    spy over the whole fenced rerun creation)."""
+    import hashlib
+
+    from soloring.generation import rerun as rerun_mod
+
+    b = await _full_m13_world(client, tag=b"hist09r")
+    sel = await _select_binding(client, b)
+    revision, _ = await _capture(client, b["shot"])
+    engine = client._transport.app.state.engine
+    gen = "33333333-3333-3333-3333-333333333333"
+    spec = json.dumps({"schema_version": 3})
+    async with engine.connect() as conn:
+        await conn.execute(text(
+            "INSERT INTO generations (id, shot_id, shot_revision_id, "
+            "status, operation, executor, workflow_id, workflow_version, "
+            "workflow_template_hash, manifest_hash, compiled_prompt, "
+            "prompt_compiler_version, parameters_json, "
+            "workflow_spec_json, workflow_spec_hash, created_at, "
+            "updated_at, generation_number) VALUES "
+            "(:g, :sh, :r, 'succeeded', 'generate', 'comfy', 'wf', 1, "
+            ":th, :mh, 'p', 'v1', '{}', :sj, :sh2, 't', 't', 1)"),
+            {"g": gen, "sh": b["shot"], "r": revision.id,
+             "th": "e" * 64, "mh": "e" * 64, "sj": spec,
+             "sh2": hashlib.sha256(spec.encode()).hexdigest()})
+        await conn.commit()
+
+    touched: list[str] = []
+
+    @event.listens_for(engine.sync_engine, "before_cursor_execute")
+    def _spy(conn, cursor, statement, parameters, context, executemany):
+        for table in CURRENT_M13_TABLES:
+            if table in statement:
+                touched.append(table)
+
+    try:
+        new_id = await rerun_mod._create_rerun_fenced(engine, gen)
+        assert new_id is not None and new_id != gen
+    finally:
+        event.remove(engine.sync_engine, "before_cursor_execute", _spy)
+    assert touched == [], touched
+    # the rerun copies the exact captured revision identity
+    async with engine.connect() as conn:
+        row = (await conn.execute(text(
+            "SELECT shot_revision_id FROM generations WHERE id = :g"),
+            {"g": new_id})).scalar_one()
+    assert row == revision.id
