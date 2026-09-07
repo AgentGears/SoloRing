@@ -93,10 +93,17 @@ def test_no_generalized_representation_registry_table(tmp_path, monkeypatch):
                 "AND name LIKE 'production_%'"))
     finally:
         con.close()
+    # M13 R3 §4 adds the narrow frozen companions (spatial interpretation
+    # + Production Instance state/staging) — explicitly not RP-02.
     assert prod_tables == [
+        "production_instance_feature_transitions",
+        "production_instance_features",
+        "production_instance_spatial_tracks",
+        "production_instance_spatial_transitions",
         "production_objects",
         "production_revision_closures",
         "production_revision_source_assets",
+        "production_revision_spatial_interpretations",
         "production_revisions",
     ]
 

@@ -37,16 +37,18 @@ from soloring.domain.canonical import canonical_json_bytes, canonical_hash
 from soloring.settings import Settings
 from soloring.workflows.artifact_store import WorkflowArtifactStore
 
-EXPECTED_ALEMBIC_HEAD = "0013_m12_composition_occurrences"
+EXPECTED_ALEMBIC_HEAD = "0014_m13_authority_complete_world"
 BACKUP_MANIFEST_SCHEMA_VERSION = 1
 
-# M12 (frozen R3 §16): restore is head-dispatched across three heads. M12
-# adds no Blob FK, so the 0013 policy is exactly the seven M11 paths.
+# M13 (frozen R3 §23): restore is head-dispatched across four heads. M13
+# adds no Blob FK, so the 0014 policy is exactly the seven M11/M12 paths.
 PRE_M11_ALEMBIC_HEAD = "0011_m10_derived_spatial_execution"
 M11_ALEMBIC_HEAD = "0012_m11_reusable_production_revisions"
+M12_ALEMBIC_HEAD = "0013_m12_composition_occurrences"
 SUPPORTED_RESTORE_ALEMBIC_HEADS = frozenset({
     PRE_M11_ALEMBIC_HEAD,
     M11_ALEMBIC_HEAD,
+    M12_ALEMBIC_HEAD,
     EXPECTED_ALEMBIC_HEAD,
 })
 
@@ -89,11 +91,11 @@ M11_BLOB_FK_COLUMNS = frozenset(
 
 
 def _blob_fk_policy_for_head(head: str) -> frozenset:
-    """Exact head-specific Blob-FK inventory (frozen §§14.2/16.2)."""
+    """Exact head-specific Blob-FK inventory (frozen §§14.2/16.2/23.2)."""
     if head == PRE_M11_ALEMBIC_HEAD:
         return PRE_M11_BLOB_FK_COLUMNS
-    if head in (M11_ALEMBIC_HEAD, EXPECTED_ALEMBIC_HEAD):
-        # M12 adds no Blob FK; 0012 and 0013 share the exact seven paths.
+    if head in (M11_ALEMBIC_HEAD, M12_ALEMBIC_HEAD, EXPECTED_ALEMBIC_HEAD):
+        # M12/M13 add no Blob FK; 0012-0014 share the exact seven paths.
         return M11_BLOB_FK_COLUMNS
     raise RecoveryCorruption(f"unsupported recovery head {head!r}.")
 
@@ -1133,6 +1135,164 @@ def _prove_no_m12_state(staged_db: Path) -> None:
         con.close()
 
 
+_M13_TABLES = (
+    "composition_occurrence_authority_subjects",
+    "production_revision_spatial_interpretations",
+    "production_instance_features",
+    "production_instance_feature_transitions",
+    "production_instance_spatial_tracks",
+    "production_instance_spatial_transitions",
+    "composition_spatial_bindings",
+    "composition_spatial_binding_subjects",
+    "composition_spatial_binding_entries",
+    "shot_production_world_selections",
+    "shot_revision_production_worlds",
+    "shot_revision_production_instance_feature_states",
+    "shot_revision_production_instance_spatial_states",
+)
+
+
+def _prove_no_m13_state(staged_db: Path) -> None:
+    """A restored pre-M13 root invents no M13 authority (frozen R3 §23.3).
+
+    The thirteen M13-owned tables exist only at 0014+; their absence at an
+    older recorded head is the no-invention proof.
+    """
+    con = sqlite3.connect(str(staged_db))
+    try:
+        tables = {
+            r[0] for r in con.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'")
+        }
+        present = tables & set(_M13_TABLES)
+        if present:
+            raise RecoveryCorruption(
+                "pre-0014 restore invented M13 tables: "
+                f"{sorted(present)}."
+            )
+    finally:
+        con.close()
+
+
+def _verify_m13_world_state(staged_db: Path) -> None:
+    """Verify the M13 immutable state present at 0014 (frozen R3 §23.4).
+
+    M13A slice: subject adoptions and Production Revision spatial
+    interpretations. The verifier grows with the M13B-E slices that make
+    the remaining tables writable; every table that can hold rows at the
+    current slice is verified with no unverified-row window.
+    """
+    con = sqlite3.connect(str(staged_db))
+    con.row_factory = sqlite3.Row
+    try:
+        _verify_m13_subjects(con)
+        _verify_m13_interpretations(con)
+    finally:
+        con.close()
+
+
+def _verify_m13_subjects(con) -> None:
+    rows = con.execute(
+        "SELECT composition_id, occurrence_id, subject_kind, "
+        "creative_entity_id FROM composition_occurrence_authority_subjects"
+    ).fetchall()
+    for r in rows:
+        if r["subject_kind"] not in ("creative_entity", "production_instance"):
+            raise RecoveryCorruption(
+                f"adoption kind {r['subject_kind']!r} outside schema-1 domain")
+        if r["subject_kind"] == "creative_entity":
+            if r["creative_entity_id"] is None:
+                raise RecoveryCorruption(
+                    "creative_entity adoption without creative_entity_id")
+        elif r["creative_entity_id"] is not None:
+            raise RecoveryCorruption(
+                "production_instance adoption carries creative_entity_id")
+        occ = con.execute(
+            "SELECT 1 FROM composition_occurrences "
+            "WHERE id = ? AND composition_id = ?",
+            (r["occurrence_id"], r["composition_id"])).fetchone()
+        if occ is None:
+            raise RecoveryCorruption(
+                "adoption references an occurrence outside its lineage")
+        if r["creative_entity_id"] is not None:
+            ent = con.execute(
+                "SELECT project_id FROM creative_entities WHERE id = ?",
+                (r["creative_entity_id"],)).fetchone()
+            if ent is None:
+                raise RecoveryCorruption(
+                    "adoption references a missing CreativeEntity")
+            comp = con.execute(
+                "SELECT project_id FROM compositions WHERE id = ?",
+                (r["composition_id"],)).fetchone()
+            if comp is None or comp["project_id"] != ent["project_id"]:
+                raise RecoveryCorruption(
+                    "adoption crosses Projects")
+    # Active-liveness uniqueness (frozen §2.2): at most one ACTIVE
+    # occurrence per (composition lineage, CreativeEntity) claim.
+    dupes = con.execute(
+        "SELECT a.composition_id, a.creative_entity_id, COUNT(*) AS n "
+        "FROM composition_occurrence_authority_subjects a "
+        "WHERE a.creative_entity_id IS NOT NULL "
+        "AND NOT EXISTS ("
+        "  SELECT 1 FROM composition_identity_operation_sources s "
+        "  JOIN composition_identity_operations op ON op.id = s.operation_id "
+        "  WHERE op.composition_id = a.composition_id "
+        "  AND s.occurrence_id = a.occurrence_id "
+        "  AND s.terminates_identity = 1) "
+        "GROUP BY a.composition_id, a.creative_entity_id HAVING n > 1"
+    ).fetchall()
+    if dupes:
+        raise RecoveryCorruption(
+            "overlapping active CreativeEntity claims: "
+            f"{[(d['composition_id'], d['creative_entity_id']) for d in dupes]}"
+        )
+
+
+def _verify_m13_interpretations(con) -> None:
+    from soloring.errors import SoloRingError
+    from soloring.production_world.canonical import (
+        verify_stored_interpretation,
+    )
+
+    rows = con.execute(
+        "SELECT production_revision_id, schema_version, x_mm, y_mm, z_mm, "
+        "yaw_udeg, pitch_udeg, roll_udeg, interpretation_json, "
+        "interpretation_hash "
+        "FROM production_revision_spatial_interpretations").fetchall()
+    for r in rows:
+        snap = con.execute(
+            "SELECT snapshot_hash FROM production_revisions "
+            "WHERE id = ?", (r["production_revision_id"],)).fetchone()
+        if snap is None:
+            raise RecoveryCorruption(
+                "interpretation references a missing Production Revision")
+        blob = con.execute(
+            "SELECT blob_hash FROM production_revision_closures "
+            "WHERE production_revision_id = ? AND contract_key = "
+            "'retained_blob' AND contract_version = 1",
+            (r["production_revision_id"],)).fetchone()
+        if blob is None:
+            raise RecoveryCorruption(
+                "interpretation parent has no retained_blob/v1 closure")
+        if r["schema_version"] != 1:
+            raise RecoveryCorruption("interpretation schema_version != 1")
+        try:
+            verify_stored_interpretation(
+                interpretation_json=r["interpretation_json"],
+                interpretation_hash=r["interpretation_hash"],
+                x_mm=r["x_mm"], y_mm=r["y_mm"], z_mm=r["z_mm"],
+                yaw_udeg=r["yaw_udeg"], pitch_udeg=r["pitch_udeg"],
+                roll_udeg=r["roll_udeg"],
+                row_production_revision_id=r["production_revision_id"],
+                parent_snapshot_hash=snap["snapshot_hash"],
+                parent_blob_hash=blob["blob_hash"],
+            )
+        except SoloRingError as exc:
+            raise RecoveryCorruption(
+                f"corrupt spatial interpretation "
+                f"{r['production_revision_id']}: {exc.message}") from exc
+
+
 def _verify_m12_composition_state(staged_db: Path) -> None:
     """Verify every M12 immutable Composition state row (frozen R3 §16.6).
 
@@ -1456,6 +1616,9 @@ async def backup(
         # M12 §16.3: immutable composition/occurrence state is verified in
         # the staged DB before liveness enumeration/certification.
         await asyncio.to_thread(_verify_m12_composition_state, staged_db)
+        # M13 §23.4: immutable production-world state is verified in the
+        # staged DB before liveness enumeration/certification.
+        await asyncio.to_thread(_verify_m13_world_state, staged_db)
         liveness = await asyncio.to_thread(_enumerate_liveness, staged_db)
 
         blob_root = Path(settings.blob_dir)
@@ -1583,12 +1746,19 @@ async def restore(backup_root: Path, dest: Path) -> dict:
         await asyncio.to_thread(_verify_staged_db, staged_db, expected_head=head)
         if head == PRE_M11_ALEMBIC_HEAD:
             await asyncio.to_thread(_prove_no_m11_state, staged_db)
+            await asyncio.to_thread(_prove_no_m13_state, staged_db)
         elif head == M11_ALEMBIC_HEAD:
             await asyncio.to_thread(_verify_m11_production_state, staged_db)
             await asyncio.to_thread(_prove_no_m12_state, staged_db)
-        else:  # 0013
+            await asyncio.to_thread(_prove_no_m13_state, staged_db)
+        elif head == M12_ALEMBIC_HEAD:  # 0013
             await asyncio.to_thread(_verify_m11_production_state, staged_db)
             await asyncio.to_thread(_verify_m12_composition_state, staged_db)
+            await asyncio.to_thread(_prove_no_m13_state, staged_db)
+        else:  # 0014
+            await asyncio.to_thread(_verify_m11_production_state, staged_db)
+            await asyncio.to_thread(_verify_m12_composition_state, staged_db)
+            await asyncio.to_thread(_verify_m13_world_state, staged_db)
 
         # Step 9: exact liveness equality with the manifest (the restored
         # DATA root is not a backup artifact; verify against the parsed

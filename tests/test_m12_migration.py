@@ -136,10 +136,9 @@ def test_0013_orm_metadata_matches_upgraded_schema_and_resolved_names(
         import re as _re
 
         out = {}
-        for (tbl,) in con.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' "
-            "AND name LIKE 'composition%'"
-        ):
+        # M13 adds composition%-named production-world tables; M12 parity
+        # stays exact over the fixed ten-table M12 inventory.
+        for tbl in M12_TABLES:
             cols = tuple(sorted((r[1], r[2], r[3], r[5])
                                 for r in con.execute(f'PRAGMA table_info("{tbl}")')))
             fks = tuple(sorted(con.execute(f'PRAGMA foreign_key_list("{tbl}")')))
@@ -253,8 +252,8 @@ def test_migration_head_is_exactly_0013(tmp_path, monkeypatch):
     ver = con.execute("SELECT version_num FROM alembic_version").fetchone()[0]
     files = sorted(p.name for p in VERSIONS.glob("0*.py"))
     con.close()
-    assert ver == "0013_m12_composition_occurrences"
-    assert files[-1] == "0013_m12_composition_occurrences.py"
+    assert ver == "0014_m13_authority_complete_world"  # M13 advances the head
+    assert files[-1] == "0014_m13_authority_complete_world.py"
 
 
 def test_0012_predecessor_database_upgrades_cleanly_to_0013(tmp_path, monkeypatch):

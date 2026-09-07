@@ -128,7 +128,9 @@ def test_0012_exact_orm_migration_parity(tmp_path, monkeypatch):
         "production_objects", "production_revisions",
         "production_revision_closures", "production_revision_source_assets",
     }
-    assert set(mig) == set(orm)
+    # M13 advances the ORM past 0012; parity is exact for the M11 tables
+    # (the ORM snapshot is a superset after later milestones).
+    assert set(mig) <= set(orm)
     for tbl in mig:
         assert mig[tbl] == orm[tbl], f"ORM/migration drift on {tbl}: {mig[tbl]} vs {orm[tbl]}"
 
@@ -264,5 +266,5 @@ def test_migration_head_is_0012(tmp_path, monkeypatch):
     ver = con.execute("SELECT version_num FROM alembic_version").fetchone()[0]
     files = sorted(p.name for p in VERSIONS.glob("0*.py"))
     con.close()
-    assert ver == "0013_m12_composition_occurrences"  # M12 advances the head
-    assert files[-1] == "0013_m12_composition_occurrences.py"
+    assert ver == "0014_m13_authority_complete_world"  # M13 advances the head
+    assert files[-1] == "0014_m13_authority_complete_world.py"

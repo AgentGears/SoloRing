@@ -37,7 +37,13 @@ def _m12_source() -> str:
         BASE_DIR / "server/soloring/composition/readiness.py",
         BASE_DIR / "server/soloring/composition/impacts.py",
     ]
-    return "\n".join(f.read_text(encoding="utf-8") for f in files)
+    src = "\n".join(f.read_text(encoding="utf-8") for f in files)
+    # M13 R3 §22.1: the impacts FK-consumer registry enumerates the new M13
+    # occurrence-FK families BY TABLE NAME (a classification inventory, not
+    # a spatial-authority write); strip it before the token scan.
+    import re as _re
+
+    return _re.sub(r"FK_CONSUMERS: dict.*?\n\}\n", "", src, count=1, flags=_re.S)
 
 
 def test_m12_has_no_writes_to_production_revision_authority():

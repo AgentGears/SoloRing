@@ -39,6 +39,12 @@ from soloring.spatial.math import Transform as _Transform
 # Frozen §8.1 — the mechanically discovered FK consumer set at 0013, with
 # impact classification. A structural test re-derives this from PRAGMA and
 # fails closed on any unregistered FK.
+# Frozen M13 R3 §22.1 — the five direct M13 occurrence-FK families join the
+# enumeration at 0014: subject adoption is durable identity metadata that
+# never blocks by itself; active PI features/tracks are live current
+# blockers once their authoring surfaces exist (M13B); the two historical
+# ShotRevision projections never block. Live-blocker resolution itself
+# activates with those surfaces — no M13 rows can exist before them.
 FK_CONSUMERS: dict[tuple[str, str], str] = {
     ("composition_working_occurrences", "occurrence_id"): "working/internal",
     ("composition_working_occurrences", "composition_id"): "working/internal",
@@ -48,6 +54,16 @@ FK_CONSUMERS: dict[tuple[str, str], str] = {
     ("composition_identity_operation_sources", "composition_id"): "lineage/internal",
     ("composition_identity_operation_targets", "occurrence_id"): "lineage/internal",
     ("composition_identity_operation_targets", "composition_id"): "lineage/internal",
+    ("composition_occurrence_authority_subjects", "occurrence_id"): "adoption/non-blocking",
+    ("composition_occurrence_authority_subjects", "composition_id"): "adoption/non-blocking",
+    ("production_instance_features", "occurrence_id"): "instance-state/live-blocker",
+    ("production_instance_features", "composition_id"): "instance-state/live-blocker",
+    ("production_instance_spatial_tracks", "occurrence_id"): "instance-spatial/live-blocker",
+    ("production_instance_spatial_tracks", "composition_id"): "instance-spatial/live-blocker",
+    ("shot_revision_production_instance_feature_states", "occurrence_id"): "historical/non-blocking",
+    ("shot_revision_production_instance_feature_states", "composition_id"): "historical/non-blocking",
+    ("shot_revision_production_instance_spatial_states", "occurrence_id"): "historical/non-blocking",
+    ("shot_revision_production_instance_spatial_states", "composition_id"): "historical/non-blocking",
 }
 
 # Explicit non-FK durable-consumer registry — empty in M12 (frozen §2.5).
