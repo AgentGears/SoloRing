@@ -47,3 +47,74 @@ class AuthoritySubjectRead(BaseModel):
     subject_id: str | None
     creative_entity_id: str | None
     created_at: str | None
+
+
+class PIFeatureCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    key: str
+    kind: str
+    value_type: str
+    name: str
+    description: str | None = None
+    enum_values: list[str] | None = None
+    unit: str | None = None
+    supersedes_feature_id: str | None = None
+
+
+class PIFeaturePatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = None
+    description: str | None = None
+
+
+class PIFeatureRead(BaseModel):
+    id: str
+    composition_id: str
+    occurrence_id: str
+    key: str
+    kind: str
+    value_type: str
+    name: str
+    description: str | None
+    enum_values_json: str | None
+    unit: str | None
+    supersedes_feature_id: str | None
+    created_at: str
+    updated_at: str
+
+
+class PITransitionCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    anchor_type: str
+    anchor_id: str
+    boundary: str
+    operation: str
+    value: object | None = None
+
+
+class PITrackCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    occurrence_id: str
+    requirement: str
+
+
+class PITrackRead(BaseModel):
+    id: str
+    spatial_world_id: str
+    composition_id: str
+    occurrence_id: str
+    requirement: str
+
+
+class PITrackTransitionCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    anchor_type: str
+    anchor_id: str
+    boundary: str
+    operation: str
+    transform: dict | None = None

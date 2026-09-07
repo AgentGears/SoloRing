@@ -38,12 +38,19 @@ def _m12_source() -> str:
         BASE_DIR / "server/soloring/composition/impacts.py",
     ]
     src = "\n".join(f.read_text(encoding="utf-8") for f in files)
-    # M13 R3 §22.1: the impacts FK-consumer registry enumerates the new M13
-    # occurrence-FK families BY TABLE NAME (a classification inventory, not
-    # a spatial-authority write); strip it before the token scan.
+    # M13 R3 §22.1/§22.3: the impacts FK-consumer registry enumerates the
+    # new M13 occurrence-FK families BY TABLE NAME, and the live-blocker
+    # resolver READS those tables to resolve termination blockers — a
+    # classification inventory and read-only resolution, never a
+    # spatial-authority write. Strip both before the token scan.
     import re as _re
 
-    return _re.sub(r"FK_CONSUMERS: dict.*?\n\}\n", "", src, count=1, flags=_re.S)
+    src = _re.sub(r"FK_CONSUMERS: dict.*?\n\}\n", "", src, count=1,
+                  flags=_re.S)
+    src = _re.sub(
+        r"async def _resolve_live_blockers.*?(?=\n(?:async )?def )",
+        "", src, count=1, flags=_re.S)
+    return src
 
 
 def test_m12_has_no_writes_to_production_revision_authority():

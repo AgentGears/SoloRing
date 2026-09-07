@@ -108,6 +108,94 @@ def _shot_not_found(shot_id: str) -> SoloRingError:
     )
 
 
+def resolve_feature_winners_core(
+    *, ordering, target_rank: int, features: list[dict], transitions: list[dict],
+) -> list[dict]:
+    """THE shared rank/winner/value-verification core (M13 R3 §8.2).
+
+    Subject-agnostic: ``features`` rows carry ``id``/``owner_id`` plus the
+    Feature schema fields; ``transitions`` rows carry ``feature_id`` plus
+    the M7 transition fields. Returns winner records (``set`` survivors
+    with verified canonical values, sorted by (owner_id, feature_key)).
+    Raises internal_invariant on ambiguous winners, out-of-domain
+    operations, malformed clears, or stored-value corruption — exactly as
+    the M7 resolver does, so Entity and Production Instance state can
+    never acquire independent boundary semantics.
+    """
+    by_feature: dict[str, list] = {}
+    for t in transitions:
+        try:
+            rank = ordering.rank_of(t["anchor_type"], t["anchor_id"], t["boundary"])
+        except SoloRingError:
+            raise internal_invariant(
+                f"Active feature transition {t['id']} anchored at "
+                f"({t['anchor_type']}, {t['anchor_id']}, {t['boundary']}) "
+                "is not present in the canonical ordering."
+            )
+        if rank <= target_rank:
+            by_feature.setdefault(t["feature_id"], []).append((rank, t))
+
+    feature_by_id = {f["id"]: dict(f) for f in features}
+    winners: list[dict] = []
+    for fid, eligible in by_feature.items():
+        best_rank = max(r for r, _ in eligible)
+        best = [t for r, t in eligible if r == best_rank]
+        if len(best) != 1:
+            raise internal_invariant(
+                f"Ambiguous effective transition for feature {fid}: "
+                f"{len(best)} transitions share the winning rank — "
+                "no ID/timestamp/UUID tie-breaking is permitted."
+            )
+        t = best[0]
+        if t["operation"] == "clear":
+            if t["value_json"] is not None or t["value_hash"] is not None:
+                raise internal_invariant(
+                    f"Stored clear transition {t['id']} carries non-NULL "
+                    "value columns."
+                )
+            continue  # canonical absence (§5 clear semantics)
+        if t["operation"] != "set":
+            raise internal_invariant(
+                f"Stored transition {t['id']} has operation "
+                f"{t['operation']!r} outside the set|clear domain."
+            )
+        feature = feature_by_id[fid]
+        try:
+            enum_values = None
+            if feature["value_type"] == "enum":
+                enum_values = json.loads(feature["enum_values_json"])
+            stored_value = json.loads(t["value_json"])
+            v_json, v_hash = canonicalize_value(
+                feature["value_type"], stored_value, enum_values=enum_values
+            )
+        except Exception as exc:
+            raise internal_invariant(
+                f"Stored transition {t['id']} value cannot be decoded "
+                "against its Feature schema — persisted corruption."
+            ) from exc
+        if v_json != t["value_json"] or v_hash != t["value_hash"]:
+            raise internal_invariant(
+                f"Stored transition {t['id']} value disagrees with its "
+                "Feature schema under re-canonicalization."
+            )
+        winners.append({
+            "owner_id": feature["owner_id"],
+            "feature_id": fid,
+            "feature_key": feature["key"],
+            "feature_kind": feature["kind"],
+            "value_type": feature["value_type"],
+            "unit": feature["unit"],
+            "value_json": t["value_json"],
+            "value_hash": t["value_hash"],
+            "source_transition_id": t["id"],
+            "source_anchor_type": t["anchor_type"],
+            "source_anchor_id": t["anchor_id"],
+            "source_boundary": t["boundary"],
+        })
+    winners.sort(key=lambda w: (w["owner_id"], w["feature_key"]))
+    return winners
+
+
 def narrative_context_required(shot_id: str) -> SoloRingError:
     return SoloRingError(
         ErrorCode.NARRATIVE_CONTEXT_REQUIRED,
@@ -216,86 +304,29 @@ async def resolve_effective_feature_state(
             "canonical ordering during Feature-state resolution."
         )
 
-    # Rank every transition through the ordering; a transition anchored
-    # outside the canonical stream is stored corruption.
-    by_feature: dict[str, list] = {}
-    for t in transitions:
-        try:
-            rank = ordering.rank_of(t["anchor_type"], t["anchor_id"], t["boundary"])
-        except SoloRingError:
-            raise internal_invariant(
-                f"Active feature transition {t['id']} anchored at "
-                f"({t['anchor_type']}, {t['anchor_id']}, {t['boundary']}) "
-                "is not present in the canonical ordering."
-            )
-        if rank <= target_rank:
-            by_feature.setdefault(t["feature_id"], []).append((rank, t))
-
-    feature_by_id = {f["id"]: dict(f) for f in features}
-    winners: list[EffectiveFeatureState] = []
-    for fid, eligible in by_feature.items():
-        best_rank = max(r for r, _ in eligible)
-        best = [t for r, t in eligible if r == best_rank]
-        if len(best) != 1:
-            raise internal_invariant(
-                f"Ambiguous effective transition for feature {fid}: "
-                f"{len(best)} transitions share the winning rank — "
-                "no ID/timestamp/UUID tie-breaking is permitted."
-            )
-        t = best[0]
-        if t["operation"] == "clear":
-            if t["value_json"] is not None or t["value_hash"] is not None:
-                raise internal_invariant(
-                    f"Stored clear transition {t['id']} carries non-NULL "
-                    "value columns."
-                )
-            continue  # canonical absence (§5 clear semantics)
-        if t["operation"] != "set":
-            raise internal_invariant(
-                f"Stored transition {t['id']} has operation "
-                f"{t['operation']!r} outside the set|clear domain."
-            )
-        feature = feature_by_id[fid]
-        # Stored-value verification: re-canonicalize and require exact
-        # byte/hash equality with what is persisted. ANY decoding failure
-        # here is database corruption — normalized to the invariant error,
-        # never leaked as client validation or an unstructured exception.
-        try:
-            enum_values = None
-            if feature["value_type"] == "enum":
-                enum_values = json.loads(feature["enum_values_json"])
-            stored_value = json.loads(t["value_json"])
-            v_json, v_hash = canonicalize_value(
-                feature["value_type"], stored_value, enum_values=enum_values
-            )
-        except Exception as exc:
-            raise internal_invariant(
-                f"Stored transition {t['id']} value cannot be decoded "
-                "against its Feature schema — persisted corruption."
-            ) from exc
-        if v_json != t["value_json"] or v_hash != t["value_hash"]:
-            raise internal_invariant(
-                f"Stored transition {t['id']} value disagrees with its "
-                "Feature schema under re-canonicalization."
-            )
-        winners.append(
-            EffectiveFeatureState(
-                entity_id=feature["entity_id"],
-                feature_id=fid,
-                feature_key=feature["key"],
-                feature_kind=feature["kind"],
-                value_type=feature["value_type"],
-                unit=feature["unit"],
-                value_json=t["value_json"],
-                value_hash=t["value_hash"],
-                source_transition_id=t["id"],
-                source_anchor_type=t["anchor_type"],
-                source_anchor_id=t["anchor_id"],
-                source_boundary=t["boundary"],
-            )
+    # The shared rank/winner/value-verification core (M13 R3 §8.2): the
+    # Entity resolver maps rows onto it; Production Instance state maps
+    # the same core so boundary semantics can never diverge.
+    core_features = [dict(f, owner_id=f["entity_id"]) for f in features]
+    winners = [
+        EffectiveFeatureState(
+            entity_id=w["owner_id"],
+            feature_id=w["feature_id"],
+            feature_key=w["feature_key"],
+            feature_kind=w["feature_kind"],
+            value_type=w["value_type"],
+            unit=w["unit"],
+            value_json=w["value_json"],
+            value_hash=w["value_hash"],
+            source_transition_id=w["source_transition_id"],
+            source_anchor_type=w["source_anchor_type"],
+            source_anchor_id=w["source_anchor_id"],
+            source_boundary=w["source_boundary"],
         )
-
-    winners.sort(key=lambda s: (s.entity_id, s.feature_key))
+        for w in resolve_feature_winners_core(
+            ordering=ordering, target_rank=target_rank,
+            features=core_features, transitions=transitions)
+    ]
     return ResolutionOutcome(
         shot_id=shot_id, assigned=True,
         relevant_temporal_data=relevant, states=tuple(winners),
