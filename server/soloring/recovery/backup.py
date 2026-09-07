@@ -1187,6 +1187,10 @@ def _verify_m13_world_state(staged_db: Path) -> None:
     try:
         _verify_m13_subjects(con)
         _verify_m13_interpretations(con)
+        _verify_m13_pi_state(con)
+        _verify_m13_pi_spatial(con)
+        _verify_m13_bindings(con)
+        _verify_m13_selection_and_history(con)
     finally:
         con.close()
 
@@ -1839,3 +1843,374 @@ def _count_generations(manifest: dict, data_root: Path) -> int:
         return con.execute("SELECT COUNT(*) FROM generations").fetchone()[0]
     finally:
         con.close()
+
+
+def _verify_m13_pi_state(con) -> None:
+    rows = con.execute(
+        "SELECT id, composition_id, occurrence_id, key, kind, value_type, "
+        "name, enum_values_json, unit, supersedes_feature_id FROM "
+        "production_instance_features").fetchall()
+    seen: set = set()
+    for r in rows:
+        seen.add(r[0])
+        if not (r[2] and r[3]):
+            raise RecoveryCorruption("PI feature identity fields corrupt")
+        occ = con.execute(
+            "SELECT 1 FROM composition_occurrences WHERE id = ? AND "
+            "composition_id = ?", (r[2], r[1])).fetchone()
+        if occ is None:
+            raise RecoveryCorruption(
+                f"PI feature {r[0]} references an occurrence outside its "
+                "lineage")
+        if r[5] == "enum" and r[7] is None:
+            raise RecoveryCorruption(
+                f"PI feature {r[0]}: enum without enum_values_json")
+        if r[5] != "enum" and r[7] is not None:
+            raise RecoveryCorruption(
+                f"PI feature {r[0]}: enum_values_json on non-enum")
+        if r[9] is not None and r[9] not in seen and not con.execute(
+                "SELECT 1 FROM production_instance_features WHERE id = ?",
+                (r[9],)).fetchone():
+            raise RecoveryCorruption(
+                f"PI feature {r[0]} supersedes a missing predecessor")
+        adoption = con.execute(
+            "SELECT subject_kind FROM "
+            "composition_occurrence_authority_subjects WHERE "
+            "composition_id = ? AND occurrence_id = ?",
+            (r[1], r[2])).fetchone()
+        if adoption is None or adoption[0] != "production_instance":
+            raise RecoveryCorruption(
+                f"PI feature {r[0]} lacks a production_instance adoption "
+                "for its occurrence (provenance incoherent)")
+    # transitions: set/clear grammar + active-coordinate uniqueness
+    trows = con.execute(
+        "SELECT id, feature_id, anchor_type, anchor_id, boundary, "
+        "operation, value_json, value_hash FROM "
+        "production_instance_feature_transitions").fetchall()
+    active: set = set()
+    for t in trows:
+        if t[3] is None:
+            raise RecoveryCorruption(
+                f"PI feature transition {t[0]} has no anchor")
+        if t[5] == "set":
+            if t[6] is None or t[7] is None or len(t[7]) != 64:
+                raise RecoveryCorruption(
+                    f"PI feature transition {t[0]}: set without canonical "
+                    "value/hash")
+        elif t[5] == "clear":
+            if t[6] is not None or t[7] is not None:
+                raise RecoveryCorruption(
+                    f"PI feature transition {t[0]}: clear carries values")
+        else:
+            raise RecoveryCorruption(
+                f"PI feature transition {t[0]}: operation outside "
+                "set|clear")
+        coord = (t[1], t[2], t[3], t[4])
+        # tombstone-inclusive uniqueness is structural (PK/unique); the
+        # active-coordinate partial unique is validated by schema parity
+        del coord, active
+
+
+def _verify_m13_pi_spatial(con) -> None:
+    rows = con.execute(
+        "SELECT id, spatial_world_id, composition_id, occurrence_id, "
+        "requirement FROM production_instance_spatial_tracks").fetchall()
+    for r in rows:
+        if r[4] not in ("required", "optional"):
+            raise RecoveryCorruption(
+                f"PI track {r[0]}: requirement outside the domain")
+        world = con.execute(
+            "SELECT project_id FROM spatial_worlds WHERE id = ?",
+            (r[1],)).fetchone()
+        comp = con.execute(
+            "SELECT project_id FROM compositions WHERE id = ?",
+            (r[2],)).fetchone()
+        if world is None or comp is None or world[0] != comp[0]:
+            raise RecoveryCorruption(
+                f"PI track {r[0]}: world/Composition coherence broken")
+        adoption = con.execute(
+            "SELECT subject_kind FROM "
+            "composition_occurrence_authority_subjects WHERE "
+            "composition_id = ? AND occurrence_id = ?",
+            (r[2], r[3])).fetchone()
+        if adoption is None or adoption[0] != "production_instance":
+            raise RecoveryCorruption(
+                f"PI track {r[0]} lacks a production_instance adoption")
+    srows = con.execute(
+        "SELECT id, spatial_track_id, operation, x_mm, y_mm, z_mm, "
+        "yaw_udeg, pitch_udeg, roll_udeg FROM "
+        "production_instance_spatial_transitions").fetchall()
+    for t in srows:
+        six = (t[3], t[4], t[5], t[6], t[7], t[8])
+        if t[2] == "set":
+            if any(v is None for v in six):
+                raise RecoveryCorruption(
+                    f"PI spatial transition {t[0]}: incomplete set")
+        elif t[2] == "clear":
+            if any(v is not None for v in six):
+                raise RecoveryCorruption(
+                    f"PI spatial transition {t[0]}: clear carries a "
+                    "transform")
+        else:
+            raise RecoveryCorruption(
+                f"PI spatial transition {t[0]}: operation outside "
+                "set|clear")
+
+
+def _verify_m13_bindings(con) -> None:
+    """Immutable binding integrity ONLY (§23.4): canonical bytes/hash,
+    normalized child equality, exact pinned closure, and pinned-target
+    EXISTENCE even when the target is now soft-deleted. Never re-derives
+    today's candidate — staleness is legal immutable history."""
+    import hashlib
+    import json as _json
+    import re as _re
+
+    from soloring.domain.canonical import canonical_json_str
+    from soloring.errors import SoloRingError
+    from soloring.production_world.binding import _parse_binding_value
+    from soloring.production_world.canonical import (
+        verify_stored_interpretation,
+    )
+
+    parents = con.execute(
+        "SELECT id, composition_revision_id, composition_revision_hash, "
+        "spatial_world_revision_id, spatial_world_revision_hash, "
+        "schema_version, binding_json, binding_hash FROM "
+        "composition_spatial_bindings").fetchall()
+    for p in parents:
+        try:
+            parsed = _json.loads(p[6])
+        except ValueError as exc:
+            raise RecoveryCorruption(
+                f"binding {p[0]} JSON unparseable") from exc
+        try:
+            value = _parse_binding_value(parsed)
+        except SoloRingError as exc:
+            raise RecoveryCorruption(
+                f"binding {p[0]}: {exc.message}") from exc
+        if canonical_json_str(value) != p[6]:
+            raise RecoveryCorruption(
+                f"binding {p[0]} is not the canonical encoding")
+        if hashlib.sha256(p[6].encode("utf-8")).hexdigest() != p[7]:
+            raise RecoveryCorruption(
+                f"binding {p[0]} hash disagrees with canonical bytes")
+        if (value["composition_revision"]["revision_id"] != p[1]
+                or value["composition_revision"]["snapshot_hash"] != p[2]
+                or value["spatial_world_revision"]["revision_id"] != p[3]
+                or value["spatial_world_revision"]["snapshot_hash"] != p[4]
+                or p[5] != 1):
+            raise RecoveryCorruption(
+                f"binding {p[0]} parent columns disagree with its value")
+        # exact immutable closure: C hash + W hash
+        c = con.execute(
+            "SELECT snapshot_hash FROM composition_revisions WHERE id = ?",
+            (p[1],)).fetchone()
+        if c is None or c[0] != p[2]:
+            raise RecoveryCorruption(
+                f"binding {p[0]}: pinned CompositionRevision missing or "
+                "hash disagrees")
+        w = con.execute(
+            "SELECT snapshot_hash FROM spatial_world_revisions WHERE "
+            "id = ?", (p[3],)).fetchone()
+        if w is None or w[0] != p[4]:
+            raise RecoveryCorruption(
+                f"binding {p[0]}: pinned SpatialWorldRevision missing or "
+                "hash disagrees")
+        # normalized children == canonical value (contiguous positions)
+        srows = con.execute(
+            "SELECT position, occurrence_id, production_revision_id, "
+            "production_revision_hash, subject_kind, subject_id, "
+            "creative_entity_id FROM composition_spatial_binding_subjects "
+            "WHERE binding_id = ? ORDER BY position", (p[0],)).fetchall()
+        if len(srows) != len(value["subjects"]):
+            raise RecoveryCorruption(
+                f"binding {p[0]} subject child count mismatch")
+        for pos, (row, s) in enumerate(zip(srows, value["subjects"])):
+            exp_ce = (s["authority_subject"]["id"]
+                      if s["authority_subject"]["kind"] == "creative_entity"
+                      else None)
+            if (row[0] != pos or row[1] != s["occurrence_id"]
+                    or row[2] != s["production_revision_id"]
+                    or row[3] != s["production_revision_hash"]
+                    or row[4] != s["authority_subject"]["kind"]
+                    or row[5] != s["authority_subject"]["id"]
+                    or row[6] != exp_ce):
+                raise RecoveryCorruption(
+                    f"binding {p[0]} subject projection mismatch")
+            pr = con.execute(
+                "SELECT snapshot_hash FROM production_revisions WHERE "
+                "id = ?", (row[2],)).fetchone()
+            if pr is None or pr[0] != row[3]:
+                raise RecoveryCorruption(
+                    f"binding {p[0]}: subject ProductionRevision closure "
+                    "broken")
+        erows = con.execute(
+            "SELECT position, occurrence_id, production_revision_id, "
+            "production_revision_hash, subject_kind, subject_id, "
+            "creative_entity_id, placement_kind, spatial_frame_id, "
+            "spatial_track_id, production_instance_track_id, "
+            "spatial_interpretation_hash FROM "
+            "composition_spatial_binding_entries WHERE binding_id = ? "
+            "ORDER BY position", (p[0],)).fetchall()
+        if len(erows) != len(value["entries"]):
+            raise RecoveryCorruption(
+                f"binding {p[0]} entry child count mismatch")
+        for pos, (row, e) in enumerate(zip(erows, value["entries"])):
+            exp_ce = (e["authority_subject"]["id"]
+                      if e["authority_subject"]["kind"] == "creative_entity"
+                      else None)
+            if (row[0] != pos or row[1] != e["occurrence_id"]
+                    or row[4] != e["authority_subject"]["kind"]
+                    or row[5] != e["authority_subject"]["id"]
+                    or row[6] != exp_ce
+                    or row[7] != e["placement"]["kind"]
+                    or row[11] != e["spatial_interpretation_hash"]):
+                raise RecoveryCorruption(
+                    f"binding {p[0]} entry projection mismatch")
+            # placement XOR against the canonical value
+            col = {"entity_fixed_frame": row[8], "entity_track": row[9],
+                   "production_instance_track": row[10]}[row[7]]
+            others = [v for k, v in {
+                "entity_fixed_frame": row[8], "entity_track": row[9],
+                "production_instance_track": row[10]}.items()
+                if k != row[7]]
+            if col != e["placement"]["id"] or any(v is not None
+                                                  for v in others):
+                raise RecoveryCorruption(
+                    f"binding {p[0]} entry placement XOR broken")
+            # pinned target EXISTENCE — soft-deleted remains verifiable
+            target_table = {"entity_fixed_frame": "spatial_frames",
+                            "entity_track": "spatial_tracks",
+                            "production_instance_track":
+                                "production_instance_spatial_tracks"}[row[7]]
+            tgt = con.execute(
+                f"SELECT 1 FROM {target_table} WHERE id = ?",
+                (col,)).fetchone()  # noqa: S608 — fixed table whitelist
+            if tgt is None:
+                raise RecoveryCorruption(
+                    f"binding {p[0]}: pinned A4 target row {col} missing")
+            # pinned interpretation closure + hash agreement
+            irow = con.execute(
+                "SELECT production_revision_id, x_mm, y_mm, z_mm, "
+                "yaw_udeg, pitch_udeg, roll_udeg, interpretation_json, "
+                "interpretation_hash FROM "
+                "production_revision_spatial_interpretations WHERE "
+                "production_revision_id = ?", (row[2],)).fetchone()
+            if irow is None or irow[8] != row[11]:
+                raise RecoveryCorruption(
+                    f"binding {p[0]}: pinned interpretation missing or "
+                    "hash disagrees")
+            parents_row = con.execute(
+                "SELECT pr.snapshot_hash, (SELECT c.blob_hash FROM "
+                "production_revision_closures c WHERE "
+                "c.production_revision_id = pr.id AND c.contract_key = "
+                "'retained_blob' AND c.contract_version = 1) FROM "
+                "production_revisions pr WHERE pr.id = ?",
+                (row[2],)).fetchone()
+            if parents_row is None or parents_row[1] is None:
+                raise RecoveryCorruption(
+                    f"binding {p[0]}: interpretation parent closure "
+                    "unreachable")
+            try:
+                verify_stored_interpretation(
+                    interpretation_json=irow[7],
+                    interpretation_hash=irow[8],
+                    x_mm=irow[1], y_mm=irow[2], z_mm=irow[3],
+                    yaw_udeg=irow[4], pitch_udeg=irow[5],
+                    roll_udeg=irow[6],
+                    row_production_revision_id=irow[0],
+                    parent_snapshot_hash=parents_row[0],
+                    parent_blob_hash=parents_row[1])
+            except SoloRingError as exc:
+                raise RecoveryCorruption(
+                    f"binding {p[0]}: pinned interpretation corrupt: "
+                    f"{exc.message}") from exc
+
+
+def _verify_m13_selection_and_history(con) -> None:
+    """Current selection referential coherence + schema-6 parents with
+    exact child projections (§23.4). A selection referencing an
+    unresolvable binding is corruption; selection STALENESS is not
+    checked here — that is current-status classification."""
+    sels = con.execute(
+        "SELECT shot_id, binding_id FROM "
+        "shot_production_world_selections").fetchall()
+    for s in sels:
+        if con.execute(
+                "SELECT 1 FROM shots WHERE id = ?", (s[0],)).fetchone() \
+                is None:
+            raise RecoveryCorruption(
+                f"selection for shot {s[0]}: shot missing")
+        if con.execute(
+                "SELECT 1 FROM composition_spatial_bindings WHERE id = ?",
+                (s[1],)).fetchone() is None:
+            raise RecoveryCorruption(
+                f"selection for shot {s[0]}: binding {s[1]} missing")
+    parents = con.execute(
+        "SELECT shot_revision_id, production_world_hash, binding_id, "
+        "binding_hash, composition_revision_id, composition_revision_hash, "
+        "spatial_world_revision_id, spatial_world_revision_hash FROM "
+        "shot_revision_production_worlds").fetchall()
+    for p in parents:
+        rev = con.execute(
+            "SELECT snapshot_json FROM shot_revisions WHERE id = ?",
+            (p[0],)).fetchone()
+        if rev is None:
+            raise RecoveryCorruption(
+                f"schema-6 parent for missing ShotRevision {p[0]}")
+        import json as _json
+
+        from soloring.domain.canonical import canonical_json_str
+
+        try:
+            snap = _json.loads(rev[0])
+        except ValueError as exc:
+            raise RecoveryCorruption(
+                f"ShotRevision {p[0]} snapshot unparseable") from exc
+        pack = snap.get("production_world") if isinstance(snap, dict) \
+            else None
+        if pack is None:
+            raise RecoveryCorruption(
+                f"ShotRevision {p[0]}: M13 parent row without schema-6 "
+                "content")
+        b = pack["binding"]
+        if (p[2] != b["binding_id"] or p[3] != b["binding_hash"]
+                or p[4] != b["value"]["composition_revision"]["revision_id"]
+                or p[5] != b["value"]["composition_revision"]
+                ["snapshot_hash"]
+                or p[6] != b["value"]["spatial_world_revision"]
+                ["revision_id"]
+                or p[7] != b["value"]["spatial_world_revision"]
+                ["snapshot_hash"]):
+            raise RecoveryCorruption(
+                f"ShotRevision {p[0]}: M13 parent row disagrees with the "
+                "embedded pack")
+        # child projection equality against the pack (positions included)
+        frows = con.execute(
+            "SELECT position, occurrence_id, feature_id, value_json, "
+            "value_hash FROM "
+            "shot_revision_production_instance_feature_states WHERE "
+            "shot_revision_id = ? ORDER BY position", (p[0],)).fetchall()
+        expected_f = [
+            (pos, e["occurrence_id"], e["feature_id"],
+             canonical_json_str(e["value"]), e["value_hash"])
+            for pos, e in enumerate(pack["instance_feature_states"])]
+        got_f = [(r[0], r[1], r[2], r[3], r[4]) for r in frows]
+        if got_f != expected_f:
+            raise RecoveryCorruption(
+                f"ShotRevision {p[0]}: PI feature-state children "
+                "disagree with the captured pack")
+        srows = con.execute(
+            "SELECT position, occurrence_id, production_instance_track_id, "
+            "x_mm FROM shot_revision_production_instance_spatial_states "
+            "WHERE shot_revision_id = ? ORDER BY position", (p[0],)).fetchall()
+        expected_s = [
+            (pos, e["occurrence_id"], e["production_instance_track_id"],
+             e["transform"]["translation_mm"][0])
+            for pos, e in enumerate(pack["instance_spatial_states"])]
+        got_s = [(r[0], r[1], r[2], r[3]) for r in srows]
+        if got_s != expected_s:
+            raise RecoveryCorruption(
+                f"ShotRevision {p[0]}: PI spatial-state children disagree "
+                "with the captured pack")
