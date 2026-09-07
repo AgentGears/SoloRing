@@ -33,6 +33,7 @@ from soloring.production_world import binding as binding_svc
 from soloring.production_world import interpretation as interp
 from soloring.production_world import instance_spatial
 from soloring.production_world import instance_state
+from soloring.production_world import inspection
 from soloring.production_world import selection as selection_svc
 from soloring.production_world import subjects
 
@@ -358,3 +359,24 @@ async def delete_selection(
     await selection_svc.delete_selection(
         session, shot_id, expected_binding_id=body.expected_binding_id)
     return {"ok": True}
+
+
+@router.get("/shots/{shot_id}/production-world")
+async def get_production_world(
+    shot_id: str,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """§14.5/§24.6: the ONE resolver projection — current status, stale
+    details, readiness issues, and the resolved pack/hash when ready."""
+    return await inspection.inspect_production_world(session, shot_id)
+
+
+@router.get("/shot-revisions/{revision_id}/production-world")
+async def get_captured_production_world(
+    revision_id: str,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """§24.7: additive historical projection — captured graph only,
+    explicitly labeled; never calls the current M13 resolver."""
+    return await inspection.read_captured_production_world(
+        session, revision_id)
