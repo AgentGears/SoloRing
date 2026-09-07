@@ -286,6 +286,7 @@ def build_capturable_snapshot(
 def effective_working_snapshot_hash(
     shot, refs, resolved: list[ResolvedDependency], feature_states=(),
     relation_states=(), visual_pack=None, spatial_pack=None,
+    production_world_pack=None,
 ) -> str:
     """The Shot's effective working hash (M6-F15 + M7C §10.4 + M7D §10.2).
 
@@ -295,7 +296,7 @@ def effective_working_snapshot_hash(
     implementation."""
     snapshot, _ = build_capturable_snapshot(
         shot, refs, resolved, feature_states, relation_states, visual_pack,
-        spatial_pack,
+        spatial_pack, production_world_pack,
     )
     return canonical_hash(snapshot)
 

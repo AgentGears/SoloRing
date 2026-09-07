@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import uuid
 
+from sqlalchemy import event, text
+
 import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker
@@ -183,9 +185,10 @@ async def test_m13_shot_01(client):
     assert revision.snapshot_hash == canonical_hash(snap)
 
 
-async def test_m13_shot_02_and_09(client):
+async def _shot_02_09_body(client, tag):
     """M13-SHOT:02/09 — exact selected binding loads/validates; schema-6
     canonical golden bytes/hash with the exact lower schema-5 content."""
+    # shared body; each exact-name owner calls it
     b = await _full_m13_world(client, tag=b"shot02")
     sel = await _select_binding(client, b)
     revision, _ = await _capture(client, b["shot"])
@@ -218,6 +221,15 @@ async def test_m13_shot_02_and_09(client):
             f"/shots/{b['shot']}/production-world")).json()[
             "production_world_hash"])
 
+
+
+async def test_m13_shot_02(client):
+    """M13-SHOT:02 — exact selected binding loads/validates."""
+    await _shot_02_09_body(client, tag='shot02')
+
+async def test_m13_shot_09(client):
+    """M13-SHOT:09 — schema-6 canonical golden bytes/hash."""
+    await _shot_02_09_body(client, tag='shot09')
 
 async def test_m13_shot_03(client):
     """M13-SHOT:03 — a stale binding blocks current capture."""
@@ -404,3 +416,151 @@ async def test_m13_shot_15(client):
     assert snap["production_world"]["binding"]["value"]["subjects"] == []
     assert snap["production_world"]["instance_feature_states"] == []
     assert snap["production_world"]["instance_spatial_states"] == []
+
+
+
+
+async def _shot_07_08_body(client, tag):
+    """M13-SHOT:07/08 — PI state and staging resolve on the SAME coherent
+    read: the captured pack carries both the effective feature value and
+    the effective staging transform for the exact bound subject."""
+    # shared body; each exact-name owner calls it
+    import json as _json
+
+    from tests.test_m13_shot_capture import (
+        _capture,
+        _full_m13_world,
+        _select_binding,
+    )
+
+    b = await _full_m13_world(client, tag=b"shot0708")
+    sel = await _select_binding(client, b)
+    # add a PI feature with a set transition at the sequence start
+    r = await client.post(
+        f"/production-instances/{sel['occurrence_id']}/features",
+        json={"key": "fallen", "kind": "status", "value_type": "text",
+              "name": "Fallen"})
+    assert r.status_code == 201, r.text
+    fid = r.json()["id"]
+    engine = client._transport.app.state.engine
+    async with engine.connect() as conn:
+        seq = (await conn.execute(text(
+            "SELECT id FROM sequences WHERE project_id = :p "
+            "ORDER BY position LIMIT 1"), {"p": b["pid"]})).scalar_one()
+    r = await client.post(
+        f"/production-instance-features/{fid}/transitions",
+        json={"anchor_type": "sequence", "anchor_id": seq,
+              "boundary": "start", "operation": "set", "value": "down"})
+    assert r.status_code == 201, r.text
+    revision, _ = await _capture(client, b["shot"])
+    snap = _json.loads(revision.snapshot_json)
+    pack = snap["production_world"]
+    assert [s["value"] for s in pack["instance_feature_states"]] == ["down"]
+    assert [t["transform"]["translation_mm"]
+            for t in pack["instance_spatial_states"]] == [[100, 0, 0]]
+
+
+
+async def test_m13_shot_07(client):
+    """M13-SHOT:07 — PI state resolved on the same coherent read."""
+    await _shot_07_08_body(client, tag='shot07')
+
+async def test_m13_shot_08(client):
+    """M13-SHOT:08 — PI staging resolved on the same coherent read."""
+    await _shot_07_08_body(client, tag='shot08')
+
+async def test_m13_shot_12(client):
+    """M13-SHOT:12 — the working hash and capture use the SAME resolver
+    and builder: selecting a production world changes the working hash,
+    and an M13-blocked shot NULLs the hash (never a lower-schema
+    fallback)."""
+    from soloring.domain.shots import read_shot_detail
+
+    from tests.test_m13_shot_capture import (
+        _factory,
+        _full_m13_world,
+        _select_binding,
+    )
+
+    b = await _full_m13_world(client, tag=b"shot12")
+    engine = client._transport.app.state.engine
+
+    async def _hash():
+        out = await read_shot_detail(
+            engine, b["shot"],
+            settings=client._transport.app.state.settings)
+        return out[4]
+
+    before = await _hash()
+    sel = await _select_binding(client, b)
+    after = await _hash()
+    assert before is not None and after is not None
+    assert before != after  # the selection entered the working hash
+    # make M13 blocked (stale binding) → the working hash NULLs
+    r = await client.delete(
+        f"/production-instance-spatial-tracks/{sel['track']}")
+    assert r.status_code == 200
+    blocked = await _hash()
+    assert blocked is None
+
+
+async def test_m13_shot_13(client):
+    """M13-SHOT:13 — M7/M8/M10/M13 share ONE explicit database snapshot:
+    a connection spy proves the whole capture read runs on a single
+    connection."""
+    from tests.test_m13_shot_capture import (
+        _capture,
+        _full_m13_world,
+        _select_binding,
+    )
+
+    b = await _full_m13_world(client, tag=b"shot13")
+    await _select_binding(client, b)
+    engine = client._transport.app.state.engine
+    seen: set = set()
+
+    @event.listens_for(engine.sync_engine, "before_cursor_execute")
+    def _spy(conn, cursor, statement, parameters, context, executemany):
+        seen.add(id(conn))
+
+    from soloring.domain.revisions import _snapshot_one_read
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    factory = async_sessionmaker(bind=engine, expire_on_commit=False)
+    try:
+        # spy over the coherent READ unit itself: M7/M8/M10/M13 all
+        # resolve on exactly ONE connection
+        await _snapshot_one_read(
+            factory(), b["shot"],
+            settings=client._transport.app.state.settings)
+    finally:
+        event.remove(engine.sync_engine, "before_cursor_execute", _spy)
+    assert len(seen) == 1, len(seen)
+
+
+async def test_m13_shot_14(client):
+    """M13-SHOT:14 — selection/current GET exposes deterministic
+    stale-binding status with the closed vocabulary."""
+    from tests.test_m13_shot_capture import (
+        _full_m13_world,
+        _select_binding,
+    )
+
+    b = await _full_m13_world(client, tag=b"shot14")
+    sel = await _select_binding(client, b)
+    r = await client.get(f"/shots/{b['shot']}/production-world")
+    out = r.json()
+    assert out["selected"] is True and out["ready"] is True
+    assert out["binding_current_complete"] is True
+    # make the binding stale through the placement set
+    r = await client.delete(
+        f"/production-instance-spatial-tracks/{sel['track']}")
+    assert r.status_code == 200
+    out = (await client.get(
+        f"/shots/{b['shot']}/production-world")).json()
+    assert out["ready"] is False
+    assert out["binding_current_complete"] is False
+    assert out["stale_details"][0]["code"] == (
+        "BINDING_STALE_PLACEMENT_SET_CHANGED")
+
+

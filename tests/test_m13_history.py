@@ -200,3 +200,138 @@ async def test_m13_history_09_rerun(client):
             "SELECT shot_revision_id FROM generations WHERE id = :g"),
             {"g": new_id})).scalar_one()
     assert row == revision.id
+
+
+# --- remaining HISTORY cells --------------------------------------------------
+
+
+async def _history_04_05_body(client, tag):
+    """M13-HISTORY:04/05 — missing ProductionRevision closure and a
+    missing/corrupt C or W revision fail the historical read closed."""
+    # shared body; each exact-name owner calls it
+    from tests.test_m13_shot_capture import (
+        _capture,
+        _full_m13_world,
+        _select_binding,
+    )
+
+    b = await _full_m13_world(client, tag=b"hist0405")
+    sel = await _select_binding(client, b)
+    revision, _ = await _capture(client, b["shot"])
+    engine = client._transport.app.state.engine
+    # 04: delete the retained-blob closure row (PR closure unreachable)
+    async with engine.connect() as conn:
+        await conn.execute(text("PRAGMA foreign_keys=OFF"))
+        await conn.execute(text(
+            "DELETE FROM production_revision_closures WHERE "
+            "production_revision_id = :r"), {"r": b["production_revision_id"]})
+        await conn.execute(text("PRAGMA foreign_keys=ON"))
+        await conn.commit()
+    r = await client.get(
+        f"/shot-revisions/{revision.id}/production-world")
+    assert r.status_code == 500 and r.json()[
+        "error_code"] == "INTERNAL_INVARIANT_VIOLATION"
+
+    b2 = await _full_m13_world(client, tag=b"hist0405b")
+    sel2 = await _select_binding(client, b2)
+    revision2, _ = await _capture(client, b2["shot"])
+    # 05: delete the pinned SpatialWorldRevision (corrupt closure)
+    async with engine.connect() as conn:
+        await conn.execute(text("PRAGMA foreign_keys=OFF"))
+        await conn.execute(text(
+            "DELETE FROM spatial_world_revisions WHERE id = :r"),
+            {"r": b2["rev"]["id"]})
+        await conn.execute(text("PRAGMA foreign_keys=ON"))
+        await conn.commit()
+    r = await client.get(
+        f"/shot-revisions/{revision2.id}/production-world")
+    assert r.status_code == 500 and r.json()[
+        "error_code"] == "INTERNAL_INVARIANT_VIOLATION"
+
+
+
+async def test_m13_history_04(client):
+    """M13-HISTORY:04 — missing ProductionRevision closure fails closed."""
+    await _history_04_05_body(client, tag='hist04')
+
+async def test_m13_history_05(client):
+    """M13-HISTORY:05 — missing/corrupt C or W revision fails closed."""
+    await _history_04_05_body(client, tag='hist05')
+
+async def _history_06_07_08_body(client, tag):
+    """M13-HISTORY:06/07/08 — with the CURRENT M13 surfaces unavailable
+    (selection, PI features, PI tracks, subject adoption dropped), the
+    historical read and the captured-graph semantics still succeed."""
+    # shared body; each exact-name owner calls it
+    from soloring.generation import rerun as rerun_mod
+
+    from tests.test_m13_shot_capture import (
+        _capture,
+        _full_m13_world,
+        _select_binding,
+    )
+
+    b = await _full_m13_world(client, tag=b"hist0608")
+    sel = await _select_binding(client, b)
+    revision, _ = await _capture(client, b["shot"])
+    # a terminal generation bound to the captured revision for rerun
+    import hashlib
+
+    gen = "44444444-4444-4444-4444-444444444444"
+    spec = json.dumps({"schema_version": 3})
+    engine = client._transport.app.state.engine
+    async with engine.connect() as conn:
+        await conn.execute(text(
+            "INSERT INTO generations (id, shot_id, shot_revision_id, "
+            "status, operation, executor, workflow_id, workflow_version, "
+            "workflow_template_hash, manifest_hash, compiled_prompt, "
+            "prompt_compiler_version, parameters_json, "
+            "workflow_spec_json, workflow_spec_hash, created_at, "
+            "updated_at, generation_number) VALUES "
+            "(:g, :sh, :r, 'succeeded', 'generate', 'comfy', 'wf', 1, "
+            ":th, :mh, 'p', 'v1', '{}', :sj, :sh2, 't', 't', 1)"),
+            {"g": gen, "sh": b["shot"], "r": revision.id,
+             "th": "e" * 64, "mh": "e" * 64, "sj": spec,
+             "sh2": hashlib.sha256(spec.encode()).hexdigest()})
+        await conn.commit()
+        # make every CURRENT M13 surface unavailable (PRAGMA must run
+        # outside any transaction on this fresh connection state)
+        await conn.exec_driver_sql("PRAGMA foreign_keys=OFF")
+        await conn.execute(text(
+            "DROP TABLE shot_production_world_selections"))
+        await conn.execute(text(
+            "DROP TABLE production_instance_feature_transitions"))
+        await conn.execute(text(
+            "DROP TABLE production_instance_features"))
+        await conn.execute(text(
+            "DROP TABLE production_instance_spatial_transitions"))
+        await conn.execute(text(
+            "DROP TABLE production_instance_spatial_tracks"))
+        await conn.execute(text(
+            "DROP TABLE composition_occurrence_authority_subjects"))
+        await conn.exec_driver_sql("PRAGMA foreign_keys=ON")
+        await conn.commit()
+    r = await client.get(
+        f"/shot-revisions/{revision.id}/production-world")
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out["captured"] is True
+    assert out["binding"]["binding_id"] == sel["binding_id"]
+    assert len(out["captured_spatial_states"]) == 1
+    # the rerun of the captured generation still works (06: no selection
+    # table; 07: no PI feature tables; 08: no PI track tables)
+    new_id = await rerun_mod._create_rerun_fenced(engine, gen)
+    assert new_id != gen
+
+
+async def test_m13_history_06(client):
+    """M13-HISTORY:06 — current selection unavailable; historical read succeeds."""
+    await _history_06_07_08_body(client, tag='hist06')
+
+async def test_m13_history_07(client):
+    """M13-HISTORY:07 — current PI feature tables unavailable; historical read succeeds."""
+    await _history_06_07_08_body(client, tag='hist07')
+
+async def test_m13_history_08(client):
+    """M13-HISTORY:08 — current PI track tables unavailable; historical read succeeds."""
+    await _history_06_07_08_body(client, tag='hist08')

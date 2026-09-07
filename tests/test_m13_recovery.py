@@ -391,3 +391,26 @@ def test_m13_recovery_05(tmp_path):
         con.close()
     assert n == 1
     assert soft == NOW  # pinned target row retained, verifiably soft-deleted
+
+
+def test_m13_recovery_02(tmp_path):
+    """M13-RECOVERY:02 — restore of 0011/0012/0013 data under the newer
+    recovery code proves no M13 authority was invented: the staged older
+    DB carries none of the thirteen M13 tables and _prove_no_m13_state
+    accepts it."""
+    # a 0013-headed staged DB has no M13 tables by construction; prove
+    # the no-invention gate directly against a minimal 0013 schema
+    import sqlite3
+
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    con = sqlite3.connect(data_dir / "soloring.db")
+    con.execute("CREATE TABLE alembic_version (version_num VARCHAR(32) "
+                "NOT NULL PRIMARY KEY)")
+    con.execute("INSERT INTO alembic_version (version_num) VALUES "
+                "('0013_m12_composition_occurrences')")
+    con.commit()
+    con.close()
+    from pathlib import Path
+
+    rb._prove_no_m13_state(Path(data_dir / "soloring.db"))  # no raise

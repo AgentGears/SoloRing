@@ -44,6 +44,10 @@ jobs:
         run: python scripts/m11_validate_proof_map.py
       - name: Validate M12 proof map
         run: python scripts/m12_validate_proof_map.py
+      - name: M13 proof map
+        run: python scripts/m13_validate_proof_map.py
+      - name: M13 boundary
+        run: python scripts/m13_validate_boundary.py
 
       - name: Run backend tests
         run: python -m pytest -q

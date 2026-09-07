@@ -108,9 +108,9 @@ async def _load_composition_revision(
             "project_id": row.project_id}
 
 
-async def _verify_interpretation(conn, production_revision_id: str,
-                                 parent_snapshot_hash: str,
-                                 parent_blob_hash: str) -> str:
+async def _verify_interpretation_unused(conn, production_revision_id: str,
+                                        parent_snapshot_hash: str,
+                                        parent_blob_hash: str) -> str:
     row = (
         await conn.execute(
             text(
@@ -214,47 +214,56 @@ async def derive_candidate(conn, *, c: dict, w: dict) -> tuple[dict, list]:
     ce_ids = sorted({a["creative_entity_id"] for a in adoptions.values()
                      if a["subject_kind"] == "creative_entity"})
     active_ce_ok: set[str] = set()
-    for eid in ce_ids:
-        ent = (
-            await conn.execute(
-                text("SELECT project_id, deleted_at FROM creative_entities "
-                     "WHERE id = :e"), {"e": eid},
-            )
-        ).first()
-        if ent is None or ent.deleted_at is not None:
-            add("BINDING_SUBJECT_INVALID", creative_entity_id=eid,
-                reason="missing_or_deleted")
-            continue
-        if ent.project_id != c["project_id"]:
-            add("BINDING_PROJECT_MISMATCH", creative_entity_id=eid,
-                reason="cross_project_creative_entity")
-            continue
-        # overlapping active claimants (terminated claimants never block)
-        dupes = (
-            await conn.execute(
-                text(
-                    "SELECT a.occurrence_id FROM "
-                    "composition_occurrence_authority_subjects a "
-                    "WHERE a.composition_id = :cid AND a.creative_entity_id "
-                    "= :e AND a.occurrence_id IN ("
-                    + ",".join(f":o{i}" for i in range(len(occ_ids)))
-                    + ") AND NOT EXISTS ("
-                    "  SELECT 1 FROM composition_identity_operation_sources s"
-                    "  JOIN composition_identity_operations op "
-                    "  ON op.id = s.operation_id "
-                    "  WHERE op.composition_id = a.composition_id "
-                    "  AND s.occurrence_id = a.occurrence_id "
-                    "  AND s.terminates_identity = 1)"
-                ),
-                {"cid": c["composition_id"], "e": eid, **params},
-            )
-        ).fetchall()
-        if len(dupes) > 1:
-            add("BINDING_SUBJECT_INVALID", creative_entity_id=eid,
-                reason="overlapping_active_claim",
-                occurrences=sorted(d.occurrence_id for d in dupes))
-            continue
-        active_ce_ok.add(eid)
+    if ce_ids:
+        # set-oriented (§26.1 Q2-class): ONE entity query for ALL CE ids
+        eph = ", ".join(f":e{i}" for i in range(len(ce_ids)))
+        ent_rows = (await conn.execute(
+            text(f"SELECT id, project_id, deleted_at FROM creative_entities"
+                 f" WHERE id IN ({eph})"),
+            {f"e{i}": v for i, v in enumerate(ce_ids)},
+        )).fetchall()
+        ent_by_id = {r.id: r for r in ent_rows}
+        # ONE grouped query for every overlapping-active-claim CE at once
+        dupes_rows = (await conn.execute(
+            text(
+                "SELECT a.creative_entity_id, a.occurrence_id FROM "
+                "composition_occurrence_authority_subjects a "
+                "WHERE a.composition_id = :cid AND a.occurrence_id IN ("
+                + ",".join(f":o{i}" for i in range(len(occ_ids)))
+                + ") AND a.creative_entity_id IN (" + eph + ") "
+                "AND NOT EXISTS ("
+                "  SELECT 1 FROM composition_identity_operation_sources s"
+                "  JOIN composition_identity_operations op "
+                "  ON op.id = s.operation_id "
+                "  WHERE op.composition_id = a.composition_id "
+                "  AND s.occurrence_id = a.occurrence_id "
+                "  AND s.terminates_identity = 1) "
+                "ORDER BY a.creative_entity_id, a.occurrence_id"
+            ),
+            {"cid": c["composition_id"], **params,
+             **{f"e{i}": v for i, v in enumerate(ce_ids)}},
+        )).fetchall()
+        claim_counts: dict[str, list[str]] = {}
+        for d in dupes_rows:
+            claim_counts.setdefault(d.creative_entity_id,
+                                    []).append(d.occurrence_id)
+        for eid in ce_ids:
+            ent = ent_by_id.get(eid)
+            if ent is None or ent.deleted_at is not None:
+                add("BINDING_SUBJECT_INVALID", creative_entity_id=eid,
+                    reason="missing_or_deleted")
+                continue
+            if ent.project_id != c["project_id"]:
+                add("BINDING_PROJECT_MISMATCH", creative_entity_id=eid,
+                    reason="cross_project_creative_entity")
+                continue
+            claimants = claim_counts.get(eid, [])
+            if len(claimants) > 1:
+                add("BINDING_SUBJECT_INVALID", creative_entity_id=eid,
+                    reason="overlapping_active_claim",
+                    occurrences=sorted(claimants))
+                continue
+            active_ce_ok.add(eid)
     for occ, a in adoptions.items():
         if a["subject_kind"] == "creative_entity" and (
                 a["creative_entity_id"] not in active_ce_ok):
@@ -342,26 +351,59 @@ async def derive_candidate(conn, *, c: dict, w: dict) -> tuple[dict, list]:
                          and len(targets_by_occurrence[occ]) == 1})
     pr_hashes: dict[str, str] = {}
     pr_blobs: dict[str, str] = {}
-    for prid in needed_prs:
-        row = (
-            await conn.execute(
-                text(
-                    "SELECT pr.id, pr.snapshot_hash, "
-                    "(SELECT c.blob_hash FROM production_revision_closures c"
-                    " WHERE c.production_revision_id = pr.id AND "
-                    "c.contract_key = 'retained_blob' AND "
-                    "c.contract_version = 1) AS blob_hash "
-                    "FROM production_revisions pr WHERE pr.id = :rid"
-                ),
-                {"rid": prid},
+    if needed_prs:
+        # set-oriented (§26.1 Q3-class): ONE closure query for ALL needed PRs
+        nph = ", ".join(f":n{i}" for i in range(len(needed_prs)))
+        nparams = {f"n{i}": v for i, v in enumerate(needed_prs)}
+        for row in (await conn.execute(
+            text(
+                "SELECT pr.id, pr.snapshot_hash, "
+                "(SELECT c.blob_hash FROM production_revision_closures c"
+                " WHERE c.production_revision_id = pr.id AND "
+                "c.contract_key = 'retained_blob' AND "
+                "c.contract_version = 1) AS blob_hash "
+                f"FROM production_revisions pr WHERE pr.id IN ({nph})"
+            ),
+            nparams,
+        )).fetchall():
+            pr_hashes[row.id] = row.snapshot_hash
+            pr_blobs[row.id] = row.blob_hash
+        for prid in needed_prs:
+            if prid not in pr_hashes:
+                add("BINDING_SUBJECT_INVALID", production_revision_id=prid,
+                    reason="missing_production_revision")
+    # set-oriented (§26.1 Q3): ONE interpretation query for ALL needed
+    # PRs; verification is in-memory per row (CPU only, no round trips)
+    interp_map: dict[str, str] = {}
+    closed_prs = [p for p in needed_prs
+                  if p in pr_hashes and pr_hashes[p] is not None
+                  and pr_blobs.get(p) is not None]
+    if closed_prs:
+        iph = ", ".join(f":i{i}" for i in range(len(closed_prs)))
+        iparams = {f"i{i}": v for i, v in enumerate(closed_prs)}
+        irows = (await conn.execute(
+            text(
+                "SELECT production_revision_id, interpretation_json, "
+                "interpretation_hash, x_mm, y_mm, z_mm, yaw_udeg, "
+                "pitch_udeg, roll_udeg FROM "
+                "production_revision_spatial_interpretations "
+                f"WHERE production_revision_id IN ({iph})"
+            ),
+            iparams,
+        )).fetchall()
+        for row in irows:
+            verify_stored_interpretation(
+                interpretation_json=row.interpretation_json,
+                interpretation_hash=row.interpretation_hash,
+                x_mm=row.x_mm, y_mm=row.y_mm, z_mm=row.z_mm,
+                yaw_udeg=row.yaw_udeg, pitch_udeg=row.pitch_udeg,
+                roll_udeg=row.roll_udeg,
+                row_production_revision_id=row.production_revision_id,
+                parent_snapshot_hash=pr_hashes[row.production_revision_id],
+                parent_blob_hash=pr_blobs[row.production_revision_id],
             )
-        ).first()
-        if row is None:
-            add("BINDING_SUBJECT_INVALID", production_revision_id=prid,
-                reason="missing_production_revision")
-            continue
-        pr_hashes[prid] = row.snapshot_hash
-        pr_blobs[prid] = row.blob_hash
+            interp_map[row.production_revision_id] = (
+                row.interpretation_hash)
     for s in sorted(subjects, key=lambda s: s["occurrence_id"]):
         occ = s["occurrence_id"]
         if occ in blocked_occurrences:
@@ -380,8 +422,7 @@ async def derive_candidate(conn, *, c: dict, w: dict) -> tuple[dict, list]:
                 reason="production_revision_not_closed")
             blocked_occurrences.add(occ)
             continue
-        interp = await _verify_interpretation(
-            conn, prid, pr_hashes[prid], pr_blobs[prid])
+        interp = interp_map.get(prid)
         if interp is None:
             add("BINDING_SPATIAL_INTERPRETATION_REQUIRED",
                 occurrence_id=occ, production_revision_id=prid)
@@ -394,14 +435,8 @@ async def derive_candidate(conn, *, c: dict, w: dict) -> tuple[dict, list]:
             "production_revision_hash": pr_hashes[prid],
             "authority_subject": dict(s["authority_subject"]),
             "placement": {"kind": target["kind"], "id": target["id"]},
-            "spatial_interpretation_hash": None,  # filled below
+            "spatial_interpretation_hash": interp_map[prid],
         })
-
-    # interpretation hashes (verified rows) per entry
-    for e in entries:
-        prid = e["production_revision_id"]
-        e["spatial_interpretation_hash"] = await _interp_hash(
-            conn, prid, pr_hashes[prid], pr_blobs[prid])
 
     issues.sort(key=lambda i: _ISSUE_ORDER[i["code"]])
     return binding_value(

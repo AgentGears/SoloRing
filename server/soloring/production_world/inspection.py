@@ -145,6 +145,27 @@ async def read_captured_production_world(
                     f"{parent['binding_id']} is unreachable — corrupt "
                     "historical state") from exc
             raise
+        # §20.1: the exact pinned CompositionRevision and
+        # SpatialWorldRevision closures must exist and match the binding's
+        # parent columns (captured-graph-only)
+        c_row = (
+            await conn.execute(
+                text("SELECT snapshot_hash FROM composition_revisions "
+                     "WHERE id = :r"), {"r": parent["composition_revision_id"]},
+            )
+        ).first()
+        w_row = (
+            await conn.execute(
+                text("SELECT snapshot_hash FROM spatial_world_revisions "
+                     "WHERE id = :r"), {"r": parent["spatial_world_revision_id"]},
+            )
+        ).first()
+        if (c_row is None or c_row[0] != parent["composition_revision_hash"]
+                or w_row is None
+                or w_row[0] != parent["spatial_world_revision_hash"]):
+            raise internal_invariant(
+                f"ShotRevision {revision_id}: pinned C/W revision closure "
+                "is unreachable or disagrees")
         # §20.2/§30.8: every pinned entry's immutable spatial
         # interpretation must exist and verify (captured-graph-only — the
         # interpretation table is immutable historical closure, §21)
