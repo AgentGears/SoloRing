@@ -13,6 +13,12 @@ from soloring.api.deps import get_session
 from soloring.api.schemas.production_world import (
     AuthoritySubjectAdopt,
     AuthoritySubjectRead,
+    BindingPairRequest,
+    BindingRead,
+    BindingReadinessRead,
+    SelectionDelete,
+    SelectionPut,
+    SelectionRead,
     PIFeatureCreate,
     PIFeaturePatch,
     PIFeatureRead,
@@ -23,9 +29,11 @@ from soloring.api.schemas.production_world import (
     SpatialInterpretationCreate,
     SpatialInterpretationRead,
 )
+from soloring.production_world import binding as binding_svc
 from soloring.production_world import interpretation as interp
 from soloring.production_world import instance_spatial
 from soloring.production_world import instance_state
+from soloring.production_world import selection as selection_svc
 from soloring.production_world import subjects
 
 router = APIRouter(tags=["production-world"])
@@ -257,4 +265,96 @@ async def delete_pi_spatial_transition(
 ) -> dict:
     await instance_spatial.delete_spatial_transition(
         session, transition_id)
+    return {"ok": True}
+
+
+# --- Composition↔Spatial binding (frozen §24.5) -----------------------------
+
+
+@router.post(
+    "/composition-revisions/{composition_revision_id}"
+    "/spatial-binding-readiness",
+    response_model=BindingReadinessRead,
+)
+async def binding_readiness(
+    composition_revision_id: str,
+    body: BindingPairRequest,
+    session: AsyncSession = Depends(get_session),
+) -> BindingReadinessRead:
+    async with session.bind.connect() as conn:
+        out = await binding_svc.binding_readiness(
+            conn, composition_revision_id=composition_revision_id,
+            spatial_world_revision_id=body.spatial_world_revision_id)
+    out.pop("_value", None)
+    return BindingReadinessRead(**out)
+
+
+@router.post(
+    "/composition-revisions/{composition_revision_id}/spatial-bindings",
+    response_model=BindingRead,
+)
+async def publish_binding(
+    composition_revision_id: str,
+    body: BindingPairRequest,
+    response: Response,
+    session: AsyncSession = Depends(get_session),
+) -> BindingRead:
+    value, created = await binding_svc.publish_binding(
+        session, composition_revision_id=composition_revision_id,
+        spatial_world_revision_id=body.spatial_world_revision_id)
+    if created:
+        response.status_code = status.HTTP_201_CREATED
+    return BindingRead(**value)
+
+
+@router.get(
+    "/composition-spatial-bindings/{binding_id}",
+    response_model=BindingRead,
+)
+async def get_binding(
+    binding_id: str,
+    session: AsyncSession = Depends(get_session),
+) -> BindingRead:
+    return BindingRead(**await binding_svc.read_binding(session, binding_id))
+
+
+# --- Shot production-world selection (frozen §24.6, pointer tier) ------------
+
+
+@router.get(
+    "/shots/{shot_id}/production-world-selection",
+    response_model=SelectionRead,
+)
+async def get_selection(
+    shot_id: str,
+    session: AsyncSession = Depends(get_session),
+) -> SelectionRead:
+    return SelectionRead(**await selection_svc.get_selection(
+        session, shot_id))
+
+
+@router.put(
+    "/shots/{shot_id}/production-world-selection",
+    response_model=SelectionRead,
+)
+async def put_selection(
+    shot_id: str,
+    body: SelectionPut,
+    session: AsyncSession = Depends(get_session),
+) -> SelectionRead:
+    return SelectionRead(**await selection_svc.put_selection(
+        session, shot_id, binding_id=body.binding_id,
+        expected_binding_id=body.expected_binding_id))
+
+
+@router.delete(
+    "/shots/{shot_id}/production-world-selection",
+)
+async def delete_selection(
+    shot_id: str,
+    body: SelectionDelete,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    await selection_svc.delete_selection(
+        session, shot_id, expected_binding_id=body.expected_binding_id)
     return {"ok": True}

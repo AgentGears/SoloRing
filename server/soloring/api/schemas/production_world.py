@@ -118,3 +118,55 @@ class PITrackTransitionCreate(BaseModel):
     boundary: str
     operation: str
     transform: dict | None = None
+
+
+class BindingPairRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    spatial_world_revision_id: str
+
+
+class BindingReadinessRead(BaseModel):
+    ready: bool
+    issues: list[dict]
+    proposed_binding_hash: str
+    composition_revision_id: str
+    composition_revision_hash: str
+    spatial_world_revision_id: str
+    spatial_world_revision_hash: str
+    subject_summaries: list[dict]
+    entry_summaries: list[dict]
+
+
+class BindingRead(BaseModel):
+    binding_id: str
+    binding_hash: str
+    schema_version: int
+    composition_id: str
+    composition_revision_id: str
+    composition_revision_hash: str
+    spatial_world_revision_id: str
+    spatial_world_revision_hash: str
+    subjects: list[dict]
+    entries: list[dict]
+    created_at: str
+
+
+class SelectionPut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    binding_id: str
+    expected_binding_id: str | None = None
+
+
+class SelectionDelete(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_binding_id: str
+
+
+class SelectionRead(BaseModel):
+    shot_id: str
+    binding_id: str | None
+    updated_at: str | None
+    binding: dict | None = None

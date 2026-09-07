@@ -146,11 +146,16 @@ def _spec(prid: str, name: str = "Chair 7") -> dict:
 
 
 async def mint(client, composition_id: str, prid: str, version: int, *,
-               name: str = "Chair 7") -> dict:
+               name: str = "Chair 7",
+               transform: tuple = (0, 0, 0)) -> dict:
+    spec = _spec(prid, name)
+    if transform != (0, 0, 0):
+        spec["transform"] = {"translation_mm": list(transform),
+                             "rotation_udeg": [0, 0, 0]}
     r = await client.post(
         f"/compositions/{composition_id}/occurrences",
         json={"scope": SCOPE, "expected_working_version": version,
-              **_spec(prid, name)})
+              **spec})
     assert r.status_code == 201, r.text
     return r.json()
 
