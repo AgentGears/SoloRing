@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Asset, ProductionObject } from "@/lib/types";
 
 vi.mock("@/lib/api.client", () => ({
+  getSpatialInterpretation: vi.fn(async () => null),
+  createSpatialInterpretationTransform: vi.fn(),
   listAssets: vi.fn(async () => ASSETS),
   listProductionObjects: vi.fn(async () => [OBJ]),
   createProductionObject: vi.fn(),

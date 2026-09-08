@@ -116,8 +116,11 @@ def build_impact_value(
         ),
         "live_blocking_references": sorted(
             live_blocking_references,
-            key=lambda r: (r["consumer_key"], r["consumer_row_id"],
-                           r["occurrence_id"]),
+            # M13 R3 §22.3 order: (occurrence_id, consumer, id-or-shot_id).
+            # The list was structurally empty throughout M12, so this key
+            # never ran before M13 and no existing fingerprint changes.
+            key=lambda r: (r["occurrence_id"], r["consumer"],
+                           r.get("id", r.get("shot_id"))),
         ),
     }
 

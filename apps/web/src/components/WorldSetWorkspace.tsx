@@ -10,6 +10,11 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import {
+  AuthoritySubjectRow,
+  M13BindingLauncherScoped,
+} from "@/components/ProductionWorldPanel";
+
 import { asApiError } from "@/lib/api.shared";
 import {
   applyIdentityOperation,
@@ -449,6 +454,8 @@ export default function WorldSetWorkspace({ projectId }: { projectId: string }) 
             </div>
           )}
 
+          <M13BindingLauncherScoped compositionId={selected.id} />
+
           <div>
             <select
               aria-label="Source kind"
@@ -492,6 +499,10 @@ export default function WorldSetWorkspace({ projectId }: { projectId: string }) 
               <li key={o.occurrence_id} data-testid={`occ-${o.occurrence_id}`}>
                 <span>{o.display_name}</span>
                 <small>{o.occurrence_id}</small>
+                <AuthoritySubjectRow
+                  compositionId={selected.id}
+                  occurrenceId={o.occurrence_id}
+                  nested={o.source_kind === "composition_revision"} />
                 <span>
                   {" "}(x {o.x_mm}, y {o.y_mm}, z {o.z_mm}; yaw {o.yaw_udeg})
                   {o.visible ? "" : " — hidden"}
@@ -700,3 +711,5 @@ function diffOccurrences(
     };
   });
 }
+
+

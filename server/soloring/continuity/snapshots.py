@@ -198,6 +198,7 @@ def relation_state_spec_entry(state) -> dict:
 def build_capturable_snapshot(
     shot, refs, resolved: list[ResolvedDependency], feature_states=(),
     relation_states=(), visual_pack=None, spatial_pack=None,
+    production_world_pack=None,
 ) -> tuple[dict, dict | None]:
     """(snapshot value, continuity spec or None) from ONE captured value.
 
@@ -210,13 +211,19 @@ def build_capturable_snapshot(
         one or more effective Feature states
         OR relation states           → schema 3 + spec 2
         any non-empty approved visual
-        pack                          → schema 4 over the exact lower base
+          pack                        → schema 4 over the exact lower base
+        any non-empty M10 pack       → schema 5 over the exact lower base
+        a valid selected M13 world   → schema 6 over the exact schema-5
+                                       base (frozen M13 R3 §17)
 
     There is no empty schema-3/4 representation (M6-F14 extended by M7D
     §8.3 and M8 §54–55): states that all clear keep the exact lower
     schema; the zero-deps/non-empty-visual cell is unreachable by
     construction. An endpoint-incomplete or visually-unready Shot never
-    reaches this builder at all (the read unit raises first)."""
+    reaches this builder at all (the read unit raises first). Likewise
+    no schema 6 exists without the exact schema-5 base beneath it: the
+    M13 pack requires the spatial pack (§17.2), and a selected
+    zero-subject binding is still non-empty M13 content (§2.9)."""
     deps = sort_resolved(resolved)
     states = sort_feature_states(feature_states)
     relations = sort_relation_states(relation_states)
@@ -258,12 +265,28 @@ def build_capturable_snapshot(
                 **{k: v for k, v in base.items()
                    if k != "schema_version"},
                 "spatial_continuity": spatial_pack}
+    if production_world_pack is not None:
+        # M13 R3 §17.2: schema 6 wraps the EXACT schema-5 base; an M13
+        # pack without the spatial pack is an invariant failure, never a
+        # representable schema.
+        if spatial_pack is None:
+            from soloring.errors import internal_invariant
+
+            raise internal_invariant(
+                "production-world pack supplied without the M10 spatial "
+                "pack — schema 6 requires the exact schema-5 base."
+            )
+        base = {"schema_version": 6,
+                **{k: v for k, v in base.items()
+                   if k != "schema_version"},
+                "production_world": production_world_pack}
     return base, spec
 
 
 def effective_working_snapshot_hash(
     shot, refs, resolved: list[ResolvedDependency], feature_states=(),
     relation_states=(), visual_pack=None, spatial_pack=None,
+    production_world_pack=None,
 ) -> str:
     """The Shot's effective working hash (M6-F15 + M7C §10.4 + M7D §10.2).
 
@@ -273,7 +296,7 @@ def effective_working_snapshot_hash(
     implementation."""
     snapshot, _ = build_capturable_snapshot(
         shot, refs, resolved, feature_states, relation_states, visual_pack,
-        spatial_pack,
+        spatial_pack, production_world_pack,
     )
     return canonical_hash(snapshot)
 

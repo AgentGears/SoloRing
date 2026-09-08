@@ -39,6 +39,12 @@ from soloring.spatial.math import Transform as _Transform
 # Frozen §8.1 — the mechanically discovered FK consumer set at 0013, with
 # impact classification. A structural test re-derives this from PRAGMA and
 # fails closed on any unregistered FK.
+# Frozen M13 R3 §22.1 — the five direct M13 occurrence-FK families join the
+# enumeration at 0014: subject adoption is durable identity metadata that
+# never blocks by itself; active PI features/tracks are live current
+# blockers once their authoring surfaces exist (M13B); the two historical
+# ShotRevision projections never block. Live-blocker resolution itself
+# activates with those surfaces — no M13 rows can exist before them.
 FK_CONSUMERS: dict[tuple[str, str], str] = {
     ("composition_working_occurrences", "occurrence_id"): "working/internal",
     ("composition_working_occurrences", "composition_id"): "working/internal",
@@ -48,10 +54,25 @@ FK_CONSUMERS: dict[tuple[str, str], str] = {
     ("composition_identity_operation_sources", "composition_id"): "lineage/internal",
     ("composition_identity_operation_targets", "occurrence_id"): "lineage/internal",
     ("composition_identity_operation_targets", "composition_id"): "lineage/internal",
+    ("composition_occurrence_authority_subjects", "occurrence_id"): "adoption/non-blocking",
+    ("composition_occurrence_authority_subjects", "composition_id"): "adoption/non-blocking",
+    ("production_instance_features", "occurrence_id"): "instance-state/live-blocker",
+    ("production_instance_features", "composition_id"): "instance-state/live-blocker",
+    ("production_instance_spatial_tracks", "occurrence_id"): "instance-spatial/live-blocker",
+    ("production_instance_spatial_tracks", "composition_id"): "instance-spatial/live-blocker",
+    ("shot_revision_production_instance_feature_states", "occurrence_id"): "historical/non-blocking",
+    ("shot_revision_production_instance_feature_states", "composition_id"): "historical/non-blocking",
+    ("shot_revision_production_instance_spatial_states", "occurrence_id"): "historical/non-blocking",
+    ("shot_revision_production_instance_spatial_states", "composition_id"): "historical/non-blocking",
 }
 
-# Explicit non-FK durable-consumer registry — empty in M12 (frozen §2.5).
-NON_FK_DURABLE_CONSUMERS: dict[str, str] = {}
+# Explicit non-FK durable-consumer registry (frozen §2.5; activated by
+# M13 R3 §22.2): the Shot selection is the ONE registered indirect
+# current consumer — it reaches occurrences only through
+# binding → binding subject/entry → occurrence.
+NON_FK_DURABLE_CONSUMERS: dict[str, str] = {
+    "shot_production_world_selections": "current-selection/indirect",
+}
 
 # Frozen §2.4 cardinality contract.
 CARDINALITY = {
@@ -138,11 +159,66 @@ async def _historical_counts(conn, source_ids: list[str]) -> dict[str, int]:
 
 
 async def _resolve_live_blockers(conn, source_ids: list[str]) -> list[dict]:
-    """Registered external live blockers — empty registry in M12."""
-    # FK consumers are internal by contract; the non-FK registry is empty.
-    # The resolver is the extension point a future milestone must register
-    # against before adding authoritative occurrence references (§2.5).
-    return []
+    """Registered external live blockers (frozen M13 R3 §22.3).
+
+    Active ProductionInstanceFeature and ProductionInstanceSpatialTrack
+    rows are unconditionally live current blockers for their occurrence.
+    Subject adoption is durable identity metadata and never blocks by
+    itself; historical ShotRevision rows never block. Blocker elements
+    use the frozen canonical JSON shapes, sorted by
+    (occurrence_id, consumer, id). The M13 current-selection blocker is
+    the registered non-FK durable consumer (§22.2) and resolves through
+    the binding subject graph.
+    """
+    if not source_ids:
+        return []
+    ph = ",".join(f":i{n}" for n in range(len(source_ids)))
+    params = {f"i{n}": i for n, i in enumerate(source_ids)}
+    blockers: list[dict] = []
+    feature_rows = (
+        await conn.execute(
+            text(
+                "SELECT id, occurrence_id FROM production_instance_features "
+                f"WHERE deleted_at IS NULL AND occurrence_id IN ({ph})"
+            ),
+            params,
+        )
+    ).fetchall()
+    for r in feature_rows:
+        blockers.append({"consumer": "production_instance_feature",
+                         "id": r.id, "occurrence_id": r.occurrence_id})
+    track_rows = (
+        await conn.execute(
+            text(
+                "SELECT id, occurrence_id FROM "
+                "production_instance_spatial_tracks "
+                f"WHERE deleted_at IS NULL AND occurrence_id IN ({ph})"
+            ),
+            params,
+        )
+    ).fetchall()
+    for r in track_rows:
+        blockers.append({"consumer": "production_instance_spatial_track",
+                         "id": r.id, "occurrence_id": r.occurrence_id})
+    sel_rows = (
+        await conn.execute(
+            text(
+                "SELECT s.shot_id, s.binding_id, bs.occurrence_id FROM "
+                "shot_production_world_selections s "
+                "JOIN composition_spatial_binding_subjects bs "
+                "ON bs.binding_id = s.binding_id "
+                f"WHERE bs.occurrence_id IN ({ph})"
+            ),
+            params,
+        )
+    ).fetchall()
+    for r in sel_rows:
+        blockers.append({"consumer": "shot_production_world_selection",
+                         "shot_id": r.shot_id, "binding_id": r.binding_id,
+                         "occurrence_id": r.occurrence_id})
+    blockers.sort(key=lambda b: (
+        b["occurrence_id"], b["consumer"], b.get("id", b.get("shot_id"))))
+    return blockers
 
 
 def _normalize_request(conn_holder, composition_id: str, request: dict):
@@ -214,8 +290,12 @@ async def preview_identity_operation(
             source_occurrence_ids=source_ids,
             source_dispositions=dispositions,
             live_blocking_references=blockers)
+    # Frozen M13 R3 §22.4: any live M13 blocker makes a TERMINATING
+    # operation's preview allowed=false with the full exact blocker set;
+    # fork does not terminate and is never blocked by live state.
+    blocked = bool(blockers) and _TERMINATES[kind]
     return {
-        "allowed": True,
+        "allowed": not blocked,
         "working_version": comp["working_version"],
         "normalized_request": request_value,
         "request_fingerprint": request_fingerprint(request_value),
@@ -281,7 +361,15 @@ async def apply_identity_operation(
         if imp_fp != expected_impact_fingerprint:
             raise EditConflict("stale_impact",
                                "impact fingerprint mismatch under fence")
-        # 6. no live blockers (empty registry in M12)
+        # 6. live M13 blockers refuse TERMINATING operations (frozen
+        # M13 R3 §22.4); fork does not terminate and is never blocked
+        # merely because the source owns live state.
+        if blockers and _TERMINATES[kind]:
+            raise EditConflict(
+                "live_references",
+                "terminating identity operation refused: live M13 "
+                "authority references exist for a source occurrence",
+                details={"live_blocking_references": blockers})
         # 7. temporal/liveness/cardinality rules
         for d in dispositions:
             if not d["active"] or not d["in_working_state"]:

@@ -146,7 +146,7 @@ def template(tmp_path_factory):
     data_dir.mkdir()
     settings = Settings(data_dir=data_dir)
     seeded = _seed_m12_state(data_dir, settings)
-    _stamp_head(data_dir, "0013_m12_composition_occurrences")
+    _stamp_head(data_dir, "0014_m13_authority_complete_world")
     backup_root = base / "backup"
     asyncio.run(rb.backup(settings, backup_root))
     return {"data_dir": data_dir, "settings": settings, "seed": seeded,
@@ -168,14 +168,15 @@ def env(template, tmp_path):
 
 def test_current_backup_requires_0013_head(template):
     """M12-RECOVERY:01."""
-    assert rb.EXPECTED_ALEMBIC_HEAD == "0013_m12_composition_occurrences"
+    assert rb.EXPECTED_ALEMBIC_HEAD == "0014_m13_authority_complete_world"
     manifest = json.loads(
         (template["backup_root"] / "backup-manifest.json").read_text())
-    assert manifest["alembic_version"] == "0013_m12_composition_occurrences"
+    assert manifest["alembic_version"] == "0014_m13_authority_complete_world"
     assert rb.SUPPORTED_RESTORE_ALEMBIC_HEADS == {
         "0011_m10_derived_spatial_execution",
         "0012_m11_reusable_production_revisions",
         "0013_m12_composition_occurrences",
+        "0014_m13_authority_complete_world",
     }
 
 
@@ -202,7 +203,7 @@ def test_restore_0013_verifies_composition_snapshots_and_projections(
         n = con.execute("SELECT COUNT(*) FROM composition_revisions").fetchone()[0]
     finally:
         con.close()
-    assert ver == "0013_m12_composition_occurrences"
+    assert ver == "0014_m13_authority_complete_world"
     assert n == 1
 
 

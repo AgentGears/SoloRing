@@ -119,6 +119,89 @@ def _shot_not_found(shot_id: str) -> SoloRingError:
         status_code=404)
 
 
+def resolve_staging_winners_core(
+    *, ordering, target_rank: int, tracks: list[dict], transitions: list[dict],
+) -> tuple[list[dict], list[dict]]:
+    """THE shared staging winner core (M13 R3 §9.1).
+
+    Subject-agnostic: ``tracks`` rows carry ``id``/``owner_id``/
+    ``requirement``; ``transitions`` rows carry ``track_id`` plus the M10
+    transition fields. Returns (winners, absent) as plain records sorted
+    by (owner_id, track_id); the caller enriches with subject-specific
+    revision identity. Ambiguous winners, out-of-domain operations,
+    malformed clears, and incomplete sets raise internal_invariant
+    exactly as the M10 resolver does, so EntityTrack and
+    ProductionInstanceTrack staging can never diverge.
+    """
+    by_track: dict[str, list] = {}
+    for t in transitions:
+        try:
+            rank = ordering.rank_of(
+                t["anchor_type"], t["anchor_id"], t["boundary"])
+        except SoloRingError:
+            raise internal_invariant(
+                f"Active spatial transition {t['id']} anchored at "
+                f"({t['anchor_type']}, {t['anchor_id']}, {t['boundary']}) "
+                "is not present in the canonical ordering.")
+        if rank <= target_rank:
+            by_track.setdefault(t["track_id"], []).append((rank, t))
+
+    track_by_id = {t["id"]: t for t in tracks}
+    winners: list[dict] = []
+    absent: list[dict] = []
+    eligible_track_ids = set(by_track.keys())
+    for tid, eligible in by_track.items():
+        best_rank = max(r for r, _ in eligible)
+        best = [t for r, t in eligible if r == best_rank]
+        if len(best) != 1:
+            raise internal_invariant(
+                f"Ambiguous effective staging for track {tid}: "
+                f"{len(best)} transitions share the winning rank — "
+                "no ID/timestamp/UUID tie-breaking is permitted.")
+        t = best[0]
+        six = (t["x_mm"], t["y_mm"], t["z_mm"],
+               t["yaw_udeg"], t["pitch_udeg"], t["roll_udeg"])
+        track = track_by_id[tid]
+        if t["operation"] == "clear":
+            if any(v is not None for v in six):
+                raise internal_invariant(
+                    f"Stored clear transition {t['id']} carries non-NULL "
+                    "transform columns.")
+            absent.append({
+                "track_id": tid, "owner_id": track["owner_id"],
+                "requirement": track["requirement"], "reason": "clear"})
+            continue  # canonical absence
+        if t["operation"] != "set":
+            raise internal_invariant(
+                f"Stored transition {t['id']} has operation "
+                f"{t['operation']!r} outside the set|clear domain.")
+        if any(v is None for v in six):
+            raise internal_invariant(
+                f"Stored set transition {t['id']} has an incomplete "
+                "transform.")
+        winners.append({
+            "track_id": tid, "owner_id": track["owner_id"],
+            "requirement": track["requirement"],
+            "x_mm": six[0], "y_mm": six[1], "z_mm": six[2],
+            "yaw_udeg": six[3], "pitch_udeg": six[4], "roll_udeg": six[5],
+            "source_transition_id": t["id"],
+            "source_anchor_type": t["anchor_type"],
+            "source_anchor_id": t["anchor_id"],
+            "source_boundary": t["boundary"]})
+
+    # applicable tracks with no eligible transition at all
+    for t in tracks:
+        if t["id"] not in eligible_track_ids:
+            absent.append({
+                "track_id": t["id"], "owner_id": t["owner_id"],
+                "requirement": t["requirement"],
+                "reason": "no_eligible_transition"})
+
+    winners.sort(key=lambda w: (w["owner_id"], w["track_id"]))
+    absent.sort(key=lambda a: (a["owner_id"], a["track_id"]))
+    return winners, absent
+
+
 def narrative_context_required(shot_id: str) -> SoloRingError:
     return SoloRingError(
         ErrorCode.NARRATIVE_CONTEXT_REQUIRED,
@@ -212,79 +295,36 @@ async def resolve_effective_staging(
             f"Assigned active shot {shot_id} missing from its Project's "
             "canonical ordering during staging resolution.")
 
-    # rank every transition through the ordering; an anchor outside the
-    # canonical stream is stored corruption (§8.7 discipline)
-    by_track: dict[str, list] = {}
-    for t in transitions:
-        try:
-            rank = ordering.rank_of(
-                t["anchor_type"], t["anchor_id"], t["boundary"])
-        except SoloRingError:
-            raise internal_invariant(
-                f"Active spatial transition {t['id']} anchored at "
-                f"({t['anchor_type']}, {t['anchor_id']}, {t['boundary']}) "
-                "is not present in the canonical ordering.")
-        if rank <= target_rank:
-            by_track.setdefault(t["spatial_track_id"], []).append((rank, t))
-
-    track_by_id = {t["id"]: t for t in tracks}
-    winners: list[EffectiveSpatialTrackState] = []
-    absent: list[AbsentSpatialTrack] = []
-    eligible_track_ids = set(by_track.keys())
-    for tid, eligible in by_track.items():
-        best_rank = max(r for r, _ in eligible)
-        best = [t for r, t in eligible if r == best_rank]
-        if len(best) != 1:
-            raise internal_invariant(
-                f"Ambiguous effective staging for track {tid}: "
-                f"{len(best)} transitions share the winning rank — "
-                "no ID/timestamp/UUID tie-breaking is permitted.")
-        t = best[0]
-        six = (t["x_mm"], t["y_mm"], t["z_mm"],
-               t["yaw_udeg"], t["pitch_udeg"], t["roll_udeg"])
-        track = track_by_id[tid]
-        if t["operation"] == "clear":
-            if any(v is not None for v in six):
-                raise internal_invariant(
-                    f"Stored clear transition {t['id']} carries non-NULL "
-                    "transform columns.")
-            absent.append(AbsentSpatialTrack(
-                spatial_track_id=tid, entity_id=track["entity_id"],
-                entity_revision_id=revisions[track["entity_id"]],
-                requirement=track["requirement"], reason="clear"))
-            continue  # canonical absence
-        if t["operation"] != "set":
-            raise internal_invariant(
-                f"Stored transition {t['id']} has operation "
-                f"{t['operation']!r} outside the set|clear domain.")
-        if any(v is None for v in six):
-            raise internal_invariant(
-                f"Stored set transition {t['id']} has an incomplete "
-                "transform.")
-        winners.append(
-            EffectiveSpatialTrackState(
-                spatial_track_id=tid,
-                entity_id=track["entity_id"],
-                entity_revision_id=revisions[track["entity_id"]],
-                requirement=track["requirement"],
-                x_mm=six[0], y_mm=six[1], z_mm=six[2],
-                yaw_udeg=six[3], pitch_udeg=six[4], roll_udeg=six[5],
-                source_transition_id=t["id"],
-                source_anchor_type=t["anchor_type"],
-                source_anchor_id=t["anchor_id"],
-                source_boundary=t["boundary"]))
-
-    # applicable tracks with no eligible transition at all
-    for t in tracks:
-        if t["id"] not in eligible_track_ids:
-            absent.append(AbsentSpatialTrack(
-                spatial_track_id=t["id"], entity_id=t["entity_id"],
-                entity_revision_id=revisions[t["entity_id"]],
-                requirement=t["requirement"],
-                reason="no_eligible_transition"))
-
-    winners.sort(key=lambda s: (s.entity_id, s.spatial_track_id))
-    absent.sort(key=lambda a: (a.entity_id, a.spatial_track_id))
+    # The shared staging winner core (M13 R3 §9.1): EntityTrack staging
+    # enriches the records with the exact resolved EntityRevisions here;
+    # ProductionInstanceTrack staging enriches with occurrence identity.
+    core_tracks = [dict(t, owner_id=t["entity_id"],
+                        track_id=t["id"]) for t in tracks]
+    core_transitions = [dict(t, track_id=t["spatial_track_id"])
+                        for t in transitions]
+    w_rows, a_rows = resolve_staging_winners_core(
+        ordering=ordering, target_rank=target_rank,
+        tracks=core_tracks, transitions=core_transitions)
+    winners = [
+        EffectiveSpatialTrackState(
+            spatial_track_id=w["track_id"],
+            entity_id=w["owner_id"],
+            entity_revision_id=revisions[w["owner_id"]],
+            requirement=w["requirement"],
+            x_mm=w["x_mm"], y_mm=w["y_mm"], z_mm=w["z_mm"],
+            yaw_udeg=w["yaw_udeg"], pitch_udeg=w["pitch_udeg"],
+            roll_udeg=w["roll_udeg"],
+            source_transition_id=w["source_transition_id"],
+            source_anchor_type=w["source_anchor_type"],
+            source_anchor_id=w["source_anchor_id"],
+            source_boundary=w["source_boundary"])
+        for w in w_rows]
+    absent = [
+        AbsentSpatialTrack(
+            spatial_track_id=a["track_id"], entity_id=a["owner_id"],
+            entity_revision_id=revisions[a["owner_id"]],
+            requirement=a["requirement"], reason=a["reason"])
+        for a in a_rows]
     return StagingResolutionOutcome(
         shot_id=shot_id, spatial_world_id=spatial_world_id,
         assigned=True, relevant_transition_data=relevant_transition_data,

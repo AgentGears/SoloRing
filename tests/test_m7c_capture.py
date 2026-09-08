@@ -517,11 +517,13 @@ async def test_structural_singularity_both_paths_invoke_builder(
     original = snaps.build_capturable_snapshot
 
     def spy(shot, refs, resolved, feature_states=(), relation_states=(),
-            visual_pack=None, spatial_pack=None):
+            visual_pack=None, spatial_pack=None, production_world_pack=None):
+        # M13 extends the ONE builder with the schema-6 pack argument;
+        # both paths still flow through this single function.
         calls.append(len(feature_states))
         return original(
             shot, refs, resolved, feature_states, relation_states,
-            visual_pack, spatial_pack,
+            visual_pack, spatial_pack, production_world_pack,
         )
 
     monkeypatch.setattr(snaps, "build_capturable_snapshot", spy)
@@ -530,11 +532,13 @@ async def test_structural_singularity_both_paths_invoke_builder(
     monkeypatch.setattr(
         snaps, "effective_working_snapshot_hash",
         lambda shot, refs, resolved, feature_states=(),
-        relation_states=(), visual_pack=None, spatial_pack=None: (
+        relation_states=(), visual_pack=None, spatial_pack=None,
+        production_world_pack=None: (
             __import__("soloring.domain.canonical",
                        fromlist=["canonical_hash"]).canonical_hash(
                 spy(shot, refs, resolved, feature_states,
-                    relation_states, visual_pack, spatial_pack)[0])
+                    relation_states, visual_pack, spatial_pack,
+                    production_world_pack)[0])
         ),
     )
 
@@ -599,9 +603,9 @@ def test_migration_files_and_head_is_0009():
     to 0009 only with M8A's visual-identity migration."""
     versions = BASE_DIR / "server" / "alembic" / "versions"
     files = sorted(p.name for p in versions.glob("*.py"))
-    assert files[-2] == "0012_m11_reusable_production_revisions.py"
-    assert files[-1] == "0013_m12_composition_occurrences.py"
-    assert len(files) == 13
+    assert files[-2] == "0013_m12_composition_occurrences.py"
+    assert files[-1] == "0014_m13_authority_complete_world.py"
+    assert len(files) == 14
 
 
 # --- Reuse integrity fail-closed ----------------------------------------------------------------

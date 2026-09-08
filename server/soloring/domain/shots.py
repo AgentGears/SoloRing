@@ -371,6 +371,34 @@ async def read_shot_detail(engine: AsyncEngine, shot_id: str, *, settings=None):
             if readiness["continuity_state_ready"] and (
                 spatial_outcome is None or spatial_outcome.ready
             ):
+                # M13 R3 §14/§18: the working hash covers the selected
+                # production world through the SAME resolver capture uses,
+                # on this same pinned snapshot. An M13-blocked shot (stale
+                # binding, missing dependency, agreement mismatch) has no
+                # authoritative working snapshot: the hash NULLs exactly
+                # like an unresolved required M10 state — never a
+                # lower-schema fallback (§12 mirror of M10D §43).
+                production_world_pack = None
+                if spatial_outcome is not None and spatial_outcome.ready:
+                    from soloring.production_world.resolver import (
+                        resolve_production_world,
+                    )
+
+                    m13_outcome = await resolve_production_world(
+                        conn, shot_id=shot_id,
+                        resolved_dependencies=resolved,
+                        m10_spatial_result=spatial_outcome,
+                    )
+                    if m13_outcome.ready:
+                        production_world_pack = m13_outcome.pack
+                    else:
+                        effective_hash = None
+                        differs = None
+                        await conn.commit()
+                        return (
+                            shot, refs, differs, resolved, effective_hash,
+                            readiness, visual_result, spatial_outcome,
+                        )
                 # The working hash covers M10 authority; an unresolved
                 # required M10 state NULLs the hash WITHOUT falling back
                 # to lower-schema current bytes (M10D §43).
@@ -380,6 +408,7 @@ async def read_shot_detail(engine: AsyncEngine, shot_id: str, *, settings=None):
                     visual_result.pack,
                     spatial_outcome.pack if spatial_outcome is not None
                     else None,
+                    production_world_pack,
                 )
                 differs = await canon.differs_from_approved(
                     conn, shot, refs, effective_hash

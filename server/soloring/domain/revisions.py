@@ -137,11 +137,27 @@ async def _snapshot_one_read(
                 conn, shot_id=shot_id, resolved_dependencies=resolved
             )
             require_spatial_ready(spatial_result)
+            # M13 R3 §14/§18: the ONE production-world resolver runs after
+            # M10 on this SAME pinned snapshot, consuming the exact
+            # resolved dependencies and the exact M10 result — never a
+            # second connection. The strict gate raises the first frozen
+            # M13 blocker before any builder invocation.
+            from soloring.production_world.resolver import (
+                require_production_world_ready,
+                resolve_production_world,
+            )
+
+            production_world_result = await resolve_production_world(
+                conn, shot_id=shot_id,
+                resolved_dependencies=resolved,
+                m10_spatial_result=spatial_result,
+            )
+            require_production_world_ready(production_world_result)
             await conn.commit()
             return (
                 shot, refs, resolved, outcome.states,
                 relation_outcome.relation_states,
-                visual_result, spatial_result,
+                visual_result, spatial_result, production_world_result,
             )
         except Exception:
             with contextlib.suppress(Exception):
@@ -199,7 +215,7 @@ def _expected_relation_rows(relation_states):
 async def _validate_reuse_integrity(
     conn, revision_id, snapshot_json, spec_json, spec_hash,
     resolved, feature_states, relation_states=(), visual_result=None,
-    spatial_result=None,
+    spatial_result=None, production_world_result=None,
 ) -> None:
     """Fail-closed validation of an EXISTING winner (M7C §9.4 + M7D §10.4,
     APR-023).
@@ -314,6 +330,7 @@ async def _validate_reuse_integrity(
         from soloring.visual.capture import validate_visual_reuse
 
         await validate_visual_reuse(conn, revision_id, visual_result.pack)
+    await _validate_m13_reuse(conn, revision_id, production_world_result)
 
 
 async def _persist_revision_fenced(
@@ -328,6 +345,7 @@ async def _persist_revision_fenced(
     relation_states=(),
     visual_result=None,
     spatial_result=None,
+    production_world_result=None,
 ) -> str:
     """The ShotRevision write phase as ONE BEGIN IMMEDIATE unit (M6 §9/§57,
     M6C re-gate blocker 2; M7D §10.3 adds the relation children):
@@ -369,6 +387,7 @@ async def _persist_revision_fenced(
                         conn, existing[0], snapshot_json, spec_json,
                         spec_hash, resolved, feature_states, relation_states,
                         visual_result, spatial_result,
+                        production_world_result,
                     )
                     await conn.exec_driver_sql("COMMIT")
                     return existing[0]
@@ -485,6 +504,10 @@ async def _persist_revision_fenced(
                     await _persist_spatial_children(
                         conn, revision_id, spatial_result
                     )
+                if production_world_result is not None and                         production_world_result.pack is not None:
+                    await _persist_m13_children(
+                        conn, revision_id, production_world_result
+                    )
                 await conn.exec_driver_sql("COMMIT")
                 return revision_id
             except IntegrityError:
@@ -535,15 +558,17 @@ async def capture_revision_with_visual(
     shot, refs, resolved = read[0], read[1], read[2]
     feature_states, relation_states, visual_result = read[3], read[4], read[5]
     spatial_result = read[6]
+    production_world_result = read[7]
     visual_pack = (
         visual_result.pack if visual_result is not None else None
     )
     spatial_pack = (
         spatial_result.pack if spatial_result is not None else None
     )
+    production_world_pack = production_world_result.pack
     snapshot, continuity_spec = build_capturable_snapshot(
         shot, refs, resolved, feature_states, relation_states, visual_pack,
-        spatial_pack,
+        spatial_pack, production_world_pack,
     )
     snapshot_hash = canonical_hash(snapshot)
     snapshot_json = canonical_json_str(snapshot)
@@ -555,7 +580,7 @@ async def capture_revision_with_visual(
     revision_id = await _persist_revision_fenced(
         session.bind, shot_id, snapshot_json, snapshot_hash,
         spec_json, spec_hash, resolved, feature_states, relation_states,
-        visual_result, spatial_result,
+        visual_result, spatial_result, production_world_result,
     )
     revision = await session.get(ShotRevision, revision_id)
     assert revision is not None
@@ -739,3 +764,189 @@ async def _validate_spatial_reuse(conn, revision_id: str,
         raise internal_invariant(
             f"ShotRevision {revision_id} reuse: stored spatial plan "
             "child bytes/hash disagree with the embedded pack.")
+
+
+async def _persist_m13_children(conn, revision_id: str, m13_result) -> None:
+    """Immutable M13 ShotRevision children (frozen R3 §19): exactly one
+    production-world parent row, PI feature-state rows, and PI
+    spatial-state rows — every position equal to its canonical pack-array
+    index (§5.12/§5.13), every field projecting exactly from the pack."""
+    pack = m13_result.pack
+    b = pack["binding"]
+    value = b["value"]
+    await conn.execute(text(
+        "INSERT INTO shot_revision_production_worlds ("
+        "shot_revision_id, production_world_hash, binding_id, "
+        "binding_hash, composition_revision_id, composition_revision_hash, "
+        "spatial_world_revision_id, spatial_world_revision_hash) VALUES "
+        "(:r, :pwh, :b, :bh, :c, :ch, :w, :wh)"),
+        {"r": revision_id, "pwh": m13_result.production_world_hash,
+         "b": b["binding_id"], "bh": b["binding_hash"],
+         "c": value["composition_revision"]["revision_id"],
+         "ch": value["composition_revision"]["snapshot_hash"],
+         "w": value["spatial_world_revision"]["revision_id"],
+         "wh": value["spatial_world_revision"]["snapshot_hash"]})
+    if pack["instance_feature_states"]:
+        # zip the audit transition ids in canonical order (§16.4)
+        audit = list(m13_result.feature_source_transition_ids)
+        await conn.execute(text(
+            "INSERT INTO "
+            "shot_revision_production_instance_feature_states ("
+            "shot_revision_id, position, composition_id, occurrence_id, "
+            "feature_id, feature_key, feature_kind, value_type, unit, "
+            "value_json, value_hash, source_transition_id, "
+            "source_anchor_type, source_anchor_id, source_boundary) "
+            "VALUES (:r, :pos, :cid, :oid, :fid, :fkey, :fkind, :vt, "
+            ":unit, :vj, :vh, :tid, :sat, :said, :sb)"),
+            [{"r": revision_id, "pos": pos,
+              "cid": e["composition_id"], "oid": e["occurrence_id"],
+              "fid": e["feature_id"], "fkey": e["feature_key"],
+              "fkind": e["feature_kind"], "vt": e["value_type"],
+              "unit": e["unit"],
+              "vj": canonical_json_str(e["value"]),
+              "vh": e["value_hash"],
+              "tid": audit[pos] if pos < len(audit) else None,
+              "sat": e["source_anchor"]["anchor_type"],
+              "said": e["source_anchor"]["anchor_id"],
+              "sb": e["source_anchor"]["boundary"]}
+             for pos, e in enumerate(pack["instance_feature_states"])])
+    # zip the audit transition ids in canonical order (§16.4)
+    if pack["instance_spatial_states"]:
+        await conn.execute(text(
+            "INSERT INTO "
+            "shot_revision_production_instance_spatial_states ("
+            "shot_revision_id, position, composition_id, occurrence_id, "
+            "production_instance_track_id, requirement, x_mm, y_mm, z_mm, "
+            "yaw_udeg, pitch_udeg, roll_udeg, source_transition_id, "
+            "source_anchor_type, source_anchor_id, source_boundary) "
+            "VALUES (:r, :pos, :cid, :oid, :t, :req, :x, :y, :z, :yaw, "
+            ":pitch, :roll, :tid, :sat, :said, :sb)"),
+            [{"r": revision_id, "pos": pos,
+              "cid": e["composition_id"], "oid": e["occurrence_id"],
+              "t": e["production_instance_track_id"],
+              "req": e["requirement"],
+              "x": e["transform"]["translation_mm"][0],
+              "y": e["transform"]["translation_mm"][1],
+              "z": e["transform"]["translation_mm"][2],
+              "yaw": e["transform"]["rotation_udeg"][0],
+              "pitch": e["transform"]["rotation_udeg"][1],
+              "roll": e["transform"]["rotation_udeg"][2],
+              "tid": e["source_transition"]["transition_id"],
+              "sat": e["source_transition"]["anchor_type"],
+              "said": e["source_transition"]["anchor_id"],
+              "sb": e["source_transition"]["boundary"]}
+             for pos, e in enumerate(pack["instance_spatial_states"])])
+
+
+async def _validate_m13_reuse(conn, revision_id: str, m13_result) -> None:
+    """Fail-closed validation of the M13 winner children (frozen R3 §19).
+
+    A schema-6 winner must carry the exact parent row and BOTH child sets
+    projecting exactly from the pack, with contiguous positions equal to
+    the canonical array indexes; a pre-schema-6 winner must carry NO M13
+    rows. Prohibited: reuse-decline-and-recapture, repair, refill, or any
+    current-state substitution (frozen §19/§20)."""
+    pack = m13_result.pack if m13_result is not None else None
+    parent = (
+        await conn.execute(text(
+            "SELECT production_world_hash, binding_id, binding_hash, "
+            "composition_revision_id, composition_revision_hash, "
+            "spatial_world_revision_id, spatial_world_revision_hash FROM "
+            "shot_revision_production_worlds WHERE shot_revision_id = :r"),
+            {"r": revision_id},
+        )
+    ).mappings().one_or_none()
+    if pack is None:
+        if parent is not None:
+            raise internal_invariant(
+                f"ShotRevision {revision_id} reuse: stored M13 parent row "
+                "has no captured production-world pack.")
+        return
+    if parent is None:
+        raise internal_invariant(
+            f"ShotRevision {revision_id} reuse: captured production-world "
+            "pack has no stored M13 parent row.")
+    b = pack["binding"]
+    value = b["value"]
+    if (parent["production_world_hash"] != m13_result.production_world_hash
+            or parent["binding_id"] != b["binding_id"]
+            or parent["binding_hash"] != b["binding_hash"]
+            or parent["composition_revision_id"]
+            != value["composition_revision"]["revision_id"]
+            or parent["composition_revision_hash"]
+            != value["composition_revision"]["snapshot_hash"]
+            or parent["spatial_world_revision_id"]
+            != value["spatial_world_revision"]["revision_id"]
+            or parent["spatial_world_revision_hash"]
+            != value["spatial_world_revision"]["snapshot_hash"]):
+        raise internal_invariant(
+            f"ShotRevision {revision_id} reuse: stored M13 parent row "
+            "disagrees with the captured pack.")
+
+    frows = (
+        await conn.execute(text(
+            "SELECT position, composition_id, occurrence_id, feature_id, "
+            "feature_key, feature_kind, value_type, unit, value_json, "
+            "value_hash, source_transition_id, source_anchor_type, "
+            "source_anchor_id, source_boundary FROM "
+            "shot_revision_production_instance_feature_states WHERE "
+            "shot_revision_id = :r ORDER BY position"), {"r": revision_id},
+        )
+    ).mappings().all()
+    audit = list(m13_result.feature_source_transition_ids)
+    expected_f = [
+        (pos, e["composition_id"], e["occurrence_id"], e["feature_id"],
+         e["feature_key"], e["feature_kind"], e["value_type"], e["unit"],
+         canonical_json_str(e["value"]), e["value_hash"],
+         audit[pos] if pos < len(audit) else None,
+         e["source_anchor"]["anchor_type"],
+         e["source_anchor"]["anchor_id"], e["source_anchor"]["boundary"])
+        for pos, e in enumerate(pack["instance_feature_states"])]
+    stored_f = [
+        (r["position"], r["composition_id"], r["occurrence_id"],
+         r["feature_id"], r["feature_key"], r["feature_kind"],
+         r["value_type"], r["unit"], r["value_json"], r["value_hash"],
+         r["source_transition_id"], r["source_anchor_type"],
+         r["source_anchor_id"], r["source_boundary"]) for r in frows]
+    if stored_f != expected_f:
+        raise internal_invariant(
+            f"ShotRevision {revision_id} reuse: stored PI feature-state "
+            "children disagree with the captured pack (count, order, "
+            "identity, or values).")
+
+    srows = (
+        await conn.execute(text(
+            "SELECT position, composition_id, occurrence_id, "
+            "production_instance_track_id, requirement, x_mm, y_mm, z_mm, "
+            "yaw_udeg, pitch_udeg, roll_udeg, source_transition_id, "
+            "source_anchor_type, source_anchor_id, source_boundary FROM "
+            "shot_revision_production_instance_spatial_states WHERE "
+            "shot_revision_id = :r ORDER BY position"), {"r": revision_id},
+        )
+    ).mappings().all()
+    expected_s = [
+        (pos, e["composition_id"], e["occurrence_id"],
+         e["production_instance_track_id"], e["requirement"],
+         e["transform"]["translation_mm"][0],
+         e["transform"]["translation_mm"][1],
+         e["transform"]["translation_mm"][2],
+         e["transform"]["rotation_udeg"][0],
+         e["transform"]["rotation_udeg"][1],
+         e["transform"]["rotation_udeg"][2],
+         e["source_transition"]["transition_id"],
+         e["source_transition"]["anchor_type"],
+         e["source_transition"]["anchor_id"],
+         e["source_transition"]["boundary"])
+        for pos, e in enumerate(pack["instance_spatial_states"])]
+    stored_s = [
+        (r["position"], r["composition_id"], r["occurrence_id"],
+         r["production_instance_track_id"], r["requirement"],
+         r["x_mm"], r["y_mm"], r["z_mm"], r["yaw_udeg"], r["pitch_udeg"],
+         r["roll_udeg"], r["source_transition_id"],
+         r["source_anchor_type"], r["source_anchor_id"],
+         r["source_boundary"]) for r in srows]
+    if stored_s != expected_s:
+        raise internal_invariant(
+            f"ShotRevision {revision_id} reuse: stored PI spatial-state "
+            "children disagree with the captured pack (count, order, "
+            "identity, or values).")

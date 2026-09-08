@@ -905,3 +905,228 @@ import { fetchJson as sharedFetchJson } from "./api.shared";
 export async function getJson<T>(url: string): Promise<T> {
   return sharedFetchJson<T>(url);
 }
+
+// --- M13 production world (frozen R3 §24) ----------------------------------
+
+export interface AuthoritySubjectRead {
+  composition_id: string;
+  occurrence_id: string;
+  subject_kind: string;
+  subject_id: string | null;
+  creative_entity_id: string | null;
+  created_at: string | null;
+}
+
+export interface SpatialInterpretationRead {
+  production_revision_id: string;
+  interpretation_hash: string;
+  spatial_interpretation_available?: boolean;
+}
+
+export interface BindingReadiness {
+  ready: boolean;
+  issues: { code: string }[];
+  proposed_binding_hash: string;
+  composition_revision_id: string;
+  composition_revision_hash: string;
+  spatial_world_revision_id: string;
+  spatial_world_revision_hash: string;
+  subject_summaries: { occurrence_id: string; kind?: string; id?: string }[];
+  entry_summaries: { occurrence_id: string; placement: { kind: string; id: string } }[];
+}
+
+export interface BindingRead {
+  binding_id: string;
+  binding_hash: string;
+  composition_revision_id: string;
+  composition_revision_hash: string;
+  spatial_world_revision_id: string;
+  spatial_world_revision_hash: string;
+  subjects: unknown[];
+  entries: unknown[];
+  created_at: string;
+}
+
+export interface ProductionWorldStatus {
+  shot_id: string;
+  selected: boolean;
+  binding_id: string | null;
+  binding_hash: string | null;
+  binding_current_complete: boolean | null;
+  stale_details: { code: string }[];
+  ready: boolean;
+  issues: { code: string }[];
+  production_world: {
+    binding: {
+      binding_id: string;
+      binding_hash: string;
+      value: {
+        composition_revision: {
+          revision_id: string; snapshot_hash: string };
+        spatial_world_revision: {
+          revision_id: string; snapshot_hash: string };
+      };
+    };
+    instance_feature_states?: unknown[];
+    instance_spatial_states?: {
+      production_instance_track_id: string;
+      requirement: string }[];
+  } | null;
+  production_world_hash: string | null;
+}
+
+export async function getAuthoritySubject(
+  compositionId: string, occurrenceId: string,
+): Promise<AuthoritySubjectRead> {
+  return getJson<AuthoritySubjectRead>(
+    `${BASE}/compositions/${compositionId}/occurrences/${occurrenceId}`
+    + `/authority-subject`);
+}
+
+export async function adoptAuthoritySubject(
+  compositionId: string, occurrenceId: string, kind: string,
+  creativeEntityId?: string,
+): Promise<AuthoritySubjectRead> {
+  return fetchJson(
+    `${BASE}/compositions/${compositionId}/occurrences/${occurrenceId}`
+    + `/authority-subject`,
+    { method: "POST", body: JSON.stringify(
+      { kind, creative_entity_id: creativeEntityId ?? null }) });
+}
+
+export async function getSpatialInterpretation(
+  revisionId: string,
+): Promise<{
+  interpretation_hash: string;
+  realization_local_to_subject_local: {
+    translation_mm: number[]; rotation_udeg: number[] };
+} | null> {
+  const res = await fetch(
+    `${BASE}/production-revisions/${revisionId}/spatial-interpretation`);
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`interpretation ${res.status}`);
+  return res.json();
+}
+
+export async function createSpatialInterpretation(
+  revisionId: string,
+  translationMm: number[],
+): Promise<{ interpretation_hash: string }> {
+  return createSpatialInterpretationTransform(
+    revisionId, translationMm, [0, 0, 0]);
+}
+
+export async function createSpatialInterpretationTransform(
+  revisionId: string,
+  translationMm: number[],
+  rotationUdeg: number[],
+): Promise<{ interpretation_hash: string }> {
+  return fetchJson(
+    `${BASE}/production-revisions/${revisionId}/spatial-interpretation`,
+    { method: "POST", body: JSON.stringify({
+      realization_local_to_subject_local: {
+        translation_mm: translationMm,
+        rotation_udeg: rotationUdeg } }) });
+}
+
+export async function bindingReadiness(
+  compositionRevisionId: string, worldRevisionId: string,
+): Promise<BindingReadiness> {
+  return fetchJson(
+    `${BASE}/composition-revisions/${compositionRevisionId}`
+    + `/spatial-binding-readiness`,
+    { method: "POST", body: JSON.stringify({
+      spatial_world_revision_id: worldRevisionId }) });
+}
+
+export async function publishBinding(
+  compositionRevisionId: string, worldRevisionId: string,
+): Promise<BindingRead> {
+  return fetchJson(
+    `${BASE}/composition-revisions/${compositionRevisionId}`
+    + `/spatial-bindings`,
+    { method: "POST", body: JSON.stringify({
+      spatial_world_revision_id: worldRevisionId }) });
+}
+
+export async function getShotProductionWorld(
+  shotId: string,
+): Promise<ProductionWorldStatus> {
+  return getJson<ProductionWorldStatus>(
+    `${BASE}/shots/${shotId}/production-world`);
+}
+
+export async function putProductionWorldSelection(
+  shotId: string, bindingId: string, expectedBindingId: string | null,
+): Promise<{ binding_id: string }> {
+  return fetchJson(
+    `${BASE}/shots/${shotId}/production-world-selection`,
+    { method: "PUT", body: JSON.stringify({
+      binding_id: bindingId, expected_binding_id: expectedBindingId }) });
+}
+
+export async function deleteProductionWorldSelection(
+  shotId: string, expectedBindingId: string,
+): Promise<void> {
+  const res = await fetch(
+    `${BASE}/shots/${shotId}/production-world-selection`,
+    { method: "DELETE", body: JSON.stringify({
+      expected_binding_id: expectedBindingId }) });
+  if (!res.ok) throw new Error(`selection delete ${res.status}`);
+}
+
+// --- M13 round-4: canonical /api helpers (browser boundary) -------------
+
+export async function listProductionInstanceTracks(
+  worldId: string,
+): Promise<{ id: string; occurrence_id: string; requirement: string }[]> {
+  return getJson(
+    `${BASE}/spatial-worlds/${worldId}/production-instance-tracks`);
+}
+
+export async function createProductionInstanceTrack(
+  worldId: string, occurrenceId: string, requirement: string,
+): Promise<{ id: string }> {
+  return fetchJson(
+    `${BASE}/spatial-worlds/${worldId}/production-instance-tracks`,
+    { method: "POST", body: JSON.stringify({
+      occurrence_id: occurrenceId, requirement }) });
+}
+
+export async function createProductionInstanceSpatialTransition(
+  trackId: string, body: {
+    anchor_type: string; anchor_id: string; boundary: string;
+    operation: string; transform: { translation_mm: number[];
+                                    rotation_udeg: number[] } },
+): Promise<{ id: string }> {
+  return fetchJson(
+    `${BASE}/production-instance-spatial-tracks/${trackId}/transitions`,
+    { method: "POST", body: JSON.stringify(body) });
+}
+
+export interface CapturedProductionWorldRead {
+  captured: boolean;
+  production_world_hash?: string;
+  binding?: {
+    binding_id: string; binding_hash: string;
+    composition_revision_id: string; composition_revision_hash: string;
+    spatial_world_revision_id: string;
+    spatial_world_revision_hash: string;
+  };
+  captured_feature_states?: unknown[];
+  captured_spatial_states?: unknown[];
+}
+
+export async function getCapturedProductionWorld(
+  revisionId: string,
+): Promise<CapturedProductionWorldRead> {
+  return getJson<CapturedProductionWorldRead>(
+    `${BASE}/shot-revisions/${revisionId}/production-world`);
+}
+
+export async function listCompositionRevisionsPublic(
+  compositionId: string,
+): Promise<{ revision_id: string; revision_number?: number }[]> {
+  return getJson(
+    `${BASE}/compositions/${compositionId}/revisions`);
+}
