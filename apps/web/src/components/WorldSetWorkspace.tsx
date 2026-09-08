@@ -10,6 +10,11 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import {
+  AuthoritySubjectRow,
+  BindingPanel,
+} from "@/components/ProductionWorldPanel";
+
 import { asApiError } from "@/lib/api.shared";
 import {
   applyIdentityOperation,
@@ -449,6 +454,8 @@ export default function WorldSetWorkspace({ projectId }: { projectId: string }) 
             </div>
           )}
 
+          <M13BindingLauncher compositionId={selected.id} />
+
           <div>
             <select
               aria-label="Source kind"
@@ -492,6 +499,9 @@ export default function WorldSetWorkspace({ projectId }: { projectId: string }) 
               <li key={o.occurrence_id} data-testid={`occ-${o.occurrence_id}`}>
                 <span>{o.display_name}</span>
                 <small>{o.occurrence_id}</small>
+                <AuthoritySubjectRow
+                  compositionId={selected.id}
+                  occurrenceId={o.occurrence_id} />
                 <span>
                   {" "}(x {o.x_mm}, y {o.y_mm}, z {o.z_mm}; yaw {o.yaw_udeg})
                   {o.visible ? "" : " — hidden"}
@@ -699,4 +709,33 @@ function diffOccurrences(
         `SAME identity, changed: ${changes.join("; ")}`,
     };
   });
+}
+
+
+function M13BindingLauncher({ compositionId }: { compositionId: string }) {
+  const [pair, setPair] = useState<{ c: string; w: string } | null>(null);
+  return (
+    <section aria-label="m13 binding launcher">
+      <button
+        type="button"
+        onClick={() => {
+          const c = window.prompt("exact published Composition Revision ID:");
+          if (!c) return;
+          const w = window.prompt("exact SpatialWorldRevision ID:");
+          if (!w) return;
+          setPair({ c: c.trim(), w: w.trim() });
+        }}>
+        Compose↔Spatial binding for this set…
+      </button>
+      {pair ? (
+        <BindingPanel compositionRevisionId={pair.c}
+                      worldRevisionId={pair.w} />
+      ) : (
+        <small>
+          {" "}The server derives the complete subject/entry sets; the
+          caller submits only the exact revision pair.
+        </small>
+      )}
+    </section>
+  );
 }

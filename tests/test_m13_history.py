@@ -330,14 +330,10 @@ async def _history_06_07_08_body(client, tag):
         await conn.execute(text(
             "DROP TABLE production_instance_spatial_transitions"))
         await conn.execute(text(
+            "DROP TABLE production_instance_spatial_tracks"))
+        await conn.execute(text(
             "DROP TABLE composition_occurrence_authority_subjects"))
         await conn.exec_driver_sql("PRAGMA foreign_keys=ON")
-        # every remaining PI track row is tombstoned: current staging
-        # resolution can produce nothing, while the retained rows still
-        # prove pinned-target existence for the immutable binding
-        await conn.execute(text(
-            "UPDATE production_instance_spatial_tracks SET deleted_at = "
-            "'2026-01-01T00:00:00.000Z' WHERE deleted_at IS NULL"))
         await conn.commit()
     r = await client.get(
         f"/shot-revisions/{revision.id}/production-world")
@@ -347,7 +343,7 @@ async def _history_06_07_08_body(client, tag):
     assert out["binding"]["binding_id"] == sel["binding_id"]
     assert len(out["captured_spatial_states"]) == 1
     # the rerun of the captured generation still works (06: no selection
-    # table; 07: no PI feature tables; 08: no PI staging surface)
+    # table; 07: no PI feature tables; 08: no PI track/transition tables)
     new_id = await rerun_mod._create_rerun_fenced(engine, gen)
     assert new_id != gen
 

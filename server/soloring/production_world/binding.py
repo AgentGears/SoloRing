@@ -795,33 +795,29 @@ async def _validate_stored_binding(conn, binding_id: str) -> dict:
         raise internal_invariant(
             f"binding {parent.id} world revision hash disagrees with the "
             "verified M10 reader")
-    # 3. every distinct pinned ProductionRevision: exact snapshot hash +
-    #    retained-blob closure existence
+    # 3. every distinct pinned ProductionRevision passes the EXACT M11
+    #    metadata/closure verifier semantics (§10.1: canonical snapshot
+    #    bytes + recomputed hash, exactly-one closure, closure == the
+    #    canonical consumption object, closure-to-Blob byte identity,
+    #    media grammar) through the factored set-oriented core — one
+    #    core, no N+1, no thinner parallel implementation
     pinned_prs = sorted({
         s["production_revision_id"] for s in value["subjects"]} | {
         e["production_revision_id"] for e in value["entries"]})
-    pr_rows: dict[str, tuple[str, str | None]] = {}
-    if pinned_prs:
-        pph = ", ".join(f":p{i}" for i in range(len(pinned_prs)))
-        for r in (await conn.execute(
-            text(
-                "SELECT pr.id, pr.snapshot_hash, "
-                "(SELECT c.blob_hash FROM production_revision_closures c "
-                " WHERE c.production_revision_id = pr.id AND "
-                " c.contract_key = 'retained_blob' AND "
-                " c.contract_version = 1) AS blob_hash "
-                f"FROM production_revisions pr WHERE pr.id IN ({pph})"),
-            {f"p{i}": v for i, v in enumerate(pinned_prs)},
-        )).fetchall():
-            pr_rows[r.id] = (r.snapshot_hash, r.blob_hash)
+    from soloring.production.metadata_core import (
+        verify_production_revisions_metadata_core,
+    )
+
+    pr_verified = await verify_production_revisions_metadata_core(
+        conn, pinned_prs)
     for item in list(value["subjects"]) + list(value["entries"]):
         prid = item["production_revision_id"]
-        found = pr_rows.get(prid)
-        if found is None or found[1] is None:
+        found = pr_verified.get(prid)
+        if found is None:
             raise internal_invariant(
                 f"binding {parent.id}: pinned ProductionRevision {prid} "
                 "missing or not closed")
-        if found[0] != item["production_revision_hash"]:
+        if found["snapshot_hash"] != item["production_revision_hash"]:
             raise internal_invariant(
                 f"binding {parent.id}: pinned ProductionRevision hash "
                 f"disagrees for {prid}")
@@ -850,7 +846,7 @@ async def _validate_stored_binding(conn, binding_id: str) -> dict:
             raise internal_invariant(
                 f"binding {parent.id}: pinned interpretation missing or "
                 "hash disagrees")
-        snap_hash, blob_hash = pr_rows[e["production_revision_id"]]
+        verified = pr_verified[e["production_revision_id"]]
         verify_stored_interpretation(
             interpretation_json=irow.interpretation_json,
             interpretation_hash=irow.interpretation_hash,
@@ -858,31 +854,8 @@ async def _validate_stored_binding(conn, binding_id: str) -> dict:
             yaw_udeg=irow.yaw_udeg, pitch_udeg=irow.pitch_udeg,
             roll_udeg=irow.roll_udeg,
             row_production_revision_id=irow.production_revision_id,
-            parent_snapshot_hash=snap_hash,
-            parent_blob_hash=blob_hash)
-    # 5. every pinned placement-target row EXISTS (soft-deleted remains
-    #    verifiable — staleness is never corruption) — ONE batched query
-    #    per target family (§26.1)
-    target_table = {"entity_fixed_frame": "spatial_frames",
-                    "entity_track": "spatial_tracks",
-                    "production_instance_track":
-                        "production_instance_spatial_tracks"}
-    by_kind: dict[str, list[str]] = {}
-    for e in value["entries"]:
-        by_kind.setdefault(e["placement"]["kind"],
-                           []).append(e["placement"]["id"])
-    for kind, ids in by_kind.items():
-        table = target_table[kind]
-        tph = ", ".join(f":t{i}" for i in range(len(ids)))
-        found = {r[0] for r in (await conn.execute(
-            text(f"SELECT id FROM {table} WHERE id IN ({tph})"),  # noqa: S608
-            {f"t{i}": v for i, v in enumerate(ids)},
-        )).fetchall()}
-        missing = sorted(set(ids) - found)
-        if missing:
-            raise internal_invariant(
-                f"binding {parent.id}: pinned A4 target rows missing: "
-                f"{missing}")
+            parent_snapshot_hash=verified["snapshot_hash"],
+            parent_blob_hash=verified["blob_hash"])
     return _read_projection(parent, value, composition.composition_id)
 
 

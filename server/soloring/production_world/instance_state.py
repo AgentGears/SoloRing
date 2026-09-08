@@ -402,15 +402,26 @@ async def patch_transition(session: AsyncSession, transition_id: str, *,
             conn, subj["project_id"], p_at, p_aid)
         if p_op == "clear":
             if value is not _UNSET and value is not None:
-                raise validation_error("clear requires no value")
+                raise validation_error(
+                    "clear requires value to be omitted; value:null is "
+                    "never accepted")
             v_json = v_hash = None
         else:
             if value is _UNSET:
+                if row.operation != "set" or row.value_json is None:
+                    # M7 rule: a clear→set transition requires an
+                    # explicitly supplied value — there is nothing legal
+                    # to preserve
+                    raise validation_error(
+                        "changing a clear transition to set requires an "
+                        "explicit value")
                 # preserve the stored value; re-verify it canonically
                 value_obj = _json.loads(row.value_json)
             else:
                 if value is None:
-                    raise validation_error("set requires a value")
+                    raise validation_error(
+                        "value:null is never accepted; omit value or "
+                        "supply the set value")
                 value_obj = value
             enum_values = None
             if feature["value_type"] == "enum":

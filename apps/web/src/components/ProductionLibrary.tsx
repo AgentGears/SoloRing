@@ -10,6 +10,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { SpatialInterpretationSection } from "@/components/ProductionWorldPanel";
+
 import { asApiError, type ApiError } from "@/lib/api.shared";
 import {
   createProductionObject,
@@ -277,6 +279,7 @@ export default function ProductionLibrary({ projectId }: { projectId: string }) 
                   <li key={s.asset_id}>source Asset {s.asset_id}</li>
                 ))}
               </ul>
+              <SpatialInterpretationSection revisionId={detail.revision_id} />
             </div>
           )}
         </div>

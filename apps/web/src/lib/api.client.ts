@@ -996,7 +996,11 @@ export async function adoptAuthoritySubject(
 
 export async function getSpatialInterpretation(
   revisionId: string,
-): Promise<{ interpretation_hash: string } | null> {
+): Promise<{
+  interpretation_hash: string;
+  realization_local_to_subject_local: {
+    translation_mm: number[]; rotation_udeg: number[] };
+} | null> {
   const res = await fetch(
     `${BASE}/production-revisions/${revisionId}/spatial-interpretation`);
   if (res.status === 404) return null;

@@ -313,16 +313,26 @@ async def patch_spatial_transition(
             conn, subj["project_id"], p_at, p_aid)
         if p_op == "clear":
             if transform is not _UNSET and transform is not None:
-                raise validation_error("clear requires no transform")
+                raise validation_error(
+                    "clear requires transform to be omitted; a non-null "
+                    "transform is never accepted")
             six = (None,) * 6
         else:
-            base = (row.x_mm, row.y_mm, row.z_mm, row.yaw_udeg,
-                    row.pitch_udeg, row.roll_udeg)
             if transform is _UNSET:
-                six = base
+                if row.operation != "set" or row.x_mm is None:
+                    # M10 rule: a clear→set transition requires an
+                    # explicit complete transform — there is nothing
+                    # legal to preserve
+                    raise validation_error(
+                        "changing a clear transition to set requires an "
+                        "explicit complete transform")
+                six = (row.x_mm, row.y_mm, row.z_mm, row.yaw_udeg,
+                       row.pitch_udeg, row.roll_udeg)
             else:
                 if transform is None:
-                    raise validation_error("set requires a transform")
+                    raise validation_error(
+                        "transform:null is never accepted; omit the "
+                        "field or supply the six-value transform")
                 six = _norm_transform_components(transform)
         if (p_at, p_aid, p_b) != (row.anchor_type, row.anchor_id,
                                    row.boundary):

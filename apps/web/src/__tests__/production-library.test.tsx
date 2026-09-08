@@ -16,6 +16,8 @@ const listProductionRevisions = vi.fn();
 const getProductionRevision = vi.fn();
 
 vi.mock("@/lib/api.client", () => ({
+  getSpatialInterpretation: vi.fn(async () => null),
+  createSpatialInterpretationTransform: vi.fn(),
   listAssets: vi.fn(async () => ASSETS),
   listProductionObjects: (...a: unknown[]) => listProductionObjects(...a),
   createProductionObject: (...a: unknown[]) => createProductionObject(...a),

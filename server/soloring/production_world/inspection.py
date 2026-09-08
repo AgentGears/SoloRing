@@ -317,8 +317,18 @@ async def read_captured_production_world(
         # positions); the semantic value is re-canonicalized per row and
         # its stored hash compared, exactly as the M7 historical reader
         # does for Entity features
+        from soloring.continuity.snapshots import (
+            historical_canonicalize_value,
+        )
+
         rebuilt_features = []
         for pos, r in enumerate(frows):
+            # §5.12: position is zero-based contiguous and equals the
+            # canonical pack-array index — a gap or shift is corruption
+            if r["position"] != pos:
+                raise internal_invariant(
+                    f"ShotRevision {revision_id}: feature-state position "
+                    f"{r['position']} != canonical index {pos}")
             try:
                 value_json = canonical_json_str(_json.loads(r["value_json"]))
             except ValueError as exc:
@@ -330,6 +340,16 @@ async def read_captured_production_world(
                 raise internal_invariant(
                     f"ShotRevision {revision_id}: captured feature value "
                     f"hash disagrees at position {pos}")
+            # the captured value obeys its CAPTURED value_type grammar —
+            # the M7 historical primitive, never current Feature state
+            try:
+                historical_canonicalize_value(
+                    r["value_type"], r["value_json"])
+            except ValueError as exc:
+                raise internal_invariant(
+                    f"ShotRevision {revision_id}: captured feature value "
+                    f"at position {pos} violates its captured value_type "
+                    f"{r['value_type']!r}") from exc
             rebuilt_features.append({
                 "composition_id": r["composition_id"],
                 "occurrence_id": r["occurrence_id"],
@@ -354,6 +374,10 @@ async def read_captured_production_world(
         # rebuild spatial states from captured rows
         rebuilt_spatial = []
         for pos, r in enumerate(srows):
+            if r["position"] != pos:
+                raise internal_invariant(
+                    f"ShotRevision {revision_id}: spatial-state position "
+                    f"{r['position']} != canonical index {pos}")
             rebuilt_spatial.append({
                 "composition_id": r["composition_id"],
                 "occurrence_id": r["occurrence_id"],

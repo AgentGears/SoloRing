@@ -185,8 +185,10 @@ export function SpatialInterpretationSection({
 
   useEffect(() => {
     void getSpatialInterpretation(revisionId).then((r) => {
-      setState(r ? { available: true, hash: r.interpretation_hash }
-                 : { available: false });
+      setState(r
+        ? { available: true, hash: r.interpretation_hash,
+            transform: r.realization_local_to_subject_local }
+        : { available: false });
     }).catch((e) => setError(String(e)));
   }, [revisionId, getSpatialInterpretation]);
 
@@ -418,11 +420,15 @@ export function PIStagingAuthoring({
     setBusy(true);
     setError(null);
     try {
-      const tracks = await getJson<{ id: string }[]>(
+      const tracks = await getJson<
+        { id: string; occurrence_id: string }[]>(
         `${process.env.NEXT_PUBLIC_API_ORIGIN ?? ""}/spatial-worlds/`
         + `${worldId}/production-instance-tracks`);
-      const mine = tracks.find(() => true);
-      if (!mine) throw new Error("create a track first");
+      const mine = tracks.find((t) => t.occurrence_id === occurrenceId);
+      if (!mine) {
+        throw new Error("no PI track for this occurrence — create one "
+          + "first");
+      }
       const translation = tx.split(",").map((v) =>
         Number.parseInt(v.trim(), 10));
       if (translation.length !== 3 || translation.some(Number.isNaN)) {

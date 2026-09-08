@@ -302,10 +302,9 @@ export default async function ShotPage({
 
       <h2>Production world</h2>
       <ShotProductionWorldCard shotId={shot!.id} />
-      {revisions.length > 0 ? (
-        <CapturedProductionWorldInspector
-          revisionId={revisions[0].id} />
-      ) : null}
+      {revisions.map((r) => (
+        <CapturedProductionWorldInspector key={r.id} revisionId={r.id} />
+      ))}
 
       <h2>Visual references at capture</h2>
       <VisualProvenanceList revisions={revisions} continuity={provenance} />
