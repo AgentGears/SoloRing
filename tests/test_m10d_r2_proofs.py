@@ -16,6 +16,7 @@ cardinality grows (deps/features/relations/visual items/M10 tracks/
 frames), asserting normalized SQL statement-class identity + count
 identity, plus an explicit per-row-regression tripwire (item 144).
 """
+from tests.conftest import make_tracked_maker
 import asyncio
 import json
 import time
@@ -468,8 +469,7 @@ async def test_byte_determinism_real_order_perturbation(tmp_path):
         eng = create_soloring_engine(Settings(data_dir=tmp_path / tag))
         async with eng.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
-        fac = async_sessionmaker(bind=eng, expire_on_commit=False,
-                                 class_=AsyncSession)
+        fac = make_tracked_maker(eng)
         try:
             return await _det_build(fac, eng, reverse=reverse)
         finally:

@@ -48,14 +48,14 @@ export function AuthoritySubjectRow({
 
   if (nested) {
     return (
-      <li>
+      <div>
         occurrence {occurrence_id_label(occurrenceId)}:
         {" "}<strong>M13 schema-1 promotion unsupported/deferred</strong>
         <small>
           {" "}Nested Composition Revision sources are not promoted to
           independent authority subjects in schema 1.
         </small>
-      </li>
+      </div>
     );
   }
 
@@ -75,7 +75,7 @@ export function AuthoritySubjectRow({
   }
 
   if (subject === null) {
-    return <li>occurrence {occurrenceId.slice(0, 8)}…: loading…</li>;
+    return <div>occurrence {occurrenceId.slice(0, 8)}…: loading…</div>;
   }
   const label = subject.subject_kind === "composition_local"
     ? "Composition-local"
@@ -83,7 +83,7 @@ export function AuthoritySubjectRow({
       ? `Creative Entity ${subject.subject_id?.slice(0, 8) ?? ""}…`
       : "Production Instance";
   return (
-    <li>
+    <div>
       occurrence {occurrence_id_label(occurrenceId)}: <strong>{label}</strong>
       {subject.subject_kind === "composition_local" ? (
         <>
@@ -110,7 +110,7 @@ export function AuthoritySubjectRow({
         </>
       ) : null}
       {error ? <div role="alert">{error}</div> : null}
-    </li>
+    </div>
   );
 }
 

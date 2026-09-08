@@ -8,6 +8,7 @@ one-selected-Blob physical work — no wall-clock threshold is normative.
 
 from __future__ import annotations
 
+from tests.conftest import make_tracked_maker
 import hashlib
 
 import pytest
@@ -229,8 +230,7 @@ async def test_production_object_list_query_shape_is_bounded(
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
     rep_engine = representative["engine"]
-    rep_factory = async_sessionmaker(bind=rep_engine, expire_on_commit=False,
-                                     class_=AsyncSession)
+    rep_factory = make_tracked_maker(rep_engine)
     pid = representative["project_id"]
 
     async with rep_factory() as s:

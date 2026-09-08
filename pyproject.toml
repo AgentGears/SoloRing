@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "soloring"
 version = "0.1.0"
-description = "SoloRing v0.1 — local-first creative generation loop"
+description = "SoloRing - local-first feature-film-level continuity architecture (persistent production authority + historical world, through milestone M13)"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from tests.conftest import make_tracked_maker
 import asyncio
 import hashlib
 import logging
@@ -155,7 +156,7 @@ async def test_concurrent_convergence_is_not_reported_as_repair(
         # "Upload A" commits its Blob row now (after B's row check, before
         # B's file check), without the physical file being present yet from
         # B's point of view.
-        f = async_sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
+        f = make_tracked_maker(engine)
         async with f() as s:
             await insert_blob_if_absent(s, blob_hash, rel, len(data), "image/png")
             await s.commit()

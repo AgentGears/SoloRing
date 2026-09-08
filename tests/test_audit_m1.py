@@ -10,6 +10,7 @@ F3: a corrupt pre-existing file at a content-addressed Blob path must be
 
 from __future__ import annotations
 
+from tests.conftest import make_tracked_maker
 import hashlib
 import json
 
@@ -37,7 +38,7 @@ async def _seed_blob_content(engine, settings, content: bytes,
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(content)
     aid = new_uuid()
-    f = async_sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
+    f = make_tracked_maker(engine)
     async with f() as s:
         pid = project_id or (await s.execute(
             text("SELECT id FROM projects LIMIT 1")

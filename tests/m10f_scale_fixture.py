@@ -173,7 +173,8 @@ def canonical_inventory(engine) -> dict:
 
 
 async def build_fixture(engine, factory, settings, *, n_bulk_shots=2460,
-                        with_history: bool = True) -> dict:
+                        with_history: bool = True,
+                        pkg_root_parent=None) -> dict:
     """Build the canonical representative Project. Returns identities.
 
     ``with_history=False`` skips Generation creation (used by cold-path
@@ -522,8 +523,14 @@ async def build_fixture(engine, factory, settings, *, n_bulk_shots=2460,
         return ids
 
     # --- Generation history: v1 / v2 / v3 targets ------------------------
+    # HYG-08: generated packages live under caller-owned (pytest
+    # temporary) storage, never the repository working directory
+    root = Path(pkg_root_parent) if pkg_root_parent is not None else None
+    if root is None:
+        import tempfile
+        root = Path(tempfile.mkdtemp(prefix="m10f-scale-pkgs-"))
     await _build_generation_history(engine, factory, settings, ids,
-                                    Path("."), pid)
+                                    root, pid)
     return ids
 
 

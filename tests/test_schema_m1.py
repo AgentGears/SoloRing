@@ -7,6 +7,7 @@ are deferred in the ORM.
 
 from __future__ import annotations
 
+from tests.conftest import make_tracked_maker
 import uuid
 
 import pytest
@@ -35,7 +36,7 @@ def _uid() -> str:
 
 @pytest.fixture
 def factory(engine) -> async_sessionmaker[AsyncSession]:
-    return async_sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
+    return make_tracked_maker(engine)
 
 
 async def _seed(factory: async_sessionmaker[AsyncSession]) -> dict[str, str]:

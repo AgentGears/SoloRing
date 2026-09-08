@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from tests.conftest import make_tracked_maker
 import json
 
 import pytest
@@ -225,10 +226,6 @@ async def test_correction_b4_patch_surface(client):
     assert r.status_code == 200
 
     # PATCH the PI spatial transition's transform
-    stid = (await engine.connect()).execute(text(
-        "SELECT id FROM production_instance_spatial_transitions WHERE "
-        "spatial_track_id = :t LIMIT 1"), {"t": track}).scalar_one() \
-        if False else None
     async with engine.connect() as conn:
         stid = (await conn.execute(text(
             "SELECT id FROM production_instance_spatial_transitions "
@@ -364,7 +361,7 @@ async def test_correction_r2_b1_m11_core_in_binding_verifier(client):
     from soloring.production_world.binding import read_binding
     from sqlalchemy.ext.asyncio import async_sessionmaker
 
-    factory = async_sessionmaker(bind=engine, expire_on_commit=False)
+    factory = make_tracked_maker(engine)
 
     class _S:
         bind = engine

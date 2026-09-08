@@ -7,6 +7,7 @@ negative-evidence rules.
 
 from __future__ import annotations
 
+from tests.conftest import make_tracked_maker
 import asyncio
 import json
 import sqlite3 as sq
@@ -372,8 +373,7 @@ async def _seed_generation(client_, factory, engine):
 
     aid = new_uuid()
     bh = hashlib.sha256(aid.encode()).hexdigest()
-    f = async_sessionmaker(bind=engine, expire_on_commit=False,
-                            class_=AsyncSession)
+    f = make_tracked_maker(engine)
     async with f() as s:
         s.add(Blob(hash=bh, path=f"sha256/{bh[:2]}/{bh[2:4]}/{bh}",
                    size_bytes=1))
@@ -397,8 +397,7 @@ async def _import_via_existing_importer(engine, settings, factory, gid,
     from soloring.generation.repository import get_generation_full
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-    f2 = async_sessionmaker(bind=engine, expire_on_commit=False,
-                             class_=AsyncSession)
+    f2 = make_tracked_maker(engine)
     async with f2() as s:
         generation = await get_generation_full(s, gid)
     return await import_staged_outputs(

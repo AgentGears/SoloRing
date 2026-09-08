@@ -33,8 +33,9 @@ CAM = {
 
 
 def _factory(client):
-    return async_sessionmaker(bind=client._transport.app.state.engine,
-                              expire_on_commit=False)
+    from tests.conftest import make_tracked_maker
+
+    return make_tracked_maker(client._transport.app.state.engine)
 
 
 async def _seed_at_scale(client, *, n_occurrences, n_pi_subjects,

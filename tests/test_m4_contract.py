@@ -7,6 +7,7 @@ reinterpreted by later manifest changes.
 
 from __future__ import annotations
 
+from tests.conftest import make_tracked_maker
 import json
 
 import pytest
@@ -388,7 +389,7 @@ async def test_media_compatibility_enforced_when_declared(client, factory, engin
     r = await client.post(f"/shots/{sid}/generations")
     gid = r.json()["id"]
 
-    factory2 = async_sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
+    factory2 = make_tracked_maker(engine)
     async with factory2() as s:
         generation = await get_generation_full(s, gid)
     outs = wx.spec_outputs(json.loads(generation.workflow_spec_json))

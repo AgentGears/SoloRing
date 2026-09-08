@@ -13,6 +13,7 @@ P3-5: create_generation_request survives a forced revision-collision
 
 from __future__ import annotations
 
+from tests.conftest import make_tracked_maker
 import asyncio
 import hashlib
 import json
@@ -218,8 +219,7 @@ async def _seed_fake_generation(client, factory, engine, settings) -> str:
         from soloring.domain.ids import new_uuid
 
         aid = new_uuid()
-        f = async_sessionmaker(bind=engine, expire_on_commit=False,
-                               class_=AsyncSession)
+        f = make_tracked_maker(engine)
         async with f() as s:
             s.add(Blob(hash=bh, path=f"sha256/{bh[:2]}/{bh[2:4]}/{bh}",
                        size_bytes=len(PNG), detected_media_type="image/png"))
@@ -359,8 +359,7 @@ async def test_create_generation_survives_revision_rollback(
         from soloring.domain.ids import new_uuid
 
         aid = new_uuid()
-        f = async_sessionmaker(bind=engine, expire_on_commit=False,
-                               class_=AsyncSession)
+        f = make_tracked_maker(engine)
         async with f() as s:
             s.add(Blob(hash=bh, path=f"sha256/{bh[:2]}/{bh[2:4]}/{bh}",
                        size_bytes=len(PNG),

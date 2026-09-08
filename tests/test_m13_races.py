@@ -10,6 +10,7 @@ attempted its own fence during the park.
 
 from __future__ import annotations
 
+from tests.conftest import make_tracked_maker
 import asyncio
 
 import pytest
@@ -448,8 +449,7 @@ def _capture_task(client, shot_id):
     from soloring.domain.revisions import capture_revision_with_visual
     from sqlalchemy.ext.asyncio import async_sessionmaker
 
-    factory = async_sessionmaker(
-        bind=client._transport.app.state.engine, expire_on_commit=False)
+    factory = make_tracked_maker(client._transport.app.state.engine)
     return capture_revision_with_visual(
         factory(), shot_id,
         settings=client._transport.app.state.settings)
@@ -538,8 +538,7 @@ async def test_m13_race_13(client):
         from soloring.spatial import revisions as rev_svc
         from soloring.spatial import worlds as world_svc
 
-        f = async_sessionmaker(bind=client._transport.app.state.engine,
-                               expire_on_commit=False)
+        f = make_tracked_maker(client._transport.app.state.engine)
         await world_svc.put_state_frame(
             f(), b["state"]["id"], b["desk_frame"]["id"],
             translation_mm=[3200, 0, -2000], rotation_udeg=[0, 0, 0],
@@ -656,10 +655,9 @@ async def test_m13_race_15(client):
 
 
 async def _first_transition_id(engine, track_id):
-    rows = (await engine.connect()).execute(
-        text("SELECT id FROM production_instance_spatial_transitions "
-             "WHERE spatial_track_id = :t AND deleted_at IS NULL "
-             "LIMIT 1"), {"t": track_id})
+    # the ONE query, awaited under explicit connection ownership (HYG-02:
+    # the former dead first line created an unawaited coroutine and an
+    # unowned connection)
     async with engine.connect() as conn:
         return (await conn.execute(text(
             "SELECT id FROM production_instance_spatial_transitions "

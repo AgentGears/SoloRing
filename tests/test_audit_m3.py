@@ -13,6 +13,7 @@ F7: staged-output hashing is chunked and bounded — a large output is hashed
 
 from __future__ import annotations
 
+from tests.conftest import make_tracked_maker
 import asyncio
 import hashlib
 import io
@@ -52,8 +53,7 @@ async def _seed_generation(client, factory, engine, settings) -> dict:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(content)
     aid = new_uuid()
-    f = async_sessionmaker(bind=engine, expire_on_commit=False,
-                           class_=AsyncSession)
+    f = make_tracked_maker(engine)
     async with f() as s:
         s.add(Blob(hash=bh, path=f"sha256/{bh[:2]}/{bh[2:4]}/{bh}",
                    size_bytes=len(content), detected_media_type="image/png"))

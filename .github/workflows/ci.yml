@@ -48,6 +48,12 @@ jobs:
         run: python scripts/m13_validate_proof_map.py
       - name: M13 boundary
         run: python scripts/m13_validate_boundary.py
+      - name: Hygiene proof map
+        run: python scripts/hygiene_validate_proof_map.py
+      - name: Hygiene boundary
+        run: python scripts/hygiene_validate_boundary.py
+      - name: No repo-root generated residue
+        run: python -c "from pathlib import Path; assert not Path('m10f-scale-pkgs').exists(), 'repo-root residue present'"
 
       - name: Run backend tests
         run: python -m pytest -q
@@ -84,3 +90,6 @@ jobs:
         env:
           SOLORING_API_ORIGIN: http://127.0.0.1:65534
         run: npm run build
+
+      - name: Runtime dependency audit baseline
+        run: npm audit --omit=dev --json | python ../../scripts/hygiene_validate_npm_audit.py -

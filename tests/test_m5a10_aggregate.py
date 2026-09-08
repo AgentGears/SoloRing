@@ -14,6 +14,7 @@ through the worker boundary, and aggregate AST boundary / state-space audits.
 
 from __future__ import annotations
 
+from tests.conftest import make_tracked_maker
 import ast
 import asyncio
 import hashlib
@@ -260,7 +261,7 @@ async def _seed_reference(engine, settings, project_id: str,
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(content)
     aid = new_uuid()
-    f = async_sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
+    f = make_tracked_maker(engine)
     async with f() as s:
         s.add(Blob(hash=bh, path=f"sha256/{bh[:2]}/{bh[2:4]}/{bh}",
                    size_bytes=len(content), detected_media_type="image/png"))

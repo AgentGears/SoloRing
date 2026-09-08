@@ -14,6 +14,7 @@ the SAME SQL statement classes/count for a small fixture and a
 ~2,500-Shot representative fixture. Rows may scale; round trips may
 not (APR-044).
 """
+from tests.conftest import make_tracked_maker
 import asyncio
 import time
 import uuid
@@ -228,9 +229,7 @@ class _Composer:
 
     async def preview(self, ids, shot):
         from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-        factory = async_sessionmaker(bind=self.engine,
-                                     expire_on_commit=False,
-                                     class_=AsyncSession)
+        factory = make_tracked_maker(self.engine)
         async with factory() as session:
             return await staging.preview_staging(
                 session, spatial_world_id=ids["world"], shot_id=shot)

@@ -9,6 +9,7 @@ backup/restore without the original creator.
 
 from __future__ import annotations
 
+from tests.conftest import make_tracked_maker
 import asyncio
 import hashlib
 import json
@@ -83,7 +84,7 @@ def _seed_m11_state(data_dir: Path, settings: Settings) -> dict:
         )
         async with eng.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
-        factory = async_sessionmaker(bind=eng, expire_on_commit=False, class_=AsyncSession)
+        factory = make_tracked_maker(eng)
         pid = new_uuid()
         async with factory() as s:
             async with s.bind.connect() as conn:
@@ -257,7 +258,7 @@ async def test_backup_restore_roundtrip_preserves_production_revision_and_strict
 
     eng = create_async_engine(
         f"sqlite+aiosqlite:///{(dest / 'soloring.db').as_posix()}")
-    factory = async_sessionmaker(bind=eng, expire_on_commit=False, class_=AsyncSession)
+    factory = make_tracked_maker(eng)
     rid = env and template_rid(env)
     async with factory() as s:
         async with s.bind.connect() as conn:
@@ -395,8 +396,7 @@ async def test_restore_does_not_require_original_creator(env, tmp_path):
 
         eng = create_async_engine(
             f"sqlite+aiosqlite:///{(dest / 'soloring.db').as_posix()}")
-        factory = async_sessionmaker(bind=eng, expire_on_commit=False,
-                                     class_=AsyncSession)
+        factory = make_tracked_maker(eng)
         async with factory() as s:
             async with s.bind.connect() as conn:
                 meta = await load_verified_production_revision(

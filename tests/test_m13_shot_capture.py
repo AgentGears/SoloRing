@@ -27,8 +27,9 @@ CAM = {
 
 
 def _factory(client):
-    return async_sessionmaker(bind=client._transport.app.state.engine,
-                              expire_on_commit=False)
+    from tests.conftest import make_tracked_maker
+
+    return make_tracked_maker(client._transport.app.state.engine)
 
 
 async def _entity_approved(client, pid, kind, name):
@@ -532,7 +533,9 @@ async def test_m13_shot_13(client):
     from soloring.domain.revisions import _snapshot_one_read
     from sqlalchemy.ext.asyncio import async_sessionmaker
 
-    factory = async_sessionmaker(bind=engine, expire_on_commit=False)
+    from tests.conftest import make_tracked_maker
+
+    factory = make_tracked_maker(engine)
     try:
         # spy over the coherent READ unit itself: M7/M8/M10/M13 all
         # resolve on exactly ONE connection
