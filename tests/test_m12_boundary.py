@@ -140,8 +140,13 @@ def test_m12_normative_external_name_scan_is_clean():
 
 
 def test_no_unregistered_non_fk_durable_occurrence_consumer_contract():
-    """M12-BOUNDARY:07 — the non-FK registry is empty and frozen in M12."""
-    assert impacts_mod.NON_FK_DURABLE_CONSUMERS == {}
+    """M12-BOUNDARY:07 — the non-FK registry stays closed. Empty and
+    frozen in M12; M13 R3 §22.2 activates the ONE frozen indirect
+    consumer (the Shot selection through binding→subject/entry→
+    occurrence). Nothing beyond the frozen registry may exist."""
+    assert impacts_mod.NON_FK_DURABLE_CONSUMERS == {
+        "shot_production_world_selections": "current-selection/indirect",
+    }
     # The impact fingerprint carries the consumer_contract_version so any
     # future registry extension changes impact identity mechanically.
     from soloring.composition.canonical import CONSUMER_CONTRACT_VERSION

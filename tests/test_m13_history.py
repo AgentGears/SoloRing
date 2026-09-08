@@ -18,9 +18,29 @@ CURRENT_M13_TABLES = (
     "composition_occurrence_authority_subjects",
     "production_instance_features",
     "production_instance_feature_transitions",
-    "production_instance_spatial_tracks",
     "production_instance_spatial_transitions",
 )
+
+# The PI-track table serves a dual role: its rows are immutable
+# provenance for pinned A4 targets (frozen §22.1/§23.4 — existence is
+# required even after soft deletion), so the immutable binding verifier
+# legitimately performs batched EXISTENCE lookups. Every other read of
+# the table on the historical/rerun path would be current-authority
+# consultation and stays forbidden.
+_TRACK_EXISTENCE_RE = __import__("re").compile(
+    r"^SELECT id FROM production_instance_spatial_tracks "
+    r"WHERE id IN \(")
+
+
+def _spy_check(statement: str, touched: list) -> None:
+    for table in CURRENT_M13_TABLES:
+        if table in statement:
+            touched.append(f"{table}: {statement[:60]}")
+    if "production_instance_spatial_tracks" in statement and \
+            _TRACK_EXISTENCE_RE.match(statement.strip()) is None:
+        touched.append(
+            f"production_instance_spatial_tracks (non-existence): "
+            f"{statement[:60]}")
 
 
 async def _captured_world(client, *, tag=b"m13-hist"):
@@ -114,9 +134,7 @@ async def test_m13_history_09(client):
 
     @event.listens_for(engine.sync_engine, "before_cursor_execute")
     def _spy(conn, cursor, statement, parameters, context, executemany):
-        for table in CURRENT_M13_TABLES:
-            if table in statement:
-                touched.append(table)
+        _spy_check(statement, touched)
 
     try:
         r = await client.get(
@@ -184,9 +202,7 @@ async def test_m13_history_09_rerun(client):
 
     @event.listens_for(engine.sync_engine, "before_cursor_execute")
     def _spy(conn, cursor, statement, parameters, context, executemany):
-        for table in CURRENT_M13_TABLES:
-            if table in statement:
-                touched.append(table)
+        _spy_check(statement, touched)
 
     try:
         new_id = await rerun_mod._create_rerun_fenced(engine, gen)
@@ -260,8 +276,16 @@ async def test_m13_history_05(client):
 
 async def _history_06_07_08_body(client, tag):
     """M13-HISTORY:06/07/08 — with the CURRENT M13 surfaces unavailable
-    (selection, PI features, PI tracks, subject adoption dropped), the
-    historical read and the captured-graph semantics still succeed."""
+    (selection table dropped; PI feature/feature-transition tables
+    dropped; PI spatial-transition table dropped and every PI track
+    soft-deleted so current staging resolution is impossible), the
+    historical read and the captured-graph semantics still succeed.
+
+    The PI-track ROW table itself must remain: soft-deleted track rows
+    are immutable provenance for pinned A4 targets (frozen §22.1/§23.4 —
+    recovery and the binding verifier require row existence, never
+    current eligibility), so "unavailable" means the current resolver
+    surface, not the retained provenance rows."""
     # shared body; each exact-name owner calls it
     from soloring.generation import rerun as rerun_mod
 
@@ -294,8 +318,8 @@ async def _history_06_07_08_body(client, tag):
              "th": "e" * 64, "mh": "e" * 64, "sj": spec,
              "sh2": hashlib.sha256(spec.encode()).hexdigest()})
         await conn.commit()
-        # make every CURRENT M13 surface unavailable (PRAGMA must run
-        # outside any transaction on this fresh connection state)
+        # make every CURRENT M13 authoring/resolution surface unavailable
+        # (PRAGMA must run outside any open transaction)
         await conn.exec_driver_sql("PRAGMA foreign_keys=OFF")
         await conn.execute(text(
             "DROP TABLE shot_production_world_selections"))
@@ -306,10 +330,14 @@ async def _history_06_07_08_body(client, tag):
         await conn.execute(text(
             "DROP TABLE production_instance_spatial_transitions"))
         await conn.execute(text(
-            "DROP TABLE production_instance_spatial_tracks"))
-        await conn.execute(text(
             "DROP TABLE composition_occurrence_authority_subjects"))
         await conn.exec_driver_sql("PRAGMA foreign_keys=ON")
+        # every remaining PI track row is tombstoned: current staging
+        # resolution can produce nothing, while the retained rows still
+        # prove pinned-target existence for the immutable binding
+        await conn.execute(text(
+            "UPDATE production_instance_spatial_tracks SET deleted_at = "
+            "'2026-01-01T00:00:00.000Z' WHERE deleted_at IS NULL"))
         await conn.commit()
     r = await client.get(
         f"/shot-revisions/{revision.id}/production-world")
@@ -319,7 +347,7 @@ async def _history_06_07_08_body(client, tag):
     assert out["binding"]["binding_id"] == sel["binding_id"]
     assert len(out["captured_spatial_states"]) == 1
     # the rerun of the captured generation still works (06: no selection
-    # table; 07: no PI feature tables; 08: no PI track tables)
+    # table; 07: no PI feature tables; 08: no PI staging surface)
     new_id = await rerun_mod._create_rerun_fenced(engine, gen)
     assert new_id != gen
 

@@ -67,6 +67,11 @@ def test_m13_impact_01():
     }
     tables = {t for (t, _) in FK_CONSUMERS}
     assert families <= tables
+    # frozen §22.2: the Shot selection is the ONE registered non-FK
+    # current consumer (binding → subject/entry → occurrence)
+    from soloring.composition.impacts import NON_FK_DURABLE_CONSUMERS
+    assert NON_FK_DURABLE_CONSUMERS == {
+        "shot_production_world_selections": "current-selection/indirect"}
     assert FK_CONSUMERS[
         ("composition_occurrence_authority_subjects", "occurrence_id")] == (
         "adoption/non-blocking")

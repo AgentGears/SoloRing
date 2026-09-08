@@ -170,3 +170,44 @@ class SelectionRead(BaseModel):
     binding_id: str | None
     updated_at: str | None
     binding: dict | None = None
+
+
+class PITransitionPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    anchor_type: str | None = None
+    anchor_id: str | None = None
+    boundary: str | None = None
+    operation: str | None = None
+    value: object | None = None
+
+
+class PITrackPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    requirement: str
+
+
+class PITrackTransitionPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    anchor_type: str | None = None
+    anchor_id: str | None = None
+    boundary: str | None = None
+    operation: str | None = None
+    transform: dict | None = None
+
+
+class ProductionWorldStatusRead(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    shot_id: str
+    selected: bool
+    binding_id: str | None
+    binding_hash: str | None
+    binding_current_complete: bool | None
+    stale_details: list[dict]
+    ready: bool
+    issues: list[dict]
+    production_world: dict | None = None
+    production_world_hash: str | None = None

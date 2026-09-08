@@ -94,7 +94,31 @@ async def read_captured_production_world(
                 f"ShotRevision {revision_id!r} not found.", status_code=404)
         import json as _json
 
-        snapshot = _json.loads(rev.snapshot_json)
+        from soloring.domain.canonical import (
+            canonical_hash,
+            canonical_json_str,
+        )
+
+        # §20.2: re-canonicalize the ShotRevision snapshot and verify the
+        # stored snapshot hash BEFORE trusting any embedded content
+        try:
+            snapshot = _json.loads(rev.snapshot_json)
+        except ValueError as exc:
+            raise internal_invariant(
+                f"ShotRevision {revision_id}: snapshot_json is not "
+                "parseable") from exc
+        if canonical_json_str(snapshot) != rev.snapshot_json:
+            raise internal_invariant(
+                f"ShotRevision {revision_id}: snapshot is not the canonical"
+                " encoding")
+        rev_hash_row = (await conn.execute(
+            text("SELECT snapshot_hash FROM shot_revisions WHERE id = :r"),
+            {"r": revision_id},
+        )).first()
+        if canonical_hash(snapshot) != rev_hash_row[0]:
+            raise internal_invariant(
+                f"ShotRevision {revision_id}: snapshot_hash disagrees with"
+                " the canonicalized bytes")
         captured = snapshot.get("production_world") if isinstance(
             snapshot, dict) else None
         parent = (
@@ -247,6 +271,112 @@ async def read_captured_production_world(
                 {"r": revision_id},
             )
         ).mappings().all()
+
+        # ---- full captured-pack verification (frozen §5.12/§5.13/§20.2,
+        # review B3): the pack is re-hashed, the embedded binding value
+        # is proven equal to the immutable binding's canonical value, and
+        # BOTH child families are rebuilt from the captured rows and
+        # compared field-exactly (values + positions) against the
+        # embedded pack arrays — the M7 historical-reader discipline.
+        import hashlib
+
+        from soloring.production_world.resolver import (
+            production_world_hash as _pw_hash,
+        )
+
+        if _pw_hash(captured) != parent["production_world_hash"]:
+            raise internal_invariant(
+                f"ShotRevision {revision_id}: production_world_hash "
+                "disagrees with the canonicalized captured pack")
+        # embedded binding value == immutable binding canonical value
+        binding_value = {
+            "schema_version": 1,
+            "composition_revision": {
+                "revision_id": stored_binding["composition_revision_id"],
+                "snapshot_hash":
+                    stored_binding["composition_revision_hash"]},
+            "spatial_world_revision": {
+                "revision_id":
+                    stored_binding["spatial_world_revision_id"],
+                "snapshot_hash":
+                    stored_binding["spatial_world_revision_hash"]},
+            "subjects": stored_binding["subjects"],
+            "entries": stored_binding["entries"],
+        }
+        if canonical_json_str(binding_value) != canonical_json_str(
+                captured["binding"]["value"]):
+            raise internal_invariant(
+                f"ShotRevision {revision_id}: embedded binding value "
+                "differs from the immutable binding")
+        if captured["binding"]["binding_hash"] != (
+                stored_binding["binding_hash"]):
+            raise internal_invariant(
+                f"ShotRevision {revision_id}: embedded binding hash "
+                "differs from the immutable binding")
+        # rebuild feature states from captured rows (order + values +
+        # positions); the semantic value is re-canonicalized per row and
+        # its stored hash compared, exactly as the M7 historical reader
+        # does for Entity features
+        rebuilt_features = []
+        for pos, r in enumerate(frows):
+            try:
+                value_json = canonical_json_str(_json.loads(r["value_json"]))
+            except ValueError as exc:
+                raise internal_invariant(
+                    f"ShotRevision {revision_id}: captured feature value "
+                    f"at position {pos} is not parseable") from exc
+            if hashlib.sha256(value_json.encode("utf-8")).hexdigest() != (
+                    r["value_hash"]):
+                raise internal_invariant(
+                    f"ShotRevision {revision_id}: captured feature value "
+                    f"hash disagrees at position {pos}")
+            rebuilt_features.append({
+                "composition_id": r["composition_id"],
+                "occurrence_id": r["occurrence_id"],
+                "feature_id": r["feature_id"],
+                "feature_key": r["feature_key"],
+                "feature_kind": r["feature_kind"],
+                "value_type": r["value_type"],
+                "unit": r["unit"],
+                "value": _json.loads(r["value_json"]),
+                "value_hash": r["value_hash"],
+                "source_anchor": {
+                    "anchor_type": r["source_anchor_type"],
+                    "anchor_id": r["source_anchor_id"],
+                    "boundary": r["source_boundary"],
+                },
+            })
+        if rebuilt_features != captured["instance_feature_states"]:
+            raise internal_invariant(
+                f"ShotRevision {revision_id}: captured feature-state "
+                "children disagree with the embedded pack (count, order, "
+                "identity, or values)")
+        # rebuild spatial states from captured rows
+        rebuilt_spatial = []
+        for pos, r in enumerate(srows):
+            rebuilt_spatial.append({
+                "composition_id": r["composition_id"],
+                "occurrence_id": r["occurrence_id"],
+                "production_instance_track_id":
+                    r["production_instance_track_id"],
+                "requirement": r["requirement"],
+                "transform": {
+                    "translation_mm": [r["x_mm"], r["y_mm"], r["z_mm"]],
+                    "rotation_udeg": [r["yaw_udeg"], r["pitch_udeg"],
+                                      r["roll_udeg"]],
+                },
+                "source_transition": {
+                    "transition_id": r["source_transition_id"],
+                    "anchor_type": r["source_anchor_type"],
+                    "anchor_id": r["source_anchor_id"],
+                    "boundary": r["source_boundary"],
+                },
+            })
+        if rebuilt_spatial != captured["instance_spatial_states"]:
+            raise internal_invariant(
+                f"ShotRevision {revision_id}: captured spatial-state "
+                "children disagree with the embedded pack (count, order, "
+                "identity, or values)")
         return {
             "revision_id": revision_id,
             "schema_version": snapshot.get("schema_version"),

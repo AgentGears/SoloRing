@@ -177,8 +177,13 @@ async def put_selection(
                 {"s": shot_id, "b": binding_id},
             )
         await conn.exec_driver_sql("COMMIT")
-    return await get_selection(session, shot_id) | {
-        "binding": await read_binding_summary(session, binding_id)}
+    # Frozen §14.5/§24.6: a successful selection PUT returns the SAME
+    # resolver-derived status projection as GET /shots/{id}/production-world
+    from soloring.production_world.inspection import (
+        inspect_production_world,
+    )
+
+    return await inspect_production_world(session, shot_id)
 
 
 async def delete_selection(
@@ -229,8 +234,3 @@ async def get_selection(session: AsyncSession, shot_id: str) -> dict:
                     "updated_at": None}
         return {"shot_id": row.shot_id, "binding_id": row.binding_id,
                 "updated_at": row.updated_at}
-
-
-async def read_binding_summary(session: AsyncSession, binding_id: str):
-    from soloring.production_world.binding import read_binding
-    return await read_binding(session, binding_id)

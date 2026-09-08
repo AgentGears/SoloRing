@@ -66,8 +66,13 @@ FK_CONSUMERS: dict[tuple[str, str], str] = {
     ("shot_revision_production_instance_spatial_states", "composition_id"): "historical/non-blocking",
 }
 
-# Explicit non-FK durable-consumer registry — empty in M12 (frozen §2.5).
-NON_FK_DURABLE_CONSUMERS: dict[str, str] = {}
+# Explicit non-FK durable-consumer registry (frozen §2.5; activated by
+# M13 R3 §22.2): the Shot selection is the ONE registered indirect
+# current consumer — it reaches occurrences only through
+# binding → binding subject/entry → occurrence.
+NON_FK_DURABLE_CONSUMERS: dict[str, str] = {
+    "shot_production_world_selections": "current-selection/indirect",
+}
 
 # Frozen §2.4 cardinality contract.
 CARDINALITY = {
@@ -161,9 +166,9 @@ async def _resolve_live_blockers(conn, source_ids: list[str]) -> list[dict]:
     Subject adoption is durable identity metadata and never blocks by
     itself; historical ShotRevision rows never block. Blocker elements
     use the frozen canonical JSON shapes, sorted by
-    (occurrence_id, consumer, id). The M13 current-selection blocker
-    resolves through the binding subject graph; no selection rows can
-    exist until the binding surface (M13C) does.
+    (occurrence_id, consumer, id). The M13 current-selection blocker is
+    the registered non-FK durable consumer (§22.2) and resolves through
+    the binding subject graph.
     """
     if not source_ids:
         return []

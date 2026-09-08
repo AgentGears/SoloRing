@@ -125,6 +125,12 @@ async def _full_m13_world(client, *, tag=b"m13-shot"):
             "axis": axis, "shot": shot, "desk_frame": fr_desk}
 
 
+async def _shot_for(client, pid):
+    r = await client.post(f"/projects/{pid}/shots", json={"subject": "s"})
+    assert r.status_code == 201, r.text
+    return r.json()["id"]
+
+
 async def _capture(client, shot_id):
     from soloring.domain.revisions import capture_revision_with_visual
     return await capture_revision_with_visual(

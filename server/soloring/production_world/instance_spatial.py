@@ -134,6 +134,30 @@ async def list_tracks(session: AsyncSession, world_id: str) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+async def patch_track(session: AsyncSession, track_id: str, *,
+                      requirement: str | None = None) -> None:
+    """The only schema-1 track mutation (frozen §24.4, mirroring M10):
+    explicit requirement policy edit; identity fields are immutable."""
+    if requirement is None:
+        return
+    if requirement not in ("required", "optional"):
+        raise validation_error(
+            "requirement must be 'required' or 'optional'")
+    async with session.bind.connect() as conn:
+        await conn.exec_driver_sql("BEGIN IMMEDIATE")
+        track = await _load_active_track(conn, track_id)
+        await _require_pi_subject(conn, track["composition_id"],
+                                  track["occurrence_id"])
+        await conn.execute(
+            text(
+                "UPDATE production_instance_spatial_tracks SET "
+                f"requirement = :r, updated_at = {NOW_SQL} WHERE id = :t"
+            ),
+            {"r": requirement, "t": track_id},
+        )
+        await conn.exec_driver_sql("COMMIT")
+
+
 async def delete_track(session: AsyncSession, track_id: str) -> None:
     async with session.bind.connect() as conn:
         await conn.exec_driver_sql("BEGIN IMMEDIATE")
@@ -235,6 +259,113 @@ async def create_spatial_transition(session: AsyncSession, track_id: str,
         )
         await conn.exec_driver_sql("COMMIT")
     return tid
+
+
+_UNSET = object()
+
+
+async def patch_spatial_transition(
+    session: AsyncSession, transition_id: str, *,
+    anchor_type=_UNSET, anchor_id=_UNSET, boundary=_UNSET,
+    operation=_UNSET, transform=_UNSET,
+) -> None:
+    """PATCH one COMPLETE prospective transition (frozen §24.4, mirroring
+    the M10 SpatialTransition PATCH discipline): omitted fields preserve;
+    the aggregate must be one of the two legal forms; anchor/boundary
+    changes revalidate the complete prospective coordinate."""
+    async with session.bind.connect() as conn:
+        await conn.exec_driver_sql("BEGIN IMMEDIATE")
+        row = (
+            await conn.execute(
+                text(
+                    "SELECT t.id, t.spatial_track_id, t.anchor_type, "
+                    "t.anchor_id, t.boundary, t.operation, t.x_mm, t.y_mm,"
+                    " t.z_mm, t.yaw_udeg, t.pitch_udeg, t.roll_udeg, "
+                    "t.deleted_at, k.composition_id, k.occurrence_id FROM "
+                    "production_instance_spatial_transitions t JOIN "
+                    "production_instance_spatial_tracks k ON "
+                    "k.id = t.spatial_track_id WHERE t.id = :tid"
+                ),
+                {"tid": transition_id},
+            )
+        ).first()
+        if row is None:
+            raise not_found(
+                ErrorCode.PRODUCTION_INSTANCE_SPATIAL_TRACK_NOT_FOUND,
+                f"Production Instance spatial transition {transition_id!r}"
+                " not found.",
+            )
+        subj = await _require_pi_subject(conn, row.composition_id,
+                                         row.occurrence_id)
+        if row.deleted_at is not None:
+            raise validation_error("cannot patch a deleted transition")
+        p_at = row.anchor_type if anchor_type is _UNSET else anchor_type
+        p_aid = row.anchor_id if anchor_id is _UNSET else anchor_id
+        p_b = row.boundary if boundary is _UNSET else boundary
+        p_op = row.operation if operation is _UNSET else operation
+        if p_at not in ("sequence", "scene", "shot"):
+            raise validation_error("anchor_type must be sequence|scene|shot")
+        if p_b not in ("start", "end"):
+            raise validation_error("boundary must be start|end")
+        if p_op not in ("set", "clear"):
+            raise validation_error("operation must be set|clear")
+        await _validate_anchor_in_ordering(
+            conn, subj["project_id"], p_at, p_aid)
+        if p_op == "clear":
+            if transform is not _UNSET and transform is not None:
+                raise validation_error("clear requires no transform")
+            six = (None,) * 6
+        else:
+            base = (row.x_mm, row.y_mm, row.z_mm, row.yaw_udeg,
+                    row.pitch_udeg, row.roll_udeg)
+            if transform is _UNSET:
+                six = base
+            else:
+                if transform is None:
+                    raise validation_error("set requires a transform")
+                six = _norm_transform_components(transform)
+        if (p_at, p_aid, p_b) != (row.anchor_type, row.anchor_id,
+                                   row.boundary):
+            taken = (
+                await conn.execute(
+                    text(
+                        "SELECT 1 FROM "
+                        "production_instance_spatial_transitions WHERE "
+                        "spatial_track_id = :t AND anchor_type = :at AND "
+                        "anchor_id = :aid AND boundary = :b AND "
+                        "deleted_at IS NULL AND id <> :ex"
+                    ),
+                    {"t": row.spatial_track_id, "at": p_at, "aid": p_aid,
+                     "b": p_b, "ex": transition_id},
+                )
+            ).first()
+            if taken is not None:
+                raise SoloRingError(
+                    ErrorCode.SPATIAL_TRANSITION_INVALID,
+                    "the prospective coordinate is already occupied",
+                    status_code=409,
+                )
+        # exact M10 canonicalization at authoring time
+        stored = six
+        if p_op == "set":
+            from soloring.spatial.math import Transform
+
+            tr = Transform(translation_mm=six[:3], rotation_udeg=six[3:])
+            stored = tuple(tr.translation_mm) + tuple(tr.rotation_udeg)
+        await conn.execute(
+            text(
+                "UPDATE production_instance_spatial_transitions SET "
+                "anchor_type = :at, anchor_id = :aid, boundary = :b, "
+                "operation = :op, x_mm = :x, y_mm = :y, z_mm = :z, "
+                "yaw_udeg = :yaw, pitch_udeg = :pitch, roll_udeg = :roll, "
+                f"updated_at = {NOW_SQL} WHERE id = :tid"
+            ),
+            {"at": p_at, "aid": p_aid, "b": p_b, "op": p_op,
+             "x": stored[0], "y": stored[1], "z": stored[2],
+             "yaw": stored[3], "pitch": stored[4], "roll": stored[5],
+             "tid": transition_id},
+        )
+        await conn.exec_driver_sql("COMMIT")
 
 
 async def delete_spatial_transition(session: AsyncSession,

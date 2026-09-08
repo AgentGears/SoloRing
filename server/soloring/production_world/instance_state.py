@@ -349,6 +349,108 @@ async def create_transition(session: AsyncSession, feature_id: str,
     return tid
 
 
+_UNSET = object()
+
+
+async def patch_transition(session: AsyncSession, transition_id: str, *,
+                           anchor_type=_UNSET, anchor_id=_UNSET,
+                           boundary=_UNSET, operation=_UNSET,
+                           value=_UNSET) -> None:
+    """PATCH one COMPLETE prospective transition (frozen §24.3, mirroring
+    the M7/M10 PATCH discipline). Omitted fields preserve; the resulting
+    aggregate must be one of the two legal forms (set = canonical value,
+    clear = no value); anchor/boundary changes revalidate the complete
+    prospective coordinate against the active-coordinate uniqueness."""
+    async with session.bind.connect() as conn:
+        await conn.exec_driver_sql("BEGIN IMMEDIATE")
+        row = (
+            await conn.execute(
+                text(
+                    "SELECT t.id, t.feature_id, t.anchor_type, t.anchor_id,"
+                    " t.boundary, t.operation, t.value_json, t.value_hash,"
+                    " t.deleted_at, f.composition_id, f.occurrence_id FROM "
+                    "production_instance_feature_transitions t JOIN "
+                    "production_instance_features f ON f.id = t.feature_id "
+                    "WHERE t.id = :tid"
+                ),
+                {"tid": transition_id},
+            )
+        ).first()
+        if row is None:
+            raise not_found(
+                ErrorCode.PRODUCTION_INSTANCE_FEATURE_NOT_FOUND,
+                f"Production Instance feature transition {transition_id!r} "
+                "not found.",
+            )
+        subj = await _require_pi_subject(conn, row.composition_id,
+                                         row.occurrence_id)
+        feature = await _load_active_feature(conn, row.feature_id)
+        if row.deleted_at is not None:
+            raise validation_error(
+                "cannot patch a deleted transition")
+        p_at = row.anchor_type if anchor_type is _UNSET else anchor_type
+        p_aid = row.anchor_id if anchor_id is _UNSET else anchor_id
+        p_b = row.boundary if boundary is _UNSET else boundary
+        p_op = row.operation if operation is _UNSET else operation
+        if p_at not in ("sequence", "scene", "shot"):
+            raise validation_error("anchor_type must be sequence|scene|shot")
+        if p_b not in ("start", "end"):
+            raise validation_error("boundary must be start|end")
+        if p_op not in ("set", "clear"):
+            raise validation_error("operation must be set|clear")
+        await _validate_anchor_in_ordering(
+            conn, subj["project_id"], p_at, p_aid)
+        if p_op == "clear":
+            if value is not _UNSET and value is not None:
+                raise validation_error("clear requires no value")
+            v_json = v_hash = None
+        else:
+            if value is _UNSET:
+                # preserve the stored value; re-verify it canonically
+                value_obj = _json.loads(row.value_json)
+            else:
+                if value is None:
+                    raise validation_error("set requires a value")
+                value_obj = value
+            enum_values = None
+            if feature["value_type"] == "enum":
+                enum_values = _json.loads(feature["enum_values_json"])
+            v_json, v_hash = canonicalize_value(
+                feature["value_type"], value_obj, enum_values=enum_values)
+        if (p_at, p_aid, p_b) != (row.anchor_type, row.anchor_id,
+                                   row.boundary):
+            taken = (
+                await conn.execute(
+                    text(
+                        "SELECT 1 FROM "
+                        "production_instance_feature_transitions "
+                        "WHERE feature_id = :fid AND anchor_type = :at "
+                        "AND anchor_id = :aid AND boundary = :b AND "
+                        "deleted_at IS NULL AND id <> :ex"
+                    ),
+                    {"fid": row.feature_id, "at": p_at, "aid": p_aid,
+                     "b": p_b, "ex": transition_id},
+                )
+            ).first()
+            if taken is not None:
+                raise SoloRingError(
+                    ErrorCode.CONTINUITY_TRANSITION_CONFLICT,
+                    "the prospective coordinate is already occupied",
+                    status_code=409,
+                )
+        await conn.execute(
+            text(
+                "UPDATE production_instance_feature_transitions SET "
+                "anchor_type = :at, anchor_id = :aid, boundary = :b, "
+                f"operation = :op, value_json = :vj, value_hash = :vh, "
+                f"updated_at = {NOW_SQL} WHERE id = :tid"
+            ),
+            {"at": p_at, "aid": p_aid, "b": p_b, "op": p_op,
+             "vj": v_json, "vh": v_hash, "tid": transition_id},
+        )
+        await conn.exec_driver_sql("COMMIT")
+
+
 async def delete_transition(session: AsyncSession, transition_id: str) -> None:
     async with session.bind.connect() as conn:
         await conn.exec_driver_sql("BEGIN IMMEDIATE")

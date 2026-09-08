@@ -238,9 +238,40 @@ async def resolve_production_world(
                     "spatial_world_revision_hash":
                         stored["spatial_world_revision_hash"]}})
 
-    # 10-12. PI state + staging for the EXACT bound subject set only
-    subjects = [(stored["composition_id"], s["occurrence_id"])
-                for s in stored["subjects"]]
+    # 10-12. PI state + staging for the EXACT bound subject set — PI
+    # authority belongs ONLY to production_instance subjects (frozen
+    # §5.3/§5.5: CreativeEntity state remains exclusively M7/M10).
+    # Shadow PI rows on a creative_entity-adopted occurrence are stored
+    # authority corruption, never silently consumed or ignored.
+    pi_subjects = [(stored["composition_id"], s["occurrence_id"])
+                   for s in stored["subjects"]
+                   if s["authority_subject"]["kind"]
+                   == "production_instance"]
+    ce_occurrences = [s["occurrence_id"] for s in stored["subjects"]
+                      if s["authority_subject"]["kind"]
+                      == "creative_entity"]
+    if ce_occurrences:
+        cph = ",".join(f":c{i}" for i in range(len(ce_occurrences)))
+        cparams = {f"c{i}": o for i, o in enumerate(ce_occurrences)}
+        shadow_features = (await conn.execute(
+            text(
+                "SELECT COUNT(*) FROM production_instance_features "
+                f"WHERE deleted_at IS NULL AND occurrence_id IN ({cph})"),
+            cparams,
+        )).scalar_one()
+        shadow_tracks = (await conn.execute(
+            text(
+                "SELECT COUNT(*) FROM "
+                "production_instance_spatial_tracks "
+                f"WHERE deleted_at IS NULL AND occurrence_id IN ({cph})"),
+            cparams,
+        )).scalar_one()
+        if shadow_features or shadow_tracks:
+            raise internal_invariant(
+                "shadow Production Instance authority exists for "
+                "creative_entity-adopted bound subjects — CreativeEntity "
+                "state remains exclusively on M7/M10 authority")
+    subjects = pi_subjects
     pi_features = await resolve_pi_feature_state(
         conn, shot_id=shot_id, subjects=subjects)
     if not pi_features["assigned"] and pi_features[

@@ -12,6 +12,8 @@ import RealizationPanel from "@/components/RealizationPanel";
 import VisualContinuityPanel from "@/components/VisualContinuityPanel";
 import VisualProvenanceList from "@/components/VisualProvenanceList";
 import SpatialContinuityPanel from "@/components/SpatialContinuityPanel";
+import { ShotProductionWorldCard } from "@/components/ProductionWorldPanel";
+import { CapturedProductionWorldInspector } from "@/components/ProductionWorldPanel";
 import ReferencePanel from "@/components/ReferencePanel";
 import { SemanticDependenciesPanel } from "@/components/SemanticDependenciesPanel";
 import RevisionProvenanceList from "@/components/RevisionProvenanceList";
@@ -297,6 +299,13 @@ export default async function ShotPage({
 
       <h2>Spatial continuity</h2>
       <SpatialContinuityPanel shotId={shot!.id} />
+
+      <h2>Production world</h2>
+      <ShotProductionWorldCard shotId={shot!.id} />
+      {revisions.length > 0 ? (
+        <CapturedProductionWorldInspector
+          revisionId={revisions[0].id} />
+      ) : null}
 
       <h2>Visual references at capture</h2>
       <VisualProvenanceList revisions={revisions} continuity={provenance} />

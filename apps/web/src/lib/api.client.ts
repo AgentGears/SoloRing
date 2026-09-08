@@ -956,6 +956,23 @@ export interface ProductionWorldStatus {
   stale_details: { code: string }[];
   ready: boolean;
   issues: { code: string }[];
+  production_world: {
+    binding: {
+      binding_id: string;
+      binding_hash: string;
+      value: {
+        composition_revision: {
+          revision_id: string; snapshot_hash: string };
+        spatial_world_revision: {
+          revision_id: string; snapshot_hash: string };
+      };
+    };
+    instance_feature_states?: unknown[];
+    instance_spatial_states?: {
+      production_instance_track_id: string;
+      requirement: string }[];
+  } | null;
+  production_world_hash: string | null;
 }
 
 export async function getAuthoritySubject(
@@ -991,11 +1008,21 @@ export async function createSpatialInterpretation(
   revisionId: string,
   translationMm: number[],
 ): Promise<{ interpretation_hash: string }> {
+  return createSpatialInterpretationTransform(
+    revisionId, translationMm, [0, 0, 0]);
+}
+
+export async function createSpatialInterpretationTransform(
+  revisionId: string,
+  translationMm: number[],
+  rotationUdeg: number[],
+): Promise<{ interpretation_hash: string }> {
   return fetchJson(
     `${BASE}/production-revisions/${revisionId}/spatial-interpretation`,
     { method: "POST", body: JSON.stringify({
       realization_local_to_subject_local: {
-        translation_mm: translationMm, rotation_udeg: [0, 0, 0] } }) });
+        translation_mm: translationMm,
+        rotation_udeg: rotationUdeg } }) });
 }
 
 export async function bindingReadiness(

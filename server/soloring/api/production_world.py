@@ -23,9 +23,13 @@ from soloring.api.schemas.production_world import (
     PIFeaturePatch,
     PIFeatureRead,
     PITrackCreate,
+    PITrackPatch,
     PITrackRead,
     PITrackTransitionCreate,
+    PITrackTransitionPatch,
     PITransitionCreate,
+    PITransitionPatch,
+    ProductionWorldStatusRead,
     SpatialInterpretationCreate,
     SpatialInterpretationRead,
 )
@@ -336,14 +340,16 @@ async def get_selection(
 
 @router.put(
     "/shots/{shot_id}/production-world-selection",
-    response_model=SelectionRead,
+    response_model=ProductionWorldStatusRead,
 )
 async def put_selection(
     shot_id: str,
     body: SelectionPut,
     session: AsyncSession = Depends(get_session),
-) -> SelectionRead:
-    return SelectionRead(**await selection_svc.put_selection(
+) -> ProductionWorldStatusRead:
+    # frozen §14.5/§24.6: the SAME resolver-derived status projection as
+    # GET /shots/{shot_id}/production-world
+    return ProductionWorldStatusRead(**await selection_svc.put_selection(
         session, shot_id, binding_id=body.binding_id,
         expected_binding_id=body.expected_binding_id))
 
@@ -361,14 +367,16 @@ async def delete_selection(
     return {"ok": True}
 
 
-@router.get("/shots/{shot_id}/production-world")
+@router.get("/shots/{shot_id}/production-world",
+            response_model=ProductionWorldStatusRead)
 async def get_production_world(
     shot_id: str,
     session: AsyncSession = Depends(get_session),
-) -> dict:
+) -> ProductionWorldStatusRead:
     """§14.5/§24.6: the ONE resolver projection — current status, stale
     details, readiness issues, and the resolved pack/hash when ready."""
-    return await inspection.inspect_production_world(session, shot_id)
+    return ProductionWorldStatusRead(
+        **await inspection.inspect_production_world(session, shot_id))
 
 
 @router.get("/shot-revisions/{revision_id}/production-world")
@@ -380,3 +388,42 @@ async def get_captured_production_world(
     explicitly labeled; never calls the current M13 resolver."""
     return await inspection.read_captured_production_world(
         session, revision_id)
+
+
+@router.patch(
+    "/production-instance-feature-transitions/{transition_id}")
+async def patch_pi_feature_transition(
+    transition_id: str,
+    body: PITransitionPatch,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    await instance_state.patch_transition(
+        session, transition_id,
+        **{k: v for k, v in body.model_dump().items()
+           if k in body.model_fields_set})
+    return {"ok": True}
+
+
+@router.patch("/production-instance-spatial-tracks/{track_id}")
+async def patch_pi_track(
+    track_id: str,
+    body: PITrackPatch,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    await instance_spatial.patch_track(
+        session, track_id, requirement=body.requirement)
+    return {"ok": True}
+
+
+@router.patch(
+    "/production-instance-spatial-transitions/{transition_id}")
+async def patch_pi_spatial_transition(
+    transition_id: str,
+    body: PITrackTransitionPatch,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    await instance_spatial.patch_spatial_transition(
+        session, transition_id,
+        **{k: v for k, v in body.model_dump().items()
+           if k in body.model_fields_set})
+    return {"ok": True}
