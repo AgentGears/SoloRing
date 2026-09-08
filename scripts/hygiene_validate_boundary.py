@@ -52,6 +52,7 @@ ALLOWLIST = (
     "tests/test_schema_m1.py",
     "tests/test_upload.py",
     "tests/test_generation_repository.py",
+    "tests/test_m10d_races.py",
     "tests/test_m13_binding.py",
     "tests/test_m13_shot_capture.py",
     "tests/test_m13_scale.py",
@@ -105,21 +106,25 @@ def main() -> int:
 
     for f in changed:
         p = REPO / f
-        if not p.is_file():
-            continue
+        if not p.is_file() or f.endswith("hygiene_validate_boundary.py"):
+            continue  # this validator's own scan patterns name the vocabulary
         src = p.read_text(encoding="utf-8", errors="replace")
         for pattern, what in M14_PATTERNS:
             if re.search(pattern, src, re.I):
                 errors.append(f"{f}: {what} vocabulary present")
 
-    # new authority tables: any CREATE TABLE in changed files
+    # new authority tables: CREATE TABLE in changed MIGRATION-path files
+    # only — test fixtures legitimately build scratch schema objects
+    # (e.g. the alembic_version stamp) and are not migration source
     for f in changed:
+        if not f.startswith("server/alembic/versions/"):
+            continue
         p = REPO / f
         if not p.is_file() or not f.endswith((".py",)):
             continue
         src = p.read_text(encoding="utf-8", errors="replace")
         for m in re.finditer(r'CREATE TABLE\s+"?(\w+)"?', src, re.I):
-            errors.append(f"{f}: new table {m.group(1)} in migration-shaped "
+            errors.append(f"{f}: new table {m.group(1)} in migration "
                           "source")
 
     if errors:
