@@ -10,6 +10,12 @@ const listOccurrences = vi.fn();
 const patchOccurrence = vi.fn();
 
 vi.mock("@/lib/api.client", () => ({
+  listCompositionRevisionsPublic: vi.fn(async () => []),
+  getCapturedProductionWorld: vi.fn(async () => ({
+    captured: false })),
+  listProductionInstanceTracks: vi.fn(async () => []),
+  createProductionInstanceTrack: vi.fn(),
+  createProductionInstanceSpatialTransition: vi.fn(),
   getJson: vi.fn(async (url: string) =>
     // readiness must stay null (the guarded panel) while
     // revisions/history resolve to empty lists

@@ -431,6 +431,14 @@ async def load_production_revision_metadata_verified(
             {"oid": row.production_object_id},
         )
     ).first()
+    if obj is None:
+        # §10.1 ownership: a missing Production Object is corruption —
+        # the same fail-closed semantics as the shared batch core, never
+        # a verified result with project_id=None
+        raise internal_invariant(
+            "ProductionRevision's Production Object is missing",
+            details={"revision_id": revision_id},
+        )
     # THE one shared §10.1 semantic core (also consumed set-oriented by
     # the M13 binding verifier) — this wrapper only supplies the rows
     # and preserves the public not-found behavior above.
@@ -464,7 +472,7 @@ async def load_production_revision_metadata_verified(
     return {
         "revision_id": row.id,
         "production_object_id": row.production_object_id,
-        "project_id": obj.project_id if obj else None,
+        "project_id": obj.project_id,
         "revision_number": row.revision_number,
         "snapshot_json": row.snapshot_json,
         "snapshot_hash": row.snapshot_hash,

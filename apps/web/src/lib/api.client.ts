@@ -1074,3 +1074,59 @@ export async function deleteProductionWorldSelection(
       expected_binding_id: expectedBindingId }) });
   if (!res.ok) throw new Error(`selection delete ${res.status}`);
 }
+
+// --- M13 round-4: canonical /api helpers (browser boundary) -------------
+
+export async function listProductionInstanceTracks(
+  worldId: string,
+): Promise<{ id: string; occurrence_id: string; requirement: string }[]> {
+  return getJson(
+    `${BASE}/spatial-worlds/${worldId}/production-instance-tracks`);
+}
+
+export async function createProductionInstanceTrack(
+  worldId: string, occurrenceId: string, requirement: string,
+): Promise<{ id: string }> {
+  return fetchJson(
+    `${BASE}/spatial-worlds/${worldId}/production-instance-tracks`,
+    { method: "POST", body: JSON.stringify({
+      occurrence_id: occurrenceId, requirement }) });
+}
+
+export async function createProductionInstanceSpatialTransition(
+  trackId: string, body: {
+    anchor_type: string; anchor_id: string; boundary: string;
+    operation: string; transform: { translation_mm: number[];
+                                    rotation_udeg: number[] } },
+): Promise<{ id: string }> {
+  return fetchJson(
+    `${BASE}/production-instance-spatial-tracks/${trackId}/transitions`,
+    { method: "POST", body: JSON.stringify(body) });
+}
+
+export interface CapturedProductionWorldRead {
+  captured: boolean;
+  production_world_hash?: string;
+  binding?: {
+    binding_id: string; binding_hash: string;
+    composition_revision_id: string; composition_revision_hash: string;
+    spatial_world_revision_id: string;
+    spatial_world_revision_hash: string;
+  };
+  captured_feature_states?: unknown[];
+  captured_spatial_states?: unknown[];
+}
+
+export async function getCapturedProductionWorld(
+  revisionId: string,
+): Promise<CapturedProductionWorldRead> {
+  return getJson<CapturedProductionWorldRead>(
+    `${BASE}/shot-revisions/${revisionId}/production-world`);
+}
+
+export async function listCompositionRevisionsPublic(
+  compositionId: string,
+): Promise<{ revision_id: string; revision_number?: number }[]> {
+  return getJson(
+    `${BASE}/compositions/${compositionId}/revisions`);
+}

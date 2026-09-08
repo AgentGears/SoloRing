@@ -18,6 +18,12 @@ const previewIdentityOperation = vi.fn();
 const applyIdentityOperation = vi.fn();
 
 vi.mock("@/lib/api.client", () => ({
+  listCompositionRevisionsPublic: vi.fn(async () => []),
+  getCapturedProductionWorld: vi.fn(async () => ({
+    captured: false })),
+  listProductionInstanceTracks: vi.fn(async () => []),
+  createProductionInstanceTrack: vi.fn(),
+  createProductionInstanceSpatialTransition: vi.fn(),
   listCompositions: vi.fn(async () => [COMP]),
   listOccurrences: vi.fn(async () => [NESTED_OCC]),
   mintOccurrence: (...a: unknown[]) => mintOccurrence(...a),

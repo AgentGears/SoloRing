@@ -7,6 +7,7 @@ import json
 import pytest
 from sqlalchemy import text
 
+from tests.m13_seed import make_composition
 from tests.test_m13_binding import (
     _adopt,
     _approved_world,
@@ -648,6 +649,32 @@ async def test_correction_r3_factored_m11_core_shared(client):
     assert "exactly one closure" in e1.value.message
     assert "exactly one closure" in e2.value.message
 
+    # ownership equivalence: a missing Production Object is corruption
+    # on BOTH readers (the scalar path previously returned
+    # project_id=None — the round-3 review defect)
+    from tests.m13_seed import seed_second_revision
+
+    b2 = await seed_base(client, tag=b"r3-core-own")
+    prid2 = b2["production_revision_id"]
+    async with engine.connect() as conn:
+        await conn.execute(text("PRAGMA foreign_keys=OFF"))
+        await conn.execute(text(
+            "DELETE FROM production_objects WHERE id = :o"),
+            {"o": b2["production_object_id"]})
+        await conn.execute(text("PRAGMA foreign_keys=ON"))
+        await conn.commit()
+    with pytest.raises(SoloRingError) as e3:
+        async with engine.connect() as conn:
+            await prod_service.load_production_revision_metadata_verified(
+                conn, revision_id=prid2)
+    with pytest.raises(SoloRingError) as e4:
+        async with engine.connect() as conn:
+            await verify_production_revisions_metadata_core(conn, [prid2])
+    assert e3.value.code == e4.value.code == (
+        ErrorCode.INTERNAL_INVARIANT_VIOLATION)
+    assert "object" in e3.value.message.lower()
+    assert "object" in e4.value.message.lower()
+
 
 async def test_correction_r3_binding_membership_in_exact_c(client):
     """R3-2 — a consistently corrupted binding (JSON+hash+children all
@@ -781,42 +808,51 @@ async def test_correction_r3_historical_query_count_bounded(client):
         _select_binding,
     )
 
-    async def measure(n_tracks):
+    async def measure(n_entries):
         b = await _full_m13_world(
-            client, tag=f"r3-hist-{n_tracks}".encode())
-        sel = await _select_binding(client, b)
-        # additional PI tracks + subjects widen the captured entry set
-        engine = client._transport.app.state.engine
-        engine = client._transport.app.state.engine
-        async with engine.connect() as conn:
-            version = (await conn.execute(text(
-                "SELECT working_version FROM compositions WHERE id = :c"),
-                {"c": sel["cid"]})).scalar_one()
-        for i in range(n_tracks):
+            client, tag=f"r4-hist-{n_entries}".encode())
+        # widen the entry set BEFORE publication so the subjects/tracks
+        # are members of the exact bound C (the round-3 fixture added
+        # them after publication, so they were correctly excluded and
+        # the two measurements compared the same 1-entry graph)
+        from tests.m13_seed import mint, publish as publish_c
+        from tests.test_m13_binding import (
+            _adopt,
+            _interpretation,
+            _publish as publish_binding,
+        )
+
+        # reuse the fixture's approved world: the Shot's M10 plan
+        # resolves exactly this world revision (§14.4 agreement)
+        world_id = b["world"]["id"]
+        cid = await make_composition(client, b["pid"])
+        await _interpretation(client, b["production_revision_id"])
+        version = 0
+        for i in range(n_entries):
+            m = await mint(client, cid, b["production_revision_id"],
+                           version, name=f"Instance {i}")
+            version += 1
+            await _adopt(client, cid, m["occurrence_id"],
+                         {"kind": "production_instance"})
             r = await client.post(
-                f"/compositions/{sel['cid']}/occurrences",
-                json={"scope": "composition_working_state",
-                      "expected_working_version": version + i,
-                      "display_name": f"Extra {i}",
-                      "source": {"kind": "production_revision",
-                                 "revision_id":
-                                     b["production_revision_id"]},
-                      "visible": True,
-                      "transform": {"translation_mm": [0, 0, 0],
-                                    "rotation_udeg": [0, 0, 0]}})
+                f"/spatial-worlds/{world_id}/production-instance-tracks",
+                json={"occurrence_id": m["occurrence_id"],
+                      "requirement": "optional"})
             assert r.status_code == 201, r.text
-            oid = r.json()["occurrence_id"]
-            r = await client.post(
-                f"/compositions/{sel['cid']}/occurrences/{oid}"
-                "/authority-subject",
-                json={"kind": "production_instance"})
-            assert r.status_code == 201, r.text
-            r = await client.post(
-                f"/spatial-worlds/{b['world']['id']}"
-                "/production-instance-tracks",
-                json={"occurrence_id": oid, "requirement": "optional"})
-            assert r.status_code == 201, r.text
+        pub = await publish_c(client, cid, version)
+        pr = await publish_binding(client, pub["revision"]["revision_id"],
+                                   b["rev"]["id"])
+        assert pr.status_code == 201, pr.text
+        binding = pr.json()
+        # ESSENTIAL: the bound binding really carries the cardinality
+        assert len(binding["entries"]) == n_entries
+        r = await client.put(
+            f"/shots/{b['shot']}/production-world-selection",
+            json={"binding_id": binding["binding_id"],
+                  "expected_binding_id": None})
+        assert r.status_code == 200, r.text
         revision, _ = await _capture(client, b["shot"])
+        engine = client._transport.app.state.engine
         count = 0
 
         @event.listens_for(engine.sync_engine,
@@ -836,6 +872,8 @@ async def test_correction_r3_historical_query_count_bounded(client):
     small = await measure(1)
     rep = await measure(8)
     assert small == rep, (small, rep)
+    # (the 1-vs-8 entry counts are asserted inside measure BEFORE any
+    # SQL counting — the proof cannot silently collapse again)
 
 
 async def test_correction_r3_spatial_self_consistent_corruption(client):

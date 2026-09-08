@@ -8,6 +8,12 @@ import type { Composition, OccurrenceRow } from "@/lib/types";
 const getJson = vi.fn();
 
 vi.mock("@/lib/api.client", () => ({
+  listCompositionRevisionsPublic: vi.fn(async () => []),
+  getCapturedProductionWorld: vi.fn(async () => ({
+    captured: false })),
+  listProductionInstanceTracks: vi.fn(async () => []),
+  createProductionInstanceTrack: vi.fn(),
+  createProductionInstanceSpatialTransition: vi.fn(),
   listCompositions: vi.fn(async () => [COMP]),
   listOccurrences: vi.fn(async () => [OCC]),
   createComposition: vi.fn(),

@@ -15,6 +15,11 @@ import {
   getAuthoritySubject,
   getShotProductionWorld,
   getSpatialInterpretation,
+  createProductionInstanceSpatialTransition,
+  createProductionInstanceTrack,
+  getCapturedProductionWorld,
+  listCompositionRevisionsPublic,
+  listProductionInstanceTracks,
   publishBinding,
   putProductionWorldSelection,
 } from "@/lib/api.client";
@@ -430,14 +435,9 @@ export function PIStagingAuthoring({
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_ORIGIN ?? ""}/spatial-worlds/`
-        + `${worldId}/production-instance-tracks`,
-        { method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ occurrence_id: occurrenceId,
-                                 requirement }) });
-      if (!res.ok) throw new Error(`track create ${res.status}`);
-      setStatus(`track ${await res.json().then((r) => r.id)} created`);
+      const out = await createProductionInstanceTrack(
+        worldId, occurrenceId, requirement);
+      setStatus(`track ${out.id} created`);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -449,10 +449,7 @@ export function PIStagingAuthoring({
     setBusy(true);
     setError(null);
     try {
-      const tracks = await getJson<
-        { id: string; occurrence_id: string }[]>(
-        `${process.env.NEXT_PUBLIC_API_ORIGIN ?? ""}/spatial-worlds/`
-        + `${worldId}/production-instance-tracks`);
+      const tracks = await listProductionInstanceTracks(worldId);
       const mine = tracks.find((t) => t.occurrence_id === occurrenceId);
       if (!mine) {
         throw new Error("no PI track for this occurrence — create one "
@@ -463,16 +460,12 @@ export function PIStagingAuthoring({
       if (translation.length !== 3 || translation.some(Number.isNaN)) {
         throw new Error("translation must be three integers");
       }
-      const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_ORIGIN ?? ""
-        }/production-instance-spatial-tracks/${mine.id}/transitions`,
-        { method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ anchor_type: anchorType,
-                                 anchor_id: anchorId.trim(), boundary,
-                                 operation: "set",
-                                 transform: { translation_mm: translation,
-                                              rotation_udeg: [0, 0, 0] } }) });
-      if (!res.ok) throw new Error(`transition ${res.status}`);
+      await createProductionInstanceSpatialTransition(mine.id, {
+        anchor_type: anchorType,
+        anchor_id: anchorId.trim(), boundary,
+        operation: "set",
+        transform: { translation_mm: translation,
+                     rotation_udeg: [0, 0, 0] } });
       setStatus("staging set");
     } catch (e) {
       setError(String(e));
@@ -545,19 +538,7 @@ export function CapturedProductionWorldInspector({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    getJson<{
-      captured: boolean;
-      production_world_hash?: string;
-      binding?: {
-        binding_id: string; binding_hash: string;
-        composition_revision_id: string; composition_revision_hash: string;
-        spatial_world_revision_id: string;
-        spatial_world_revision_hash: string;
-      };
-      captured_feature_states?: unknown[];
-      captured_spatial_states?: unknown[];
-    }>(`${process.env.NEXT_PUBLIC_API_ORIGIN ?? ""
-      }/shot-revisions/${revisionId}/production-world`)
+    getCapturedProductionWorld(revisionId)
       .then(setData)
       .catch((e) => setError(String(e)));
   }, [revisionId]);
@@ -607,9 +588,7 @@ export function M13BindingLauncherScoped({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    getJson<{ revision_id: string; revision_number?: number }[]>(
-      `${process.env.NEXT_PUBLIC_API_ORIGIN ?? ""
-      }/compositions/${compositionId}/revisions`)
+    listCompositionRevisionsPublic(compositionId)
       .then(setRevisions)
       .catch((e) => setError(String(e)));
   }, [compositionId]);
