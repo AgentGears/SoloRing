@@ -795,6 +795,62 @@ async def _validate_stored_binding(conn, binding_id: str) -> dict:
         raise internal_invariant(
             f"binding {parent.id} world revision hash disagrees with the "
             "verified M10 reader")
+
+    # ---- verifier-owned occurrence membership in exact C (frozen
+    # §§5.8/5.9): every binding subject/entry occurrence must be a
+    # DIRECT production_revision member of the exact bound
+    # CompositionRevision with the same Production Revision identity —
+    # proven from the immutable revision projection, never trusted from
+    # the binding's own value. Canonical ordering (subjects and entries
+    # ascending by occurrence_id) and entry↔subject correspondence are
+    # enforced on the STORED value in the same pass.
+    cro_rows = (await conn.execute(
+        text(
+            "SELECT occurrence_id, production_revision_id FROM "
+            "composition_revision_occurrences WHERE "
+            "composition_revision_id = :rid AND source_kind = "
+            "'production_revision'"),
+        {"rid": parent.composition_revision_id},
+    )).fetchall()
+    cro_by_occurrence = {r.occurrence_id: r for r in cro_rows}
+    prev_subject_occ: str | None = None
+    subject_by_occurrence: dict[str, dict] = {}
+    for srow in value["subjects"]:
+        occ = srow["occurrence_id"]
+        member = cro_by_occurrence.get(occ)
+        if member is None or member.production_revision_id != (
+                srow["production_revision_id"]):
+            raise internal_invariant(
+                f"binding {parent.id}: subject occurrence {occ} is not a "
+                "direct production_revision member of the exact bound "
+                "CompositionRevision")
+        if prev_subject_occ is not None and occ <= prev_subject_occ:
+            raise internal_invariant(
+                f"binding {parent.id}: subjects are not in canonical "
+                "ascending occurrence_id order")
+        prev_subject_occ = occ
+        subject_by_occurrence[occ] = srow
+    prev_entry_occ: str | None = None
+    for e in value["entries"]:
+        occ = e["occurrence_id"]
+        member = cro_by_occurrence.get(occ)
+        if member is None or member.production_revision_id != (
+                e["production_revision_id"]):
+            raise internal_invariant(
+                f"binding {parent.id}: entry occurrence {occ} is not a "
+                "direct production_revision member of the exact bound "
+                "CompositionRevision")
+        if prev_entry_occ is not None and occ <= prev_entry_occ:
+            raise internal_invariant(
+                f"binding {parent.id}: entries are not in canonical "
+                "ascending occurrence_id order")
+        prev_entry_occ = occ
+        subj = subject_by_occurrence.get(occ)
+        if subj is None or subj["authority_subject"] != (
+                e["authority_subject"]):
+            raise internal_invariant(
+                f"binding {parent.id}: entry occurrence {occ} has no "
+                "matching subject with the same authority subject")
     # 3. every distinct pinned ProductionRevision passes the EXACT M11
     #    metadata/closure verifier semantics (§10.1: canonical snapshot
     #    bytes + recomputed hash, exactly-one closure, closure == the

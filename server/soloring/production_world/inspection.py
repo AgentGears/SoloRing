@@ -190,62 +190,6 @@ async def read_captured_production_world(
             raise internal_invariant(
                 f"ShotRevision {revision_id}: pinned C/W revision closure "
                 "is unreachable or disagrees")
-        # §20.2/§30.8: every pinned entry's immutable spatial
-        # interpretation must exist and verify (captured-graph-only — the
-        # interpretation table is immutable historical closure, §21)
-        from soloring.production_world.canonical import (
-            verify_stored_interpretation,
-        )
-
-        for e in stored_binding["entries"]:
-            irow = (
-                await conn.execute(
-                    text(
-                        "SELECT production_revision_id, schema_version, "
-                        "x_mm, y_mm, z_mm, yaw_udeg, pitch_udeg, "
-                        "roll_udeg, interpretation_json, "
-                        "interpretation_hash FROM "
-                        "production_revision_spatial_interpretations "
-                        "WHERE production_revision_id = :r"),
-                    {"r": e["production_revision_id"]},
-                )
-            ).first()
-            if irow is None or (irow.interpretation_hash
-                                != e["spatial_interpretation_hash"]):
-                raise internal_invariant(
-                    f"ShotRevision {revision_id}: pinned spatial "
-                    "interpretation is missing or does not match the "
-                    "captured entry")
-            parents = (
-                await conn.execute(
-                    text(
-                        "SELECT pr.snapshot_hash, (SELECT c.blob_hash FROM "
-                        "production_revision_closures c WHERE "
-                        "c.production_revision_id = pr.id AND "
-                        "c.contract_key = 'retained_blob' AND "
-                        "c.contract_version = 1) AS blob_hash FROM "
-                        "production_revisions pr WHERE pr.id = :r"),
-                    {"r": e["production_revision_id"]},
-                )
-            ).first()
-            if parents is None or parents.blob_hash is None:
-                raise internal_invariant(
-                    f"ShotRevision {revision_id}: interpretation parent "
-                    "closure is unreachable")
-            try:
-                verify_stored_interpretation(
-                    interpretation_json=irow.interpretation_json,
-                    interpretation_hash=irow.interpretation_hash,
-                    x_mm=irow.x_mm, y_mm=irow.y_mm, z_mm=irow.z_mm,
-                    yaw_udeg=irow.yaw_udeg, pitch_udeg=irow.pitch_udeg,
-                    roll_udeg=irow.roll_udeg,
-                    row_production_revision_id=irow.production_revision_id,
-                    parent_snapshot_hash=parents.snapshot_hash,
-                    parent_blob_hash=parents.blob_hash)
-            except SoloRingError as exc:
-                raise internal_invariant(
-                    f"ShotRevision {revision_id}: pinned spatial "
-                    f"interpretation is corrupt: {exc.message}") from exc
         frows = (
             await conn.execute(
                 text(
@@ -372,12 +316,50 @@ async def read_captured_production_world(
                 "children disagree with the embedded pack (count, order, "
                 "identity, or values)")
         # rebuild spatial states from captured rows
+        from soloring.spatial.math import (
+            JS_SAFE_MAX,
+            JS_SAFE_MIN,
+            UDEG_MIN,
+        )
+
+        _uuid_re = __import__("re").compile(
+            r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-"
+            r"[0-9a-f]{12}$")
         rebuilt_spatial = []
         for pos, r in enumerate(srows):
             if r["position"] != pos:
                 raise internal_invariant(
                     f"ShotRevision {revision_id}: spatial-state position "
                     f"{r['position']} != canonical index {pos}")
+            # §20.2: captured staging semantics verified from the
+            # captured row alone — never current Track state
+            if r["requirement"] not in ("required", "optional"):
+                raise internal_invariant(
+                    f"ShotRevision {revision_id}: captured requirement "
+                    f"{r['requirement']!r} at position {pos} outside the "
+                    "frozen domain")
+            six = (r["x_mm"], r["y_mm"], r["z_mm"], r["yaw_udeg"],
+                   r["pitch_udeg"], r["roll_udeg"])
+            if any(v is None for v in six):
+                raise internal_invariant(
+                    f"ShotRevision {revision_id}: captured transform "
+                    f"incomplete at position {pos}")
+            for v in six:
+                if not isinstance(v, int) or not (
+                        JS_SAFE_MIN <= v <= JS_SAFE_MAX):
+                    raise internal_invariant(
+                        f"ShotRevision {revision_id}: captured transform "
+                        f"outside the M10 integer domain at position {pos}")
+            for v in (r["yaw_udeg"], r["pitch_udeg"], r["roll_udeg"]):
+                if not (UDEG_MIN <= v < UDEG_MIN + 360_000_000):
+                    raise internal_invariant(
+                        f"ShotRevision {revision_id}: captured rotation "
+                        f"not canonically normalized at position {pos}")
+            if r["source_anchor_type"] not in ("sequence", "scene", "shot")                     or r["source_boundary"] not in ("start", "end")                     or _uuid_re.match(r["source_anchor_id"] or "") is None                     or _uuid_re.match(
+                        r["source_transition_id"] or "") is None:
+                raise internal_invariant(
+                    f"ShotRevision {revision_id}: captured source-anchor "
+                    f"grammar invalid at position {pos}")
             rebuilt_spatial.append({
                 "composition_id": r["composition_id"],
                 "occurrence_id": r["occurrence_id"],

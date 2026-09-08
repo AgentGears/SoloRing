@@ -431,28 +431,13 @@ async def load_production_revision_metadata_verified(
             {"oid": row.production_object_id},
         )
     ).first()
-    try:
-        parsed = _json.loads(row.snapshot_json)
-    except ValueError:
-        raise internal_invariant(
-            "stored snapshot_json is not parseable JSON",
-            details={"revision_id": revision_id},
-        )
-    if parsed.get("schema_version") != 1:
-        raise internal_invariant(
-            "snapshot schema_version is not 1",
-            details={"revision_id": revision_id},
-        )
-    if canonical_json_bytes(parsed) != row.snapshot_json.encode("utf-8"):
-        raise internal_invariant(
-            "stored snapshot_json is not the canonical encoding of its content",
-            details={"revision_id": revision_id},
-        )
-    if canonical_hash(parsed) != row.snapshot_hash:
-        raise internal_invariant(
-            "stored snapshot_hash does not match recomputed canonical hash",
-            details={"revision_id": revision_id},
-        )
+    # THE one shared §10.1 semantic core (also consumed set-oriented by
+    # the M13 binding verifier) — this wrapper only supplies the rows
+    # and preserves the public not-found behavior above.
+    from soloring.production.metadata_core import (
+        verify_revision_row_semantics,
+    )
+
     closures = (
         await conn.execute(
             _text(
@@ -462,42 +447,20 @@ async def load_production_revision_metadata_verified(
             {"rid": revision_id},
         )
     ).all()
-    if len(closures) != 1:
-        raise internal_invariant(
-            f"expected exactly one closure row, found {len(closures)}",
-            details={"revision_id": revision_id},
-        )
-    c = closures[0]
-    consumption = parsed.get("consumption")
-    if not isinstance(consumption, dict) or (
-        c.contract_key != consumption.get("contract_key")
-        or c.contract_version != consumption.get("contract_version")
-        or c.blob_hash != consumption.get("blob_hash")
-        or c.size_bytes != consumption.get("size_bytes")
-        or c.media_type != consumption.get("media_type")
-    ):
-        raise internal_invariant(
-            "closure row does not equal the canonical consumption object",
-            details={"revision_id": revision_id},
-        )
     blob = (
         await conn.execute(
             _text("SELECT hash, size_bytes FROM blobs WHERE hash = :h"),
-            {"h": c.blob_hash},
+            {"h": closures[0].blob_hash if closures else ""},
         )
     ).first()
-    if blob is None or blob.hash != c.blob_hash or blob.size_bytes != c.size_bytes:
-        raise internal_invariant(
-            "closure Blob row missing or byte identity mismatch",
-            details={"revision_id": revision_id, "blob_hash": c.blob_hash},
-        )
-    from soloring.production.readiness import _media_type_valid
-
-    if not _media_type_valid(c.media_type):
-        raise internal_invariant(
-            "closure media_type violates the schema-1 grammar",
-            details={"revision_id": revision_id},
-        )
+    verified = verify_revision_row_semantics(
+        revision_id=revision_id,
+        snapshot_json=row.snapshot_json,
+        snapshot_hash=row.snapshot_hash,
+        closures=closures,
+        blob_by_hash={blob.hash: blob} if blob is not None else {},
+    )
+    c = closures[0]
     return {
         "revision_id": row.id,
         "production_object_id": row.production_object_id,

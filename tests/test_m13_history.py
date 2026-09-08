@@ -18,29 +18,15 @@ CURRENT_M13_TABLES = (
     "composition_occurrence_authority_subjects",
     "production_instance_features",
     "production_instance_feature_transitions",
+    "production_instance_spatial_tracks",
     "production_instance_spatial_transitions",
 )
-
-# The PI-track table serves a dual role: its rows are immutable
-# provenance for pinned A4 targets (frozen §22.1/§23.4 — existence is
-# required even after soft deletion), so the immutable binding verifier
-# legitimately performs batched EXISTENCE lookups. Every other read of
-# the table on the historical/rerun path would be current-authority
-# consultation and stays forbidden.
-_TRACK_EXISTENCE_RE = __import__("re").compile(
-    r"^SELECT id FROM production_instance_spatial_tracks "
-    r"WHERE id IN \(")
 
 
 def _spy_check(statement: str, touched: list) -> None:
     for table in CURRENT_M13_TABLES:
         if table in statement:
-            touched.append(f"{table}: {statement[:60]}")
-    if "production_instance_spatial_tracks" in statement and \
-            _TRACK_EXISTENCE_RE.match(statement.strip()) is None:
-        touched.append(
-            f"production_instance_spatial_tracks (non-existence): "
-            f"{statement[:60]}")
+            touched.append(table)
 
 
 async def _captured_world(client, *, tag=b"m13-hist"):

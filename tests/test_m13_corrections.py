@@ -592,3 +592,333 @@ def _json_loads(v):
     import json
 
     return json.loads(v)
+
+
+# R3 correction regressions (review round 3)
+
+
+async def test_correction_r3_factored_m11_core_shared(client):
+    """R3-1 — the scalar M11 reader and the M13 batch verifier consume
+    the ONE shared semantic core: a structural source check plus a
+    behavioral equivalence (a corrupted closure fails both identically)."""
+    import inspect
+
+    from soloring.production import service as prod_service
+    from soloring.production.metadata_core import (
+        verify_production_revisions_metadata_core,
+        verify_revision_row_semantics,
+    )
+
+    scalar_src = inspect.getsource(
+        prod_service.load_production_revision_metadata_verified)
+    assert "verify_revision_row_semantics" in scalar_src
+    core_src = inspect.getsource(verify_production_revisions_metadata_core)
+    assert "verify_revision_row_semantics" in core_src
+    # the scalar reader no longer carries its own copy of the §10.1
+    # verification semantics (the media grammar + canonical-bytes checks
+    # now live ONLY in the core)
+    assert "_media_type_valid" not in scalar_src
+    assert "closure row does not equal the canonical consumption"         not in scalar_src
+
+    # behavioral equivalence on a corrupted closure count
+    from tests.m13_seed import seed_base
+
+    base = await seed_base(client, tag=b"r3-core")
+    prid = base["production_revision_id"]
+    engine = client._transport.app.state.engine
+    async with engine.connect() as conn:
+        await conn.execute(text("PRAGMA foreign_keys=OFF"))
+        await conn.execute(text(
+            "DELETE FROM production_revision_closures WHERE "
+            "production_revision_id = :r"), {"r": prid})
+        await conn.execute(text("PRAGMA foreign_keys=ON"))
+        await conn.commit()
+    from soloring.errors import ErrorCode, SoloRingError
+    import pytest
+
+    with pytest.raises(SoloRingError) as e1:
+        async with engine.connect() as conn:
+            await prod_service.load_production_revision_metadata_verified(
+                conn, revision_id=prid)
+    with pytest.raises(SoloRingError) as e2:
+        async with engine.connect() as conn:
+            await verify_production_revisions_metadata_core(conn, [prid])
+    assert e1.value.code == e2.value.code == (
+        ErrorCode.INTERNAL_INVARIANT_VIOLATION)
+    assert "exactly one closure" in e1.value.message
+    assert "exactly one closure" in e2.value.message
+
+
+async def test_correction_r3_binding_membership_in_exact_c(client):
+    """R3-2 — a consistently corrupted binding (JSON+hash+children all
+    re-pinned) pointing at a valid occurrence/PR that was never in the
+    exact bound C fails the immutable reader."""
+    import hashlib
+    import json as _json
+
+    from soloring.domain.canonical import canonical_json_str as cjs
+    from tests.test_m13_binding import (
+        _adopt,
+        _approved_world,
+        _binding_base,
+        _interpretation,
+        _publish,
+    )
+
+    b = await _binding_base(client, tag=b"r3-memb", n_occurrences=2)
+    cid = b["composition_id"]
+    for occ in b["occurrences"]:
+        await _adopt(client, cid, occ, {"kind": "production_instance"})
+    await _interpretation(client, b["production_revision_id"])
+    w = await _approved_world(client, b["project_id"])
+    r = await client.post(
+        f"/spatial-worlds/{w['world']['id']}/production-instance-tracks",
+        json={"occurrence_id": b["occurrences"][0],
+              "requirement": "required"})
+    assert r.status_code == 201
+    pr = await _publish(client, b["C"], w["revision"]["id"])
+    assert pr.status_code == 201, pr.text
+    stored = pr.json()
+    binding_id = stored["binding_id"]
+
+    # mint an occurrence AFTER publication: valid PR member of the
+    # lineage, but NOT a member of the exact bound C
+    from tests.m13_seed import mint
+
+    m2 = await mint(client, cid, b["production_revision_id"], 2,
+                    name="Out of C")
+
+    engine = client._transport.app.state.engine
+    async with engine.connect() as conn:
+        row = (await conn.execute(text(
+            "SELECT binding_json FROM composition_spatial_bindings "
+            "WHERE id = :b"), {"b": binding_id})).scalar_one()
+        value = _json.loads(row)
+        # swap the FIRST subject AND entry to the out-of-C occurrence
+        # (grammar-consistent: production_instance subject id == the new
+        # occurrence id; PR identity unchanged)
+        target = value["subjects"][0]
+        target["occurrence_id"] = m2["occurrence_id"]
+        target["authority_subject"]["id"] = m2["occurrence_id"]
+        if value["entries"]:
+            e0 = value["entries"][0]
+            e0["occurrence_id"] = m2["occurrence_id"]
+            e0["authority_subject"]["id"] = m2["occurrence_id"]
+        value["subjects"].sort(key=lambda x: x["occurrence_id"])
+        value["entries"].sort(key=lambda x: x["occurrence_id"])
+        new_json = cjs(value)
+        await conn.execute(text(
+            "UPDATE composition_spatial_bindings SET binding_json = :js,"
+            " binding_hash = :h WHERE id = :b"),
+            {"js": new_json,
+             "h": hashlib.sha256(new_json.encode()).hexdigest(),
+             "b": binding_id})
+        await conn.execute(text("DELETE FROM "
+            "composition_spatial_binding_subjects WHERE binding_id = :b"),
+            {"b": binding_id})
+        await conn.execute(text("DELETE FROM "
+            "composition_spatial_binding_entries WHERE binding_id = :b"),
+            {"b": binding_id})
+        for pos, subj in enumerate(value["subjects"]):
+            await conn.execute(text(
+                "INSERT INTO composition_spatial_binding_subjects "
+                "(binding_id, position, occurrence_id, "
+                "production_revision_id, production_revision_hash, "
+                "subject_kind, subject_id, creative_entity_id) VALUES "
+                "(:b, :pos, :occ, :pr, :prh, :sk, :sid, NULL)"),
+                {"b": binding_id, "pos": pos,
+                 "occ": subj["occurrence_id"],
+                 "pr": subj["production_revision_id"],
+                 "prh": subj["production_revision_hash"],
+                 "sk": subj["authority_subject"]["kind"],
+                 "sid": subj["authority_subject"]["id"]})
+        for pos, e in enumerate(value["entries"]):
+            col = {"entity_fixed_frame": "spatial_frame_id",
+                   "entity_track": "spatial_track_id",
+                   "production_instance_track":
+                       "production_instance_track_id"}[
+                e["placement"]["kind"]]
+            await conn.execute(text(
+                "INSERT INTO composition_spatial_binding_entries "
+                "(binding_id, position, occurrence_id, "
+                "production_revision_id, production_revision_hash, "
+                "subject_kind, subject_id, creative_entity_id, "
+                "placement_kind, " + col + ", spatial_interpretation_hash)"
+                " VALUES (:b, :pos, :occ, :pr, :prh, :sk, :sid, NULL, "
+                ":pk, :tid, :ih)"),
+                {"b": binding_id, "pos": pos,
+                 "occ": e["occurrence_id"],
+                 "pr": e["production_revision_id"],
+                 "prh": e["production_revision_hash"],
+                 "sk": e["authority_subject"]["kind"],
+                 "sid": e["authority_subject"]["id"],
+                 "pk": e["placement"]["kind"],
+                 "tid": e["placement"]["id"],
+                 "ih": e["spatial_interpretation_hash"]})
+        await conn.commit()
+
+    from soloring.errors import SoloRingError
+    from soloring.production_world.binding import read_binding
+    import pytest
+
+    class _S:
+        bind = engine
+
+    with pytest.raises(SoloRingError) as ei:
+        await read_binding(_S(), binding_id)
+    assert ei.value.code == "INTERNAL_INVARIANT_VIOLATION"
+    assert "not a direct production_revision member" in ei.value.message
+
+
+async def test_correction_r3_historical_query_count_bounded(client):
+    """R3-3 — historical inspection query count is independent of entry
+    cardinality (the per-entry loop is gone; small == representative)."""
+    from sqlalchemy import event
+
+    from tests.test_m13_shot_capture import (
+        _capture,
+        _full_m13_world,
+        _select_binding,
+    )
+
+    async def measure(n_tracks):
+        b = await _full_m13_world(
+            client, tag=f"r3-hist-{n_tracks}".encode())
+        sel = await _select_binding(client, b)
+        # additional PI tracks + subjects widen the captured entry set
+        engine = client._transport.app.state.engine
+        engine = client._transport.app.state.engine
+        async with engine.connect() as conn:
+            version = (await conn.execute(text(
+                "SELECT working_version FROM compositions WHERE id = :c"),
+                {"c": sel["cid"]})).scalar_one()
+        for i in range(n_tracks):
+            r = await client.post(
+                f"/compositions/{sel['cid']}/occurrences",
+                json={"scope": "composition_working_state",
+                      "expected_working_version": version + i,
+                      "display_name": f"Extra {i}",
+                      "source": {"kind": "production_revision",
+                                 "revision_id":
+                                     b["production_revision_id"]},
+                      "visible": True,
+                      "transform": {"translation_mm": [0, 0, 0],
+                                    "rotation_udeg": [0, 0, 0]}})
+            assert r.status_code == 201, r.text
+            oid = r.json()["occurrence_id"]
+            r = await client.post(
+                f"/compositions/{sel['cid']}/occurrences/{oid}"
+                "/authority-subject",
+                json={"kind": "production_instance"})
+            assert r.status_code == 201, r.text
+            r = await client.post(
+                f"/spatial-worlds/{b['world']['id']}"
+                "/production-instance-tracks",
+                json={"occurrence_id": oid, "requirement": "optional"})
+            assert r.status_code == 201, r.text
+        revision, _ = await _capture(client, b["shot"])
+        count = 0
+
+        @event.listens_for(engine.sync_engine,
+                           "before_cursor_execute")
+        def _c(conn, cursor, statement, parameters, context, executemany):
+            nonlocal count
+            count += 1
+
+        try:
+            r = await client.get(
+                f"/shot-revisions/{revision.id}/production-world")
+            assert r.status_code == 200, r.text
+        finally:
+            event.remove(engine.sync_engine, "before_cursor_execute", _c)
+        return count
+
+    small = await measure(1)
+    rep = await measure(8)
+    assert small == rep, (small, rep)
+
+
+async def test_correction_r3_spatial_self_consistent_corruption(client):
+    """R3-5 — a self-consistent corruption of captured staging (illegal
+    requirement + non-canonical rotation, with row, pack, pack hash, and
+    snapshot hash all re-pinned) fails the historical GET on the M10
+    semantic checks alone."""
+    import hashlib
+    import json as _json
+
+    from soloring.domain.canonical import (
+        canonical_hash,
+        canonical_json_str as cjs,
+    )
+    from soloring.production_world.resolver import (
+        production_world_hash as pwh,
+    )
+    from tests.test_m13_history import _captured_world
+
+    b, sel, revision = await _captured_world(client, tag=b"r3-spatial")
+    engine = client._transport.app.state.engine
+    url = f"/shot-revisions/{revision.id}/production-world"
+    assert (await client.get(url)).status_code == 200
+
+    async with engine.connect() as conn:
+        # corruption pair: the ROW carries a legal requirement but a
+        # NON-CANONICAL rotation (+180deg raw); the PACK carries an
+        # illegal requirement. Both survive the row CHECK; the
+        # reader-side M10 semantic checks must catch rotation (row) and
+        # requirement (pack comparison) respectively.
+        await conn.execute(text(
+            "UPDATE shot_revision_production_instance_spatial_states "
+            "SET yaw_udeg = 180000000 WHERE shot_revision_id = :r"),
+            {"r": revision.id})
+        snap = _json.loads((await conn.execute(text(
+            "SELECT snapshot_json FROM shot_revisions WHERE id = :r"),
+            {"r": revision.id})).scalar_one())
+        st = snap["production_world"]["instance_spatial_states"][0]
+        st["requirement"] = "sometimes"
+        st["transform"]["rotation_udeg"][0] = 180000000
+        new_json = cjs(snap)
+        await conn.execute(text(
+            "UPDATE shot_revisions SET snapshot_json = :sj, "
+            "snapshot_hash = :sh WHERE id = :r"),
+            {"sj": new_json, "sh": canonical_hash(snap),
+             "r": revision.id})
+        await conn.execute(text(
+            "UPDATE shot_revision_production_worlds SET "
+            "production_world_hash = :h WHERE shot_revision_id = :r"),
+            {"h": pwh(snap["production_world"]),
+             "r": revision.id})
+        await conn.commit()
+
+    r = await client.get(url)
+    assert r.status_code == 500, r.text
+    assert r.json()["error_code"] == "INTERNAL_INVARIANT_VIOLATION"
+
+
+async def test_correction_r3_clear_with_explicit_null_rejected(client):
+    """R3-6 — clear + an explicitly supplied value:null is rejected on
+    CREATE (M7 rule: the field must be omitted entirely)."""
+    from tests.test_m13_binding import _adopt, _binding_base
+
+    b = await _binding_base(client, tag=b"r3-null")
+    cid, oid = b["composition_id"], b["occurrences"][0]
+    await _adopt(client, cid, oid, {"kind": "production_instance"})
+    r = await client.post(f"/production-instances/{oid}/features",
+                          json={"key": "k", "kind": "status",
+                                "value_type": "text", "name": "K"})
+    fid = r.json()["id"]
+    r = await client.post(f"/projects/{b['project_id']}/sequences",
+                          json={"title": "S"})
+    seq = r.json()["id"]
+    r = await client.post(
+        f"/production-instance-features/{fid}/transitions",
+        json={"anchor_type": "sequence", "anchor_id": seq,
+              "boundary": "start", "operation": "clear",
+              "value": None})
+    assert r.status_code == 422, r.text
+    assert "never accepted" in r.json()["message"]
+    # a set with value:null is equally rejected
+    r = await client.post(
+        f"/production-instance-features/{fid}/transitions",
+        json={"anchor_type": "sequence", "anchor_id": seq,
+              "boundary": "start", "operation": "set", "value": None})
+    assert r.status_code == 422

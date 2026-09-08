@@ -21,23 +21,38 @@ import {
 
 /** §25.2: authority-subject display + explicit adoption (irreversible). */
 export function AuthoritySubjectRow({
-  compositionId, occurrenceId,
-}: { compositionId: string; occurrenceId: string }) {
+  compositionId, occurrenceId, nested = false,
+}: { compositionId: string; occurrenceId: string;
+     nested?: boolean }) {
   const [subject, setSubject] = useState<{
     subject_kind: string; subject_id: string | null } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
+    if (nested) return;  // nested occurrences are outside schema 1
     try {
       const s = await getAuthoritySubject(compositionId, occurrenceId);
       setSubject({ subject_kind: s.subject_kind, subject_id: s.subject_id });
     } catch (e) {
       setError(String(e));
     }
-  }, [compositionId, occurrenceId]);
+  }, [compositionId, occurrenceId, nested]);
 
   useEffect(() => { void load(); }, [load]);
+
+  if (nested) {
+    return (
+      <li>
+        occurrence {occurrence_id_label(occurrenceId)}:
+        {" "}<strong>M13 schema-1 promotion unsupported/deferred</strong>
+        <small>
+          {" "}Nested Composition Revision sources are not promoted to
+          independent authority subjects in schema 1.
+        </small>
+      </li>
+    );
+  }
 
   async function adopt(kind: "production_instance" | "creative_entity",
                        creativeEntityId?: string) {
@@ -148,6 +163,20 @@ export function BindingPanel({
             {readiness.issues.map((i, n) => (
               <li key={n}>{i.code}</li>))}
           </ul>
+          <div>
+            Composition Revision
+            <code>{readiness.composition_revision_id}</code>
+            {" / "}
+            <code>
+              {readiness.composition_revision_hash.slice(0, 16)}…</code>
+          </div>
+          <div>
+            SpatialWorld Revision
+            <code>{readiness.spatial_world_revision_id}</code>
+            {" / "}
+            <code>
+              {readiness.spatial_world_revision_hash.slice(0, 16)}…</code>
+          </div>
           <div>
             proposed binding hash:
             <code>{readiness.proposed_binding_hash.slice(0, 16)}…</code>
@@ -561,6 +590,73 @@ export function CapturedProductionWorldInspector({
         {" "}{data.captured_feature_states?.length ?? 0}</p>
       <p>captured PI staging entries:
         {" "}{data.captured_spatial_states?.length ?? 0}</p>
+    </section>
+  );
+}
+
+
+export function M13BindingLauncherScoped({
+  compositionId,
+}: { compositionId: string }) {
+  const [revisions, setRevisions] = useState<
+    { revision_id: string; revision_number?: number }[] | null>(null);
+  const [cRev, setCRev] = useState("");
+  const [wRev, setWRev] = useState("");
+  const [launched, setLaunched] = useState<{ c: string; w: string } | null>(
+    null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    getJson<{ revision_id: string; revision_number?: number }[]>(
+      `${process.env.NEXT_PUBLIC_API_ORIGIN ?? ""
+      }/compositions/${compositionId}/revisions`)
+      .then(setRevisions)
+      .catch((e) => setError(String(e)));
+  }, [compositionId]);
+
+  if (error) return <div role="alert">{error}</div>;
+  if (revisions === null) return <p>loading published revisions…</p>;
+  return (
+    <section aria-label="m13 binding launcher">
+      <h4>Compose↔Spatial binding for this set</h4>
+      {revisions.length === 0 ? (
+        <small>No published Composition Revision for this set yet.</small>
+      ) : (
+        <>
+          <label>
+            this set&rsquo;s exact Composition Revision
+            <select value={cRev} onChange={(e) => setCRev(e.target.value)}>
+              <option value="">select…</option>
+              {revisions.map((r) => (
+                <option key={r.revision_id} value={r.revision_id}>
+                  {r.revision_number
+                    ? `Revision ${r.revision_number}` : "Revision"}
+                  {" · "}{r.revision_id}
+                </option>
+              ))}
+            </select>
+          </label>{" "}
+          <label>
+            exact SpatialWorldRevision
+            <input value={wRev} onChange={(e) => setWRev(e.target.value)}
+                   placeholder="SpatialWorldRevision UUID" />
+          </label>{" "}
+          <button
+            type="button"
+            disabled={!cRev || !wRev.trim()}
+            onClick={() => setLaunched({ c: cRev, w: wRev.trim() })}>
+            Open binding readiness
+          </button>
+          <small>
+            {" "}Only this set&rsquo;s published revisions are offered; the
+            server derives the complete subject/entry sets.
+          </small>
+        </>
+      )}
+      {launched ? (
+        <BindingPanel compositionRevisionId={launched.c}
+                      worldRevisionId={launched.w} />
+      ) : null}
     </section>
   );
 }

@@ -10,6 +10,14 @@ const listOccurrences = vi.fn();
 const patchOccurrence = vi.fn();
 
 vi.mock("@/lib/api.client", () => ({
+  getJson: vi.fn(async (url: string) =>
+    // readiness must stay null (the guarded panel) while
+    // revisions/history resolve to empty lists
+    url.includes("publication-readiness") ? null : []),
+  getAuthoritySubject: vi.fn(async () => ({
+    composition_id: "c", occurrence_id: "o",
+    subject_kind: "composition_local", subject_id: null,
+    creative_entity_id: null, created_at: null })),
   listCompositions: (...a: unknown[]) => listCompositions(...a),
   listOccurrences: (...a: unknown[]) => listOccurrences(...a),
   patchOccurrence: (...a: unknown[]) => patchOccurrence(...a),

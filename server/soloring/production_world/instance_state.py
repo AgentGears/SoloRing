@@ -299,12 +299,23 @@ async def create_transition(session: AsyncSession, feature_id: str,
             raise validation_error("boundary must be 'start' or 'end'")
         if payload.operation not in ("set", "clear"):
             raise validation_error("operation must be 'set' or 'clear'")
+        value_supplied = "value" in getattr(
+            payload, "model_fields_set", {"value"}) and getattr(
+            payload, "value", None) is not None
+        value_explicit_null = "value" in getattr(
+            payload, "model_fields_set", set()) and getattr(
+            payload, "value", None) is None
         if payload.operation == "clear":
-            if payload.value is not None:
-                raise validation_error("clear requires value to be omitted")
+            if value_supplied or value_explicit_null:
+                raise validation_error(
+                    "clear requires value to be omitted entirely; "
+                    "value:null is never accepted")
             value_json = value_hash = None
         else:
-            if payload.value is None:
+            if value_explicit_null:
+                raise validation_error(
+                    "value:null is never accepted; supply the set value")
+            if not value_supplied:
                 raise validation_error("set requires a value")
             enum_values = None
             if feature["value_type"] == "enum":
@@ -401,10 +412,10 @@ async def patch_transition(session: AsyncSession, transition_id: str, *,
         await _validate_anchor_in_ordering(
             conn, subj["project_id"], p_at, p_aid)
         if p_op == "clear":
-            if value is not _UNSET and value is not None:
+            if value is not _UNSET:
                 raise validation_error(
-                    "clear requires value to be omitted; value:null is "
-                    "never accepted")
+                    "clear requires value to be omitted entirely; "
+                    "value:null is never accepted")
             v_json = v_hash = None
         else:
             if value is _UNSET:
