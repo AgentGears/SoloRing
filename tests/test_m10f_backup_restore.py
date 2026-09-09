@@ -14,6 +14,7 @@ alembic-stamped DB. Each test corrupts its own byte-copy.
 
 from __future__ import annotations
 
+from tests.conftest import make_tracked_maker
 import asyncio
 import hashlib
 import io
@@ -1349,8 +1350,7 @@ async def test_blob_physical_before_reference_commit_invariant(
     from soloring.db.models import Asset  # noqa: F401
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-    factory = async_sessionmaker(
-        bind=engine, expire_on_commit=False, class_=AsyncSession)
+    factory = make_tracked_maker(engine)
     project_id = str(uuid.uuid4())
     async with factory() as s:
         await s.execute(text(

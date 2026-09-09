@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "policy": "UPSTREAM_BLOCKED_RUNTIME_HIGH (frozen R2 HYG-04)",
+  "review_trigger": "any new runtime high/critical requires a reviewed exception or remediation before the gate can close",
+  "exceptions": [],
+  "successor_note": "The next@14.2.35 exception was REMOVED (not rewritten) by the frozen Post-M13 Next.js Critical Security Remediation R2 (frozen artifact 4c3d1846bba75b1395dd504c3d01e03542ad120dba93c40e7ed88b4012fd3d31): next is exact-pinned at 15.5.25, both Critical advisories GHSA-p293-qw3h-jr36 and GHSA-2xp9-vwfh-vxw4 are absent from the live runtime audit, and the runtime audit carries zero high/critical findings. The empty exceptions array composes with the frozen HYG-04 validator (accepted against a clean audit). Evidence: docs/security/post-m13-next-security-implementation-record.md + scripts/next_security_validate.py."
+}

@@ -10,6 +10,7 @@ outputs.
 
 from __future__ import annotations
 
+from tests.conftest import make_tracked_maker
 import asyncio
 import json
 
@@ -128,7 +129,7 @@ async def test_adoption_single_take_no_resubmission(client, factory, engine, set
 
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-    factory2 = async_sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
+    factory2 = make_tracked_maker(engine)
     async with factory2() as s:
         from soloring.generation.repository import get_generation_full
         from soloring.workflows.manifest import load_workflow
@@ -217,7 +218,7 @@ async def test_preparing_with_handle_is_adopted_not_requeued(
     fake = FakeExecutor()
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-    factory2 = async_sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
+    factory2 = make_tracked_maker(engine)
     async with factory2() as s:
         from soloring.generation.repository import get_generation_full
         from soloring.workflows.manifest import load_workflow
@@ -263,7 +264,7 @@ async def test_cancel_across_owner_death_no_duplicate_submission(
     factory2 = None
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-    factory2 = async_sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
+    factory2 = make_tracked_maker(engine)
     fake_a = FakeExecutor()
     async with factory2() as s:
         from soloring.generation.repository import get_generation_full
@@ -321,7 +322,7 @@ async def test_importing_crash_replay_single_publication(
 
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-    factory2 = async_sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
+    factory2 = make_tracked_maker(engine)
 
     from soloring.assets.blob_store import BlobStore
     from soloring.executors.fake import handle_json
@@ -421,7 +422,7 @@ async def test_lease_loss_does_not_cancel_executor_work(client, factory, engine,
 
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-    factory2 = async_sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
+    factory2 = make_tracked_maker(engine)
     fake_a = FakeExecutor()
     async with factory2() as s:
         from soloring.generation.repository import get_generation_full
@@ -508,7 +509,7 @@ async def test_cancel_running_flow_completes(client, factory, engine, settings):
 
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-    factory2 = async_sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
+    factory2 = make_tracked_maker(engine)
     fake = FakeExecutor()
     async with factory2() as s:
         from soloring.generation.repository import get_generation_full

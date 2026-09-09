@@ -52,9 +52,12 @@ class _EngineSession:
     read/write units and session.get for the final entity load."""
 
     def __init__(self, engine):
-        from sqlalchemy.ext.asyncio import AsyncSession
+        from tests.conftest import make_tracked_maker
         self.bind = engine
-        self._session = AsyncSession(bind=engine, expire_on_commit=False)
+        # tracked maker: the facade's inner session registers with the
+        # conftest registry so the engine fixture closes it before
+        # disposal (bare AsyncSession leaked the connection after GC)
+        self._session = make_tracked_maker(engine)()
 
     async def get(self, *a, **kw):
         return await self._session.get(*a, **kw)

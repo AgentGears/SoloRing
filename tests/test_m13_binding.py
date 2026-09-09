@@ -19,8 +19,9 @@ from tests.m13_seed import (
 
 
 def _factory(client):
-    return async_sessionmaker(bind=client._transport.app.state.engine,
-                              expire_on_commit=False)
+    from tests.conftest import make_tracked_maker
+
+    return make_tracked_maker(client._transport.app.state.engine)
 
 
 async def _approved_world(client, pid, *, frames=(("origin", (0, 0, 0),

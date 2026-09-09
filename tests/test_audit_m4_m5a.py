@@ -15,6 +15,7 @@ F15: one corrupt queued row cannot starve the queue.
 
 from __future__ import annotations
 
+from tests.conftest import make_tracked_maker
 import hashlib
 import json
 
@@ -124,8 +125,7 @@ async def _seed_comfy(client, factory, engine, settings, monkeypatch, wf):
     from soloring.domain.ids import new_uuid
 
     aid = new_uuid()
-    f = async_sessionmaker(bind=engine, expire_on_commit=False,
-                           class_=AsyncSession)
+    f = make_tracked_maker(engine)
     async with f() as s:
         s.add(Blob(hash=bh, path=f"sha256/{bh[:2]}/{bh[2:4]}/{bh}",
                    size_bytes=len(content), detected_media_type="image/png"))
@@ -373,8 +373,7 @@ async def test_corrupt_queued_row_does_not_starve_the_queue(
     from soloring.domain.ids import new_uuid
 
     aid = new_uuid()
-    f = async_sessionmaker(bind=engine, expire_on_commit=False,
-                           class_=AsyncSession)
+    f = make_tracked_maker(engine)
     async with f() as s:
         s.add(Blob(hash=bh, path=f"sha256/{bh[:2]}/{bh[2:4]}/{bh}",
                    size_bytes=len(content), detected_media_type="image/png"))

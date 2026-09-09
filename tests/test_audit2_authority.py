@@ -16,6 +16,7 @@ R7: publication fence                              → attempt + importing
 
 from __future__ import annotations
 
+from tests.conftest import make_tracked_maker
 import asyncio
 import hashlib
 import json
@@ -89,8 +90,7 @@ async def _seed(client, factory, engine, settings, executor="fake",
         from soloring.domain.ids import new_uuid
 
         aid = new_uuid()
-        f = async_sessionmaker(bind=engine, expire_on_commit=False,
-                               class_=AsyncSession)
+        f = make_tracked_maker(engine)
         async with f() as s:
             s.add(Blob(hash=bh, path=f"sha256/{bh[:2]}/{bh[2:4]}/{bh}",
                        size_bytes=len(PNG), detected_media_type="image/png"))

@@ -173,12 +173,20 @@ def canonical_inventory(engine) -> dict:
 
 
 async def build_fixture(engine, factory, settings, *, n_bulk_shots=2460,
-                        with_history: bool = True) -> dict:
+                        with_history: bool = True,
+                        pkg_root_parent=None) -> dict:
     """Build the canonical representative Project. Returns identities.
 
     ``with_history=False`` skips Generation creation (used by cold-path
-    measurements that need a pristine target Shot).
+    measurements that need a pristine target Shot). ``pkg_root_parent``
+    is REQUIRED when ``with_history=True`` (HYG-08): generated packages
+    must live under caller-owned storage, never the repository working
+    directory or an unscoped OS tempdir.
     """
+    if with_history and pkg_root_parent is None:
+        raise ValueError(
+            "pkg_root_parent is required when with_history=True (HYG-08): "
+            "generated packages must live under caller-owned storage")
     rng = _rng()
     pid = det_id("project")
     ids: dict[str, str] = {"project": pid}
@@ -522,8 +530,12 @@ async def build_fixture(engine, factory, settings, *, n_bulk_shots=2460,
         return ids
 
     # --- Generation history: v1 / v2 / v3 targets ------------------------
+    # HYG-08: generated packages live under caller-owned (pytest
+    # temporary) storage, never the repository working directory; the
+    # caller must supply pkg_root_parent (validated at entry).
+    root = Path(pkg_root_parent)
     await _build_generation_history(engine, factory, settings, ids,
-                                    Path("."), pid)
+                                    root, pid)
     return ids
 
 

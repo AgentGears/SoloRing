@@ -9,6 +9,7 @@ states, and the first real-provenance exercise of the M2A comparison.
 
 from __future__ import annotations
 
+from tests.conftest import make_tracked_maker
 import asyncio
 import json
 
@@ -273,7 +274,7 @@ async def test_reimport_creates_no_duplicates(client, factory, engine, settings)
     from soloring.generation.repository import get_generation_full
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-    factory2 = async_sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
+    factory2 = make_tracked_maker(engine)
     async with factory2() as s:
         generation = await get_generation_full(s, gen["id"])
     staged = [StagedOutput(
@@ -513,7 +514,7 @@ async def test_sse_emits_immediately_then_terminal_event(client, factory, engine
     sid, aid, pid = await _seed(factory, engine)
     gen = await _create_generation(client, sid)
 
-    factory2 = async_sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
+    factory2 = make_tracked_maker(engine)
     # Non-terminal generation: the first event arrives immediately (no wait).
     first = await _drain(sse_events(factory2, 0.05, gen["id"]), max_events=1)
     assert first[0]["status"] == "queued"
@@ -531,6 +532,6 @@ async def test_sse_unknown_generation(engine):
     from soloring.api.generations import sse_events
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-    factory2 = async_sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
+    factory2 = make_tracked_maker(engine)
     events = await _drain(sse_events(factory2, 0.05, "00000000-0000-0000-0000-000000000000"))
     assert events[0]["error_code"] == "GENERATION_NOT_FOUND"

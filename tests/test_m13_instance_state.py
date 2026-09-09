@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from tests.conftest import make_tracked_maker
 from sqlalchemy import text
 
 from tests.m13_seed import (
@@ -70,7 +71,7 @@ async def _topology(client, pid, n_shots=1):
     assert r.status_code == 201, r.text
     scene = r.json()["id"]
     engine = client._transport.app.state.engine
-    factory = async_sessionmaker(bind=engine, expire_on_commit=False)
+    factory = make_tracked_maker(engine)
     shot_ids = []
     for i in range(n_shots):
         async with factory() as s:

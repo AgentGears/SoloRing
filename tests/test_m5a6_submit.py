@@ -8,6 +8,7 @@ full POST instrumentation.
 
 from __future__ import annotations
 
+from tests.conftest import make_tracked_maker
 import asyncio
 import json
 import time
@@ -209,7 +210,7 @@ async def seed_reference_asset(engine, project_id):
 
     aid = new_uuid()
     bh = hashlib.sha256(aid.encode()).hexdigest()
-    f = async_sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
+    f = make_tracked_maker(engine)
     async with f() as s:
         s.add(Blob(hash=bh, path=f"sha256/{bh[:2]}/{bh[2:4]}/{bh}",
                    size_bytes=1))

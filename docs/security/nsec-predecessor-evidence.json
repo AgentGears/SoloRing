@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "purpose": "Squash-survival predecessor evidence for the Post-M13 Next-security boundary and NSEC-BASE:03 (merge-review correction 2026-09-09). The repository integrates by squash merge only, so the intermediate hygiene commit is NOT part of published main history; these checked-in, machine-verifiable facts replace runtime git-object dependencies on it.",
+  "predecessor_commit": "3adead55ca052808260bc4939403bd1fdcc29e13",
+  "predecessor_tree": "d9e0c9b5cbfaeec902d70b97eed858193f76696a",
+  "predecessor_lock_blob": "946639773277989cbc05aca7b28e5a524d764f72",
+  "predecessor_lock_path": "apps/web/package-lock.json",
+  "predecessor_lock_next": "14.2.35",
+  "published_base_commit": "384a46d3a5c68d7d81784befc338aa8621b93fbd",
+  "published_base_tree": "a360a58bde22f9e692680232af56d5613d273702",
+  "predecessor_live_audit": {
+    "date": "2026-09-09",
+    "finding": "next",
+    "severity": "critical",
+    "advisory_count": 23,
+    "vulnerable_range": "9.5.0 - 15.5.23",
+    "target_ghsas_present": [
+      "GHSA-p293-qw3h-jr36",
+      "GHSA-2xp9-vwfh-vxw4"
+    ]
+  },
+  "verification_note": "The predecessor lock blob was verified by content hash at correction time (git rev-parse 3adead5:apps/web/package-lock.json == 9466397...; the blob parses as a valid npm lockfile resolving next 14.2.35). When the predecessor commit is reachable in a clone, NSEC-BASE:03 cross-verifies live; in squash-shaped published history the checked-in values above are the durable proof. Both target GHSAs were reproduced in the predecessor live audit recorded in docs/security/post-m13-next-security-SEC0-inventory.md section 3."
+}

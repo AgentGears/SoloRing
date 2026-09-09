@@ -9,6 +9,7 @@ disappearance grace (COMFY_JOB_LOST), independently of outages.
 
 from __future__ import annotations
 
+from tests.conftest import make_tracked_maker
 import hashlib
 import json
 
@@ -107,8 +108,7 @@ async def _seed(client, factory, engine, settings, monkeypatch) -> str:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(PNG)
         aid = new_uuid()
-        f = async_sessionmaker(bind=engine, expire_on_commit=False,
-                               class_=AsyncSession)
+        f = make_tracked_maker(engine)
         async with f() as s:
             s.add(Blob(hash=bh, path=f"sha256/{bh[:2]}/{bh[2:4]}/{bh}",
                        size_bytes=len(PNG), detected_media_type=None))

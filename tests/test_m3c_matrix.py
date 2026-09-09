@@ -8,6 +8,7 @@ durable (generation, attempt) submission identity.
 
 from __future__ import annotations
 
+from tests.conftest import make_tracked_maker
 import asyncio
 import json
 from pathlib import Path
@@ -146,7 +147,7 @@ async def test_crash_after_submit_before_handle_persists_single_execution(
 
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-    factory2 = async_sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
+    factory2 = make_tracked_maker(engine)
     async with factory2() as s:
         generation = await get_generation_full(s, gid)
         spec = worker_execution._build_execution_spec(generation, attempt_id)
@@ -214,7 +215,7 @@ async def test_cancel_vs_completion_completion_wins_when_executor_finished(
 
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-    factory2 = async_sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
+    factory2 = make_tracked_maker(engine)
     async with factory2() as s:
         generation = await get_generation_full(s, gid)
         spec = worker_execution._build_execution_spec(generation, attempt)
@@ -258,7 +259,7 @@ async def test_cancel_crash_after_confirm_successor_completes_cancel(
 
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-    factory2 = async_sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
+    factory2 = make_tracked_maker(engine)
     async with factory2() as s:
         generation = await get_generation_full(s, gid)
         spec = worker_execution._build_execution_spec(generation, attempt)
@@ -317,7 +318,7 @@ async def test_import_crash_matrix_converges(
 
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-    factory2 = async_sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
+    factory2 = make_tracked_maker(engine)
     async with factory2() as s:
         generation = await get_generation_full(s, gid)
     fake = FakeExecutor()
@@ -388,7 +389,7 @@ async def test_concurrent_imports_converge_single_publication(
 
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-    factory2 = async_sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
+    factory2 = make_tracked_maker(engine)
     async with factory2() as s:
         generation = await get_generation_full(s, gid)
     fake = FakeExecutor()
@@ -452,7 +453,7 @@ async def test_missing_declared_output_rejected(client, factory, engine, setting
 
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-    factory2 = async_sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
+    factory2 = make_tracked_maker(engine)
     async with factory2() as s:
         generation = await get_generation_full(s, gid)
     # Staging directory exists but the declared output file does NOT.
@@ -481,7 +482,7 @@ async def test_extra_output_rejected(client, factory, engine, settings):
 
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-    factory2 = async_sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
+    factory2 = make_tracked_maker(engine)
     async with factory2() as s:
         generation = await get_generation_full(s, gid)
     staged, staging = await _staged_for(settings, generation)
@@ -510,7 +511,7 @@ async def test_zero_byte_output_rejected_no_publication(client, factory, engine,
 
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-    factory2 = async_sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
+    factory2 = make_tracked_maker(engine)
     async with factory2() as s:
         generation = await get_generation_full(s, gid)
     staged, staging = await _staged_for(
@@ -533,7 +534,7 @@ async def test_staging_path_escape_rejected(client, factory, engine, settings):
 
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-    factory2 = async_sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
+    factory2 = make_tracked_maker(engine)
     async with factory2() as s:
         generation = await get_generation_full(s, gid)
     # A valid file placed OUTSIDE the attempt staging directory.
@@ -559,7 +560,7 @@ async def test_sse_reconnect_sees_authoritative_state(client, factory, engine, s
 
     sid = await _seed(factory, engine)
     gid = await _create_generation(client, sid)
-    factory2 = async_sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
+    factory2 = make_tracked_maker(engine)
 
     async def first_event():
         gen = sse_events(factory2, 0.05, gid)
@@ -609,7 +610,7 @@ async def test_import_does_not_block_event_loop(client, factory, engine, setting
 
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-    factory2 = async_sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
+    factory2 = make_tracked_maker(engine)
     async with factory2() as s:
         generation = await get_generation_full(s, gid)
     big = b"\x89PNG\r\n\x1a\n" + (b"0123456789abcdef" * 4 * 1024 * 1024)  # ~64 MiB

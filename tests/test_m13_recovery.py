@@ -20,9 +20,11 @@ NOW = "2026-01-01T00:00:00.000Z"
 def _factory(data_dir):
     from sqlalchemy.ext.asyncio import create_async_engine
 
+    from tests.conftest import make_tracked_maker
+
     eng = create_async_engine(
         f"sqlite+aiosqlite:///{(data_dir / 'soloring.db').as_posix()}")
-    return async_sessionmaker(bind=eng, expire_on_commit=False), eng
+    return make_tracked_maker(eng), eng
 
 
 async def _seed_full(data_dir) -> dict:
@@ -269,6 +271,9 @@ async def _seed_full(data_dir) -> dict:
         from soloring.domain.revisions import capture_revision_with_visual
 
         revision, _visual = await capture_revision_with_visual(s, shot)
+    from tests.conftest import close_registered_sessions
+
+    await close_registered_sessions(eng)
     await eng.dispose()
     return {"pid": pid, "composition_id": comp["id"], "shot": shot,
             "binding_id": binding["binding_id"], "track": track,

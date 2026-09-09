@@ -37,7 +37,8 @@ async def _build(tmp_path, *, with_history=True):
             await conn.run_sync(Base.metadata.create_all)
         factory = create_session_factory(engine)
         ids = await build_fixture(
-            engine, factory, settings, with_history=with_history)
+            engine, factory, settings, with_history=with_history,
+            pkg_root_parent=data_dir.parent)
     # after the build, uuid4 is restored (asserted inside the context)
     settings_mod._settings = saved_singleton
     inventory = canonical_inventory(engine)

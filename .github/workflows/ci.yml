@@ -48,9 +48,25 @@ jobs:
         run: python scripts/m13_validate_proof_map.py
       - name: M13 boundary
         run: python scripts/m13_validate_boundary.py
+      - name: Hygiene proof map
+        run: python scripts/hygiene_validate_proof_map.py
+      - name: Hygiene boundary
+        run: python scripts/hygiene_validate_boundary.py
+      - name: Next security proof map
+        run: python scripts/next_security_validate_proof_map.py
+      - name: Next security boundary
+        run: python scripts/next_security_validate_boundary.py
+      - name: No repo-root generated residue
+        run: python -c "from pathlib import Path; assert not Path('m10f-scale-pkgs').exists(), 'repo-root residue present'"
 
       - name: Run backend tests
         run: python -m pytest -q
+
+      # Post-suite: a regression that recreates the directory DURING
+      # pytest must still fail the job — the pre-suite check above
+      # cannot see it (frozen R2 HYG-08 permanent proof).
+      - name: No repo-root generated residue (post-suite)
+        run: python -c "from pathlib import Path; assert not Path('m10f-scale-pkgs').exists(), 'repo-root residue present after backend suite'"
 
   frontend:
     name: Frontend
@@ -74,8 +90,14 @@ jobs:
       - name: Install frontend
         run: npm ci
 
+      - name: Next security pins
+        run: python ../../scripts/next_security_validate.py --pins-only
+
       - name: Run frontend tests
         run: npm test
+
+      - name: Next type generation
+        run: npx next typegen
 
       - name: Typecheck
         run: npx tsc --noEmit
@@ -84,3 +106,9 @@ jobs:
         env:
           SOLORING_API_ORIGIN: http://127.0.0.1:65534
         run: npm run build
+
+      - name: Runtime dependency audit + Next security audit
+        run: |
+          npm audit --omit=dev --json > "$RUNNER_TEMP/nsec-audit.json" || true
+          python ../../scripts/hygiene_validate_npm_audit.py "$RUNNER_TEMP/nsec-audit.json"
+          python ../../scripts/next_security_validate.py "$RUNNER_TEMP/nsec-audit.json"

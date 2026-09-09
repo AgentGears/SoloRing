@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from tests.conftest import make_tracked_maker
 import asyncio
 import hashlib
 import json
@@ -57,8 +58,7 @@ def _seed_m12_state(data_dir: Path, settings: Settings) -> dict:
             f"sqlite+aiosqlite:///{(data_dir / 'soloring.db').as_posix()}")
         async with eng.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
-        factory = async_sessionmaker(bind=eng, expire_on_commit=False,
-                                     class_=AsyncSession)
+        factory = make_tracked_maker(eng)
         async with factory() as s:
             async with s.bind.connect() as conn:
                 await conn.execute(text(
