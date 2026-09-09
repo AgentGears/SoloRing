@@ -7,7 +7,7 @@ Validated by `python scripts/next_security_validate_proof_map.py` (Backend CI, b
 
 | Cell | Disposition | Exact proof owner | Claim |
 |---|---|---|---|
-| `NSEC-BASE:01` | STRUCTURAL | `scripts/next_security_validate_boundary.py` | Diff base is exact 3adead5; allowlist-scoped successor slice only. |
+| `NSEC-BASE:01` | STRUCTURAL | `scripts/next_security_validate_boundary.py` | Dual-mode implementation boundary: exact 3adead5 diff (strict security allowlist) when the predecessor is reachable; after squash integration, published-M13 diff + union allowlist + checked-in predecessor evidence (docs/security/nsec-predecessor-evidence.json) — no ephemeral-branch dependency. |
 | `NSEC-BASE:02` | STRUCTURAL | `scripts/next_security_validate_boundary.py` | M13 immutable; migration head remains 0014; no server/alembic change. |
 | `NSEC-BASE:03` | TEST | `tests/test_post_m13_next_security.py::test_nsec_base_03_predecessor_lock_next` | Predecessor lock (exact 3adead5) resolves next 14.2.35 — the replaced vulnerable identity. |
 | `NSEC-BASE:04` | TEST | `tests/test_post_m13_next_security.py::test_nsec_base_04_predecessor_audit_evidence` | SEC0 evidence records the predecessor live audit reproducing both target Critical GHSAs (23 advisories, 9.5.0 - 15.5.23). |

@@ -144,3 +144,48 @@ Closure-status correction: **NSEC-CLOSE:01 (Linux CI) is PENDING PR
 CI** — zero Actions runs exist for the branch head because no PR is
 authorized; the workflow source carries every gate and the cell
 completes when an authorized PR's CI runs green.
+
+## Merge-review correction — squash-history durability (PR #16, 2026-09-09)
+
+The final merge review withheld merge authorization on one topology
+blocker: the repository integrates by SQUASH merge only, so the
+intermediate hygiene commit `3adead5` is not part of published main
+history — yet the security boundary validator (`BASE = 3adead5`,
+`git diff BASE..HEAD`) and `NSEC-BASE:03` (`git show 3adead5:…`)
+permanently depended on that object. PR CI passed only because
+GitHub's synthetic merge commit keeps both parents reachable during
+the run. Corrections (all additive; frozen R2 unchanged):
+
+1. **Checked-in machine-readable predecessor evidence**
+   (`docs/security/nsec-predecessor-evidence.json`): predecessor
+   commit/tree, the predecessor lock blob content hash
+   `946639773277989cbc05aca7b28e5a524d764f72` (verified by
+   `git rev-parse 3adead5:apps/web/package-lock.json`; the blob parses
+   as a valid lockfile resolving next 14.2.35), published M13 identity,
+   and the reproduced predecessor live-audit facts (critical, 23
+   advisories, `9.5.0 - 15.5.23`, both target GHSAs).
+2. **`NSEC-BASE:03` rewritten** to assert the checked-in evidence
+   values (constants) with an opportunistic live cross-verification
+   when — and only when — the predecessor is reachable in the current
+   clone; squash-shaped history is a first-class supported state.
+3. **Security boundary validator made squash-safe (dual-mode)**:
+   predecessor mode (exact `3adead5..HEAD`, strict security allowlist)
+   whenever the object is reachable — the frozen
+   implementation-boundary proof, unchanged; otherwise published mode
+   (`384a46d..HEAD`, security∪hygiene union allowlist, checked-in
+   predecessor evidence required and identity-exact). A `--repo`
+   argument supports testing. The hygiene boundary already diffs from
+   published M13 and needs no change.
+4. **Automated regression**
+   (`test_nsec_boundary_squash_survival`): proves the mode flip, runs
+   the FULL validator green in published mode over the true post-squash
+   surface, and proves the evidence file is load-bearing (missing or
+   corrupted identity → rejection).
+5. **One-time topology demonstration** (handoff record, no post-proof
+   commits): a simulated squash commit (`git commit-tree
+   <final-tree> -p 384a46d`) served through a single-branch clone in
+   which `3adead5` is absent; the boundary validator and NSEC-BASE:03
+   both run green inside that clone.
+
+No repository-settings change was made or requested; squash-only
+integration is preserved.

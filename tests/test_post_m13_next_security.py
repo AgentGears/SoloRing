@@ -41,14 +41,45 @@ def _lock_version(lock: dict, name: str):
 
 
 def test_nsec_base_03_predecessor_lock_next():
-    """NSEC-BASE:03: the predecessor lock (exact 3adead5) resolves
-    next 14.2.35 — the vulnerable identity this slice replaces."""
-    out = subprocess.run(
-        ["git", "show", "3adead55ca052808260bc4939403bd1fdcc29e13:"
-         "apps/web/package-lock.json"],
-        cwd=REPO, capture_output=True, text=True, check=True).stdout
-    lock = json.loads(out)
-    assert _lock_version(lock, "next") == "14.2.35"
+    """NSEC-BASE:03 (squash-survival form): the checked-in predecessor
+    evidence records the exact vulnerable identity this slice replaces —
+    predecessor commit 3adead5, its lock blob content hash, and
+    next 14.2.35. The repository integrates by SQUASH merge only, so the
+    intermediate hygiene commit is not part of published main history;
+    the machine-readable evidence is the durable proof. When the
+    predecessor happens to be reachable in the current clone, the live
+    object is cross-verified against the same values."""
+    ev = json.loads((REPO / "docs" / "security" /
+                     "nsec-predecessor-evidence.json").read_text(
+                         encoding="utf-8"))
+    assert ev["predecessor_commit"] == \
+        "3adead55ca052808260bc4939403bd1fdcc29e13"
+    assert ev["predecessor_tree"] == \
+        "d9e0c9b5cbfaeec902d70b97eed858193f76696a"
+    assert ev["predecessor_lock_blob"] == \
+        "946639773277989cbc05aca7b28e5a524d764f72"
+    assert ev["predecessor_lock_next"] == "14.2.35"
+    audit = ev["predecessor_live_audit"]
+    assert audit["severity"] == "critical" and \
+        audit["advisory_count"] == 23
+    assert sorted(audit["target_ghsas_present"]) == sorted(TARGET_GHSAS)
+    # opportunistic live cross-verification (pre-squash clones only —
+    # must NOT be required in squash-shaped published history)
+    reach = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet",
+         f"{ev['predecessor_commit']}^{{commit}}"],
+        cwd=REPO, capture_output=True, text=True)
+    if reach.returncode == 0:
+        blob = subprocess.run(
+            ["git", "rev-parse",
+             f"{ev['predecessor_commit']}:apps/web/package-lock.json"],
+            cwd=REPO, capture_output=True, text=True, check=True
+        ).stdout.strip()
+        assert blob == ev["predecessor_lock_blob"]
+        lock = json.loads(subprocess.run(
+            ["git", "cat-file", "-p", blob],
+            cwd=REPO, capture_output=True, text=True, check=True).stdout)
+        assert _lock_version(lock, "next") == "14.2.35"
 
 
 def test_nsec_base_04_predecessor_audit_evidence():
@@ -198,6 +229,56 @@ def test_nsec_boundary_exact_path_enforcement():
         assert pa("docs/security/anything.md", mod.ALLOWLIST) is True
         # unlisted root-level file with a listed directory name inside
         assert pa("docsX/hygiene/file.md", mod.ALLOWLIST) is False
+
+
+def test_nsec_boundary_squash_survival(tmp_path, monkeypatch):
+    """Merge-review blocker (squash-history durability): the repository
+    integrates by SQUASH merge only, so the intermediate hygiene commit
+    3adead5 is not permanently reachable from published main. Prove the
+    security boundary survives that world:
+
+      1. mode selection flips to published M13 exactly when the
+         predecessor is unreachable;
+      2. in published mode the FULL validator is green over the true
+         post-squash surface (diff published M13..HEAD, union
+         allowlist, checked-in predecessor evidence required);
+      3. the checked-in evidence is mandatory in published mode — its
+         absence is rejected.
+    """
+    sec = _load_script_module("next_security_validate_boundary")
+
+    # 1. selection: predecessor mode in this clone (it is reachable)
+    assert sec.select_base(REPO) == ("predecessor", sec.PREDECESSOR)
+    # ... and published mode when the predecessor is unreachable
+    def _unreachable(sha, repo):
+        if sha == sec.PREDECESSOR:
+            return False
+        return sec._commit_reachable(sha, repo)
+    monkeypatch.setattr(sec, "_commit_reachable", _unreachable)
+    assert sec.select_base(REPO) == ("published", sec.PUBLISHED_M13)
+
+    # 2. full published-mode validation over the true post-squash
+    #    surface (the diff vs published M13 is exactly what a squash
+    #    commit on main would carry)
+    assert sec.main(REPO) == 0
+
+    # 3. evidence is load-bearing in published mode: without the
+    #    checked-in file the validator must reject
+    ev = REPO / "docs" / "security" / "nsec-predecessor-evidence.json"
+    saved = ev.read_text(encoding="utf-8")
+    ev.unlink()
+    try:
+        assert sec.main(REPO) == 1
+    finally:
+        ev.write_text(saved, encoding="utf-8")
+    # and corrupted identity values are rejected too
+    bad = json.loads(saved)
+    bad["predecessor_lock_blob"] = "0" * 40
+    ev.write_text(json.dumps(bad), encoding="utf-8")
+    try:
+        assert sec.main(REPO) == 1
+    finally:
+        ev.write_text(saved, encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
