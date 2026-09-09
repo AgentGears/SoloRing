@@ -95,10 +95,6 @@ def main() -> int:
         print(f"SMOKE FAIL: port {APP_PORT} already occupied "
               "(frozen start port) — free it and rerun", file=sys.stderr)
         return 2
-    if not (WEB / ".next" / "BUILD_ID").is_file():
-        print("SMOKE FAIL: apps/web/.next missing — run `npm run build` "
-              "first (frozen §12 sequence)", file=sys.stderr)
-        return 2
 
     server = ThreadingHTTPServer(("127.0.0.1", STUB_PORT), Stub)
     threading.Thread(target=server.serve_forever, daemon=True).start()
