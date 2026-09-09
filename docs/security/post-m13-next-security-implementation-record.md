@@ -96,3 +96,51 @@ lower-bounds that segment at 16.0 (it is the 16.x line), and the
 offline range proof encodes it that way; the authoritative closure
 signal remains the live-audit absence of both GHSAs, which does not
 depend on this encoding.
+
+## Source-review corrections (review of 9137c13, frozen R2 unchanged)
+
+Independent source review of `9137c135…` (tree `1dd1c170…`) found four
+conformance/proof blockers; all corrected additively, no plan
+revision:
+
+1. **F1 — clean-checkout typegen/tsc ordering.** CI now runs
+   `npx next typegen` immediately before `npx tsc --noEmit` (Next
+   15.5's documented CI sequence), and the Windows §12 sequence gains
+   the same step. Empirical nuance, recorded exactly: on this
+   toolchain (TS 5.9.3) a clean-state `tsc` does NOT error on the
+   unresolved `./.next/types/routes.d.ts` reference in the
+   Next-15-regenerated `next-env.d.ts` — `tsc --listFilesOnly` proves
+   the route types silently drop out of the program (present after
+   typegen, absent before). The defect was therefore a silently
+   weaker CI typecheck rather than a red one; the typegen step
+   restores route-type validation either way. This also explains why
+   the `next-env.d.ts` regeneration only surfaced during SEC6's
+   CI-style build.
+2. **F2 — postcss semver proof.** The validator's and PKG:05's
+   `>=8.5.23 <9` bounds compared version STRINGS (lexicographic
+   ordering falsely admits e.g. `8.5.3`). Both now compare numeric
+   semver tuples; a six-row regression matrix (8.5.22 and 8.5.3 and
+   9.0.0 reject; 8.5.23, 8.5.28, 8.10.0 accept) drives the validator
+   itself through `--pins-only` on synthesized lockfiles.
+3. **F3 — allowlist exact-path enforcement.** Both boundary
+   validators matched allowlist entries by prefix even for exact-file
+   entries (authorizing e.g. `next_security_validate.py.bak`). Both
+   now use `path_allowed`: directory entries (trailing `/`) alone may
+   prefix-match; everything else requires exact equality. An
+   automated negative proof exercises BOTH validators' real allowlists
+   (near-prefix `.bak`/`-anything`/`.orig` siblings rejected; exact
+   files and directory prefixes accepted).
+4. **F4 — final-head Windows proof.** The tracked SEC5 evidence was
+   for `6bd48dc`/`11aca88b`, whose tree lacked the later
+   `next-env.d.ts` typegen change; the proof map's CLOSE:02 wording
+   overstated it. Correction: the full §12 sequence (F1-corrected,
+   with `next typegen`) is rerun on the exact final correction head
+   AFTER the correction commit, with no source changes afterward;
+   identity and mechanical results are reported in the re-review
+   handoff (no post-proof commits, per the review instruction, so the
+   identity loop cannot restart).
+
+Closure-status correction: **NSEC-CLOSE:01 (Linux CI) is PENDING PR
+CI** — zero Actions runs exist for the branch head because no PR is
+authorized; the workflow source carries every gate and the cell
+completes when an authorized PR's CI runs green.

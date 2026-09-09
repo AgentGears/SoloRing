@@ -5,6 +5,7 @@ proofs run in CI via scripts/next_security_validate.py)."""
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from pathlib import Path
 
@@ -111,13 +112,92 @@ def test_nsec_pkg_04_lock_peer_graph_static_proof():
     assert checked >= 3, f"unexpectedly few peers checked ({checked})"
 
 
+def _semver_tuple(version: str) -> tuple[int, ...]:
+    parts: list[int] = []
+    for piece in str(version).split("."):
+        m = re.match(r"\d+", piece)
+        if not m:
+            break
+        parts.append(int(m.group(0)))
+    return tuple(parts)
+
+
 def test_nsec_pkg_05_postcss_override_retained():
     """NSEC-PKG:05 (frozen §7.4 RETAIN): the override stays exactly
-    '>=8.5.23 <9' and the lock resolves postcss inside the safe range."""
+    '>=8.5.23 <9' and the lock resolves postcss inside the safe range
+    (numeric semver comparison — never lexicographic)."""
     pkg = json.loads((WEB / "package.json").read_text(encoding="utf-8"))
     assert pkg["overrides"]["postcss"] == ">=8.5.23 <9"
     postcss = _lock_version(_lock(), "postcss")
-    assert postcss is not None and "8.5.23" <= postcss < "9", postcss
+    assert postcss is not None
+    v = _semver_tuple(postcss)
+    assert v >= (8, 5, 23) and v < (9,), postcss
+
+
+@pytest.mark.parametrize("postcss,want_rc", [
+    ("8.5.22", 1),   # vulnerable line
+    ("8.5.3", 1),    # lexicographic hole: '8.5.3' > '8.5.23' as string
+    ("8.5.23", 0),   # inclusive floor
+    ("8.5.28", 0),   # resolved version (safe)
+    ("8.10.0", 0),   # minor above 23 — safe, only reachable numerically
+    ("9.0.0", 1),    # outside the override's <9 bound
+])
+def test_nsec_pkg_05_postcss_semver_matrix(tmp_path, postcss, want_rc):
+    """NSEC-PKG:05 regression (review F2): the security validator's
+    postcss safety check compares numerically — synthesized lockfiles
+    carry each boundary version and the validator's --pins-only gate
+    must accept/reject per the frozen >=8.5.23 <9 override range."""
+    root = _matrix_tree(tmp_path, lock_over={"postcss": postcss})
+    r = _run_pins_only(root)
+    assert r.returncode == want_rc, (
+        f"postcss {postcss}: expected rc={want_rc}, got "
+        f"{r.returncode}\n{(r.stdout + r.stderr)[-500:]}")
+
+
+def _run_pins_only(root):
+    import sys
+    exe = str(REPO / ".venv" / "Scripts" / "python.exe")
+    if not Path(exe).exists():
+        exe = sys.executable
+    return subprocess.run(
+        [exe, str(REPO / "scripts" / "next_security_validate.py"),
+         "--root", str(root), "--pins-only"],
+        capture_output=True, text=True, timeout=120)
+
+
+def _load_script_module(name: str):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        name, REPO / "scripts" / f"{name}.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_nsec_boundary_exact_path_enforcement():
+    """NSEC review F3: boundary allowlists match EXACT paths — only
+    directory entries (trailing '/') may prefix-match. Near-prefix
+    siblings of allowlisted files must be rejected by BOTH boundary
+    validators."""
+    sec = _load_script_module("next_security_validate_boundary")
+    hyg = _load_script_module("hygiene_validate_boundary")
+    for mod in (sec, hyg):
+        pa = mod.path_allowed
+        # exact entries: only exact equality
+        assert pa("scripts/next_security_validate.py",
+                  mod.ALLOWLIST) is True
+        assert pa("scripts/next_security_validate.py.bak",
+                  mod.ALLOWLIST) is False
+        assert pa("scripts/next_security_validate.py-anything",
+                  mod.ALLOWLIST) is False
+        assert pa("apps/web/package.json", mod.ALLOWLIST) is True
+        assert pa("apps/web/package.json.bak", mod.ALLOWLIST) is False
+        assert pa(".github/workflows/ci.yml", mod.ALLOWLIST) is True
+        assert pa(".github/workflows/ci.yml.orig", mod.ALLOWLIST) is False
+        # directory entries: prefix
+        assert pa("docs/security/anything.md", mod.ALLOWLIST) is True
+        # unlisted root-level file with a listed directory name inside
+        assert pa("docsX/hygiene/file.md", mod.ALLOWLIST) is False
 
 
 # ---------------------------------------------------------------------------

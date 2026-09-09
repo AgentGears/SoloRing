@@ -102,13 +102,26 @@ def git(*args: str) -> str:
                           text=True, check=True).stdout
 
 
+def path_allowed(path: str, allowlist) -> bool:
+    """Directory entries (trailing '/') match by prefix; every other
+    entry requires EXACT equality — an exact-file entry must never
+    authorize near-prefix siblings like `x.py.bak`."""
+    for entry in allowlist:
+        if entry.endswith("/"):
+            if path.startswith(entry):
+                return True
+        elif path == entry:
+            return True
+    return False
+
+
 def main() -> int:
     errors: list[str] = []
 
     changed = [f for f in git("diff", "--name-only", f"{BASE}..HEAD")
                .splitlines() if f.strip()]
     for f in changed:
-        if not any(f == a or f.startswith(a) for a in ALLOWLIST):
+        if not path_allowed(f, ALLOWLIST):
             errors.append(f"changed file outside the hygiene allowlist: {f}")
 
     versions = REPO / "server" / "alembic" / "versions"

@@ -19,20 +19,58 @@ Next security boundary              GREEN (security-slice scoped; no server/alem
 backend pytest pass 1               1977 passed / 7 skipped, ZERO warnings, rc=0 (868s)
 backend pytest pass 2               1977 passed / 7 skipped, ZERO warnings, rc=0 (857s)
 frontend tests                      28 files / 124 tests, rc=0
-TypeScript                          0 errors
+TypeScript                          0 errors (after `npx next typegen` — F1)
 production build                    GREEN (CI-style, SOLORING_API_ORIGIN=http://127.0.0.1:65534;
                                       six dynamic routes)
 npm dependency graph                valid (npm ci 177 pkgs; npm ls zero invalid/unmet)
 runtime npm audit                   ZERO findings at every severity
 hygiene audit validator             GREEN (accepted against the EMPTY exception baseline)
 Next security validator             GREEN (pins+tree+audit; both target GHSAs absent)
-Windows production smoke            GREEN (SEC5 record; exact commit 6bd48dc / tree 11aca88b)
+Windows production smoke            SEC5 run green at 6bd48dc; final-correction-head rerun
+                                    (F1-corrected §12 sequence) reported in the re-review
+                                    handoff — see the Windows proof doc protocol
 
 repo-root m10f-scale-pkgs           ABSENT
 migration head                      0014_m13_authority_complete_world
 tracked tree                        CLEAN at the final head
 M14 source mutation                 NONE (boundary-proven)
 ```
+
+## Closure status after the source-review corrections (review of 9137c13)
+
+Four blockers (F1–F4) were corrected additively; the corrected counts
+and reruns supersede the matrix rows above where noted:
+
+- **F1** — CI now runs `npx next typegen` immediately before
+  `npx tsc --noEmit` (Next 15.5's documented CI sequence), and the
+  Windows §12 sequence gains the same step. Empirical nuance recorded:
+  on this toolchain (TypeScript 5.9.3) a clean-state `tsc` does NOT
+  error on the unresolved `./.next/types/routes.d.ts` reference —
+  `--listFilesOnly` proves the route types silently drop out of the
+  program instead, making the typecheck silently weaker; the typegen
+  step restores route-type validation and matches the documented
+  sequence.
+- **F2** — the postcss safety bound in the security validator and the
+  PKG:05 proof now compares numeric semver tuples (lexicographic
+  strings misorder 8.5.3 vs 8.5.23). Regression matrix
+  (8.5.22/8.5.3/9.0.0 reject; 8.5.23/8.5.28/8.10.0 accept) is
+  automated against the validator itself.
+- **F3** — both boundary validators enforce exact-path allowlists
+  (directory entries alone may prefix-match); near-prefix siblings of
+  allowlisted files are rejected, with an automated negative proof
+  over BOTH validators' real allowlists.
+- **F4** — the mandatory Windows production proof is rerun on the
+  exact final correction head (F1-corrected sequence) after the
+  correction commit, with no source changes afterward; identity and
+  mechanical results are reported in the re-review handoff per the
+  review instruction (no post-proof commits).
+
+**NSEC-CLOSE:01 (Linux CI leg) status: PENDING PR CI.** Zero GitHub
+Actions runs exist for the branch head because no PR is authorized
+yet — that is expected, not a defect. The workflow source carries
+every gate (nine validators across both jobs, the pins-only pre-test
+gate, typegen→tsc, build, and both audit validators on one audit
+document); CLOSE:01 completes when an authorized PR's CI runs green.
 
 Node-count arithmetic: 1977 = 1954 (hygiene closure count) + 23 (the
 security proof tests: 5 offline proofs + the 18-case negative matrix).

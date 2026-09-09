@@ -44,6 +44,6 @@ Validated by `python scripts/next_security_validate_proof_map.py` (Backend CI, b
 
 | Cell | Disposition | Exact proof owner | Claim |
 |---|---|---|---|
-| `NSEC-CLOSE:01` | DISPOSITION | `docs/security/post-m13-next-security-closure-record.md` | Linux-class gates green (fe tests/tsc/build, npm ci, audits, both audit validators); CI workflow carries every gate (PR run completes the CI leg). |
-| `NSEC-CLOSE:02` | DISPOSITION | `docs/security/post-m13-next-security-Windows-production-proof.md` | Windows production-mode smoke green on exact commit/tree (frozen §12 sequence). |
+| `NSEC-CLOSE:01` | DISPOSITION | `docs/security/post-m13-next-security-closure-record.md` | Linux CI leg: PENDING PR CI — the workflow source carries every gate (nine validators, pins-only gate, typegen→tsc, build, both audit validators); zero Actions runs exist pre-PR by design; completes when an authorized PR's CI runs green. |
+| `NSEC-CLOSE:02` | DISPOSITION | `docs/security/post-m13-next-security-Windows-production-proof.md` | Windows production-mode smoke on the exact final correction head (F1-corrected §12 sequence incl. `next typegen`); protocol per review F4 — identity and mechanical results in the re-review handoff, no post-proof commits. |
 | `NSEC-CLOSE:03` | DISPOSITION | `docs/security/post-m13-next-security-closure-record.md` | Complete frozen Hygiene H7 re-closure green; residue absent; head 0014; clean tree; no M14 mutation. |

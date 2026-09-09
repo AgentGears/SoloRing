@@ -2,7 +2,32 @@
 
 Frozen R2 (`4c3d1846bba75b1395dd504c3d01e03542ad120dba93c40e7ed88b4012fd3d31`) §12. The Windows-host-specific RCE (GHSA-p293-qw3h-jr36, no known workaround on affected Windows-hosted applications) makes this proof mandatory; Linux CI cannot close it.
 
-## Environment (Windows deployment class)
+## Final-correction-head proof (authoritative — review F4)
+
+The run recorded under "Environment" below was executed at the SEC5
+commit `6bd48dc` / tree `11aca88b`, BEFORE the review-correction
+commit introduced the `next-env.d.ts` typegen change. Per source
+review F4, the authoritative proof is a rerun of the full frozen §12
+sequence — WITH the F1 correction (`npx next typegen` before
+`npx tsc --noEmit`) — executed at the exact final correction head,
+with **no source changes after the proof**. That rerun's commit/tree
+identity and mechanical results are reported in the re-review handoff
+(the branch head at push time IS the proof target); no additional
+commit records the run, per the review instruction, so the identity
+loop cannot restart.
+
+Corrected §12 sequence:
+
+```text
+npm ci
+npm test
+npx next typegen        (F1: route types generated before tsc)
+npx tsc --noEmit
+npm run build           (production bundle under the stub origin)
+npm start               (next start -p 3000; smoke probes)
+```
+
+## Environment (Windows deployment class; SEC5 run at 6bd48dc)
 
 ```text
 security commit   6bd48dcd899e99d6b4cd07e3b7b95c34e107fbf0

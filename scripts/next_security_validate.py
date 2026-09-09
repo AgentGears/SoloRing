@@ -61,6 +61,22 @@ def fail(errors: list[str]) -> int:
     return 1
 
 
+def _semver(version: str) -> tuple[int, ...]:
+    """Stable numeric semver prefix as a tuple (numeric comparison —
+    lexicographic strings misorder 8.5.3 vs 8.5.23)."""
+    parts: list[int] = []
+    for piece in str(version).split("."):
+        digits = re.match(r"\d+", piece)
+        if not digits:
+            break
+        parts.append(int(digits.group(0)))
+    return tuple(parts)
+
+
+SAFE_POSTCSS_LO = _semver("8.5.23")   # inclusive lower bound (override)
+SAFE_POSTCSS_HI = _semver("9")        # exclusive upper bound
+
+
 def _lock_version(lock: dict, name: str):
     entry = (lock.get("packages") or {}).get(f"node_modules/{name}")
     if isinstance(entry, dict) and entry.get("version"):
@@ -101,9 +117,11 @@ def validate_pins(root: Path, errors: list[str]) -> None:
     postcss = _lock_version(lock, "postcss")
     if postcss is None:
         errors.append("postcss missing from the lockfile")
-    elif not ("8.5.23" <= postcss < "9"):
-        errors.append(f"lockfile postcss {postcss!r} outside the "
-                      "override range (vulnerable line)")
+    else:
+        v = _semver(postcss)
+        if not (v >= SAFE_POSTCSS_LO and v < SAFE_POSTCSS_HI):
+            errors.append(f"lockfile postcss {postcss!r} outside the "
+                          "override range (vulnerable line)")
 
     major = str(TARGETS["next"]).split(".")[0]
     lock_major = str(_lock_version(lock, "next") or "").split(".")[0]
