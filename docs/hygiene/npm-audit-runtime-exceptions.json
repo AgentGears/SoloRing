@@ -5,7 +5,7 @@
   "exceptions": [
     {
       "package": "next",
-      "installed_major": "14",
+      "installed_version": "14.2.35",
       "severity": "high",
       "vulnerable_range": "9.5.0 - 15.5.20",
       "advisories": [
@@ -38,7 +38,8 @@
       },
       "disposition": "UPSTREAM_BLOCKED_RUNTIME_HIGH",
       "rationale": "All 21 advisories patch only in Next 15.5.x/16.x (vulnerable range recomputed at the postcss-remediated lockfile: 9.5.0 - 15.5.20); the installed 14.x line has no compatible remediation per audit metadata. A Next major migration is excluded from this hygiene gate (frozen R2 policy decision) and requires a separately reviewed plan. The SoloRing app is local-first (no public self-hosted internet exposure of the Next server), which bounds but does not eliminate the accepted risk; this note is context, not a safety claim.",
-      "invalidated_when": "fixAvailable.isSemVerMajor == false for this finding, or any advisory gains a 14.x patched release"
+      "invalidated_when": "fixAvailable.isSemVerMajor == false for this finding, any advisory gains a 14.x patched release, the lockfile-installed version drifts from the pinned 14.2.35, or the live severity leaves high",
+      "pinned_identity_note": "installed_version is exact-pinned to the lockfile (node_modules/next @ 14.2.35) and enforced by scripts/hygiene_validate_npm_audit.py against apps/web/package-lock.json; fix_available.version records the offered fix at baseline time — its patch/minor segment drifts with upstream releases, so the validator enforces the material identity (fix package name + isSemVerMajor + offered-fix major segment), not the patch/minor"
     }
   ]
 }

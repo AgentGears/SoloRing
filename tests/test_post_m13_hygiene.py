@@ -140,23 +140,67 @@ async def test_hyg_be_05_race_helper_preserves_live_proof(engine, client):
 
 @pytest.mark.asyncio
 async def test_hyg_art_02_generated_packages_live_under_pytest_tmp(
-        tmp_path, monkeypatch):
-    """HYG-ART:02: `build_fixture` places generated packages under the
-    caller-owned (pytest temp) root, never the repository working
-    directory."""
+        tmp_path):
+    """HYG-ART:02: a REAL representative history build places every
+    generated package under the caller-owned (pytest temp) root with
+    actual package files on disk; the repo-root directory stays absent
+    before and after; omitting pkg_root_parent is rejected at entry
+    instead of falling back to unscoped storage."""
     from pathlib import Path
 
-    from tests.m10f_scale_fixture import build_fixture
+    import pytest as _pytest
 
     repo_root = Path(__file__).resolve().parents[1]
     assert not (repo_root / "m10f-scale-pkgs").exists()  # absent before
 
-    import inspect
-    sig = inspect.signature(build_fixture)
-    assert "pkg_root_parent" in sig.parameters
-    src = inspect.getsource(build_fixture)
-    assert 'Path(".")' not in src
-    assert "pkg_root_parent" in src
+    from tests.m10f_scale_fixture import build_fixture
+
+    # the containment contract is mandatory, not defaulted
+    with _pytest.raises(ValueError, match="pkg_root_parent"):
+        await build_fixture(None, None, None, with_history=True,
+                            pkg_root_parent=None)
+
+    from soloring.db import models  # noqa: F401
+    from soloring.db.base import Base
+    from soloring.db.engine import (
+        create_session_factory,
+        create_soloring_engine,
+    )
+    from soloring.settings import Settings
+    import soloring.settings as settings_mod
+    from tests.m10f_scale_fixture import deterministic_uuid4
+
+    data_dir = tmp_path / "data"
+    data_dir.mkdir(parents=True)
+    settings = Settings(data_dir=data_dir)
+    saved_singleton = settings_mod._settings
+    settings_mod._settings = settings  # _assets writes via get_settings()
+    engine = create_soloring_engine(settings)
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        factory = create_session_factory(engine)
+        with deterministic_uuid4():
+            ids = await build_fixture(
+                engine, factory, settings, pkg_root_parent=data_dir.parent)
+    finally:
+        settings_mod._settings = saved_singleton
+        await engine.dispose()
+
+    # the history leg really ran (v1/v2/v3 targets all minted)
+    assert ids["v1_target_shot"] and ids["v2_target_shot"] and \
+        ids["v3_generation"]
+
+    # generated package files exist BELOW pytest-owned temporary storage
+    pkg_root = tmp_path / "m10f-scale-pkgs"  # == data_dir.parent
+    assert pkg_root.is_dir(), sorted(p.name for p in tmp_path.iterdir())
+    package_dirs = [p for p in pkg_root.iterdir() if p.is_dir()]
+    assert package_dirs, "no generated package directories"
+    files = [f for f in pkg_root.rglob("*") if f.is_file()]
+    assert files, "generated package directories carry no files"
+
+    # and the repository working directory stays clean
+    assert not (repo_root / "m10f-scale-pkgs").exists()
 
 
 def test_hyg_art_03_no_repo_root_residue_after_focus():
@@ -182,3 +226,131 @@ async def test_hyg_base_02_migration_head_unchanged(tmp_path, monkeypatch):
     files = sorted(p.name for p in versions.glob("0*.py"))
     assert files[-1] == "0014_m13_authority_complete_world.py"
     assert not any(f.startswith("0015") for f in files)
+
+
+# ---------------------------------------------------------------------------
+# HYG-DEP:06 — npm-audit baseline validator negative matrix
+# ---------------------------------------------------------------------------
+
+
+def _dep06_baseline() -> dict:
+    return {"schema_version": 1, "policy": "UPSTREAM_BLOCKED_RUNTIME_HIGH",
+            "exceptions": [{
+                "package": "pkg-x",
+                "installed_version": "1.2.3",
+                "severity": "high",
+                "vulnerable_range": ">=1.0.0 <2.0.0",
+                "advisories": ["GHSA-1111-2222-3333"],
+                "fix_available": {"name": "pkg-x", "version": "9.1.0",
+                                  "isSemVerMajor": True},
+            }]}
+
+
+def _dep06_audit(**finding_over) -> dict:
+    finding = {
+        "severity": "high",
+        "range": ">=1.0.0 <2.0.0",
+        "via": [{"url": "https://github.com/advisories/"
+                        "GHSA-1111-2222-3333"}],
+        "fixAvailable": {"name": "pkg-x", "version": "9.1.0",
+                         "isSemVerMajor": True},
+    }
+    finding.update(finding_over)
+    return {"vulnerabilities": {"pkg-x": finding}}
+
+
+def _dep06_lockfile(version: str | None) -> dict:
+    packages: dict = {}
+    if version is not None:
+        packages["node_modules/pkg-x"] = {"version": version}
+    return {"lockfileVersion": 3, "packages": packages}
+
+
+def _dep06_run(tmp_path, audit: dict, baseline: dict, lockfile: dict):
+    import json
+    import subprocess
+    import sys
+
+    repo = __import__("pathlib").Path(__file__).resolve().parents[1]
+    audit_p = tmp_path / "audit.json"
+    base_p = tmp_path / "baseline.json"
+    lock_p = tmp_path / "lock.json"
+    audit_p.write_text(json.dumps(audit), encoding="utf-8")
+    base_p.write_text(json.dumps(baseline), encoding="utf-8")
+    lock_p.write_text(json.dumps(lockfile), encoding="utf-8")
+    r = subprocess.run(
+        [sys.executable, str(repo / "scripts" /
+                             "hygiene_validate_npm_audit.py"),
+         str(audit_p), "--baseline", str(base_p),
+         "--lockfile", str(lock_p)],
+        capture_output=True, text=True, timeout=120)
+    return r.returncode, r.stdout + r.stderr
+
+
+def test_hyg_dep_06_audit_validator_rejects_drift(tmp_path):
+    """HYG-DEP:06: the npm-audit baseline validator accepts the exact
+    pinned identity and rejects every drift class: unlisted highs,
+    advisory identity, vulnerable range, severity (downgrade or
+    upgrade), fix package identity, offered-fix major, a non-major fix
+    (invalidated exception), installed-version drift, an excepted
+    package missing from the lockfile, and a stale exception. Offered
+    fix patch/minor drift is upstream-normal and accepted."""
+    cases = []
+    # exact pinned identity — accepted
+    cases.append(("exact accepted", _dep06_audit(),
+                  _dep06_baseline(), _dep06_lockfile("1.2.3"), 0))
+    # unlisted runtime high — rejected
+    a = _dep06_audit()
+    a["vulnerabilities"]["pkg-y"] = dict(
+        a["vulnerabilities"]["pkg-x"], via=[{"url": "https://x/GHSA-y"}])
+    cases.append(("unlisted high", a, _dep06_baseline(),
+                  _dep06_lockfile("1.2.3"), 1))
+    # advisory identity drift — rejected
+    cases.append(("advisory drift",
+                  _dep06_audit(via=[{"url": "https://github.com/"
+                                          "advisories/GHSA-9999-9999-9999"}]),
+                  _dep06_baseline(), _dep06_lockfile("1.2.3"), 1))
+    # vulnerable range drift — rejected
+    cases.append(("range drift", _dep06_audit(range=">=1.0.0 <2.5.0"),
+                  _dep06_baseline(), _dep06_lockfile("1.2.3"), 1))
+    # severity downgrade must not let a stale exception ride through
+    cases.append(("severity downgrade", _dep06_audit(severity="moderate"),
+                  _dep06_baseline(), _dep06_lockfile("1.2.3"), 1))
+    # fix package identity drift — rejected
+    cases.append(("fix name drift",
+                  _dep06_audit(fixAvailable={"name": "pkg-x-successor",
+                                             "version": "9.1.0",
+                                             "isSemVerMajor": True}),
+                  _dep06_baseline(), _dep06_lockfile("1.2.3"), 1))
+    # offered fix major drift — rejected (fix identity is material)
+    cases.append(("fix major drift",
+                  _dep06_audit(fixAvailable={"name": "pkg-x",
+                                             "version": "10.0.0",
+                                             "isSemVerMajor": True}),
+                  _dep06_baseline(), _dep06_lockfile("1.2.3"), 1))
+    # offered fix patch/minor drift — upstream-normal, accepted
+    cases.append(("fix patch drift accepted",
+                  _dep06_audit(fixAvailable={"name": "pkg-x",
+                                             "version": "9.2.0",
+                                             "isSemVerMajor": True}),
+                  _dep06_baseline(), _dep06_lockfile("1.2.3"), 0))
+    # compatible (non-major) fix — the exception is invalidated
+    cases.append(("invalidated exception",
+                  _dep06_audit(fixAvailable={"name": "pkg-x",
+                                             "version": "1.2.4",
+                                             "isSemVerMajor": False}),
+                  _dep06_baseline(), _dep06_lockfile("1.2.3"), 1))
+    # installed-version drift vs the baseline pin — rejected
+    cases.append(("installed version drift", _dep06_audit(),
+                  _dep06_baseline(), _dep06_lockfile("1.9.0"), 1))
+    # excepted package missing from the lockfile — rejected
+    cases.append(("missing from lockfile", _dep06_audit(),
+                  _dep06_baseline(), _dep06_lockfile(None), 1))
+    # stale exception (package no longer in the audit) — rejected
+    cases.append(("stale exception", {"vulnerabilities": {}},
+                  _dep06_baseline(), _dep06_lockfile("1.2.3"), 1))
+
+    for label, audit, baseline, lockfile, want_rc in cases:
+        rc, out = _dep06_run(tmp_path, audit, baseline, lockfile)
+        assert rc == want_rc, (
+            f"{label}: expected rc={want_rc}, got rc={rc}\n{out[-600:]}")

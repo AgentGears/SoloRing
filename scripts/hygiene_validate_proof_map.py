@@ -3,9 +3,11 @@
 Validates docs/SoloRing-Post-M13-Hygiene-Proof-Map.md for:
   * exactly the 30 frozen cell IDs, no duplicates/unknowns/missing;
   * closed disposition vocabulary;
-  * TEST owners resolve (python via pytest --collect-only; frontend via
-    exact-title search in the named file; scripts as existing files;
-    documents as existing sections);
+  * the frozen owner contract: every cell carries EXACTLY ONE owner
+    (no multi-owner fields) and that owner resolves for ALL six
+    dispositions (python via pytest --collect-only; frontend via
+    exact-title search in the named file; scripts/documents/packages
+    as existing files; document-section owners as existing headings);
   * HYG-META metadata assertions over README.md and pyproject.toml.
 
 Exit codes: 0 valid; 1 invalid; 2 usage error.
@@ -56,24 +58,46 @@ def collected_pytest_nodes() -> set[str]:
     }
 
 
+def _doc_owner_resolves(owner: str) -> bool:
+    """Document owner: `path`, `path §N`, or `path::§N` — the file must
+    exist and, when a section is named, the numbered heading must be
+    present in the document."""
+    if "::" in owner:
+        path_s, section = owner.split("::", 1)
+        section = section.strip()
+    elif " §" in owner:
+        path_s, _, section = owner.partition(" §")
+        section = section.strip()
+    else:
+        path_s, section = owner, ""
+    f = REPO / path_s.strip().strip("`")
+    if not f.is_file():
+        return False
+    if not section:
+        return True
+    m = re.match(r"§?\s*(\d+)", section.strip())
+    text = f.read_text(encoding="utf-8")
+    if not m:
+        return section in text
+    return re.search(
+        rf"^#+\s*{re.escape(m.group(1))}\b", text, re.M) is not None
+
+
 def owner_resolves(owner: str, nodes: set[str]) -> bool:
     owner = owner.strip().strip("`")
-    if owner.startswith("scripts/") or owner.startswith("docs/"):
-        target = REPO / owner.split("::")[0]
-        if not target.is_file():
-            return False
-        if "::" in owner and owner.startswith("docs/"):
-            # document-section owner: the section heading must exist
-            section = owner.split("::", 1)[1].split()[0]
-            return section.lstrip("§") in target.read_text(
-                encoding="utf-8") or section in target.read_text(
-                encoding="utf-8")
-        return True
+    if owner.startswith("scripts/"):
+        return (REPO / owner).is_file()
+    if owner.startswith("docs/"):
+        return _doc_owner_resolves(owner)
     if owner.startswith("apps/web/"):
         path, _, title = owner.partition("::")
         f = REPO / path
-        if not (path.startswith("apps/web/src/__tests__/")
-                and f.is_file()):
+        if not f.is_file():
+            return False
+        if not title:
+            return True  # plain artifact owner (e.g. package.json)
+        # test-title owner: only under src/__tests__
+        if not path.startswith("apps/web/src/__tests__/"):
             return False
         src = f.read_text(encoding="utf-8")
         # resolve either an exact `it("title"` / `test("title"` or the
@@ -147,8 +171,12 @@ def main() -> int:
         seen[cell] = disposition
         if disposition not in DISPOSITIONS:
             errors.append(f"{cell}: unknown disposition {disposition!r}")
-        if disposition == "TEST" and not owner_resolves(owner, nodes):
-            errors.append(f"{cell}: unresolvable owner {owner!r}")
+        if " + " in owner:
+            errors.append(f"{cell}: owner field names multiple owners "
+                          f"(frozen contract: exactly one): {owner!r}")
+        elif not owner_resolves(owner, nodes):
+            errors.append(f"{cell} [{disposition}]: unresolvable owner "
+                          f"{owner!r}")
 
     required = [c for cells in REQUIRED_CELLS.values() for c in cells]
     missing = [c for c in required if c not in seen]
@@ -163,8 +191,9 @@ def main() -> int:
     if errors:
         return fail(errors)
     total = sum(len(c) for c in REQUIRED_CELLS.values())
-    print(f"Hygiene proof map valid: {total} cells, all owners resolve, "
-          "metadata assertions green.")
+    print(f"Hygiene proof map valid: {total} cells, every owner resolves "
+          "(all dispositions, exactly one per cell), metadata "
+          "assertions green.")
     return 0
 
 

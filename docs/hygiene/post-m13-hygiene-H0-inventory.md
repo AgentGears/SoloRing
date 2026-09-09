@@ -23,7 +23,9 @@ Full backend run with warnings visible (`-rw`): `1946 passed, 7 skipped,
      engine.connect()).execute(...)`) — one leaked connection + one
      unawaited coroutine. Reproduced in isolation: `RuntimeWarning:
      coroutine 'AsyncConnection.execute' was never awaited` raised from
-     `tests/test_m13_races.py:631` under `-W always::RuntimeWarning`.
+     the dead construct at `tests/test_m13_races.py:659-662` (at the
+     published M13 baseline 384a46d; the helper begins at line 657)
+     under `-W always::RuntimeWarning`.
      A second identical dead construct was found during H0 in
      `tests/test_m13_corrections.py` (the `if False else None`
      leftover) — same class, same fix.
@@ -61,8 +63,10 @@ Repo-root `m10f-scale-pkgs/` present at the baseline working tree
 (leftover from prior closure runs — the defect's observable). Root cause:
 `tests/m10f_scale_fixture.py` passed `Path(".")` into
 `_build_generation_history`. Fix: `build_fixture` takes
-`pkg_root_parent` (caller passes pytest `tmp_path`-derived storage);
-falls back to OS temp when absent. Verified: `tests/test_m10f_scale.py`
+`pkg_root_parent`, MANDATORY when `with_history=True` (omission raises
+at entry — the corrected contract has no fallback; an earlier draft
+fell back to an unscoped OS tempdir, which was removed as not
+caller-scoped). Verified: `tests/test_m10f_scale.py`
 7/7 green with repo-root residue ABSENT after the run.
 
 ## 5. Dependency audits (HYG-04)
@@ -86,10 +90,18 @@ findings, both high, both present in the runtime tree:
   vulnerable range to `9.5.0 - 15.5.20` (same 21 advisories) — the
   exception baseline records the recomputed range.
 
-Validator: `scripts/hygiene_validate_npm_audit.py` (streamed audit JSON;
-never written into the tree). Verified: live audit accepted (1 excepted
-high); negative self-tests reject an unlisted high, an invalidated
-exception (`isSemVerMajor: false`), and advisory drift — all rc=1.
+Validator: `scripts/hygiene_validate_npm_audit.py` (streamed audit JSON +
+the package lockfile; never written into the tree). The exception
+baseline exact-pins the installed version (`next@14.2.35` per the
+lockfile) and the validator rejects: any critical, any unlisted high,
+advisory-identity drift, vulnerable-range drift, severity drift,
+fix-identity/fix-major drift, an invalidated exception
+(`isSemVerMajor: false`), installed-version drift, an excepted package
+missing from the lockfile, and a stale exception (offered-fix
+patch/minor drift is upstream-normal and accepted). The full rejection
+matrix is an automated proof:
+`tests/test_post_m13_hygiene.py::test_hyg_dep_06_audit_validator_rejects_drift`
+(12 cases; live audit accepted at closure with pins verified).
 
 ### Python
 
@@ -145,12 +157,14 @@ Zero `unknown` nodes. The gate does not require identical counts
 - No package-version policy exists → option 1 of the frozen plan:
   version unchanged, independence documented in README.
 
-## 9. Intended touched-file set
+## 9. Touched-file set
+
+### 9.1 Initial intended set (pre-edit plan)
 
 ```text
 tests/conftest.py                                   tracking factory + warning gate
 tests/test_m13_races.py                             dead query removed
-tests/test_m13_corrections.py                       dead construct removed
+tests/test_m13_corrections.py                        dead construct removed
 tests/m10f_scale_fixture.py                         pkg_root_parent containment
 tests/test_m10f_scale.py                            caller passes pytest tmp
 tests/test_post_m13_hygiene.py                      focused backend regressions
@@ -163,3 +177,63 @@ docs/SoloRing-Post-M13-Hygiene-Proof-Map.md         30-cell ledger
 scripts/hygiene_validate_{proof_map,boundary,npm_audit}.py
 .github/workflows/ci.yml                            hygiene validators + guards
 ```
+
+This was the INTENDED set as planned before edits. During H1, systemic
+attribution showed the dominant warning family (bare file-local
+`async_sessionmaker` sites whose sessions were never closed) spanned a
+much broader family of test files than the initial set anticipated; H1
+therefore expanded into the mechanical `make_tracked_maker` conversion
+of those files (see the implementation record H1 item 3). All expansion
+is squarely HYG-01/HYG-02 test-fixture hygiene — no production,
+server, or migration file entered the diff (enforced by the boundary
+validator's allowlist).
+
+### 9.2 Final reviewed touched-file set (diff vs exact M13 384a46d)
+
+```text
+# hygiene implementation + review corrections
+.github/workflows/ci.yml                             validators, residue guards (pre- and post-suite)
+README.md                                            metadata rewrite
+pyproject.toml                                       description
+apps/web/package.json                                postcss override
+apps/web/package-lock.json                           postcss remediation regen
+apps/web/src/components/ProductionWorldPanel.tsx     de-<li> AuthoritySubjectRow
+apps/web/src/__tests__/PostM13Hygiene.test.tsx       FE regressions + console guard
+docs/SoloRing-Post-M13-Hygiene-Proof-Map.md          30-cell ledger
+docs/hygiene/npm-audit-runtime-exceptions.json       exact-pin exception baseline
+docs/hygiene/post-m13-hygiene-H0-inventory.md        this inventory
+docs/hygiene/post-m13-hygiene-implementation-record.md
+scripts/hygiene_validate_boundary.py                 hygiene boundary validator
+scripts/hygiene_validate_npm_audit.py                audit baseline validator
+scripts/hygiene_validate_proof_map.py                proof-map validator
+tests/conftest.py                                    tracked maker + fatal warning gate
+tests/m10f_scale_fixture.py                          mandatory pkg_root_parent containment
+tests/test_m10f_scale.py                             caller passes pytest tmp
+tests/test_m13_corrections.py                        dead construct removed
+tests/test_m13_races.py                              dead query removed
+tests/test_post_m13_hygiene.py                       focused regressions + DEP:06 matrix
+
+# H1 mechanical sessionmaker->make_tracked_maker conversion (HYG-01/02)
+tests/test_audit2_authority.py        tests/test_audit3_gate.py
+tests/test_audit_m1.py                tests/test_audit_m3.py
+tests/test_audit_m4_m5a.py            tests/test_m10c_scale.py
+tests/test_m10d_r2_proofs.py          tests/test_m10d_races.py
+tests/test_m10f_backup_restore.py     tests/test_m11_recovery.py
+tests/test_m11_scale.py               tests/test_m12_recovery.py
+tests/test_m13_binding.py             tests/test_m13_instance_state.py
+tests/test_m13_recovery.py            tests/test_m13_scale.py
+tests/test_m13_shot_capture.py        tests/test_m3a_happy_path.py
+tests/test_m3b_recovery.py            tests/test_m3c_matrix.py
+tests/test_m4_contract.py             tests/test_m5a10_aggregate.py
+tests/test_m5a6_submit.py             tests/test_m5a7_observe.py
+tests/test_m5a8_cancel.py             tests/test_m5a9_outputs.py
+tests/test_m5b6_outage.py             tests/test_schema_m1.py
+tests/test_upload.py
+```
+
+49 files total; every path is inside the boundary validator's
+allowlist, and the set above equals
+`git diff --name-only 384a46d..HEAD` at the reviewed branch head.
+(`tests/test_generation_repository.py` appears in the boundary
+allowlist but is NOT in the diff — its session usage needed no
+conversion.)

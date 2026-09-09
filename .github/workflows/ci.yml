@@ -58,6 +58,12 @@ jobs:
       - name: Run backend tests
         run: python -m pytest -q
 
+      # Post-suite: a regression that recreates the directory DURING
+      # pytest must still fail the job — the pre-suite check above
+      # cannot see it (frozen R2 HYG-08 permanent proof).
+      - name: No repo-root generated residue (post-suite)
+        run: python -c "from pathlib import Path; assert not Path('m10f-scale-pkgs').exists(), 'repo-root residue present after backend suite'"
+
   frontend:
     name: Frontend
     runs-on: ubuntu-latest
