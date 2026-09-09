@@ -1963,6 +1963,29 @@ async def test_race_r8_concurrent_identical_relation_captures_converge(
 
     pid, seq, scene, shots, *_ = await _relation_fixture(client, factory)
 
+    # Deterministic park budget (post-merge correction, CI run 34362011109).
+    # B's park is SQLite's busy handler (busy_timeout=5000ms, db/sqlite.py),
+    # so this proof survives only while the winner's lock-held tail
+    # (fence-set -> COMMIT; ~15ms measured) fits that budget — a CI runner
+    # stall longer than 5s exhausted the park and surfaced the mapped busy
+    # error. Characterized mechanically: a 3s tail converges, a 6s tail
+    # reproduces the exact CI failure, and the same 6s tail converges under
+    # this extended budget. The genuine sqlite-level BEGIN IMMEDIATE
+    # contention is unchanged; only the park budget is widened for the
+    # connections created inside this test.
+    from sqlalchemy import event as _event
+
+    _engine = factory.kw["bind"]
+    await _engine.dispose()  # recycle pooled connections
+
+    @_event.listens_for(_engine.sync_engine, "connect")
+    def _r8_park_budget(dbapi_connection, connection_record):  # noqa: ANN001
+        cur = dbapi_connection.cursor()
+        try:
+            cur.execute("PRAGMA busy_timeout=60000")
+        finally:
+            cur.close()
+
     original_alloc = revision_svc._allocate_number
     original_exec = AsyncConnection.exec_driver_sql
     state = {}
@@ -1993,6 +2016,8 @@ async def test_race_r8_concurrent_identical_relation_captures_converge(
     finally:
         revision_svc._allocate_number = original_alloc
         AsyncConnection.exec_driver_sql = original_exec
+        _event.remove(_engine.sync_engine, "connect", _r8_park_budget)
+        await _engine.dispose()
 
     assert rev_a.id == rev_b.id  # convergence, exactly one insert
 
