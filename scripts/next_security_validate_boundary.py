@@ -55,6 +55,9 @@ ALLOWLIST = (
     "scripts/next_security_validate_boundary.py",
     "scripts/next_security_smoke.py",
     "tests/test_post_m13_next_security.py",
+    # post-merge R8 determinism correction (CI run 34362011109):
+    # test-scoped park budget in the APR-032/033 race proof only
+    "tests/test_m7d_relations.py",
     # frozen §5: hygiene successor-closure documents touched by this slice
     "docs/hygiene/npm-audit-runtime-exceptions.json",
     "docs/SoloRing-Post-M13-Hygiene-Proof-Map.md",
