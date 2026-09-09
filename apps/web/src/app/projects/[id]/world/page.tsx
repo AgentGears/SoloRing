@@ -10,9 +10,10 @@ export const dynamic = "force-dynamic";
 export default async function WorldSetPage({
   params,
 }: {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 }) {
-  const project = await serverGetProject(params.id);
+  const { id } = await params;
+  const project = await serverGetProject(id);
   return (
     <main>
       <p>
