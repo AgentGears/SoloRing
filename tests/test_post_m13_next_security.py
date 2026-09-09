@@ -247,9 +247,18 @@ def test_nsec_boundary_squash_survival(tmp_path, monkeypatch):
     """
     sec = _load_script_module("next_security_validate_boundary")
 
-    # 1. selection: predecessor mode in this clone (it is reachable)
-    assert sec.select_base(REPO) == ("predecessor", sec.PREDECESSOR)
-    # ... and published mode when the predecessor is unreachable
+    # 1. selection follows REAL reachability — predecessor mode where
+    #    the object exists (pre-squash clones/PR CI), published mode in
+    #    squash-shaped history. Either world must self-consistently
+    #    select the right base.
+    reachable = sec._commit_reachable(sec.PREDECESSOR, REPO)
+    mode, base = sec.select_base(REPO)
+    if reachable:
+        assert (mode, base) == ("predecessor", sec.PREDECESSOR)
+    else:
+        assert (mode, base) == ("published", sec.PUBLISHED_M13)
+    # ... and selection flips to published exactly when the
+    #     predecessor is unreachable
     def _unreachable(sha, repo):
         if sha == sec.PREDECESSOR:
             return False
