@@ -70,6 +70,19 @@ ALLOWLIST = (
     "scripts/hygiene_validate_boundary.py",
     "scripts/hygiene_validate_npm_audit.py",
     ".github/workflows/ci.yml",
+    # Post-M13 Next-security successor slice (frozen R2 @ 4c3d1846):
+    # the reviewed security remediation extends this allowlist so the
+    # hygiene boundary stays GREEN across the successor closure.
+    "apps/web/src/app/projects/[id]/production/page.tsx",
+    "apps/web/src/app/projects/[id]/world/page.tsx",
+    "apps/web/next-env.d.ts",
+    "docs/security/",
+    "docs/SoloRing-Next-Security-Proof-Map.md",
+    "scripts/next_security_validate.py",
+    "scripts/next_security_validate_proof_map.py",
+    "scripts/next_security_validate_boundary.py",
+    "scripts/next_security_smoke.py",
+    "tests/test_post_m13_next_security.py",
 )
 
 M14_PATTERNS = [
@@ -106,8 +119,10 @@ def main() -> int:
 
     for f in changed:
         p = REPO / f
-        if not p.is_file() or f.endswith("hygiene_validate_boundary.py"):
-            continue  # this validator's own scan patterns name the vocabulary
+        if not p.is_file() or f.endswith(("hygiene_validate_boundary.py",
+                                          "next_security_validate_"
+                                          "boundary.py")):
+            continue  # boundary validators' own scan patterns name the vocabulary
         src = p.read_text(encoding="utf-8", errors="replace")
         for pattern, what in M14_PATTERNS:
             if re.search(pattern, src, re.I):

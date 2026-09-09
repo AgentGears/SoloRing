@@ -52,6 +52,10 @@ jobs:
         run: python scripts/hygiene_validate_proof_map.py
       - name: Hygiene boundary
         run: python scripts/hygiene_validate_boundary.py
+      - name: Next security proof map
+        run: python scripts/next_security_validate_proof_map.py
+      - name: Next security boundary
+        run: python scripts/next_security_validate_boundary.py
       - name: No repo-root generated residue
         run: python -c "from pathlib import Path; assert not Path('m10f-scale-pkgs').exists(), 'repo-root residue present'"
 
@@ -86,6 +90,9 @@ jobs:
       - name: Install frontend
         run: npm ci
 
+      - name: Next security pins
+        run: python ../../scripts/next_security_validate.py --pins-only
+
       - name: Run frontend tests
         run: npm test
 
@@ -97,5 +104,8 @@ jobs:
           SOLORING_API_ORIGIN: http://127.0.0.1:65534
         run: npm run build
 
-      - name: Runtime dependency audit baseline
-        run: npm audit --omit=dev --json | python ../../scripts/hygiene_validate_npm_audit.py -
+      - name: Runtime dependency audit + Next security audit
+        run: |
+          npm audit --omit=dev --json > "$RUNNER_TEMP/nsec-audit.json" || true
+          python ../../scripts/hygiene_validate_npm_audit.py "$RUNNER_TEMP/nsec-audit.json"
+          python ../../scripts/next_security_validate.py "$RUNNER_TEMP/nsec-audit.json"

@@ -190,3 +190,22 @@ targets Windows-hosted self-hosted servers, which matches this
 deployment — versus remediation outside this gate). Disposition:
 **pending owner decision**; CI's audit step will remain red against
 live advisory data until decided.
+
+## HYG-04 successor closure (frozen Next-security R2 @ 4c3d1846)
+
+The pending owner decision above was resolved by a separately planned,
+reviewed, and frozen security-stop remediation (not an exception
+amendment): the unsupported, Critical-vulnerable `next@14.2.35`
+runtime was replaced by the exact-pinned Next 15 Maintenance-LTS line
+(`next@15.5.25`, above the 15.5.24 patch floor), with React 19
+companions, the two frozen async-param page corrections, and a
+mandatory Windows production-mode proof (GHSA-p293 has no known
+workaround on Windows-hosted deployments). The Next exception is
+REMOVED — the baseline `exceptions` array is empty — and the live
+runtime audit carries zero findings at every severity, with both
+target Critical GHSAs absent. Full evidence:
+`docs/security/post-m13-next-security-implementation-record.md`,
+`docs/security/post-m13-next-security-Windows-production-proof.md`,
+and `scripts/next_security_validate.py`. The hygiene boundary
+validator's allowlist recognizes the reviewed successor slice so this
+gate stays GREEN across it.
