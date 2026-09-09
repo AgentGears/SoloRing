@@ -40,7 +40,7 @@ Validated by `python scripts/hygiene_validate_proof_map.py` (Backend CI, before 
 | `HYG-DEP:01` | AUDIT-EVIDENCE | `docs/hygiene/post-m13-hygiene-H0-inventory.md` §5 | Full npm audit inventory captured (2 highs at baseline). |
 | `HYG-DEP:02` | AUDIT-EVIDENCE | `docs/hygiene/post-m13-hygiene-H0-inventory.md` §5 | Runtime-only audit inventory captured (same 2 highs). |
 | `HYG-DEP:03` | DISPOSITION | `apps/web/package.json` | postcss compatibly remediated via overrides (8.5.28); next range recomputed (audit evidence in H0 inventory §5). |
-| `HYG-DEP:04` | DISPOSITION | `docs/hygiene/npm-audit-runtime-exceptions.json` | Every retained runtime high (next) satisfies the ten-predicate exception policy; installed version exact-pinned (14.2.35). |
+| `HYG-DEP:04` | DISPOSITION | `docs/hygiene/npm-audit-runtime-exceptions.json` | Successor closure (frozen Next-security R2 @ 4c3d1846): the next exception is REMOVED — baseline exceptions array empty; runtime audit zero high/critical; both target Critical GHSAs absent (NSEC-SEC:03). |
 | `HYG-DEP:05` | AUDIT-EVIDENCE | `docs/hygiene/post-m13-hygiene-H0-inventory.md` §5 | No force/major migration; pip-audit==2.10.1 classified 39 deps, 0 vulnerabilities. |
 | `HYG-DEP:06` | TEST | `tests/test_post_m13_hygiene.py::test_hyg_dep_06_audit_validator_rejects_drift` | Validator negative matrix: rejects unlisted highs, advisory/range/severity drift, fix identity/major drift, invalidated exceptions, installed-version drift, missing lockfile entries, stale exceptions; accepts exact pins and offered-fix patch drift. |
 

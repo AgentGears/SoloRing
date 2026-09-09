@@ -1,45 +1,7 @@
 {
   "schema_version": 1,
   "policy": "UPSTREAM_BLOCKED_RUNTIME_HIGH (frozen R2 HYG-04)",
-  "review_trigger": "re-evaluate before M14 implementation authorization; a compatible non-major fix invalidates the exception",
-  "exceptions": [
-    {
-      "package": "next",
-      "installed_version": "14.2.35",
-      "severity": "high",
-      "vulnerable_range": "9.5.0 - 15.5.20",
-      "advisories": [
-        "GHSA-9g9p-9gw9-jx7f",
-        "GHSA-h25m-26qc-wcjf",
-        "GHSA-ggv3-7p47-pfv8",
-        "GHSA-3x4c-7xq6-9pq8",
-        "GHSA-q4gf-8mx6-v5v3",
-        "GHSA-8h8q-6873-q5fj",
-        "GHSA-3g8h-86w9-wvmq",
-        "GHSA-ffhc-5mcf-pf4q",
-        "GHSA-vfv6-92ff-j949",
-        "GHSA-gx5p-jg67-6x7h",
-        "GHSA-h64f-5h5j-jqjh",
-        "GHSA-c4j6-fc7j-m34r",
-        "GHSA-wfc6-r584-vfw7",
-        "GHSA-36qx-fr4f-26g5",
-        "GHSA-m99w-x7hq-7vfj",
-        "GHSA-89xv-2m56-2m9x",
-        "GHSA-68g3-v927-f742",
-        "GHSA-4633-3j49-mh5q",
-        "GHSA-4c39-4ccg-62r3",
-        "GHSA-p9j2-gv94-2wf4",
-        "GHSA-955p-x3mx-jcvp"
-      ],
-      "fix_available": {
-        "name": "next",
-        "version": "16.3.4",
-        "isSemVerMajor": true
-      },
-      "disposition": "UPSTREAM_BLOCKED_RUNTIME_HIGH",
-      "rationale": "All 21 advisories patch only in Next 15.5.x/16.x (vulnerable range recomputed at the postcss-remediated lockfile: 9.5.0 - 15.5.20); the installed 14.x line has no compatible remediation per audit metadata. A Next major migration is excluded from this hygiene gate (frozen R2 policy decision) and requires a separately reviewed plan. The SoloRing app is local-first (no public self-hosted internet exposure of the Next server), which bounds but does not eliminate the accepted risk; this note is context, not a safety claim.",
-      "invalidated_when": "fixAvailable.isSemVerMajor == false for this finding, any advisory gains a 14.x patched release, the lockfile-installed version drifts from the pinned 14.2.35, or the live severity leaves high",
-      "pinned_identity_note": "installed_version is exact-pinned to the lockfile (node_modules/next @ 14.2.35) and enforced by scripts/hygiene_validate_npm_audit.py against apps/web/package-lock.json; fix_available.version records the offered fix at baseline time — its patch/minor segment drifts with upstream releases, so the validator enforces the material identity (fix package name + isSemVerMajor + offered-fix major segment), not the patch/minor"
-    }
-  ]
+  "review_trigger": "any new runtime high/critical requires a reviewed exception or remediation before the gate can close",
+  "exceptions": [],
+  "successor_note": "The next@14.2.35 exception was REMOVED (not rewritten) by the frozen Post-M13 Next.js Critical Security Remediation R2 (frozen artifact 4c3d1846bba75b1395dd504c3d01e03542ad120dba93c40e7ed88b4012fd3d31): next is exact-pinned at 15.5.25, both Critical advisories GHSA-p293-qw3h-jr36 and GHSA-2xp9-vwfh-vxw4 are absent from the live runtime audit, and the runtime audit carries zero high/critical findings. The empty exceptions array composes with the frozen HYG-04 validator (accepted against a clean audit). Evidence: docs/security/post-m13-next-security-implementation-record.md + scripts/next_security_validate.py."
 }

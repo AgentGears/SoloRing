@@ -56,3 +56,43 @@ change was made or needed (frozen §10/STOP-7 respected).
 no-store source proof: the single server-side fetch site remains
 `apps/web/src/lib/api.shared.ts` with `cache: "no-store"` (unchanged by
 this slice; enforced by the security validator's source scan).
+
+## SEC4 — security closure
+
+- **Next exception REMOVED** (frozen §11.1): the hygiene baseline
+  `docs/hygiene/npm-audit-runtime-exceptions.json` now carries
+  `"exceptions": []` plus a successor note; the frozen HYG-04 validator
+  ACCEPTS the live clean audit against the empty baseline (verified).
+- **`scripts/next_security_validate.py`** proves the closure
+  mechanically: five exact pins in package.json AND the lockfile;
+  postcss override retained with a safe resolved version; Next major
+  exactly 15; baseline exceptions EMPTY; neither target GHSA anywhere
+  in the audit; zero high/critical; every dynamic page Promise-params;
+  forbidden async-request APIs absent; no-store line intact.
+  `--pins-only` serves the CI pre-test gate; `--root` serves the
+  negative matrix. Live runs at closure: pins-only rc=0; full
+  (pins+tree+audit) rc=0.
+- **Automated negative matrix**
+  (`tests/test_post_m13_next_security.py::test_nsec_sec_04_validator_negative_matrix`,
+  18 cases): accepts only the exact frozen shape; rejects pin drift in
+  either file, override drift, vulnerable postcss, Next major 16, any
+  surviving exception, either target GHSA, any runtime high/critical,
+  synchronous params, lost no-store, forbidden APIs. Plus offline
+  proofs: predecessor lock reproduces 14.2.35 (BASE:03), SEC0 evidence
+  carries both GHSAs (BASE:04), lock peer-graph static satisfaction
+  (PKG:04), override retention (PKG:05), locked-next range membership
+  (SEC:01/02 offline half). 23/23 green.
+- **Live audit at closure:** `npm audit --omit=dev` → **0 findings at
+  every severity**; both target Critical GHSAs absent; hygiene
+  validator and security validator both ACCEPT.
+
+### Precision note (advisory-range encoding)
+
+The frozen plan §2.2 quotes 2xp9's second affected segment as a bare
+`<16.3.3` (GitHub's advisory-UI rendering). Read literally that segment
+would also swallow 15.5.24 — contradicting the same advisory's
+"patched: 15.5.24" statement. The vendor's patched-versions fact
+lower-bounds that segment at 16.0 (it is the 16.x line), and the
+offline range proof encodes it that way; the authoritative closure
+signal remains the live-audit absence of both GHSAs, which does not
+depend on this encoding.
