@@ -35,15 +35,15 @@ Disposition vocabulary:
 | `M14-OBS:06` | TEST | `tests/test_m14_obs.py::test_m14_obs_06` | Duplicate/conflicting requirement coordinate rejected. |
 | `M14-OBS:07` | TEST | `tests/test_m14_obs.py::test_m14_obs_07` | camera.projection emission exact. |
 | `M14-OBS:08` | TEST | `tests/test_m14_obs.py::test_m14_obs_08` | world.structure emission exact. |
-| `M14-OBS:09` | PENDING | `tests/test_m14_obs.py::test_m14_obs_09` | occurrence.structure emission exact. |
-| `M14-OBS:10` | PENDING | `tests/test_m14_obs.py::test_m14_obs_10` | occurrence.placement emission exact. |
+| `M14-OBS:09` | TEST | `tests/test_m14_obs.py::test_m14_obs_09` | occurrence.structure emission exact. |
+| `M14-OBS:10` | TEST | `tests/test_m14_obs.py::test_m14_obs_10` | occurrence.placement emission exact. |
 | `M14-OBS:11` | TEST | `tests/test_m14_obs.py::test_m14_obs_11` | visual.identity conservative emission exact. |
 | `M14-OBS:12` | TEST | `tests/test_m14_obs.py::test_m14_obs_12` | Every PI feature state emits exact requirement; no heuristic omission. |
 | `M14-OBS:13` | TEST | `tests/test_m14_obs.py::test_m14_obs_13` | shot.intent emitted INFERABLE/PERMITTED_INFERENCE. |
-| `M14-OBS:14` | PENDING | `tests/test_m14_obs.py::test_m14_obs_14` | Nested Composition emits typed unsupported requirement, never flatten/omit. |
-| `M14-OBS:15` | PENDING | `tests/test_m14_obs.py::test_m14_obs_15` | Non-mesh retained ProductionRevision emits typed unsupported requirement. |
+| `M14-OBS:14` | TEST | `tests/test_m14_obs.py::test_m14_obs_14` | Nested Composition emits typed unsupported requirement, never flatten/omit. |
+| `M14-OBS:15` | TEST | `tests/test_m14_obs.py::test_m14_obs_15` | Non-mesh retained ProductionRevision emits typed unsupported requirement. |
 | `M14-OBS:16` | TEST | `tests/test_m14_obs.py::test_m14_obs_16` | Exact captured shot_revision_id drives compiler; schema-6 never enters the predecessor lower-logical fail-open path; zero current Shot resolver calls. |
-| `M14-OBS:17` | PENDING | `tests/test_m14_obs.py::test_m14_obs_17` | All executable structural meshes require exact interpretation. |
+| `M14-OBS:17` | TEST | `tests/test_m14_obs.py::test_m14_obs_17` | All executable structural meshes require exact interpretation. |
 | `M14-OBS:18` | TEST | `tests/test_m14_0_g6_g7_corpus.py::test_m14_obs_18` | Golden WorldObservationSpec fixture bytes/hash exact. |
 | `M14-OBS:19` | PENDING | `tests/test_m14_obs.py::test_m14_obs_19` | Current production-world resolver unavailable does not affect historical compiler/inspector path. |
 
@@ -82,13 +82,13 @@ Disposition vocabulary:
 
 | Cell | Disposition | Exact proof owner | Claim |
 |---|---|---|---|
-| `M14-MAT:01` | PENDING | `tests/test_m14_materializer.py::test_m14_mat_01` | structural_mesh.v1 canonical parser. |
-| `M14-MAT:02` | PENDING | `tests/test_m14_materializer.py::test_m14_mat_02` | Zero-area/out-of-range/malformed mesh rejected; winding not semantic. |
-| `M14-MAT:03` | PENDING | `tests/test_m14_materializer.py::test_m14_mat_03` | Retained Blob physical hash verified and is representation identity. |
-| `M14-MAT:04` | PENDING | `tests/test_m14_materializer.py::test_m14_mat_04` | Exact ProductionRevision/hash/blob agreement. |
-| `M14-MAT:05` | PENDING | `tests/test_m14_materializer.py::test_m14_mat_05` | Composition-owned interpretation + transform composition exact. |
-| `M14-MAT:06` | PENDING | `tests/test_m14_materializer.py::test_m14_mat_06` | A4 spatial-owned interpretation + placement composition exact. |
-| `M14-MAT:07` | PENDING | `tests/test_m14_materializer.py::test_m14_mat_07` | PI captured spatial-state matching/composition exact. |
+| `M14-MAT:01` | TEST | `tests/test_m14_materializer.py::test_m14_mat_01` | structural_mesh.v1 canonical parser. |
+| `M14-MAT:02` | TEST | `tests/test_m14_materializer.py::test_m14_mat_02` | Zero-area/out-of-range/malformed mesh rejected; winding not semantic. |
+| `M14-MAT:03` | TEST | `tests/test_m14_materializer.py::test_m14_mat_03` | Retained Blob physical hash verified and is representation identity. |
+| `M14-MAT:04` | TEST | `tests/test_m14_materializer.py::test_m14_mat_04` | Exact ProductionRevision/hash/blob agreement. |
+| `M14-MAT:05` | TEST | `tests/test_m14_materializer.py::test_m14_mat_05` | Composition-owned interpretation + transform composition exact. |
+| `M14-MAT:06` | TEST | `tests/test_m14_materializer.py::test_m14_mat_06` | A4 spatial-owned interpretation + placement composition exact. |
+| `M14-MAT:07` | TEST | `tests/test_m14_materializer.py::test_m14_mat_07` | PI captured spatial-state matching/composition exact. |
 | `M14-MAT:08` | PENDING | `tests/test_m14_materializer.py::test_m14_mat_08` | Mesh contribution reaches world-depth non-background pixels. |
 | `M14-MAT:09` | PENDING | `tests/test_m14_materializer.py::test_m14_mat_09` | Zero-mesh schema-4 bytes == exact M10 bytes. |
 | `M14-MAT:10` | PENDING | `tests/test_m14_materializer.py::test_m14_mat_10` | Deterministic repeat under same materializer contract → identical digest. |

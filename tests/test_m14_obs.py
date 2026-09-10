@@ -590,3 +590,188 @@ def test_m14_obs_16() -> None:
         "soloring.domain.canonical"}, (
         "the compiler may import only canonical/spec/error primitives — "
         "no current-state resolvers or persistence handles")
+
+
+# ---- M14B-1 occurrence cells (frozen §§8.5/28) ----------------------------
+# The retained consumer harness lives in tests/test_m14_materializer.py;
+# these cells assert the emitted requirement shapes.
+
+async def _m14b1_mesh_world(client, *, tag, transform=(25, -50, 10)):
+    from tests.test_m14_materializer import _mesh_doc, _observation_world
+
+    return await _observation_world(
+        client, tag=tag,
+        sources=[{"kind": "mesh", "mesh": _mesh_doc(),
+                  "transform": transform, "interpretation": (5, 0, 0)}],
+        adopt_first_mesh=False)
+
+
+async def _m14b1_load(client, snapshot):
+    from tests.test_m14_materializer import _load
+
+    return await _load(client, snapshot)
+
+
+async def test_m14_obs_09(client) -> None:
+    """M14-OBS:09 occurrence.structure emission exact."""
+    _b, snapshot, oids, prids = await _m14b1_mesh_world(
+        client, tag=b"m14b1-obs09")
+    outcome = await _m14b1_load(client, snapshot)
+
+    (source,) = outcome.sources
+    requirement = source.structure_requirement
+    assert requirement["property"] == "occurrence.structure"
+    assert requirement["preservation"] == "STRUCTURAL"
+    assert requirement["enforcement"] == "REQUIRED"
+    assert requirement["subject"] == {
+        "kind": "production_occurrence", "id": oids[0]}
+    assert requirement["occurrence_id"] == oids[0]
+    assert requirement["subkey"] is None
+    assert requirement["authority"]["domain"] == "A5"
+    assert requirement["authority"]["source_kind"] == "production_revision"
+    assert requirement["authority"]["source_id"] == prids[0]
+    assert requirement["authority"]["source_hash"] == (
+        source.production_revision_hash)
+    assert (requirement["source_contract"]
+            == "soloring.structural_mesh.v1")
+
+
+async def test_m14_obs_10(client) -> None:
+    """M14-OBS:10 occurrence.placement emission exact."""
+    _b, snapshot, _oids, _prids = await _m14b1_mesh_world(
+        client, tag=b"m14b1-obs10")
+    outcome = await _m14b1_load(client, snapshot)
+
+    (source,) = outcome.sources
+    requirement = source.placement_requirement
+    assert requirement["property"] == "occurrence.placement"
+    assert requirement["preservation"] == "STRUCTURAL"
+    assert requirement["enforcement"] == "REQUIRED"
+    assert requirement["subject"]["kind"] == "production_occurrence"
+    assert requirement["occurrence_id"] == source.occurrence_id
+    assert requirement["subkey"] is None
+    assert requirement["authority"]["domain"] == source.placement_owner
+    assert (requirement["authority"]["source_kind"]
+            == source.placement_source_kind)
+    assert (requirement["authority"]["source_id"]
+            == source.placement_source_id)
+    assert (requirement["authority"]["source_hash"]
+            == source.placement_source_hash)
+    assert requirement["source_contract"] == "m14.placement.v1"
+
+
+async def test_m14_obs_14(client) -> None:
+    """M14-OBS:14 nested Composition emits a typed unsupported
+    requirement — never flattened or omitted."""
+    from tests.m13_seed import make_composition, mint, publish
+    from tests.test_m13_binding import _publish
+    from tests.test_m13_shot_capture import _capture, _full_m13_world
+
+    b = await _full_m13_world(client, tag=b"m14b1-obs14")
+    # a nested source composition: publish a one-occurrence composition
+    nested_cid = await make_composition(client, b["pid"])
+    await mint(client, nested_cid, b["production_revision_id"], 0)
+    nested_pub = await publish(client, nested_cid, 1)
+    nested_revision = nested_pub["revision"]["revision_id"]
+
+    from tests.m13_seed import mint_nested
+    cid = await make_composition(client, b["pid"])
+    await mint(client, cid, b["production_revision_id"], 0)
+    await mint_nested(client, cid, nested_revision, 1)
+    pub = await publish(client, cid, 2)
+    composed_revision = pub["revision"]["revision_id"]
+    pr = await _publish(client, composed_revision, b["rev"]["id"])
+    assert pr.status_code == 201, pr.text
+    r = await client.put(
+        f"/shots/{b['shot']}/production-world-selection",
+        json={"binding_id": pr.json()["binding_id"],
+              "expected_binding_id": None})
+    assert r.status_code == 200, r.text
+    revision, _ = await _capture(client, b["shot"])
+    snapshot = json.loads(revision.snapshot_json)
+    assert snapshot["schema_version"] == 6
+
+    outcome = await _m14b1_load(client, snapshot)
+    assert outcome.sources == [] or all(
+        s.occurrence_id != _nested_id(outcome) for s in outcome.sources)
+    nested_requirements = [
+        req for req in outcome.unsupported_requirements
+        if req["source_contract"] == "nested_composition.v1"]
+    assert len(nested_requirements) == 1
+    requirement = nested_requirements[0]
+    assert requirement["authority"]["domain"] == "A6"
+    assert (requirement["authority"]["source_kind"]
+            == "composition_revision")
+    assert requirement["enforcement"] == "REQUIRED"
+    assert requirement["property"] == "occurrence.structure"
+
+
+async def test_m14_obs_15(client) -> None:
+    """M14-OBS:15 non-mesh retained ProductionRevision emits the typed
+    unsupported requirement (unrecognized.retained_blob)."""
+    from tests.test_m14_materializer import _observation_world
+
+    _b, snapshot, oids, prids = await _observation_world(
+        client, tag=b"m14b1-obs15",
+        sources=[{"kind": "nonmesh", "transform": (0, 0, 0)}],
+        adopt_first_mesh=False)
+    outcome = await _m14b1_load(client, snapshot)
+
+    assert outcome.sources == []
+    (entry,) = outcome.unsupported
+    assert entry.source_contract == "unrecognized.retained_blob"
+    assert entry.production_revision_id == prids[0]
+    (requirement,) = outcome.unsupported_requirements
+    assert requirement["property"] == "occurrence.structure"
+    assert (requirement["source_contract"]
+            == "unrecognized.retained_blob")
+    assert requirement["authority"]["domain"] == "A5"
+    assert requirement["authority"]["source_id"] == prids[0]
+    assert requirement["enforcement"] == "REQUIRED"
+
+
+async def test_m14_obs_17(client) -> None:
+    """M14-OBS:17 recognized executable meshes require the exact
+    interpretation; non-mesh blobs never demand one (V2 ordering)."""
+    from sqlalchemy import text as _sa_text
+
+    from soloring.errors import ErrorCode, SoloRingError
+    from tests.test_m14_materializer import (
+        _mesh_doc,
+        _observation_world,
+    )
+
+    # recognized mesh WITHOUT an interpretation row → typed readiness
+    # failure, before any placement or negotiation
+    _b, snapshot, _oids, prids = await _observation_world(
+        client, tag=b"m14b1-obs17a",
+        sources=[{"kind": "mesh", "mesh": _mesh_doc()}],
+        adopt_first_mesh=False)
+    engine = client._transport.app.state.engine
+    async with engine.connect() as conn:
+        await conn.execute(_sa_text(
+            "DELETE FROM production_revision_spatial_interpretations "
+            "WHERE production_revision_id = :r"), {"r": prids[0]})
+        await conn.commit()
+    with pytest.raises(SoloRingError) as excinfo:
+        await _m14b1_load(client, snapshot)
+    assert excinfo.value.code == (
+        ErrorCode.STRUCTURAL_MESH_INTERPRETATION_REQUIRED)
+
+
+
+    # non-mesh blob WITHOUT an interpretation row → typed unsupported
+    # representation, never an interpretation-required error
+    _b2, snapshot2, _oids2, prids2 = await _observation_world(
+        client, tag=b"m14b1-obs17b",
+        sources=[{"kind": "nonmesh"}],
+        adopt_first_mesh=False)
+    async with engine.connect() as conn:
+        await conn.execute(_sa_text(
+            "DELETE FROM production_revision_spatial_interpretations "
+            "WHERE production_revision_id = :r"), {"r": prids2[0]})
+        await conn.commit()
+    outcome = await _m14b1_load(client, snapshot2)
+    assert outcome.sources == []
+    (entry,) = outcome.unsupported
+    assert entry.source_contract == "unrecognized.retained_blob"

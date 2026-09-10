@@ -39,6 +39,10 @@ ALLOWED_PATTERNS = [
     r"^scripts/m14_validate_[a-z0-9_]+\.py$",
     r"^tests/fixtures/m14/[^/]+$",
     r"^tests/test_m14[a-z0-9_]*\.py$",
+    # predecessor boundary TESTS that gained the M14 succession carve
+    # (same mechanism as the successor-gate scripts below)
+    r"^tests/test_m11_scope\.py$",
+    r"^tests/test_m12_boundary\.py$",
     # successor-gate extensions: exactly the two predecessor boundary
     # validators whose frozen §51 closure requires them to stay green
     # across the authorized M14 surface (same succession mechanism the
