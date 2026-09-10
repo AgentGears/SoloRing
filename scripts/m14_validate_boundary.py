@@ -39,6 +39,12 @@ ALLOWED_PATTERNS = [
     r"^scripts/m14_validate_[a-z0-9_]+\.py$",
     r"^tests/fixtures/m14/[^/]+$",
     r"^tests/test_m14[a-z0-9_]*\.py$",
+    # successor-gate extensions: exactly the two predecessor boundary
+    # validators whose frozen §51 closure requires them to stay green
+    # across the authorized M14 surface (same succession mechanism the
+    # security slice used against the hygiene gate)
+    r"^scripts/hygiene_validate_boundary\.py$",
+    r"^scripts/next_security_validate_boundary\.py$",
     # observation compiler / capability / materializer modules
     r"^server/soloring/observation/",
     # Generation schema-4 integration

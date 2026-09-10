@@ -64,7 +64,36 @@ ALLOWLIST = (
     "docs/hygiene/post-m13-hygiene-implementation-record.md",
     "scripts/hygiene_validate_boundary.py",
     ".github/workflows/ci.yml",
+    # M14 implementation slices (frozen R2 @ 68f910f5, authorized
+    # 2026-09-10): the authorized M14 surface extends this allowlist so
+    # the security boundary stays GREEN across the M14 closure, exactly
+    # as this slice extended the hygiene allowlist before it. The
+    # blanket backend-change rejection below carves out only the
+    # M14-owned surface.
+    ".gitattributes",
+    "docs/SoloRing-M14-Proof-Map.md",
+    "scripts/m14_validate_baseline.py",
+    "scripts/m14_validate_boundary.py",
+    "scripts/m14_validate_proof_map.py",
+    "scripts/m14_validate_source_fit.py",
+    "tests/fixtures/m14/",
+    "tests/test_m14_0_baseline.py",
+    "tests/test_m14_0_g6_g7_corpus.py",
+    "tests/test_m14_obs.py",
+    "server/soloring/observation/",
 )
+
+M14_OWNED_PREFIXES = (
+    "docs/SoloRing-M14-",
+    "scripts/m14_validate_",
+    "tests/fixtures/m14/",
+    "tests/test_m14",
+    "server/soloring/observation/",
+)
+
+
+def m14_owned(path: str) -> bool:
+    return path.startswith(M14_OWNED_PREFIXES)
 
 M14_PATTERNS = [
     (r"\bObservationSpec\b", "M14 ObservationSpec"),
@@ -160,7 +189,7 @@ def main(repo: Path = REPO) -> int:
     changed = [f for f in git("diff", "--name-only", f"{base}..HEAD",
                               repo=repo).splitlines() if f.strip()]
     for f in changed:
-        if f.startswith("server/"):
+        if f.startswith("server/") and not m14_owned(f):
             errors.append(f"backend change outside the security slice: {f}")
         if f.startswith("server/alembic/"):
             errors.append(f"alembic change outside the security slice: {f}")
@@ -189,6 +218,8 @@ def main(repo: Path = REPO) -> int:
                                           "boundary.py",
                                           "hygiene_validate_boundary.py")):
             continue  # boundary validators' own scan patterns name the vocabulary
+        if m14_owned(f):
+            continue  # authorized M14 surface legitimately uses M14 vocabulary
         src = p.read_text(encoding="utf-8", errors="replace")
         for pattern, what in M14_PATTERNS:
             if re.search(pattern, src, re.I):

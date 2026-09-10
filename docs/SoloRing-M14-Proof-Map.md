@@ -27,22 +27,22 @@ Disposition vocabulary:
 
 | Cell | Disposition | Exact proof owner | Claim |
 |---|---|---|---|
-| `M14-OBS:01` | PENDING | `tests/test_m14_obs.py::test_m14_obs_01` | Strict WorldObservationSpec root grammar. |
-| `M14-OBS:02` | PENDING | `tests/test_m14_obs.py::test_m14_obs_02` | Canonical bytes/hash deterministic. |
-| `M14-OBS:03` | PENDING | `tests/test_m14_obs.py::test_m14_obs_03` | Strict Requirement grammar + identity ordering. |
-| `M14-OBS:04` | PENDING | `tests/test_m14_obs.py::test_m14_obs_04` | Strict ProductionOccurrence grammar + canonical order. |
-| `M14-OBS:05` | PENDING | `tests/test_m14_obs.py::test_m14_obs_05` | Strict Materialization grammar + canonical order. |
-| `M14-OBS:06` | PENDING | `tests/test_m14_obs.py::test_m14_obs_06` | Duplicate/conflicting requirement coordinate rejected. |
-| `M14-OBS:07` | PENDING | `tests/test_m14_obs.py::test_m14_obs_07` | camera.projection emission exact. |
-| `M14-OBS:08` | PENDING | `tests/test_m14_obs.py::test_m14_obs_08` | world.structure emission exact. |
+| `M14-OBS:01` | TEST | `tests/test_m14_obs.py::test_m14_obs_01` | Strict WorldObservationSpec root grammar. |
+| `M14-OBS:02` | TEST | `tests/test_m14_obs.py::test_m14_obs_02` | Canonical bytes/hash deterministic. |
+| `M14-OBS:03` | TEST | `tests/test_m14_obs.py::test_m14_obs_03` | Strict Requirement grammar + identity ordering. |
+| `M14-OBS:04` | TEST | `tests/test_m14_obs.py::test_m14_obs_04` | Strict ProductionOccurrence grammar + canonical order. |
+| `M14-OBS:05` | TEST | `tests/test_m14_obs.py::test_m14_obs_05` | Strict Materialization grammar + canonical order. |
+| `M14-OBS:06` | TEST | `tests/test_m14_obs.py::test_m14_obs_06` | Duplicate/conflicting requirement coordinate rejected. |
+| `M14-OBS:07` | TEST | `tests/test_m14_obs.py::test_m14_obs_07` | camera.projection emission exact. |
+| `M14-OBS:08` | TEST | `tests/test_m14_obs.py::test_m14_obs_08` | world.structure emission exact. |
 | `M14-OBS:09` | PENDING | `tests/test_m14_obs.py::test_m14_obs_09` | occurrence.structure emission exact. |
 | `M14-OBS:10` | PENDING | `tests/test_m14_obs.py::test_m14_obs_10` | occurrence.placement emission exact. |
-| `M14-OBS:11` | PENDING | `tests/test_m14_obs.py::test_m14_obs_11` | visual.identity conservative emission exact. |
-| `M14-OBS:12` | PENDING | `tests/test_m14_obs.py::test_m14_obs_12` | Every PI feature state emits exact requirement; no heuristic omission. |
-| `M14-OBS:13` | PENDING | `tests/test_m14_obs.py::test_m14_obs_13` | shot.intent emitted INFERABLE/PERMITTED_INFERENCE. |
+| `M14-OBS:11` | TEST | `tests/test_m14_obs.py::test_m14_obs_11` | visual.identity conservative emission exact. |
+| `M14-OBS:12` | TEST | `tests/test_m14_obs.py::test_m14_obs_12` | Every PI feature state emits exact requirement; no heuristic omission. |
+| `M14-OBS:13` | TEST | `tests/test_m14_obs.py::test_m14_obs_13` | shot.intent emitted INFERABLE/PERMITTED_INFERENCE. |
 | `M14-OBS:14` | PENDING | `tests/test_m14_obs.py::test_m14_obs_14` | Nested Composition emits typed unsupported requirement, never flatten/omit. |
 | `M14-OBS:15` | PENDING | `tests/test_m14_obs.py::test_m14_obs_15` | Non-mesh retained ProductionRevision emits typed unsupported requirement. |
-| `M14-OBS:16` | PENDING | `tests/test_m14_obs.py::test_m14_obs_16` | Exact captured shot_revision_id drives compiler; schema-6 never enters the predecessor lower-logical fail-open path; zero current Shot resolver calls. |
+| `M14-OBS:16` | TEST | `tests/test_m14_obs.py::test_m14_obs_16` | Exact captured shot_revision_id drives compiler; schema-6 never enters the predecessor lower-logical fail-open path; zero current Shot resolver calls. |
 | `M14-OBS:17` | PENDING | `tests/test_m14_obs.py::test_m14_obs_17` | All executable structural meshes require exact interpretation. |
 | `M14-OBS:18` | TEST | `tests/test_m14_0_g6_g7_corpus.py::test_m14_obs_18` | Golden WorldObservationSpec fixture bytes/hash exact. |
 | `M14-OBS:19` | PENDING | `tests/test_m14_obs.py::test_m14_obs_19` | Current production-world resolver unavailable does not affect historical compiler/inspector path. |

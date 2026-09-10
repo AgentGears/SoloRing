@@ -86,7 +86,37 @@ ALLOWLIST = (
     # post-merge R8 determinism correction (CI run 34362011109):
     # test-scoped park budget in the APR-032/033 race proof only
     "tests/test_m7d_relations.py",
+    # M14 implementation slices (frozen R2 @ 68f910f5, authorized
+    # 2026-09-10): the authorized M14 surface extends this allowlist so
+    # the hygiene boundary stays GREEN across the M14 closure, exactly
+    # as the security remediation extended it before. M14 vocabulary is
+    # legitimate inside the M14-owned surface (see M14_OWNED_PREFIXES)
+    # and is skipped by the vocabulary scan below.
+    ".gitattributes",
+    "docs/SoloRing-M14-Proof-Map.md",
+    "scripts/m14_validate_baseline.py",
+    "scripts/m14_validate_boundary.py",
+    "scripts/m14_validate_proof_map.py",
+    "scripts/m14_validate_source_fit.py",
+    "tests/fixtures/m14/",
+    "tests/test_m14_0_baseline.py",
+    "tests/test_m14_0_g6_g7_corpus.py",
+    "tests/test_m14_obs.py",
+    "server/soloring/observation/",
 )
+
+M14_OWNED_PREFIXES = (
+    "docs/SoloRing-M14-",
+    "scripts/m14_validate_",
+    "tests/fixtures/m14/",
+    "tests/test_m14",
+    "server/soloring/observation/",
+)
+
+
+def m14_owned(path: str) -> bool:
+    return path.startswith(M14_OWNED_PREFIXES)
+
 
 M14_PATTERNS = [
     (r"\bObservationSpec\b", "M14 ObservationSpec"),
@@ -139,6 +169,8 @@ def main() -> int:
                                           "next_security_validate_"
                                           "boundary.py")):
             continue  # boundary validators' own scan patterns name the vocabulary
+        if m14_owned(f):
+            continue  # authorized M14 surface legitimately uses M14 vocabulary
         src = p.read_text(encoding="utf-8", errors="replace")
         for pattern, what in M14_PATTERNS:
             if re.search(pattern, src, re.I):
