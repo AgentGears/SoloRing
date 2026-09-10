@@ -43,8 +43,7 @@ ALLOWED_PATTERNS = [
     # validators whose frozen §51 closure requires them to stay green
     # across the authorized M14 surface (same succession mechanism the
     # security slice used against the hygiene gate)
-    r"^scripts/hygiene_validate_boundary\.py$",
-    r"^scripts/next_security_validate_boundary\.py$",
+    r"^scripts/(hygiene|next_security|m13)_validate_boundary\.py$",
     # observation compiler / capability / materializer modules
     r"^server/soloring/observation/",
     # typed refusal vocabulary (frozen §36.1) — ErrorCode additions only

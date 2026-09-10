@@ -102,8 +102,15 @@ ALLOWLIST = (
     "tests/test_m14_0_baseline.py",
     "tests/test_m14_0_g6_g7_corpus.py",
     "tests/test_m14_obs.py",
+    "tests/test_m14_capabilities.py",
+    "tests/test_m14_execution.py",
+    "tests/test_m14_history.py",
+    "tests/test_m14_base_corpus.py",
     "server/soloring/observation/",
     "server/soloring/errors.py",
+    "server/soloring/generation/service.py",
+    "server/soloring/realization/packages.py",
+    "scripts/m13_validate_boundary.py",
 )
 
 M14_OWNED_PREFIXES = (
@@ -113,6 +120,9 @@ M14_OWNED_PREFIXES = (
     "tests/test_m14",
     "server/soloring/observation/",
     "server/soloring/errors.py",
+    "server/soloring/generation/service.py",
+    "server/soloring/realization/packages.py",
+    "scripts/m13_validate_boundary.py",
 )
 
 

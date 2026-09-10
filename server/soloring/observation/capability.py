@@ -256,6 +256,60 @@ def negotiate(spec: dict, observation_block: dict) -> dict:
     }
 
 
+NEGOTIATION_ROOT_KEYS = frozenset({
+    "schema_version", "operation_status", "verdict", "policy",
+    "requirements"})
+NEGOTIATION_POLICY_KEYS = frozenset({"id", "version", "verdict"})
+NEGOTIATION_REQUIREMENT_KEYS = frozenset({
+    "requirement_identity_hash", "verdict", "capability"})
+NEGOTIATION_VERDICTS = frozenset({
+    "SUPPORTED", "UNSUPPORTED", "UNKNOWN", "PERMITTED_INFERENCE"})
+
+
+def validate_negotiation_result(result) -> dict:
+    """Strict NegotiationResult schema-1 validation (frozen §20).
+
+    Only COMPLETED domain results are representable: operation failures
+    are exceptions, never verdict objects (APR-111).
+    """
+    if not isinstance(result, dict):
+        raise _bad("NegotiationResult must be an object")
+    extra = sorted(set(result) - NEGOTIATION_ROOT_KEYS)
+    if extra:
+        raise _bad(f"NegotiationResult has unknown fields {extra}")
+    missing = sorted(NEGOTIATION_ROOT_KEYS - set(result))
+    if missing:
+        raise _bad(f"NegotiationResult is missing fields {missing}")
+    if result["schema_version"] != 1:
+        raise _bad("NegotiationResult schema_version must be 1")
+    if result["operation_status"] != "COMPLETED":
+        raise _bad("NegotiationResult operation_status must be COMPLETED "
+                   "(APR-111: operation failures never fabricate domain "
+                   "verdicts)")
+    if result["verdict"] not in ("SUPPORTED", "UNSUPPORTED", "UNKNOWN"):
+        raise _bad(f"unknown overall verdict {result['verdict']!r}")
+    policy = result["policy"]
+    _require_closed(policy, NEGOTIATION_POLICY_KEYS,
+                    "NegotiationResult.policy")
+    if policy["verdict"] not in ("SUPPORTED", "UNSUPPORTED"):
+        raise _bad("policy.verdict must be SUPPORTED or UNSUPPORTED")
+    if not isinstance(result["requirements"], list):
+        raise _bad("NegotiationResult.requirements must be an array")
+    for row in result["requirements"]:
+        _require_closed(row, NEGOTIATION_REQUIREMENT_KEYS,
+                        "NegotiationResult.requirements entry")
+        if not _HEX64.fullmatch(str(row["requirement_identity_hash"])):
+            raise _bad("requirement_identity_hash must be lowercase "
+                       "64-hex SHA-256")
+        if row["verdict"] not in NEGOTIATION_VERDICTS:
+            raise _bad(f"unknown requirement verdict {row['verdict']!r}")
+        capability = row["capability"]
+        if capability is not None:
+            _require_closed(capability, CAPABILITY_KEYS,
+                            "negotiation capability echo")
+    return result
+
+
 def negotiation_result_bytes(result: dict) -> bytes:
     return canonical_json_bytes(result)
 

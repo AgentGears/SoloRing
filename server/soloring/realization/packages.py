@@ -293,9 +293,24 @@ def validate_package(release: CapturedPackageRelease) -> ValidatedPackage:
         manifest_v3 = parse_manifest_v3(
             release.manifest_bytes.decode("utf-8")
         )
-        profile_v2 = parse_profile_v2(
-            release.profile_bytes.decode("utf-8")
-        )
+        # Frozen M14 §17/§19: the captured realization-profile artifact
+        # may be schema 2 or schema 3. Schema 3 is exactly schema 2 plus
+        # the closed observation block; its inherited semantics are
+        # validated by DELEGATION inside parse_profile_v3 (which itself
+        # defers to the frozen parse_profile_v2 through a schema-2 view),
+        # so this seam accepts the M14 profile without forking any
+        # schema-2 meaning. No descriptor/manifest/package semantics
+        # change here.
+        profile_doc = json.loads(release.profile_bytes.decode("utf-8"))
+        if (isinstance(profile_doc, dict)
+                and profile_doc.get("schema_version") == 3):
+            from soloring.observation.capability import parse_profile_v3
+
+            profile_v2 = parse_profile_v3(profile_doc)
+        else:
+            profile_v2 = parse_profile_v2(
+                release.profile_bytes.decode("utf-8")
+            )
         try:
             fingerprint_v3 = json.loads(
                 release.fingerprint_bytes.decode("utf-8")

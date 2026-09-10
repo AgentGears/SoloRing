@@ -19,7 +19,7 @@ Disposition vocabulary:
 | `M14-BASE:01` | TEST | `tests/test_m14_0_baseline.py::test_m14_base_01` | Exact implementation predecessor 20429b3 / tree 0a755efe. |
 | `M14-BASE:02` | TEST | `tests/test_m14_0_baseline.py::test_m14_base_02` | Immutable M13 tag/commit unchanged. |
 | `M14-BASE:03` | TEST | `tests/test_m14_0_baseline.py::test_m14_base_03` | Migration predecessor exactly 0014. |
-| `M14-BASE:04` | PENDING | `tests/test_m14_base_corpus.py::test_m14_base_04` | WorkflowSpec schema-1/2/3 regression corpus green. |
+| `M14-BASE:04` | TEST | `tests/test_m14_base_corpus.py::test_m14_base_04` | WorkflowSpec schema-1/2/3 regression corpus green. |
 | `M14-BASE:05` | PENDING | `tests/test_m14_base_corpus.py::test_m14_base_05` | ShotRevision schema-1..6 historical corpus green. |
 | `M14-BASE:06` | PENDING | `tests/test_m14_base_corpus.py::test_m14_base_06` | Predecessor proof/boundary/security validators green. |
 
@@ -102,9 +102,9 @@ Disposition vocabulary:
 
 | Cell | Disposition | Exact proof owner | Claim |
 |---|---|---|---|
-| `M14-HIST:01` | PENDING | `tests/test_m14_history.py::test_m14_hist_01` | Schema-4 WorkflowSpec stores exact observation/hash. |
-| `M14-HIST:02` | PENDING | `tests/test_m14_history.py::test_m14_hist_02` | Schema-4 stores exact negotiation/hash/capability-contract hash. |
-| `M14-HIST:03` | PENDING | `tests/test_m14_history.py::test_m14_hist_03` | Exact Rerun copies exact schema-4 bytes/hash. |
+| `M14-HIST:01` | TEST | `tests/test_m14_history.py::test_m14_hist_01` | Schema-4 WorkflowSpec stores exact observation/hash. |
+| `M14-HIST:02` | TEST | `tests/test_m14_history.py::test_m14_hist_02` | Schema-4 stores exact negotiation/hash/capability-contract hash. |
+| `M14-HIST:03` | TEST | `tests/test_m14_history.py::test_m14_hist_03` | Exact Rerun copies exact schema-4 bytes/hash. |
 | `M14-HIST:04` | PENDING | `tests/test_m14_history.py::test_m14_hist_04` | Exact Rerun copies exact derived-observation artifact + Blob-hash binding. |
 | `M14-HIST:05` | PENDING | `tests/test_m14_history.py::test_m14_hist_05` | Newer ProductionRevision cannot alter history. |
 | `M14-HIST:06` | PENDING | `tests/test_m14_history.py::test_m14_hist_06` | Newer Composition/current binding/state cannot alter history. |
@@ -119,7 +119,7 @@ Disposition vocabulary:
 
 | Cell | Disposition | Exact proof owner | Claim |
 |---|---|---|---|
-| `M14-EXEC:01` | PENDING | `tests/test_m14_execution.py::test_m14_exec_01` | Schema-4 lower_schema_3 uses one shared inherited helper. |
+| `M14-EXEC:01` | TEST | `tests/test_m14_execution.py::test_m14_exec_01` | Schema-4 lower_schema_3 uses one shared inherited helper. |
 | `M14-EXEC:02` | PENDING | `tests/test_m14_execution.py::test_m14_exec_02` | Pre-publication materialization completed before Generation commit. |
 | `M14-EXEC:03` | PENDING | `tests/test_m14_execution.py::test_m14_exec_03` | Generation + WorkflowSpec-4 + exact artifact binding atomic. |
 | `M14-EXEC:04` | PENDING | `tests/test_m14_execution.py::test_m14_exec_04` | Schema-4 creates no fake Asset / dishonest GenerationInput. |
