@@ -47,6 +47,8 @@ ALLOWED_PATTERNS = [
     r"^scripts/next_security_validate_boundary\.py$",
     # observation compiler / capability / materializer modules
     r"^server/soloring/observation/",
+    # typed refusal vocabulary (frozen §36.1) — ErrorCode additions only
+    r"^server/soloring/errors\.py$",
     # Generation schema-4 integration
     r"^server/soloring/generation/",
     # workflow/package/profile schema extensions + spatial seam reuse

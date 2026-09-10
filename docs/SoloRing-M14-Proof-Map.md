@@ -51,18 +51,18 @@ Disposition vocabulary:
 
 | Cell | Disposition | Exact proof owner | Claim |
 |---|---|---|---|
-| `M14-CAP:01` | PENDING | `tests/test_m14_capabilities.py::test_m14_cap_01` | Strict profile schema-3 parser. |
-| `M14-CAP:02` | PENDING | `tests/test_m14_capabilities.py::test_m14_cap_02` | Inherited profile-2 semantics delegated, not reimplemented. |
-| `M14-CAP:03` | PENDING | `tests/test_m14_capabilities.py::test_m14_cap_03` | Policy identity exact-match gate. |
-| `M14-CAP:04` | PENDING | `tests/test_m14_capabilities.py::test_m14_cap_04` | Exact property/preservation/source-contract/materializer tuple match. |
-| `M14-CAP:05` | PENDING | `tests/test_m14_capabilities.py::test_m14_cap_05` | Supported hard requirement → SUPPORTED. |
-| `M14-CAP:06` | PENDING | `tests/test_m14_capabilities.py::test_m14_cap_06` | Property-known tuple mismatch → UNSUPPORTED. |
-| `M14-CAP:07` | PENDING | `tests/test_m14_capabilities.py::test_m14_cap_07` | Property absent → UNKNOWN. |
-| `M14-CAP:08` | PENDING | `tests/test_m14_capabilities.py::test_m14_cap_08` | PERMITTED_INFERENCE does not require capability support. |
-| `M14-CAP:09` | PENDING | `tests/test_m14_capabilities.py::test_m14_cap_09` | Overall verdict precedence exact. |
-| `M14-CAP:10` | PENDING | `tests/test_m14_capabilities.py::test_m14_cap_10` | UNSUPPORTED/UNKNOWN refuses before Generation publication. |
+| `M14-CAP:01` | TEST | `tests/test_m14_capabilities.py::test_m14_cap_01` | Strict profile schema-3 parser. |
+| `M14-CAP:02` | TEST | `tests/test_m14_capabilities.py::test_m14_cap_02` | Inherited profile-2 semantics delegated, not reimplemented. |
+| `M14-CAP:03` | TEST | `tests/test_m14_capabilities.py::test_m14_cap_03` | Policy identity exact-match gate. |
+| `M14-CAP:04` | TEST | `tests/test_m14_capabilities.py::test_m14_cap_04` | Exact property/preservation/source-contract/materializer tuple match. |
+| `M14-CAP:05` | TEST | `tests/test_m14_capabilities.py::test_m14_cap_05` | Supported hard requirement → SUPPORTED. |
+| `M14-CAP:06` | TEST | `tests/test_m14_capabilities.py::test_m14_cap_06` | Property-known tuple mismatch → UNSUPPORTED. |
+| `M14-CAP:07` | TEST | `tests/test_m14_capabilities.py::test_m14_cap_07` | Property absent → UNKNOWN. |
+| `M14-CAP:08` | TEST | `tests/test_m14_capabilities.py::test_m14_cap_08` | PERMITTED_INFERENCE does not require capability support. |
+| `M14-CAP:09` | TEST | `tests/test_m14_capabilities.py::test_m14_cap_09` | Overall verdict precedence exact. |
+| `M14-CAP:10` | TEST | `tests/test_m14_capabilities.py::test_m14_cap_10` | UNSUPPORTED/UNKNOWN refuses before Generation publication. |
 | `M14-CAP:11` | TEST | `tests/test_m14_0_g6_g7_corpus.py::test_m14_cap_11` | NegotiationResult golden bytes/hash exact. |
-| `M14-CAP:12` | PENDING | `tests/test_m14_capabilities.py::test_m14_cap_12` | Live runtime availability cannot upgrade domain capability verdict. |
+| `M14-CAP:12` | TEST | `tests/test_m14_capabilities.py::test_m14_cap_12` | Live runtime availability cannot upgrade domain capability verdict. |
 
 ## M14-PKG
 

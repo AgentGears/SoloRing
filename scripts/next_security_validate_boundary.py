@@ -81,6 +81,7 @@ ALLOWLIST = (
     "tests/test_m14_0_g6_g7_corpus.py",
     "tests/test_m14_obs.py",
     "server/soloring/observation/",
+    "server/soloring/errors.py",
 )
 
 M14_OWNED_PREFIXES = (
@@ -89,6 +90,7 @@ M14_OWNED_PREFIXES = (
     "tests/fixtures/m14/",
     "tests/test_m14",
     "server/soloring/observation/",
+    "server/soloring/errors.py",
 )
 
 
