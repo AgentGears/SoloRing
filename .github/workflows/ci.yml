@@ -56,6 +56,14 @@ jobs:
         run: python scripts/next_security_validate_proof_map.py
       - name: Next security boundary
         run: python scripts/next_security_validate_boundary.py
+      - name: M14 baseline
+        run: python scripts/m14_validate_baseline.py
+      - name: M14 proof map
+        run: python scripts/m14_validate_proof_map.py
+      - name: M14 boundary
+        run: python scripts/m14_validate_boundary.py
+      - name: M14 source fit
+        run: python scripts/m14_validate_source_fit.py
       - name: No repo-root generated residue
         run: python -c "from pathlib import Path; assert not Path('m10f-scale-pkgs').exists(), 'repo-root residue present'"
 

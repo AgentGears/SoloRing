@@ -3,3 +3,8 @@
 # pins the same hashes. Git text normalization (autocrlf) would rewrite them
 # on checkout and break those pins — store them byte-for-byte.
 workflows/** -text
+
+# M14 golden vectors carry byte-exact SHA-256 pins (frozen F06
+# identities): autocrlf would rewrite them on checkout and break the
+# corpus hash proofs — store them byte-for-byte.
+tests/fixtures/m14/** -text
