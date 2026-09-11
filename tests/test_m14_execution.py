@@ -41,14 +41,31 @@ FIXTURES = Path(__file__).resolve().parent / "fixtures" / "m14"
 
 def _observation_profile() -> dict:
     """A schema-3 realization profile: the certified schema-2 profile
-    plus the frozen F06 golden observation block."""
+    plus the F06 golden observation block with its mesh-depth
+    materializer contract pinned to the LIVE runtime contract (source
+    review P0-2: the service now requires the producing contract to be
+    the negotiated one, so every service-path package must advertise
+    the contract the machine actually computes). The pristine fixture
+    bytes remain the F06 corpus owners' concern — only the SERVICE
+    path needs the live identity."""
     from soloring.spatial.production_package import production_profile_v2
 
     profile = production_profile_v2()
-    profile["schema_version"] = 3
-    profile["observation"] = json.loads(
+    block = json.loads(
         (FIXTURES / "m14-f06-realization-profile-observation-v1.json")
         .read_bytes().decode("utf-8"))
+    from soloring.observation.materializer import (
+        build_materializer_contract,
+        materializer_contract_hash,
+    )
+
+    live_contract = materializer_contract_hash(
+        build_materializer_contract())
+    for materializer in block["materializers"]:
+        if materializer["id"] == "soloring.observation.mesh_depth":
+            materializer["contract_hash"] = live_contract
+    profile["schema_version"] = 3
+    profile["observation"] = block
     return profile
 
 

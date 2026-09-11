@@ -86,8 +86,72 @@ def _validate_world_observation(observation: dict) -> None:
             "one with the WorldObservationSpec requirements in canonical "
             "order")
 
+    _validate_negotiation_relational(spec, negotiation)
+
     for field in ("profile_hash", "capability_contract_hash"):
         _require_hex64(observation[field], f"world_observation.{field}")
+
+
+def _validate_negotiation_relational(spec: dict,
+                                     negotiation: dict) -> None:
+    """Relational integrity (source review P1-4): the stored
+    NegotiationResult must be the one THIS spec produces — every
+    requirement row hash-matches its canonical Requirement in order,
+    the policy echoes the spec's policy identity, verdict rows are
+    internally consistent, and a SUPPORTED row echoes the exact
+    requested capability tuple. A self-hashed but semantically
+    inconsistent historical value rejects here."""
+    from soloring.observation.capability import requirement_identity_hash
+
+    for requirement, result in zip(
+            spec["requirements"], negotiation["requirements"]):
+        if result["requirement_identity_hash"] != (
+                requirement_identity_hash(requirement)):
+            raise _invalid(
+                "NegotiationResult requirement row does not hash-match "
+                "its canonical WorldObservationSpec Requirement (order "
+                "or content diverged)")
+        verdict = result["verdict"]
+        capability = result["capability"]
+        if verdict == "SUPPORTED":
+            if not isinstance(capability, dict):
+                raise _invalid(
+                    "a SUPPORTED requirement row must echo the matched "
+                    "capability")
+            echoed = (capability.get("property"),
+                      capability.get("preservation"),
+                      capability.get("source_contract"))
+            requested = (requirement["property"],
+                         requirement["preservation"],
+                         requirement["source_contract"])
+            if echoed != requested:
+                raise _invalid(
+                    "a SUPPORTED requirement row echoes a capability "
+                    "tuple other than the requested one")
+        elif capability is not None:
+            raise _invalid(
+                f"a {verdict} requirement row cannot echo a capability")
+
+    policy = negotiation["policy"]
+    if (policy["id"] != spec["policy"]["id"]
+            or policy["version"] != spec["policy"]["version"]):
+        raise _invalid(
+            "NegotiationResult policy does not echo the "
+            "WorldObservationSpec policy identity")
+
+    verdicts = {row["verdict"] for row in negotiation["requirements"]}
+    if policy["verdict"] != "SUPPORTED":
+        expected = "UNSUPPORTED"
+    elif "UNSUPPORTED" in verdicts:
+        expected = "UNSUPPORTED"
+    elif "UNKNOWN" in verdicts:
+        expected = "UNKNOWN"
+    else:
+        expected = "SUPPORTED"
+    if negotiation["verdict"] != expected:
+        raise _invalid(
+            f"NegotiationResult verdict {negotiation['verdict']!r} is "
+            f"inconsistent with its own rows ({expected!r} expected)")
 
 
 def build_workflow_spec_v4(

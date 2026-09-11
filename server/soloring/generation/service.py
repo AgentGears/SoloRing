@@ -405,86 +405,101 @@ async def _integrate_schema6_observation(
 
     observation_binding = None
     observation_contract = None
-    if retained.sources:
-        # §14.3: the same CreativeEntity conditioned by both a retained
-        # mesh and an inherited entity-depth stream refuses — checked
-        # BEFORE any materialization work.
-        from soloring.observation.materializer import (
-            build_materializer_contract,
-            build_provenance,
-            check_duplicate_conditioning,
-            materialize_observation_world_depth,
-            materializer_contract_hash as _mch,
-            parameters_hash as _parameters_hash,
-            provenance_hash as _ph,
-            ARTIFACT_ROLE as _ROLE,
-            MATERIALIZER_ID as _MID,
-            MATERIALIZER_VERSION as _MVER,
-        )
-        from soloring.observation.publication import (
-            ObservationBinding,
-            publish_observation_artifact,
-        )
+    # Source review P0-1 (frozen §§14.2/19/25.1): EVERY supported
+    # schema-4 observation materializes, publishes, and binds its
+    # observation.world_depth — including the zero-retained-mesh subset
+    # (the materializer's empty-source case is the exact M10 path).
+    # A schema-4 Generation is never published without its exact
+    # derived-observation binding.
+    from soloring.observation.materializer import (
+        build_materializer_contract,
+        build_provenance,
+        check_duplicate_conditioning,
+        materialize_observation_world_depth,
+        materializer_contract_hash as _mch,
+        parameters_hash as _parameters_hash,
+        provenance_hash as _ph,
+        ARTIFACT_ROLE as _ROLE,
+        MATERIALIZER_ID as _MID,
+        MATERIALIZER_VERSION as _MVER,
+    )
+    from soloring.observation.publication import (
+        ObservationBinding,
+        publish_observation_artifact,
+    )
+    from soloring.errors import internal_invariant
 
-        check_duplicate_conditioning(retained.sources, spatial_pack)
+    check_duplicate_conditioning(retained.sources, spatial_pack)
 
-        # §25.1: deterministic materialization BEFORE publication, outside
-        # any writer fence.
-        result = materialize_observation_world_depth(
-            spatial_pack, retained.sources)
-        contract = build_materializer_contract()
-        contract_hash_actual = _mch(contract)
-        parameters = dict(_PARAMETERS_REF)
-        ph = _parameters_hash()
-        provenance = build_provenance(
+    # Source review P0-2: the contract that will PRODUCE the bytes must
+    # be the exact contract the captured capability negotiated under —
+    # a package captured under contract A never materializes under a
+    # diverged runtime contract B (frozen §36.3 invariant semantics).
+    contract = build_materializer_contract()
+    contract_hash_actual = _mch(contract)
+    if contract_hash_actual != contract_hash:
+        raise internal_invariant(
+            "The runtime MaterializerContract "
+            f"{contract_hash_actual} differs from the contract "
+            f"{contract_hash} captured by the selected observation "
+            "profile — the observation would negotiate under one "
+            "contract and materialize under another.")
+
+    # §25.1: deterministic materialization BEFORE publication, outside
+    # any writer fence.
+    result = materialize_observation_world_depth(
+        spatial_pack, retained.sources)
+    parameters = dict(_PARAMETERS_REF)
+    ph = _parameters_hash()
+    provenance = build_provenance(
+        project_id=await _project_id_for_shot(session, shot_id),
+        observation_spec_hash=canonical_hash(observation_spec),
+        materializer_contract_hash=contract_hash_actual,
+        parameters_hash=ph,
+        source_retained_blob_hashes=[
+            source.retained_blob_hash for source in retained.sources],
+        execution_package={
+            "workflow_id": release.workflow_id,
+            "workflow_version": release.workflow_version,
+            "manifest_hash": release.manifest_hash,
+            "workflow_template_hash": release.workflow_template_hash,
+            "realization_profile_hash": (
+                release.realization_profile_hash),
+            "execution_model_fingerprint_hash": (
+                release.execution_model_fingerprint_hash),
+        })
+    blob_bytes = b"".join(result.frames)
+    import hashlib as _hl
+
+    if _hl.sha256(blob_bytes).hexdigest() != result.digest:
+        raise internal_invariant(
+            "Materialized observation bytes disagree with the "
+            "artifact digest.")
+    async with session.bind.connect() as _pub:
+        artifact_id = await publish_observation_artifact(
+            _pub, store,
             project_id=await _project_id_for_shot(session, shot_id),
             observation_spec_hash=canonical_hash(observation_spec),
+            materializer_id=_MID,
+            materializer_version=_MVER,
             materializer_contract_hash=contract_hash_actual,
+            parameters=parameters,
             parameters_hash=ph,
-            source_retained_blob_hashes=[
-                source.retained_blob_hash for source in retained.sources],
-            execution_package={
-                "workflow_id": release.workflow_id,
-                "workflow_version": release.workflow_version,
-                "manifest_hash": release.manifest_hash,
-                "workflow_template_hash": release.workflow_template_hash,
-                "realization_profile_hash": (
-                    release.realization_profile_hash),
-                "execution_model_fingerprint_hash": (
-                    release.execution_model_fingerprint_hash),
-            })
-        blob_bytes = b"".join(result.frames)
-        import hashlib as _hl
+            provenance=provenance,
+            provenance_hash_value=_ph(provenance),
+            blob_bytes=blob_bytes)
+    from soloring.spatial.package3 import (
+        resolve_derived_binding as _resolve_world_key,
+    )
 
-        if _hl.sha256(blob_bytes).hexdigest() != result.digest:
-            raise internal_invariant(
-                "Materialized observation bytes disagree with the "
-                "artifact digest.")
-        async with session.bind.connect() as _pub:
-            artifact_id = await publish_observation_artifact(
-                _pub, store,
-                project_id=await _project_id_for_shot(session, shot_id),
-                observation_spec_hash=canonical_hash(observation_spec),
-                materializer_id=_MID,
-                materializer_version=_MVER,
-                materializer_contract_hash=contract_hash_actual,
-                parameters=parameters,
-                parameters_hash=ph,
-                provenance=provenance,
-                provenance_hash_value=_ph(provenance),
-                blob_bytes=blob_bytes)
-        from soloring.spatial.package3 import (
-            resolve_derived_binding as _resolve_world_key,
-        )
-
-        world_input_key, _node, _field = _resolve_world_key(
-            package.manifest_v3, _ROLE_INHERITED, 0)
-        observation_binding = ObservationBinding(
-            input_key=world_input_key, position=0,
-            artifact_id=artifact_id,
-            blob_hash=_hl.sha256(blob_bytes).hexdigest())
-        observation_contract = {
-            "contract": contract, "contract_hash": contract_hash_actual}
+    world_input_key, _node, _field = _resolve_world_key(
+        package.manifest_v3, _ROLE_INHERITED, 0)
+    observation_binding = ObservationBinding(
+        input_key=world_input_key, position=0,
+        artifact_id=artifact_id,
+        blob_hash=_hl.sha256(blob_bytes).hexdigest())
+    observation_contract = {
+        "contract": contract, "contract_hash": contract_hash_actual}
 
     return {
         "spec": observation_spec,

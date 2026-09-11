@@ -860,6 +860,13 @@ async def test_m14_obs_19(client, tmp_path) -> None:
     from tests.test_m14_materializer import _reader
 
     visual_pack = snapshot.get("visual_reference_pack")
+    from soloring.observation.materializer import (
+        build_materializer_contract,
+        materializer_contract_hash,
+    )
+
+    live_contract = materializer_contract_hash(
+        build_materializer_contract())
     recomputed = compile_world_observation_spec(
         shot_id=b["shot"],
         shot_revision_id=revision_id,
@@ -870,7 +877,7 @@ async def test_m14_obs_19(client, tmp_path) -> None:
         production_world_hash=row["production_world_hash"],
         visual_reference_pack_hash=(
             canonical_hash(visual_pack) if visual_pack else None),
-        materializer_contract_hash=CONTRACT_HASH,
+        materializer_contract_hash=live_contract,
     )
     async with engine.connect() as conn:
         retained = await load_retained_mesh_sources(

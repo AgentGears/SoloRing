@@ -91,6 +91,19 @@ async def execute_schema4_derived_inputs(
             ec.DERIVED_SPATIAL_PROVENANCE_MISMATCH,
             "Derived-observation Blob identity disagrees with the "
             "Generation binding.")
+    # Source review P0-2: the artifact's producing contract must be the
+    # exact contract the stored WorldObservationSpec negotiated under —
+    # the historical counterpart of the creation-side equality gate.
+    # Still never a comparison against TODAY'S materializer.
+    spec_contract = workflow_spec_v4["world_observation"]["spec"][
+        "materializations"][0]["materializer"]["contract_hash"]
+    if artifact["materializer_contract_hash"] != spec_contract:
+        raise _fail(
+            ec.DERIVED_SPATIAL_PROVENANCE_MISMATCH,
+            "Derived-observation artifact was produced under materializer "
+            "contract "
+            f"{artifact['materializer_contract_hash']} while the stored "
+            f"WorldObservationSpec pins {spec_contract}.")
     # §24/§26: historical validity = stored consistency ONLY. The
     # provenance is verified against the artifact row's OWN captured
     # materializer-contract hash — never today's contract.

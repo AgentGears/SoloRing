@@ -212,6 +212,13 @@ def _requirement_hash(requirement: dict) -> str:
         canonical_json_bytes(requirement)).hexdigest()
 
 
+def requirement_identity_hash(requirement: dict) -> str:
+    """The public name for the canonical Requirement identity carried
+    by NegotiationResult rows (frozen §11) — schema-4 relational
+    validation recomputes it against the stored spec."""
+    return _requirement_hash(requirement)
+
+
 def negotiate(spec: dict, observation_block: dict) -> dict:
     """Pure capability negotiation → NegotiationResult schema 1.
 

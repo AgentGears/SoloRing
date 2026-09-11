@@ -368,3 +368,20 @@ async def generation_events(
         media_type="text/event-stream",
         headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
     )
+
+
+@router.get("/generations/{generation_id}/observation")
+async def get_generation_observation(
+    generation_id: str,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """M14 frozen §31 UX/API surface: the historical observation
+    inspector for one schema-4 Generation — the captured observation
+    hash/negotination/requirements, ProductionRevision and retained
+    Blob identities, the bound derived-artifact provenance, and the
+    current materializer contract ONLY as a separately labeled
+    environment observation. Every captured value is read from stored
+    bytes and immutable bound rows; nothing is recomputed."""
+    from soloring.observation.inspection import read_captured_observation
+
+    return await read_captured_observation(session, generation_id)

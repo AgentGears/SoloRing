@@ -661,6 +661,37 @@ async def _drive(
                         )
                     ).decode("utf-8")
                 )
+                # Source review P1-4: the retained profile IS the profile
+                # the stored observation negotiated under — its hash and
+                # its observation block's canonical hash must equal the
+                # identities the schema-4 wrapper pins.
+                from soloring.domain.canonical import (
+                    canonical_hash as _v4_canonical_hash,
+                )
+                from soloring.errors import (
+                    internal_invariant as _v4_invariant,
+                )
+                from soloring.observation.capability import (
+                    capability_contract_hash as _v4_capability_hash,
+                )
+
+                observation_block_v4 = spec4["world_observation"]
+                retained_profile_hash = lower["spatial_realization"][
+                    "realization_profile_hash"]
+                if (observation_block_v4["profile_hash"]
+                        != retained_profile_hash
+                        or _v4_canonical_hash(profile)
+                        != retained_profile_hash):
+                    raise _v4_invariant(
+                        "Schema-4 stored observation profile_hash "
+                        "disagrees with the retained realization profile "
+                        "the worker loaded.")
+                if (observation_block_v4["capability_contract_hash"]
+                        != _v4_capability_hash(profile)):
+                    raise _v4_invariant(
+                        "Schema-4 stored capability_contract_hash "
+                        "disagrees with the retained profile's "
+                        "observation block.")
                 fingerprint_doc = json.loads(
                     (
                         await artifact_store.get_fingerprint(

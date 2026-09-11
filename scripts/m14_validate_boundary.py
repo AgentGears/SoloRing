@@ -80,6 +80,9 @@ ALLOWED_PATTERNS = [
     r"^server/soloring/recovery/",
     # M14 UI projection: app source only, never manifests/config
     r"^apps/web/src/.+",
+    # source-review correction slice: the frozen §31 UX/API surface on
+    # the existing inspector seams (exactly the two extended routes)
+    r"^server/soloring/api/(realization|generations)\.py$",
     # CI validator wiring + byte-exactness attributes for pinned fixtures
     r"^\.github/workflows/ci\.yml$",
     r"^\.gitattributes$",

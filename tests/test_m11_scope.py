@@ -135,6 +135,8 @@ def test_no_execution_source_delta_in_m11_owned_diff():
         "server/soloring/worker/comfy_pipeline.py",
         "server/soloring/workflows/artifact_store.py",
         "server/soloring/worker/execution.py",
+        "server/soloring/api/generations.py",
+        "server/soloring/api/realization.py",
     )
     offenders = sorted(
         p for p in changed

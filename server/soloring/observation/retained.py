@@ -181,18 +181,37 @@ def _placement_requirement(occurrence_id: str, owner: str,
 
 def _resolve_a4_subject_world(placement: dict, subject: dict,
                               captured_production_world: dict,
-                              captured_spatial_pack: dict | None) -> dict:
+                              captured_spatial_pack: dict | None, *,
+                              composition_id: str,
+                              occurrence_id: str) -> dict:
     kind = placement["kind"]
     if kind == _PI_PLACEMENT_KIND:
-        for state in captured_production_world.get(
-                "instance_spatial_states", []):
-            if (state.get("occurrence_id") is not None
-                    and state.get("production_instance_track_id")
-                    == placement["id"]):
-                return state["transform"]
-        raise _invariant(
-            "captured production_world.instance_spatial_states has no "
-            f"exact match for PI track {placement['id']!r}")
+        # Frozen §13.3 (source review P0-3): the exact matching key is
+        # (composition_id, occurrence_id, production_instance_track_id).
+        # Missing, duplicate, or malformed state fails closed — never
+        # the first merely-plausible row.
+        matches = [
+            state for state in captured_production_world.get(
+                "instance_spatial_states", [])
+            if state.get("composition_id") == composition_id
+            and state.get("occurrence_id") == occurrence_id
+            and state.get("production_instance_track_id")
+            == placement["id"]]
+        if len(matches) != 1:
+            raise _invariant(
+                "captured production_world.instance_spatial_states must "
+                f"hold exactly one state for the exact key "
+                f"(composition {composition_id}, occurrence "
+                f"{occurrence_id}, PI track {placement['id']!r}) — "
+                f"found {len(matches)}")
+        transform = matches[0].get("transform")
+        if (not isinstance(transform, dict)
+                or not isinstance(transform.get("translation_mm"), list)
+                or not isinstance(transform.get("rotation_udeg"), list)):
+            raise _invariant(
+                f"captured PI state for occurrence {occurrence_id} has "
+                "a malformed transform")
+        return transform
     if kind in _ENTITY_PLACEMENT_KINDS:
         if kind == "entity_track" and captured_spatial_pack is not None:
             for staged in captured_spatial_pack.get("staging", []):
@@ -240,7 +259,7 @@ async def load_retained_mesh_sources(
         e["occurrence_id"]: e for e in value.get("entries", [])}
 
     rows = (await conn.execute(_sa_text(
-        "SELECT id, snapshot_json, snapshot_hash FROM "
+        "SELECT id, composition_id, snapshot_json, snapshot_hash FROM "
         "composition_revisions WHERE id = :c"),
         {"c": comp_id})).mappings().all()
     queries += 1
@@ -422,10 +441,25 @@ async def load_retained_mesh_sources(
         first = interpretation["realization_local_to_subject_local"]
         if subject is not None:
             owner = "A4"
+            # Source review P1-5 (frozen §13.2 no-conflict rule): an
+            # M13-bound occurrence's captured Composition transform
+            # must be the identity — a conflicting composition
+            # transform on a bound subject is historical corruption
+            # (the binding publish already refuses it at write time).
+            occurrence_transform = occurrence.get("transform") or {}
+            if (occurrence_transform.get("translation_mm") != [0, 0, 0]
+                    or occurrence_transform.get("rotation_udeg")
+                    != [0, 0, 0]):
+                raise _invariant(
+                    f"bound occurrence {occurrence_id} carries a "
+                    "non-identity Composition transform — conflicting "
+                    "with its A4 spatial placement (frozen §13.2)")
             placement = subject["placement"]
             second = _resolve_a4_subject_world(
                 placement, subject["authority_subject"],
-                captured_production_world, captured_spatial_pack)
+                captured_production_world, captured_spatial_pack,
+                composition_id=comp_row["composition_id"],
+                occurrence_id=occurrence_id)
             placement_source_kind = "composition_spatial_binding"
             placement_source_id = binding_id
             placement_source_hash = binding_hash
