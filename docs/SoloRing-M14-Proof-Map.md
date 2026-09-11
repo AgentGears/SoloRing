@@ -105,15 +105,15 @@ Disposition vocabulary:
 | `M14-HIST:01` | TEST | `tests/test_m14_history.py::test_m14_hist_01` | Schema-4 WorkflowSpec stores exact observation/hash. |
 | `M14-HIST:02` | TEST | `tests/test_m14_history.py::test_m14_hist_02` | Schema-4 stores exact negotiation/hash/capability-contract hash. |
 | `M14-HIST:03` | TEST | `tests/test_m14_history.py::test_m14_hist_03` | Exact Rerun copies exact schema-4 bytes/hash. |
-| `M14-HIST:04` | PENDING | `tests/test_m14_history.py::test_m14_hist_04` | Exact Rerun copies exact derived-observation artifact + Blob-hash binding. |
+| `M14-HIST:04` | TEST | `tests/test_m14_history.py::test_m14_hist_04_observation_binding_copied` | Exact Rerun copies exact derived-observation artifact + Blob-hash binding. |
 | `M14-HIST:05` | PENDING | `tests/test_m14_history.py::test_m14_hist_05` | Newer ProductionRevision cannot alter history. |
 | `M14-HIST:06` | PENDING | `tests/test_m14_history.py::test_m14_hist_06` | Newer Composition/current binding/state cannot alter history. |
 | `M14-HIST:07` | PENDING | `tests/test_m14_history.py::test_m14_hist_07` | Missing retained Production closure fails closed. |
-| `M14-HIST:08` | PENDING | `tests/test_m14_history.py::test_m14_hist_08` | Missing/corrupt observation artifact fails closed; never rematerialized. |
+| `M14-HIST:08` | TEST | `tests/test_m14_history.py::test_m14_hist_08_missing_artifact_fails_closed_no_remat` | Missing/corrupt observation artifact fails closed; never rematerialized. |
 | `M14-HIST:09` | TEST | `tests/test_m14_derived_storage.py::test_recovery_blob_fk_inventory_eight_paths` | Backup/restore preserves schema-4 Generation + exact artifact binding. |
 | `M14-HIST:10` | PENDING | `tests/test_m14_history.py::test_m14_hist_10` | Old schema-1/2/3 Generations remain legible/executable. |
 | `M14-HIST:11` | TEST | `tests/test_m14_derived_storage.py::test_downgrade_schema4_history_refuses` | 0015 downgrade refuses live schema-4 history / non-empty derived state. |
-| `M14-HIST:12` | PENDING | `tests/test_m14_history.py::test_m14_hist_12` | Historical provenance validates against captured contract, not current materializer. |
+| `M14-HIST:12` | TEST | `tests/test_m14_b5_hist12.py::test_m14_hist_12_captured_contract_not_current` | Historical provenance validates against captured contract, not current materializer. |
 
 ## M14-EXEC
 

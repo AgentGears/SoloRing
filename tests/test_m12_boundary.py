@@ -102,6 +102,8 @@ def test_m12_has_no_generation_executor_or_render_source_delta():
         "server/soloring/errors.py",
         "server/soloring/generation/repository.py",
         "server/soloring/spatial/boxdepth.py",
+        "server/soloring/generation/rerun.py",
+        "server/soloring/worker/comfy_pipeline.py",
     )
     offenders = sorted(
         p for p in changed

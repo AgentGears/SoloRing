@@ -608,6 +608,81 @@ async def _drive(
                 manifest = lower.manifest
                 template_graph = json.loads(json.dumps(lower.template))
                 schema3_lower = lower
+            elif spec.get("schema_version") == 4:
+                # M14 frozen R2 §25.3: schema-4 historical execution
+                # reads the persisted execution closure ONLY — WorkflowSpec
+                # 4 (verified bytes + nested observation/negotiation
+                # hashes), the exact derived-observation binding + Blob +
+                # provenance against the CAPTURED contract hash (never
+                # today's materializer), the captured package closure by
+                # hash, the runtime-availability gate, then submission.
+                # Zero current production-world resolution; no
+                # re-negotiation against a newer profile.
+                from soloring.domain.canonical import (
+                    canonical_hash as _spec_hash,
+                )
+                from soloring.errors import internal_invariant
+                from soloring.observation.worker_inputs import (
+                    execute_schema4_derived_inputs,
+                )
+                from soloring.observation.workflow_spec import (
+                    parse_workflow_spec_v4,
+                )
+                from soloring.spatial.package3 import (
+                    check_runtime_closure,
+                    parse_manifest_v3,
+                    parse_profile_v2,
+                )
+
+                spec4 = parse_workflow_spec_v4(spec)
+                if _spec_hash(spec4) != generation.workflow_spec_hash:
+                    raise internal_invariant(
+                        "Schema-4 workflow spec bytes disagree with the "
+                        "persisted workflow_spec_hash.")
+                lower = spec4["lower_schema_3"]
+                manifest = parse_manifest_v3(
+                    manifest_bytes.decode("utf-8")
+                )
+                profile = parse_profile_v2(
+                    (
+                        await artifact_store.get_profile(
+                            lower["spatial_realization"][
+                                "realization_profile_hash"
+                            ]
+                        )
+                    ).decode("utf-8")
+                )
+                fingerprint_doc = json.loads(
+                    (
+                        await artifact_store.get_fingerprint(
+                            lower["model"][
+                                "execution_model_fingerprint_hash"
+                            ]
+                        )
+                    ).decode("utf-8")
+                )
+                unproven = check_runtime_closure(
+                    profile["spatial"], fingerprint=fingerprint_doc,
+                    template=template_graph)
+                if unproven:
+                    raise internal_invariant(
+                        "Schema-4 captured profile runtime requirements "
+                        f"not closed by captured fingerprint/template: "
+                        f"{unproven}")
+                # EXEC:06 — the runtime availability gate precedes any
+                # Comfy submission (dispatch may claim earlier).
+                verify_schema3_runtime_environment(
+                    fingerprint_doc, settings)
+                async with factory() as session:
+                    schema3_derived = await execute_schema4_derived_inputs(
+                        session, blob_store,
+                        generation_id=generation_id,
+                        attempt_id=attempt_id,
+                        workflow_spec_v4=spec4,
+                        manifest_v3=manifest,
+                        client=ClientUploader(client),
+                    )
+                spec = lower  # the inherited schema-3 execution meaning
             elif spec.get("schema_version") == 3:
                 # M10 frozen r3 §2.2/§48: schema-3 historical execution
                 # reads captured state ONLY. The v3 manifest/profile/
@@ -1045,6 +1120,21 @@ async def _drive(
             logical_schema_version=spec["schema_version"],
         ).manifest
     elif spec.get("schema_version") == 3:
+        from soloring.spatial.package3 import parse_manifest_v3
+        from soloring.workflows.manifest import parse_manifest_v2
+
+        manifest_v3_doc = parse_manifest_v3(
+            (await artifact_store.get_manifest(generation.manifest_hash))
+            .decode("utf-8")
+        )
+        inherited = {k: v for k, v in manifest_v3_doc.items()
+                     if k != "spatial_bindings"}
+        inherited["schema_version"] = "2"
+        manifest = parse_manifest_v2(inherited)
+    elif spec.get("schema_version") == 4:
+        # M14 §25.3: schema-4 output interpretation is the inherited
+        # schema-3 (manifest-v3 minus spatial_bindings → v2) view of the
+        # lower value — one shared helper, no reinterpretation.
         from soloring.spatial.package3 import parse_manifest_v3
         from soloring.workflows.manifest import parse_manifest_v2
 
