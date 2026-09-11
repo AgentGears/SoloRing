@@ -692,6 +692,55 @@ async def _drive(
                         "Schema-4 stored capability_contract_hash "
                         "disagrees with the retained profile's "
                         "observation block.")
+                # Third-review P1: the spec's PINNED materializer — id,
+                # version, output role, AND contract hash — must be the
+                # exact retained profile's materializer entry. Artifact-
+                # to-spec equality alone cannot prove profile-to-spec
+                # equality.
+                from soloring.observation.materializer import (
+                    MATERIALIZER_ID as _PINNED_MID,
+                    MATERIALIZER_VERSION as _PINNED_MVER,
+                )
+
+                retained_entry = next(
+                    (m for m in profile["observation"].get(
+                        "materializers", [])
+                     if m.get("id") == _PINNED_MID
+                     and m.get("version") == _PINNED_MVER), None)
+                pinned_materializer = observation_block_v4["spec"][
+                    "materializations"][0]
+                if (retained_entry is None
+                        or pinned_materializer["materializer"][
+                            "contract_hash"]
+                        != retained_entry["contract_hash"]
+                        or retained_entry.get("output_role")
+                        != pinned_materializer["artifact_role"]):
+                    raise _v4_invariant(
+                        "The stored WorldObservationSpec's pinned "
+                        "materializer contract is not the exact "
+                        "retained profile's materializer entry.")
+                # Third-review P1: integrity replay of the pure
+                # negotiation against the EXACT captured profile (by
+                # hash) — the stored NegotiationResult must be the one
+                # this profile produces for this spec. This is never a
+                # renegotiation against current state.
+                from soloring.domain.canonical import (
+                    canonical_json_bytes as _v4_bytes,
+                )
+                from soloring.observation import (
+                    negotiate as _v4_replay_negotiate,
+                )
+
+                replayed = _v4_replay_negotiate(
+                    observation_block_v4["spec"],
+                    profile["observation"])
+                if (_v4_bytes(replayed)
+                        != _v4_bytes(observation_block_v4[
+                            "negotiation"])):
+                    raise _v4_invariant(
+                        "The stored NegotiationResult is not the one the "
+                        "retained captured profile produces for the "
+                        "stored WorldObservationSpec.")
                 fingerprint_doc = json.loads(
                     (
                         await artifact_store.get_fingerprint(

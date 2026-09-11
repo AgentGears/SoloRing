@@ -113,6 +113,23 @@ def _validate_negotiation_relational(spec: dict,
                 "or content diverged)")
         verdict = result["verdict"]
         capability = result["capability"]
+        # Third-review P0: the verdict must be CONGRUENT with the
+        # Requirement's enforcement — a REQUIRED (hard) coordinate can
+        # only be SUPPORTED/UNSUPPORTED/UNKNOWN, and only an INFERABLE
+        # requirement can carry PERMITTED_INFERENCE. Without this, a
+        # re-pinned corruption could silently downgrade a hard
+        # requirement to a non-blocking verdict.
+        enforcement = requirement["enforcement"]
+        if enforcement == "PERMITTED_INFERENCE":
+            if verdict != "PERMITTED_INFERENCE":
+                raise _invalid(
+                    "an INFERABLE requirement's verdict must be "
+                    "PERMITTED_INFERENCE — the stored row diverges")
+        elif verdict == "PERMITTED_INFERENCE":
+            raise _invalid(
+                f"a REQUIRED requirement ({enforcement}) cannot carry "
+                "PERMITTED_INFERENCE — a hard requirement was "
+                "downgraded in stored history")
         if verdict == "SUPPORTED":
             if not isinstance(capability, dict):
                 raise _invalid(
@@ -192,7 +209,7 @@ def build_workflow_spec_v4(
     _require_hex64(profile_hash, "profile_hash")
     _require_hex64(capability_contract_hash, "capability_contract_hash")
 
-    return {
+    value = {
         "schema_version": WORKFLOW_SPEC_SCHEMA_VERSION_4,
         "lower_schema_3": lower_schema_3,
         "world_observation": {
@@ -206,6 +223,26 @@ def build_workflow_spec_v4(
                 canonical_json_bytes(negotiation)).hexdigest(),
         },
     }
+    # Third-review P0: the builder applies the SAME relational
+    # validation the parser will — it can never construct an object its
+    # own parser would later reject (including the profile-hash link,
+    # enforced there for the stored copy too).
+    _validate_world_observation(value["world_observation"])
+    _validate_profile_link(value)
+    return value
+
+
+def _validate_profile_link(value: dict) -> None:
+    """Third-review P1: the schema-4 wrapper's stored profile identity
+    must be the retained lower-schema-3 profile identity — one release
+    produced both, so a divergence is historical corruption."""
+    observation = value["world_observation"]
+    retained = value["lower_schema_3"]["spatial_realization"][
+        "realization_profile_hash"]
+    if observation["profile_hash"] != retained:
+        raise _invalid(
+            "world_observation.profile_hash disagrees with the retained "
+            "lower_schema_3 realization profile hash")
 
 
 def parse_workflow_spec_v4(value: dict) -> dict:
@@ -222,4 +259,5 @@ def parse_workflow_spec_v4(value: dict) -> dict:
         raise _invalid("schema_version must be 4")
     _validate_lower_schema_3(value["lower_schema_3"])
     _validate_world_observation(value["world_observation"])
+    _validate_profile_link(value)
     return value

@@ -373,6 +373,7 @@ async def generation_events(
 @router.get("/generations/{generation_id}/observation")
 async def get_generation_observation(
     generation_id: str,
+    request: Request,
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     """M14 frozen §31 UX/API surface: the historical observation
@@ -381,7 +382,11 @@ async def get_generation_observation(
     Blob identities, the bound derived-artifact provenance, and the
     current materializer contract ONLY as a separately labeled
     environment observation. Every captured value is read from stored
-    bytes and immutable bound rows; nothing is recomputed."""
+    bytes and immutable bound rows; the retained profile artifact is
+    fetched by captured hash and the stored profile/capability
+    identities verified against it."""
     from soloring.observation.inspection import read_captured_observation
 
-    return await read_captured_observation(session, generation_id)
+    settings = getattr(request.app.state, "settings", None)
+    return await read_captured_observation(
+        session, generation_id, settings=settings)

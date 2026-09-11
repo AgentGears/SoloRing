@@ -19,13 +19,17 @@ from soloring.errors import ErrorCode, not_found
 from soloring.domain.ids import is_uuid
 
 
-async def read_captured_observation(session, generation_id: str) -> dict:
+async def read_captured_observation(session, generation_id: str, *,
+                                    settings=None) -> dict:
     """The captured observation + artifact provenance for one Generation.
 
     Fails closed on any stored-byte corruption (the strict schema-4
     parser re-validates the exact persisted WorkflowSpec bytes); never
     consults current production-world state, the current package, or
-    the current materializer for the captured values."""
+    the current materializer for the captured values. With ``settings``
+    (the production surface always supplies them), the retained profile
+    artifact is additionally fetched BY CAPTURED HASH and the stored
+    profile/capability identities are verified against it."""
     if not is_uuid(generation_id):
         raise not_found(
             ErrorCode.GENERATION_NOT_FOUND,
@@ -96,11 +100,11 @@ async def read_captured_observation(session, generation_id: str) -> dict:
                 "at most one is representable.")
         binding = binding_rows[0]
         artifact_row = (await conn.execute(text(
-            "SELECT id, blob_hash, materializer_id, "
-            "materializer_version, materializer_contract_hash, "
-            "parameters_json, parameters_hash, provenance_json, "
-            "provenance_hash, created_at FROM "
-            "derived_observation_artifacts WHERE id = :a"),
+            "SELECT id, blob_hash, observation_spec_hash, artifact_role, "
+            "materializer_id, materializer_version, "
+            "materializer_contract_hash, parameters_json, "
+            "parameters_hash, provenance_json, provenance_hash, "
+            "created_at FROM derived_observation_artifacts WHERE id = :a"),
             {"a": binding["derived_observation_artifact_id"]}
         )).mappings().one_or_none()
         if artifact_row is None:
@@ -108,10 +112,11 @@ async def read_captured_observation(session, generation_id: str) -> dict:
                 f"Generation {generation_id}: the bound derived-"
                 "observation artifact row is missing from immutable "
                 "history.")
-        # Source review P1-4 (inspector hardening): the displayed
-        # binding/artifact identities are cross-checked against
-        # each other AND against the spec's materializer contract
-        # before presentation as captured provenance.
+        # Source review P1-4 + third review P1: the displayed
+        # binding/artifact identities are FULLY cross-checked — against
+        # each other, against the spec's pinned materialization, and
+        # internally (canonical parameters/provenance) — before
+        # presentation as captured provenance.
         from soloring.domain.canonical import canonical_hash
 
         if artifact_row["id"] != binding[
@@ -129,9 +134,13 @@ async def read_captured_observation(session, generation_id: str) -> dict:
             raise internal_invariant(
                 f"Generation {generation_id}: captured "
                 "observation provenance disagrees with its hash.")
-        spec_contract = observation["spec"][
-            "materializations"][0]["materializer"][
-                "contract_hash"]
+        parameters = json.loads(artifact_row["parameters_json"])
+        if canonical_hash(parameters) != artifact_row["parameters_hash"]:
+            raise internal_invariant(
+                f"Generation {generation_id}: captured observation "
+                "parameters disagree with parameters_hash.")
+        pinned = observation["spec"]["materializations"][0]
+        spec_contract = pinned["materializer"]["contract_hash"]
         if (artifact_row["materializer_contract_hash"]
                 != spec_contract):
             raise internal_invariant(
@@ -139,6 +148,33 @@ async def read_captured_observation(session, generation_id: str) -> dict:
                 "artifact's producing contract disagrees with the "
                 "stored WorldObservationSpec materializer "
                 "contract.")
+        if artifact_row["observation_spec_hash"] != observation[
+                "spec_hash"]:
+            raise internal_invariant(
+                f"Generation {generation_id}: the artifact's "
+                "observation-spec hash disagrees with the stored "
+                "WorldObservationSpec hash.")
+        if artifact_row["artifact_role"] != pinned["artifact_role"]:
+            raise internal_invariant(
+                f"Generation {generation_id}: the artifact's role "
+                "disagrees with the spec's materialization role.")
+        if (artifact_row["materializer_id"]
+                != pinned["materializer"]["id"]
+                or artifact_row["materializer_version"]
+                != pinned["materializer"]["version"]):
+            raise internal_invariant(
+                f"Generation {generation_id}: the artifact's "
+                "materializer identity disagrees with the spec's "
+                "pinned materializer.")
+        if (provenance.get("observation_spec_hash")
+                != observation["spec_hash"]
+                or provenance.get("parameters_hash")
+                != artifact_row["parameters_hash"]
+                or provenance.get("materializer_contract_hash")
+                != artifact_row["materializer_contract_hash"]):
+            raise internal_invariant(
+                f"Generation {generation_id}: the provenance "
+                "coordinate disagrees with the artifact row.")
         artifact = {
                     "artifact_id": artifact_row["id"],
                     "blob_hash": artifact_row["blob_hash"],
@@ -178,6 +214,59 @@ async def read_captured_observation(session, generation_id: str) -> dict:
         for occ in observation["spec"].get("production_occurrences", [])
     ]
 
+    retained_profile_verified = False
+    if settings is not None:
+        # Third-review P1: fetch the retained profile artifact BY
+        # CAPTURED HASH and verify the stored profile/capability
+        # identities against it — the inspector never presents an
+        # unverified stored identity on the production surface.
+        import hashlib as _hashlib
+
+        from soloring.observation.capability import (
+            capability_contract_hash,
+        )
+        from soloring.observation.materializer import (
+            MATERIALIZER_ID,
+            MATERIALIZER_VERSION,
+        )
+        from soloring.workflows.artifact_store import WorkflowArtifactStore
+
+        from soloring.errors import internal_invariant
+
+        retained_hash = spec["lower_schema_3"]["spatial_realization"][
+            "realization_profile_hash"]
+        profile_bytes = await WorkflowArtifactStore(
+            settings).get_profile(retained_hash)
+        if _hashlib.sha256(profile_bytes).hexdigest() != (
+                observation["profile_hash"]):
+            raise internal_invariant(
+                f"Generation {generation_id}: stored "
+                "world_observation.profile_hash disagrees with the "
+                "retained profile artifact.")
+        profile_doc = json.loads(profile_bytes.decode("utf-8"))
+        if capability_contract_hash(profile_doc) != observation[
+                "capability_contract_hash"]:
+            raise internal_invariant(
+                f"Generation {generation_id}: stored "
+                "capability_contract_hash disagrees with the retained "
+                "profile's observation block.")
+        retained_entry = next(
+            (m for m in profile_doc.get("observation", {}).get(
+                "materializers", [])
+             if m.get("id") == MATERIALIZER_ID
+             and m.get("version") == MATERIALIZER_VERSION), None)
+        pinned = observation["spec"]["materializations"][0]
+        if (retained_entry is None
+                or retained_entry["contract_hash"]
+                != pinned["materializer"]["contract_hash"]
+                or retained_entry.get("output_role")
+                != pinned["artifact_role"]):
+            raise internal_invariant(
+                f"Generation {generation_id}: the spec's pinned "
+                "materializer is not the retained profile's exact "
+                "materializer entry.")
+        retained_profile_verified = True
+
     return {
         "generation_id": generation_id,
         "shot_id": row["shot_id"],
@@ -194,6 +283,7 @@ async def read_captured_observation(session, generation_id: str) -> dict:
             "profile_hash": observation["profile_hash"],
             "capability_contract_hash": (
                 observation["capability_contract_hash"]),
+            "retained_profile_verified": retained_profile_verified,
             "requirements": requirements,
             "production_occurrences": occurrences,
             "artifact": artifact,

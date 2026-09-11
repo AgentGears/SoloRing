@@ -278,6 +278,35 @@ def test_m14_cap_04() -> None:
         if cap["property"] == "occurrence.structure")
     assert echo == golden_capability
 
+    # third-review ledger correction: the COMPLETE claimed tuple includes
+    # the materializer identity — a block carrying mesh_depth v1 AND v2
+    # whose occurrence.structure capability points at v2 does NOT
+    # support the spec's pinned v1 materialization (the semantic triple
+    # alone is never the coordinate)
+    import copy
+
+    two_materializer_block = copy.deepcopy(_golden_block())
+    v2 = copy.deepcopy(two_materializer_block["materializers"][0])
+    v2["version"] = 2
+    v2["contract_hash"] = "a" * 64
+    two_materializer_block["materializers"].append(v2)
+    for capability in two_materializer_block["capabilities"]:
+        if (capability["property"],
+                capability["source_contract"]) == (
+                "occurrence.structure",
+                "soloring.structural_mesh.v1"):
+            capability["materializer_version"] = 2
+    result = negotiate(_golden_spec(), two_materializer_block)
+    structure_row = next(
+        res for req, res in
+        zip(_golden_spec()["requirements"], result["requirements"])
+        if req["property"] == "occurrence.structure")
+    assert structure_row["verdict"] == "UNSUPPORTED", (
+        "a capability for a different materializer version is a "
+        "different tuple — never support for the pinned one")
+    assert structure_row["capability"] is None
+    assert result["verdict"] == "UNSUPPORTED"
+
 
 # ---- CAP:05 supported hard requirement → SUPPORTED (+ golden bytes) -------
 

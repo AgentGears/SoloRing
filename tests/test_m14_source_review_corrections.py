@@ -634,7 +634,10 @@ async def test_worker_rejects_profile_hash_divergence(
         code = (await conn.execute(text(
             "SELECT error_code FROM generations WHERE id = :g"),
             {"g": generation.id})).scalar_one()
-    assert code == "INTERNAL_INVARIANT_VIOLATION"
+    # the schema-4 parser's profile link may reject first (validation
+    # error); the worker-level invariant is the deeper backstop — the
+    # load-bearing claim is the drive fails before any submission
+    assert code in ("VALIDATION_ERROR", "INTERNAL_INVARIANT_VIOLATION")
 
 
 # ---- P1-4b: inspector hardening ----------------------------------------------
@@ -1118,3 +1121,287 @@ async def test_inspector_http_missing_artifact_row_fails_closed(
     r = await client.get(f"/generations/{generation.id}/observation")
     assert r.status_code == 500
     assert "artifact row is missing" in r.json().get("message", "")
+
+
+# ---- R3-P0: enforcement/verdict congruence -----------------------------------
+
+def test_required_downgraded_to_permitted_inference_rejects():
+    """The P0 bypass closed: a self-hashed schema-4 whose REQUIRED
+    occurrence.structure row was rewritten to PERMITTED_INFERENCE
+    (re-pinned negotiation + spec hashes, WorldObservationSpec and
+    artifact untouched) rejects — a hard requirement can never be
+    silently downgraded."""
+    from soloring.errors import SoloRingError
+
+    from soloring.observation.workflow_spec import parse_workflow_spec_v4
+
+    spec4 = _resign(_valid_spec4_fixture())
+    negotiation = spec4["world_observation"]["negotiation"]
+    requirements = spec4["world_observation"]["spec"]["requirements"]
+    for requirement, row in zip(requirements, negotiation["requirements"]):
+        if (requirement["property"] == "occurrence.structure"
+                and requirement["enforcement"] == "REQUIRED"):
+            row["verdict"] = "PERMITTED_INFERENCE"
+            row["capability"] = None
+            break
+    else:
+        pytest.fail("fixture carries no REQUIRED occurrence.structure row")
+    spec4 = _resign(spec4)
+    with pytest.raises(SoloRingError, match="downgraded"):
+        parse_workflow_spec_v4(spec4)
+
+
+def test_permitted_inference_upgraded_to_supported_rejects():
+    """The reverse direction: an INFERABLE shot.intent row rewritten to
+    a blocking verdict is equally inconsistent."""
+    from soloring.errors import SoloRingError
+
+    from soloring.observation.workflow_spec import parse_workflow_spec_v4
+
+    spec4 = _resign(_valid_spec4_fixture())
+    negotiation = spec4["world_observation"]["negotiation"]
+    requirements = spec4["world_observation"]["spec"]["requirements"]
+    for requirement, row in zip(requirements, negotiation["requirements"]):
+        if requirement["enforcement"] == "PERMITTED_INFERENCE":
+            row["verdict"] = "SUPPORTED"
+            row["capability"] = {
+                "property": requirement["property"],
+                "preservation": requirement["preservation"],
+                "source_contract": requirement["source_contract"],
+                "materializer_id": "soloring.observation.mesh_depth",
+                "materializer_version": 1,
+                "output_role": "observation.world_depth"}
+            break
+    else:
+        pytest.fail("fixture carries no PERMITTED_INFERENCE row")
+    spec4 = _resign(spec4)
+    with pytest.raises(SoloRingError, match="PERMITTED_INFERENCE"):
+        parse_workflow_spec_v4(spec4)
+
+
+def test_builder_applies_the_same_relational_validation():
+    """build_workflow_spec_v4 can never construct an object its own
+    parser would reject: a downgraded row refuses at BUILD time."""
+    from soloring.errors import SoloRingError
+
+    from soloring.observation.workflow_spec import build_workflow_spec_v4
+
+    lower = _minimal_v3_spec_for_builder()
+    observation = _minimal_observation_pairing_for_builder()
+    negotiation = observation["negotiation"]
+    requirements = observation["spec"]["requirements"]
+    for requirement, row in zip(requirements, negotiation["requirements"]):
+        if requirement["enforcement"] == "REQUIRED":
+            row["verdict"] = "PERMITTED_INFERENCE"
+            row["capability"] = None
+            break
+    with pytest.raises(SoloRingError):
+        build_workflow_spec_v4(
+            lower_schema_3=lower,
+            observation_spec=observation["spec"],
+            negotiation_result=negotiation,
+            profile_hash=observation["profile_hash"],
+            capability_contract_hash=observation[
+                "capability_contract_hash"])
+
+
+def _minimal_v3_spec_for_builder() -> dict:
+    from tests.test_m14_execution import _minimal_v3_spec
+
+    return _minimal_v3_spec()
+
+
+def _minimal_observation_pairing_for_builder() -> dict:
+    from tests.test_m14_execution import _minimal_observation_pairing
+
+    return _minimal_observation_pairing()
+
+
+def test_schema4_profile_link_mismatch_rejects():
+    """A self-hashed schema-4 whose world_observation.profile_hash was
+    forged (re-pinned hashes, lower_schema_3 untouched) rejects: the
+    wrapper's profile identity must be the retained lower-schema-3
+    profile identity."""
+    from soloring.errors import SoloRingError
+
+    from soloring.observation.workflow_spec import parse_workflow_spec_v4
+
+    spec4 = _resign(_valid_spec4_fixture())
+    spec4["world_observation"]["profile_hash"] = "c" * 64
+    spec4 = _resign(spec4)
+    with pytest.raises(SoloRingError, match="profile_hash"):
+        parse_workflow_spec_v4(spec4)
+
+
+# ---- R3-P1: worker integrity replay + profile→spec materializer --------------
+
+async def test_worker_replays_negotiation_against_retained_profile(
+        client, tmp_path, monkeypatch):
+    """A schema-4 Generation whose stored NegotiationResult was forged
+    (a SUPPORTED row fabricated for a capability the captured profile
+    never declared, hashes re-pinned) refuses in the worker before any
+    submission: the stored result must be the one the exact retained
+    profile produces."""
+    import soloring.worker.comfy_pipeline as cp
+    from soloring.domain.canonical import (
+        canonical_hash,
+        canonical_json_str,
+    )
+    from soloring.errors import SoloRingError
+    from soloring.worker import ownership
+    from tests.test_m10f_compatibility import _FakeExecutorClient
+    from tests.test_m14_b5_worker_closure import _seed
+
+    b, generation, spec4, manifest_v3, settings, engine = await _seed(
+        client, tmp_path, tag=b"m14-r3-replay")
+
+    # forge: flip the negotiation verdict of a refused row to SUPPORTED
+    # with a fabricated capability echo (the replay will disagree)
+    negotiation = spec4["world_observation"]["negotiation"]
+    requirements = spec4["world_observation"]["spec"]["requirements"]
+    forged = False
+    for requirement, row in zip(requirements, negotiation["requirements"]):
+        if row["verdict"] in ("UNSUPPORTED", "UNKNOWN"):
+            row["verdict"] = "SUPPORTED"
+            row["capability"] = {
+                "property": requirement["property"],
+                "preservation": requirement["preservation"],
+                "source_contract": requirement["source_contract"],
+                "materializer_id": "soloring.observation.mesh_depth",
+                "materializer_version": 1,
+                "output_role": "observation.world_depth"}
+            forged = True
+            break
+    if not forged:
+        negotiation["verdict"] = "UNSUPPORTED"
+    spec4["world_observation"]["negotiation_hash"] = canonical_hash(
+        negotiation)
+    async with engine.connect() as conn:
+        await conn.execute(text(
+            "UPDATE generations SET workflow_spec_json = :sj, "
+            "workflow_spec_hash = :sh WHERE id = :g"),
+            {"sj": canonical_json_str(spec4),
+             "sh": canonical_hash(spec4), "g": generation.id})
+        await conn.commit()
+
+    async def _explode_submit(*args, **kwargs):
+        raise AssertionError(
+            "submission reached for a replay-divergent Generation")
+
+    fake = _FakeExecutorClient(
+        b"replay-sentinel", output_node="80", output_field="images")
+    fake.submit_prompt = _explode_submit
+    worker = "w-m14-r3-replay"
+    await ownership.acquire_worker_lease(engine, worker, 300)
+    claim = await ownership.claim_next_generation(engine, worker)
+    assert claim is not None and claim[0] == generation.id
+
+    async def _cap(*a, **k):
+        return object()
+
+    monkeypatch.setattr(cp, "resolve_capability", _cap)
+    monkeypatch.setattr(
+        cp, "verify_schema3_runtime_environment",
+        lambda *a, **k: None)
+    status = await cp.drive_comfy_generation(
+        engine, settings, worker, generation.id, claim[1], fake)
+    assert status == "failed"
+
+
+async def test_worker_rejects_spec_contract_not_in_retained_profile(
+        client, tmp_path, monkeypatch):
+    """The spec's pinned materializer CONTRACT must be the retained
+    profile's exact entry: a spec pinned to a contract the profile
+    never declared refuses before any submission (profile→spec equality,
+    not merely artifact→spec)."""
+    import soloring.worker.comfy_pipeline as cp
+    from soloring.domain.canonical import (
+        canonical_hash,
+        canonical_json_str,
+    )
+    from soloring.worker import ownership
+    from tests.test_m10f_compatibility import _FakeExecutorClient
+    from tests.test_m14_b5_worker_closure import _seed
+
+    b, generation, spec4, manifest_v3, settings, engine = await _seed(
+        client, tmp_path, tag=b"m14-r3-spec-contract")
+
+    spec4["world_observation"]["spec"]["materializations"][0][
+        "materializer"]["contract_hash"] = "9" * 64
+    async with engine.connect() as conn:
+        await conn.execute(text(
+            "UPDATE generations SET workflow_spec_json = :sj, "
+            "workflow_spec_hash = :sh WHERE id = :g"),
+            {"sj": canonical_json_str(spec4),
+             "sh": canonical_hash(spec4), "g": generation.id})
+        await conn.commit()
+
+    async def _explode_submit(*args, **kwargs):
+        raise AssertionError(
+            "submission reached for a spec-contract-divergent Generation")
+
+    fake = _FakeExecutorClient(
+        b"spec-contract-sentinel", output_node="80",
+        output_field="images")
+    fake.submit_prompt = _explode_submit
+    worker = "w-m14-r3-spec-contract"
+    await ownership.acquire_worker_lease(engine, worker, 300)
+    claim = await ownership.claim_next_generation(engine, worker)
+    assert claim is not None and claim[0] == generation.id
+
+    async def _cap(*a, **k):
+        return object()
+
+    monkeypatch.setattr(cp, "resolve_capability", _cap)
+    monkeypatch.setattr(
+        cp, "verify_schema3_runtime_environment",
+        lambda *a, **k: None)
+    status = await cp.drive_comfy_generation(
+        engine, settings, worker, generation.id, claim[1], fake)
+    assert status == "failed"
+
+
+# ---- R3-P1: the inspector validates the retained profile artifact ------------
+
+async def test_inspector_http_forged_profile_hash_fails_closed(
+        client, tmp_path):
+    """A self-hashed WorkflowSpec with a forged world_observation.
+    profile_hash is refused by /generations/{id}/observation on the
+    production surface (settings supplied → the retained profile
+    artifact is fetched by captured hash and the identity verified)."""
+    from soloring.domain.canonical import (
+        canonical_hash,
+        canonical_json_str,
+    )
+    from tests.test_m14_b5_worker_closure import _seed
+
+    b, generation, spec4, manifest_v3, settings, engine = await _seed(
+        client, tmp_path, tag=b"m14-r3-insp-profile")
+    spec4["world_observation"]["profile_hash"] = "e" * 64
+    async with engine.connect() as conn:
+        await conn.execute(text(
+            "UPDATE generations SET workflow_spec_json = :sj, "
+            "workflow_spec_hash = :sh WHERE id = :g"),
+            {"sj": canonical_json_str(spec4),
+             "sh": canonical_hash(spec4), "g": generation.id})
+        await conn.commit()
+
+    r = await client.get(f"/generations/{generation.id}/observation")
+    assert r.status_code in (400, 422, 500), (
+        "a forged profile identity must not be presented as captured "
+        "truth on the product surface (the parser's profile link may "
+        "refuse first — either refusal is correct)")
+
+
+async def test_inspector_http_verified_provenance_flag(client, tmp_path):
+    """The healthy inspector response carries the retained-profile
+    verification flag — the product surface actually performed the
+    retained-artifact validation."""
+    from tests.test_m14_b5_worker_closure import _seed
+
+    b, generation, spec4, manifest_v3, settings, engine = await _seed(
+        client, tmp_path, tag=b"m14-r3-insp-flag")
+
+    r = await client.get(f"/generations/{generation.id}/observation")
+    assert r.status_code == 200, r.text
+    assert r.json()["captured"]["retained_profile_verified"] is True
