@@ -110,8 +110,8 @@ Disposition vocabulary:
 | `M14-HIST:06` | TEST | `tests/test_m14_b5_worker_closure.py::test_m14_hist_05_06` | Newer Composition/current binding/state cannot alter history. |
 | `M14-HIST:07` | TEST | `tests/test_m14_b5_worker_closure.py::test_m14_hist_07` | Missing retained Production closure fails closed. |
 | `M14-HIST:08` | TEST | `tests/test_m14_history.py::test_m14_hist_08_missing_artifact_fails_closed_no_remat` | Missing/corrupt observation artifact fails closed; never rematerialized. |
-| `M14-HIST:09` | TEST | `tests/test_m14_derived_storage.py::test_recovery_blob_fk_inventory_eight_paths` | Backup/restore preserves schema-4 Generation + exact artifact binding. |
-| `M14-HIST:10` | PENDING | `tests/test_m14_history.py::test_m14_hist_10` | Old schema-1/2/3 Generations remain legible/executable. |
+| `M14-HIST:09` | TEST | `tests/test_m14_b5_increment3.py::test_m14_hist_09_backup_restore_roundtrip` | Backup/restore preserves schema-4 Generation + exact artifact binding. |
+| `M14-HIST:10` | TEST | `tests/test_m14_b5_increment3.py::test_m14_hist_10_legacy_worker_regression` | Old schema-1/2/3 Generations remain legible/executable. |
 | `M14-HIST:11` | TEST | `tests/test_m14_derived_storage.py::test_downgrade_schema4_history_refuses` | 0015 downgrade refuses live schema-4 history / non-empty derived state. |
 | `M14-HIST:12` | TEST | `tests/test_m14_b5_hist12.py::test_m14_hist_12_captured_contract_not_current` | Historical provenance validates against captured contract, not current materializer. |
 
@@ -124,7 +124,7 @@ Disposition vocabulary:
 | `M14-EXEC:03` | PENDING | `tests/test_m14_execution.py::test_m14_exec_03` | Generation + WorkflowSpec-4 + exact artifact binding atomic. |
 | `M14-EXEC:04` | TEST | `tests/test_m14_derived_storage.py::test_no_fake_asset_or_generation_input_for_m14_closure` | Schema-4 creates no fake Asset / dishonest GenerationInput. |
 | `M14-EXEC:05` | TEST | `tests/test_m14_b5_worker_closure.py::test_m14_exec_05` | Worker makes zero current production-world resolver calls. |
-| `M14-EXEC:06` | PENDING | `tests/test_m14_execution.py::test_m14_exec_06` | Runtime availability gate occurs before Comfy submission. |
+| `M14-EXEC:06` | TEST | `tests/test_m14_b5_increment3.py::test_m14_exec_06_full_pipeline_runtime_gate` | Runtime availability gate occurs before Comfy submission. |
 | `M14-EXEC:07` | TEST | `tests/test_m14_b5_worker_closure.py::test_m14_exec_07` | Exact observation artifact binds inherited spatial.world_depth coordinate. |
 | `M14-EXEC:08` | PENDING | `tests/test_m14_execution.py::test_m14_exec_08` | Real production workflow consumes exact retained control and imports Take. |
 | `M14-EXEC:09` | PENDING | `tests/test_m14_execution.py::test_m14_exec_09` | Generation/Take causes zero production-authority mutation. |

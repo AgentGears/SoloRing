@@ -414,6 +414,11 @@ def _generation_artifact_requirements(spec: dict, what: str) -> list[tuple[str, 
 
 
 def _spec_ordinary_bindings(spec: dict, what: str) -> set[tuple[str, int, str]]:
+    # M14 §26 (HIST:09): schema-4 ordinary inputs live on the inherited
+    # lower_schema_3 value — the frozen delegated meaning, never rebuilt
+    # from current state.
+    if spec.get("schema_version") == 4:
+        spec = spec.get("lower_schema_3") or {}
     inputs = spec.get("inputs")
     if not isinstance(inputs, dict):
         raise RecoveryCorruption(f"{what}: WorkflowSpec inputs must be an object.")
