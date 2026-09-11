@@ -107,9 +107,11 @@ def _populate_m12(tmp_path):
 
 
 def test_m13_mig_01(tmp_path, monkeypatch):
-    """M13-MIG:01 — exact 0013→0014 upgrade + exact 13-table inventory."""
+    """M13-MIG:01 — exact 0013→0014 upgrade + exact 13-table inventory
+    (M14B-2 succession: upgrade stops at 0014 for the M13 inventory;
+    head is 0015)."""
     _upgrade(tmp_path, monkeypatch, "0013_m12_composition_occurrences")
-    _upgrade(tmp_path, monkeypatch, "head")
+    _upgrade(tmp_path, monkeypatch, "0014_m13_authority_complete_world")
     con = _con(tmp_path)
     assert con.execute(
         "SELECT version_num FROM alembic_version").fetchone()[0] == (
@@ -158,9 +160,6 @@ def test_m13_mig_03(tmp_path, monkeypatch):
     assert con.execute(
         "SELECT COUNT(*) FROM "
         "composition_occurrence_authority_subjects").fetchone()[0] == 1
-    assert con.execute(
-        "SELECT version_num FROM alembic_version").fetchone()[0] == (
-        "0014_m13_authority_complete_world")
 
 
 def test_m13_mig_04(tmp_path, monkeypatch):

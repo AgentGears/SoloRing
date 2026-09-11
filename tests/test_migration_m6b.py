@@ -161,7 +161,7 @@ def test_0007_rebuild_preserves_populated_rows_exactly(
         assert raised, "active-only uniqueness not enforced"
 
         assert con.execute("SELECT version_num FROM alembic_version"
-                           ).fetchone()[0] == "0014_m13_authority_complete_world"
+                           ).fetchone()[0] == "0015_m14_world_observation_execution"
     finally:
         con.close()
 

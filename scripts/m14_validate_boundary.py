@@ -43,6 +43,13 @@ ALLOWED_PATTERNS = [
     # (same mechanism as the successor-gate scripts below)
     r"^tests/test_m11_scope\.py$",
     r"^tests/test_m12_boundary\.py$",
+    # predecessor recovery tests advanced to the 0015 head posture
+    r"^tests/test_m1[123]_recovery\.py$",
+    # predecessor migration/head-posture tests advanced for 0015
+    r"^tests/test_m(10a_migrations|11_migration|12_migration|"
+    r"13_migration|5a10_migration_gate|7c_capture|9a_package|"
+    r"8a_visual|igration_m6b|igration_m6|igration_m1|igration)\.py$",
+    r"^tests/test_post_m13_hygiene\.py$",
     # successor-gate extensions: exactly the two predecessor boundary
     # validators whose frozen §51 closure requires them to stay green
     # across the authorized M14 surface (same succession mechanism the
@@ -52,6 +59,8 @@ ALLOWED_PATTERNS = [
     r"^server/soloring/observation/",
     # typed refusal vocabulary (frozen §36.1) — ErrorCode additions only
     r"^server/soloring/errors\.py$",
+    # M14 model registration in the shared metadata module
+    r"^server/soloring/db/models\.py$",
     # Generation schema-4 integration
     r"^server/soloring/generation/",
     # workflow/package/profile schema extensions + spatial seam reuse

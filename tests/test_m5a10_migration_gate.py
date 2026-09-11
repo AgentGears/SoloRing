@@ -109,7 +109,7 @@ def test_populated_0004_to_head_defaults_and_integrity(
     finally:
         con.close()
 
-    assert rev[0] == "0014_m13_authority_complete_world"
+    assert rev[0] == "0015_m14_world_observation_execution"
     assert "soft_cancel_selected_at" in cols
     # Documented defaults for pre-existing rows: submission not_started, no
     # attempt, no job, no soft cancel, no artifact.

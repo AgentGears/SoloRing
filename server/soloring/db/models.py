@@ -131,6 +131,10 @@ from soloring.production_world.models import (  # noqa: E402,F401
     ShotRevisionProductionInstanceSpatialState,
     ShotRevisionProductionWorld,
 )
+from soloring.observation.models import (  # noqa: E402,F401
+    DerivedObservationArtifact,
+    GenerationDerivedObservationInput,
+)
 
 __all__ = [
     "WorkerLease",

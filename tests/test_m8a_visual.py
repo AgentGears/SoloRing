@@ -116,7 +116,7 @@ async def test_migration_head_is_0009_and_downgrade_refuses_state(
                 "SELECT name FROM sqlite_master WHERE type='table'"
             )
         }
-        assert rev[0] == "0014_m13_authority_complete_world"
+        assert rev[0] == "0015_m14_world_observation_execution"
         for t in (
             "visual_facets", "visual_facet_value_policies", "visual_anchors",
             "visual_anchor_items", "visual_anchor_revisions",

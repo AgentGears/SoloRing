@@ -27,6 +27,11 @@ ALLOWLIST = (
     "tests/m10f_scale_fixture.py",
     "tests/test_m10f_scale.py",
     "tests/test_post_m13_hygiene.py",
+    "tests/test_m7c_capture.py",
+    "tests/test_m9a_package.py",
+    "tests/test_migration.py",
+    "tests/test_migration_m1.py",
+    "tests/test_migration_m6.py",
     "tests/test_audit2_authority.py",
     "tests/test_audit3_gate.py",
     "tests/test_audit_m1.py",
@@ -57,6 +62,14 @@ ALLOWLIST = (
     "tests/test_m13_shot_capture.py",
     "tests/test_m13_scale.py",
     "tests/test_m13_recovery.py",
+    "tests/test_m10a_migrations.py",
+    "tests/test_m11_migration.py",
+    "tests/test_m12_migration.py",
+    "tests/test_m13_migration.py",
+    "tests/test_m5a10_migration_gate.py",
+    "tests/test_m8a_visual.py",
+    "tests/test_migration_m6b.py",
+    "tests/test_post_m13_hygiene.py",
     "apps/web/src/components/ProductionWorldPanel.tsx",
     "apps/web/src/__tests__/PostM13Hygiene.test.tsx",
     "apps/web/package.json",
@@ -113,6 +126,13 @@ ALLOWLIST = (
     "server/soloring/errors.py",
     "server/soloring/generation/service.py",
     "server/soloring/realization/packages.py",
+    "server/soloring/recovery/backup.py",
+    "server/alembic/versions/0015_m14_world_observation_execution.py",
+    "server/soloring/db/models.py",
+    "tests/test_m14_derived_storage.py",
+    "tests/test_m11_recovery.py",
+    "tests/test_m12_recovery.py",
+    "tests/test_m13_recovery.py",
     "scripts/m13_validate_boundary.py",
 )
 
@@ -123,6 +143,9 @@ M14_OWNED_PREFIXES = (
     "tests/test_m14",
     "server/soloring/observation/",
     "server/soloring/errors.py",
+    "server/soloring/recovery/backup.py",
+    "server/alembic/versions/0015_m14_world_observation_execution.py",
+    "server/soloring/db/models.py",
     "server/soloring/generation/service.py",
     "server/soloring/realization/packages.py",
     "scripts/m13_validate_boundary.py",
@@ -173,10 +196,16 @@ def main() -> int:
             errors.append(f"changed file outside the hygiene allowlist: {f}")
 
     versions = REPO / "server" / "alembic" / "versions"
-    mig_0015 = [p.name for p in versions.glob("*.py")
-                if p.stem >= "0015"]
-    if mig_0015:
-        errors.append(f"migration at/beyond 0015 exists: {mig_0015}")
+    # M14B-2 succession (frozen R2 §23, authorized 2026-09-10): exactly
+    # ONE migration at/beyond 0015 is admitted — the frozen M14
+    # migration. Anything else (0016+, or a different 0015) still
+    # rejects; this is NOT a general future-migration allowance.
+    admitted_0015 = "0015_m14_world_observation_execution.py"
+    mig_beyond = [p.name for p in versions.glob("*.py")
+                  if p.stem >= "0015" and p.name != admitted_0015]
+    if mig_beyond:
+        errors.append(f"migration at/beyond 0015 beyond the frozen M14 "
+                      f"migration exists: {mig_beyond}")
 
     for f in changed:
         p = REPO / f
@@ -209,8 +238,8 @@ def main() -> int:
         for e in errors:
             print(f"HYGIENE-BOUNDARY INVALID: {e}", file=sys.stderr)
         return 1
-    print("Hygiene boundary clean: allowlist-scoped diff, head still "
-          "0014, no M14 semantics, no new tables.")
+    print("Hygiene boundary clean: allowlist-scoped diff, only the frozen "
+          "M14 0015 migration, no unauthorized M14 semantics.")
     return 0
 
 

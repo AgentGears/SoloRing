@@ -92,9 +92,9 @@ Disposition vocabulary:
 | `M14-MAT:08` | PENDING | `tests/test_m14_materializer.py::test_m14_mat_08` | Mesh contribution reaches world-depth non-background pixels. |
 | `M14-MAT:09` | PENDING | `tests/test_m14_materializer.py::test_m14_mat_09` | Zero-mesh schema-4 bytes == exact M10 bytes. |
 | `M14-MAT:10` | PENDING | `tests/test_m14_materializer.py::test_m14_mat_10` | Deterministic repeat under same materializer contract → identical digest. |
-| `M14-MAT:11` | PENDING | `tests/test_m14_materializer.py::test_m14_mat_11` | Identical concurrent publication converges. |
-| `M14-MAT:12` | PENDING | `tests/test_m14_materializer.py::test_m14_mat_12` | Conflicting same-coordinate bytes fail invariant. |
-| `M14-MAT:13` | PENDING | `tests/test_m14_materializer.py::test_m14_mat_13` | materializer_contract_hash participates in convergence identity. |
+| `M14-MAT:11` | TEST | `tests/test_m14_derived_storage.py::test_same_coordinate_same_bytes_converges` | Identical concurrent publication converges. |
+| `M14-MAT:12` | TEST | `tests/test_m14_derived_storage.py::test_same_coordinate_different_bytes_invariant` | Conflicting same-coordinate bytes fail invariant. |
+| `M14-MAT:13` | TEST | `tests/test_m14_derived_storage.py::test_materializer_contract_hash_in_convergence_identity` | materializer_contract_hash participates in convergence identity. |
 | `M14-MAT:14` | PENDING | `tests/test_m14_materializer.py::test_m14_mat_14` | Retained mesh suppresses exact identity-matched M10 proxy once; inherited entity-depth double-conditioning for the same subject refuses in schema 1. |
 | `M14-MAT:15` | PENDING | `tests/test_m14_materializer.py::test_m14_mat_15` | observation.world_depth media/frame/encoding/binding grammar exact. |
 
@@ -110,9 +110,9 @@ Disposition vocabulary:
 | `M14-HIST:06` | PENDING | `tests/test_m14_history.py::test_m14_hist_06` | Newer Composition/current binding/state cannot alter history. |
 | `M14-HIST:07` | PENDING | `tests/test_m14_history.py::test_m14_hist_07` | Missing retained Production closure fails closed. |
 | `M14-HIST:08` | PENDING | `tests/test_m14_history.py::test_m14_hist_08` | Missing/corrupt observation artifact fails closed; never rematerialized. |
-| `M14-HIST:09` | PENDING | `tests/test_m14_history.py::test_m14_hist_09` | Backup/restore preserves schema-4 Generation + exact artifact binding. |
+| `M14-HIST:09` | TEST | `tests/test_m14_derived_storage.py::test_recovery_blob_fk_inventory_eight_paths` | Backup/restore preserves schema-4 Generation + exact artifact binding. |
 | `M14-HIST:10` | PENDING | `tests/test_m14_history.py::test_m14_hist_10` | Old schema-1/2/3 Generations remain legible/executable. |
-| `M14-HIST:11` | PENDING | `tests/test_m14_history.py::test_m14_hist_11` | 0015 downgrade refuses live schema-4 history / non-empty derived state. |
+| `M14-HIST:11` | TEST | `tests/test_m14_derived_storage.py::test_downgrade_schema4_history_refuses` | 0015 downgrade refuses live schema-4 history / non-empty derived state. |
 | `M14-HIST:12` | PENDING | `tests/test_m14_history.py::test_m14_hist_12` | Historical provenance validates against captured contract, not current materializer. |
 
 ## M14-EXEC
@@ -122,7 +122,7 @@ Disposition vocabulary:
 | `M14-EXEC:01` | TEST | `tests/test_m14_execution.py::test_m14_exec_01` | Schema-4 lower_schema_3 uses one shared inherited helper. |
 | `M14-EXEC:02` | PENDING | `tests/test_m14_execution.py::test_m14_exec_02` | Pre-publication materialization completed before Generation commit. |
 | `M14-EXEC:03` | PENDING | `tests/test_m14_execution.py::test_m14_exec_03` | Generation + WorkflowSpec-4 + exact artifact binding atomic. |
-| `M14-EXEC:04` | PENDING | `tests/test_m14_execution.py::test_m14_exec_04` | Schema-4 creates no fake Asset / dishonest GenerationInput. |
+| `M14-EXEC:04` | TEST | `tests/test_m14_derived_storage.py::test_no_fake_asset_or_generation_input_for_m14_closure` | Schema-4 creates no fake Asset / dishonest GenerationInput. |
 | `M14-EXEC:05` | PENDING | `tests/test_m14_execution.py::test_m14_exec_05` | Worker makes zero current production-world resolver calls. |
 | `M14-EXEC:06` | PENDING | `tests/test_m14_execution.py::test_m14_exec_06` | Runtime availability gate occurs before Comfy submission. |
 | `M14-EXEC:07` | PENDING | `tests/test_m14_execution.py::test_m14_exec_07` | Exact observation artifact binds inherited spatial.world_depth coordinate. |

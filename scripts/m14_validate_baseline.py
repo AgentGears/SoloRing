@@ -107,6 +107,9 @@ def check_base02() -> list[str]:
     return errors
 
 
+MIGRATION_0015 = "0015_m14_world_observation_execution"
+
+
 def check_base03() -> list[str]:
     errors: list[str] = []
     listing = git(
@@ -124,10 +127,15 @@ def check_base03() -> list[str]:
     migrations = sorted(
         n for n in head_names
         if n[0].isdigit() and not n.startswith("__"))
-    if not migrations or migrations[-1] != f"{MIGRATION_PREDECESSOR}.py":
+    # Frozen M14B-2 (R2 §23): from this slice on the head is exactly the
+    # M14 migration; the pre-B2 "no 0015" posture is superseded.
+    if not migrations or migrations[-1] != f"{MIGRATION_0015}.py":
         errors.append(
             "current migration head is not exactly "
-            f"{MIGRATION_PREDECESSOR} (M14-0 adds no 0015): {migrations[-1:]}")
+            f"{MIGRATION_0015}: {migrations[-1:]}")
+    beyond = [m for m in migrations if m > f"{MIGRATION_0015}.py"]
+    if beyond:
+        errors.append(f"migrations beyond 0015 exist: {beyond}")
     return errors
 
 
@@ -152,7 +160,7 @@ def main() -> int:
             print(f"M14-BASELINE INVALID: {e}", file=sys.stderr)
         return 1
     print(f"M14 baseline clean ({', '.join(selected)}): predecessor "
-          "20429b3/0a755efe, M13 tag immutable, migration head 0014.")
+          "20429b3/0a755efe, M13 tag immutable, migration head 0015.")
     return 0
 
 

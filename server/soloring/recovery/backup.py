@@ -37,19 +37,24 @@ from soloring.domain.canonical import canonical_json_bytes, canonical_hash
 from soloring.settings import Settings
 from soloring.workflows.artifact_store import WorkflowArtifactStore
 
-EXPECTED_ALEMBIC_HEAD = "0014_m13_authority_complete_world"
+EXPECTED_ALEMBIC_HEAD = "0015_m14_world_observation_execution"
 BACKUP_MANIFEST_SCHEMA_VERSION = 1
 
-# M13 (frozen R3 §23): restore is head-dispatched across four heads. M13
-# adds no Blob FK, so the 0014 policy is exactly the seven M11/M12 paths.
+# M13 (frozen R3 §23): restore is head-dispatched across five heads. M14
+# (frozen R2 §23) advances the expected head to 0015 and adds the eighth
+# Blob-FK path (derived_observation_artifacts.blob_hash); historical
+# restore heads 0011-0014 remain supported with their exact policies.
 PRE_M11_ALEMBIC_HEAD = "0011_m10_derived_spatial_execution"
 M11_ALEMBIC_HEAD = "0012_m11_reusable_production_revisions"
 M12_ALEMBIC_HEAD = "0013_m12_composition_occurrences"
+M13_ALEMBIC_HEAD = "0014_m13_authority_complete_world"
+M14_ALEMBIC_HEAD = "0015_m14_world_observation_execution"
 SUPPORTED_RESTORE_ALEMBIC_HEADS = frozenset({
     PRE_M11_ALEMBIC_HEAD,
     M11_ALEMBIC_HEAD,
     M12_ALEMBIC_HEAD,
-    EXPECTED_ALEMBIC_HEAD,
+    M13_ALEMBIC_HEAD,
+    M14_ALEMBIC_HEAD,
 })
 
 ARTIFACT_KINDS = (
@@ -89,14 +94,26 @@ M11_BLOB_FK_COLUMNS = frozenset(
     | {("production_revision_closures", "blob_hash")}
 )
 
+# M14 (frozen R2 §23): the 0015 policy is exactly the predecessor seven
+# paths plus derived_observation_artifacts.blob_hash — the eighth path.
+# The binding table pins its Blob through the composite FK to the
+# artifact row (which itself FKs blobs), so it declares no independent
+# blobs FK and the physical inventory is exactly eight.
+M14_BLOB_FK_COLUMNS = frozenset(
+    set(M11_BLOB_FK_COLUMNS)
+    | {("derived_observation_artifacts", "blob_hash")}
+)
+
 
 def _blob_fk_policy_for_head(head: str) -> frozenset:
-    """Exact head-specific Blob-FK inventory (frozen §§14.2/16.2/23.2)."""
+    """Exact head-specific Blob-FK inventory (frozen §§14.2/16.2/23.2/§23)."""
     if head == PRE_M11_ALEMBIC_HEAD:
         return PRE_M11_BLOB_FK_COLUMNS
-    if head in (M11_ALEMBIC_HEAD, M12_ALEMBIC_HEAD, EXPECTED_ALEMBIC_HEAD):
+    if head in (M11_ALEMBIC_HEAD, M12_ALEMBIC_HEAD, M13_ALEMBIC_HEAD):
         # M12/M13 add no Blob FK; 0012-0014 share the exact seven paths.
         return M11_BLOB_FK_COLUMNS
+    if head == M14_ALEMBIC_HEAD:
+        return M14_BLOB_FK_COLUMNS
     raise RecoveryCorruption(f"unsupported recovery head {head!r}.")
 
 _HEX = set("0123456789abcdef")
@@ -365,6 +382,32 @@ def _generation_artifact_requirements(spec: dict, what: str) -> list[tuple[str, 
                     "release contract binds one profile per release."
                 )
         return out
+    if schema_version == 4:
+        # M14 (frozen R2 §37): schema 4 references the same four workflow
+        # package artifact kinds through its lower schema-3 value, plus
+        # the exact observation profile/capability identities.
+        try:
+            sr = spec["lower_schema_3"]["spatial_realization"]
+            profile_hash = sr["realization_profile_hash"]
+            fp_hash = spec["lower_schema_3"]["model"][
+                "execution_model_fingerprint_hash"]
+        except (KeyError, TypeError) as exc:
+            raise RecoveryCorruption(
+                f"{what}: schema-4 lower_schema_3 lacks its frozen "
+                "spatial_realization/model identities."
+            ) from exc
+        out.append(("realization_profiles", _hex_or_corrupt(
+            profile_hash, f"{what}: schema-4 realization_profile_hash")))
+        out.append(("execution_model_fingerprints", _hex_or_corrupt(
+            fp_hash, f"{what}: schema-4 execution_model_fingerprint_hash")))
+        observation = spec.get("world_observation")
+        if not isinstance(observation, dict):
+            raise RecoveryCorruption(
+                f"{what}: schema-4 WorkflowSpec lacks world_observation.")
+        for field in ("profile_hash", "capability_contract_hash"):
+            _hex_or_corrupt(observation.get(field),
+                            f"{what}: world_observation.{field}")
+        return out
     raise RecoveryCorruption(
         f"{what}: unsupported WorkflowSpec schema_version {schema_version!r}."
     )
@@ -433,8 +476,26 @@ def _blob_relative_path(blob_hash: str) -> str:
     return f"sha256/{blob_hash[0:2]}/{blob_hash[2:4]}/{blob_hash}"
 
 
-def _enumerate_liveness(staged_db: Path, expected_columns: frozenset = M11_BLOB_FK_COLUMNS) -> _Liveness:
+def _staged_db_head(staged_db: Path) -> str:
+    con = sqlite3.connect(str(staged_db))
+    try:
+        rows = con.execute(
+            "SELECT version_num FROM alembic_version").fetchall()
+    finally:
+        con.close()
+    if len(rows) != 1:
+        raise RecoveryCorruption(
+            f"staged DB has {len(rows)} alembic_version rows")
+    return rows[0][0]
+
+
+def _enumerate_liveness(staged_db: Path, expected_columns: frozenset | None = None) -> _Liveness:
     """Exact Blob + workflow-artifact liveness from the staged DB only."""
+    if expected_columns is None:
+        # Backup/verification paths without an explicit head dispatch
+        # read the policy from the staged DB's actual head.
+        expected_columns = _blob_fk_policy_for_head(
+            _staged_db_head(staged_db))
     con = sqlite3.connect(str(staged_db))
     con.row_factory = sqlite3.Row
     try:
@@ -612,6 +673,58 @@ def _enumerate_liveness(staged_db: Path, expected_columns: frozenset = M11_BLOB_
                             "disagrees with derived_spatial_artifacts "
                             "provenance."
                         )
+
+            if spec.get("schema_version") == 4:
+                # M14 (frozen R2 §37): verify the exact schema-4
+                # observation identities and the composite
+                # artifact-id/Blob-hash binding.
+                observation = spec["world_observation"]
+                import hashlib as _hl
+                from soloring.domain.canonical import (
+                    canonical_json_bytes as _cjb,
+                )
+                if _hl.sha256(_cjb(observation["spec"])).hexdigest() != (
+                        observation["spec_hash"]):
+                    raise RecoveryCorruption(
+                        f"{what}: world_observation.spec_hash disagrees "
+                        "with the nested WorldObservationSpec bytes.")
+                if _hl.sha256(_cjb(observation["negotiation"])).hexdigest() \
+                        != observation["negotiation_hash"]:
+                    raise RecoveryCorruption(
+                        f"{what}: world_observation.negotiation_hash "
+                        "disagrees with the nested NegotiationResult bytes.")
+                obs_rows = con.execute(
+                    "SELECT doa.id, doa.observation_spec_hash, "
+                    "doa.parameters_hash, doa.provenance_hash, "
+                    "doa.blob_hash, gdoi.input_key, gdoi.position "
+                    "FROM generation_derived_observation_inputs gdoi "
+                    "JOIN derived_observation_artifacts doa "
+                    "  ON doa.id = gdoi.derived_observation_artifact_id "
+                    "AND doa.blob_hash = gdoi.blob_hash "
+                    "WHERE gdoi.generation_id = ?",
+                    (row["id"],),
+                ).fetchall()
+                if obs_rows:
+                    for r in obs_rows:
+                        if r["observation_spec_hash"] != (
+                                observation["spec_hash"]):
+                            raise RecoveryCorruption(
+                                f"{what}: derived observation artifact "
+                                f"{r['id']} pins a different observation "
+                                "spec hash than the stored WorkflowSpec.")
+                parameters = json.loads(
+                    con.execute(
+                        "SELECT parameters_json FROM "
+                        "derived_observation_artifacts WHERE id = ?",
+                        (obs_rows[0]["id"],),
+                    ).fetchone()["parameters_json"]
+                ) if obs_rows else None
+                if parameters is not None:
+                    if _hl.sha256(_cjb(parameters)).hexdigest() != (
+                            obs_rows[0]["parameters_hash"]):
+                        raise RecoveryCorruption(
+                            f"{what}: derived observation parameters_hash "
+                            "disagrees with canonical parameters bytes.")
 
             generation_specs.append({
                 "generation_id": row["id"],
