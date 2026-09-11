@@ -85,6 +85,8 @@ ALLOWLIST = (
     "tests/test_m14_execution.py",
     "tests/test_m14_history.py",
     "tests/test_m14_base_corpus.py",
+    "tests/test_m14_ui.py",
+    "tests/test_m14_scale.py",
     "tests/test_m14_materializer.py",
     "tests/test_m11_scope.py",
     "tests/test_m12_boundary.py",

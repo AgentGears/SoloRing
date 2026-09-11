@@ -73,6 +73,8 @@ ALLOWLIST = (
     "tests/test_m14_b5_hist12.py",
     "tests/test_m14_b5_worker_closure.py",
     "tests/test_m14_b5_increment3.py",
+    "tests/test_m14_ui.py",
+    "tests/test_m14_scale.py",
     "tests/test_m10a_migrations.py",
     "tests/test_m11_migration.py",
     "tests/test_m12_migration.py",

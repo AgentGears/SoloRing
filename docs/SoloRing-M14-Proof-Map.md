@@ -134,15 +134,15 @@ Disposition vocabulary:
 
 | Cell | Disposition | Exact proof owner | Claim |
 |---|---|---|---|
-| `M14-SCALE:01` | PENDING | `tests/test_m14_scale.py::test_m14_scale_01` | 10/100/1000 closure load has bounded SQL classes. |
-| `M14-SCALE:02` | PENDING | `tests/test_m14_scale.py::test_m14_scale_02` | No per-occurrence closure/interpretation SELECT loop. |
-| `M14-SCALE:03` | PENDING | `tests/test_m14_scale.py::test_m14_scale_03` | B1 frozen resource caps fail before rasterization allocation. |
-| `M14-SCALE:04` | PENDING | `tests/test_m14_scale.py::test_m14_scale_04` | Benchmark/materializer records CPU + peak memory + artifact size. |
-| `M14-SCALE:05` | PENDING | `tests/test_m14_scale.py::test_m14_scale_05` | Repository residue absent after scale/benchmark proofs. |
+| `M14-SCALE:01` | TEST | `tests/test_m14_scale.py::test_m14_scale_01` | 10/100/1000 closure load has bounded SQL classes. |
+| `M14-SCALE:02` | TEST | `tests/test_m14_scale.py::test_m14_scale_02` | No per-occurrence closure/interpretation SELECT loop. |
+| `M14-SCALE:03` | TEST | `tests/test_m14_scale.py::test_m14_scale_03` | B1 frozen resource caps fail before rasterization allocation. |
+| `M14-SCALE:04` | TEST | `tests/test_m14_scale.py::test_m14_scale_04` | Benchmark/materializer records CPU + peak memory + artifact size. |
+| `M14-SCALE:05` | TEST | `tests/test_m14_scale.py::test_m14_scale_05` | Repository residue absent after scale/benchmark proofs. |
 
 ## M14-UI
 
 | Cell | Disposition | Exact proof owner | Claim |
 |---|---|---|---|
-| `M14-UI:01` | PENDING | `tests/test_m14_ui.py::test_m14_ui_01` | Refusal traces property → preservation → authority/source → contract → verdict. |
-| `M14-UI:02` | PENDING | `tests/test_m14_ui.py::test_m14_ui_02` | Historical inspector separates captured observation/artifact from current environment. |
+| `M14-UI:01` | TEST | `tests/test_m14_ui.py::test_m14_ui_01` | Refusal traces property → preservation → authority/source → contract → verdict. |
+| `M14-UI:02` | TEST | `tests/test_m14_ui.py::test_m14_ui_02` | Historical inspector separates captured observation/artifact from current environment. |
