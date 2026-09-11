@@ -164,45 +164,37 @@ async def execute_schema4_derived_inputs(
         blob_hash=binding["blob_hash"],
         local_path=str(store.path_for_hash(binding["blob_hash"])))]
 
-    # ---- the inherited M10 entity-depth siblings (world superseded) ---
-    entity_rows = (await session.execute(text(
-        "SELECT gdsi.input_key, gdsi.position, gdsi.artifact_role, "
-        "       gdsi.derived_spatial_artifact_id, gdsi.blob_hash "
-        "FROM generation_derived_spatial_inputs gdsi "
-        "WHERE gdsi.generation_id = :gid "
-        "AND gdsi.artifact_role = 'spatial.entity_depth' "
-        "ORDER BY gdsi.position"),
-        {"gid": generation_id})).mappings().all()
-    for row in entity_rows:
-        art = (await session.execute(text(
-            "SELECT project_id, spec_hash, runtime_fingerprint_hash, "
-            "blob_hash FROM derived_spatial_artifacts WHERE id = :aid"),
-            {"aid": row["derived_spatial_artifact_id"]}
-        )).mappings().one_or_none()
-        if art is None or art["blob_hash"] != row["blob_hash"]:
-            raise _fail(
-                ec.DERIVED_SPATIAL_PROVENANCE_MISMATCH,
-                f"Entity-depth provenance missing/mismatched for "
-                f"{row['input_key']!r}.")
-        entity_status = await blob_integrity_status(
-            store, row["blob_hash"])
-        if entity_status != "valid":
-            raise _fail(
-                ec.DERIVED_SPATIAL_BLOB_CORRUPT,
-                f"Entity-depth Blob failed integrity for "
-                f"{row['input_key']!r}.")
-        key, node, field = resolve_derived_binding(
-            manifest_v3, row["artifact_role"], row["position"])
-        if key != row["input_key"]:
-            raise _fail(
-                ec.DERIVED_SPATIAL_BINDING_INVALID,
-                f"Entity-depth input_key {row['input_key']!r} disagrees "
-                f"with the manifest binding {key!r}.")
-        verified.append(VerifiedDerivedInput(
-            input_key=row["input_key"], position=row["position"],
-            artifact_role=row["artifact_role"], node=node, field=field,
-            blob_hash=row["blob_hash"],
-            local_path=str(store.path_for_hash(row["blob_hash"]))))
+    # ---- the inherited M10 closure (fourth review P0) -----------------
+    # The ENTIRE inherited entity-depth historical closure is verified by
+    # THE predecessor M10 loader against the immutable
+    # lower_schema_3.spatial_realization — the schema-4 path never
+    # maintains a second, weaker interpretation of M10 provenance.
+    # Every identity-bearing field (artifact id, Blob hash, position,
+    # role, artifact spec/runtime hashes, spatial-continuity hash,
+    # project ownership, manifest binding, physical Blob bytes) is
+    # proven against the captured spec BEFORE anything is uploaded.
+    from soloring.spatial.worker_inputs import (
+        load_verified_derived_inputs,
+    )
+
+    m10_verified = await load_verified_derived_inputs(
+        session, store, generation_id=generation_id,
+        workflow_spec=workflow_spec_v4["lower_schema_3"],
+        manifest_v3=manifest_v3)
+    superseded = [v for v in m10_verified
+                  if v.artifact_role == "spatial.world_depth"]
+    if len(superseded) != 1:
+        raise _fail(
+            ec.DERIVED_SPATIAL_BINDING_INVALID,
+            "The inherited M10 closure must hold exactly one verified "
+            "world-depth transport to supersede — found "
+            f"{len(superseded)}")
+    # the verified entity-depth siblings carry forward UNCHANGED — the
+    # exact verified objects whose identities were just proven equal to
+    # the immutable spec entries
+    verified.extend(
+        v for v in m10_verified
+        if v.artifact_role != "spatial.world_depth")
 
     # ---- upload the exact retained bytes (the frozen attempt ns) ------
     namespace = attempt_namespace(generation_id, attempt_id)

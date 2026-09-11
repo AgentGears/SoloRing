@@ -63,10 +63,11 @@ def _load(spec4, manifest_v3):
 
 
 async def _run(client, generation, spec4, manifest_v3, settings,
-               attempt="11111111-1111-4111-8111-111111111111"):
+               attempt="11111111-1111-4111-8111-111111111111",
+               uploader=None):
     from soloring.assets.blob_store import BlobStore
 
-    uploader = _Uploader()
+    uploader = uploader or _Uploader()
     async with _factory(client)() as session:
         verified = await _load(spec4, manifest_v3)(
             session, BlobStore(settings),
@@ -143,6 +144,35 @@ async def test_m14_exec_07(client, tmp_path):
         if role_binding:
             assert v.node == role_binding["node"]
             assert v.field == role_binding["field"]
+
+    # fourth review P0 — EXEC:07 owns the identity-preservation claim
+    # on the FULL three-stream posture: every uploaded entity artifact
+    # id + Blob identity is EXACTLY the one captured in the immutable
+    # lower_schema_3 (the uploaded inherited controls are the
+    # WorkflowSpec's controls, never a substitution the spec does not
+    # pin)
+    from tests.test_m14_source_review_corrections import (
+        _three_stream_schema4_generation,
+    )
+
+    (b3, generation3, spec4_3, manifest3_3, settings3, engine3) = (
+        await _three_stream_schema4_generation(
+            client, tmp_path, tag=b"m14b5-exec07-identity"))
+    verified3, _uploader3 = await _run(
+        client, generation3, spec4_3, manifest3_3, settings3)
+    spec_entries = {
+        entry["input_key"]: entry
+        for entry in spec4_3["lower_schema_3"]["spatial_realization"][
+            "derived_artifacts"]}
+    entities3 = [v for v in verified3
+                 if v.artifact_role == "spatial.entity_depth"]
+    assert len(entities3) == 2, (
+        "premise: the three-stream posture carries two entity siblings")
+    for v in entities3:
+        entry = spec_entries[v.input_key]
+        assert v.blob_hash == entry["blob_hash"]
+        assert v.input_key == entry["input_key"]
+        assert v.position == entry["position"]
 
 
 # ---- HIST:05/06 successor mutation cannot alter the historical input -------

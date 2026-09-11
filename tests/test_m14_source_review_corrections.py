@@ -1405,3 +1405,155 @@ async def test_inspector_http_verified_provenance_flag(client, tmp_path):
     r = await client.get(f"/generations/{generation.id}/observation")
     assert r.status_code == 200, r.text
     assert r.json()["captured"]["retained_profile_verified"] is True
+
+
+# ---- R4-P0: the schema-4 path reuses the predecessor M10 closure ------------
+
+async def _three_stream_schema4_generation(client, tmp_path, *, tag: bytes):
+    """A schema-4 Generation in the full three-stream production
+    posture: gate-style mesh occurrence + TWO Track-staged characters,
+    generated through the observation package (world superseded by the
+    observation artifact, two inherited entity-depth siblings)."""
+    from tests.conftest import make_tracked_maker
+    from tests.test_m13_shot_capture import _capture as _m13_capture
+    from tests.test_m13_shot_capture import _entity_approved
+    from tests.test_m14_execution import (
+        _comfy,
+        _generate,
+        _observation_package,
+        _stored_spec,
+    )
+    from tests.test_m14_gpu_gate import _gate_mesh_doc
+    from tests.test_m14_materializer import _observation_world
+
+    b, snapshot, oids, prids = await _observation_world(
+        client, tag=tag,
+        sources=[{"kind": "mesh", "mesh": _gate_mesh_doc(),
+                  "transform": (0, 0, 0), "interpretation": (0, 0, 0)}],
+        adopt_first_mesh=False)
+    engine = _engine_of(client)
+    maker = make_tracked_maker(engine)
+
+    mark, _markrev = await _entity_approved(
+        client, b["pid"], "character", "Mark")
+    async with engine.connect() as conn:
+        await conn.execute(text(
+            "INSERT INTO shot_entity_dependencies (shot_id, entity_id, "
+            "role, position) VALUES (:s, :e, 'cast', 9)"),
+            {"s": b["shot"], "e": mark})
+        await conn.commit()
+
+    from soloring.spatial import plans as plan_svc
+    from soloring.spatial import tracks as track_svc
+    from soloring.spatial import transitions as trans_svc
+
+    async with engine.connect() as conn:
+        seq = (await conn.execute(text(
+            "SELECT id FROM sequences WHERE project_id = :p "
+            "ORDER BY position LIMIT 1"),
+            {"p": b["pid"]})).scalar_one()
+    blocking = []
+    for entity, translation in ((b["eva"], [-1500, 0, 200]),
+                                (mark, [1300, 0, -900])):
+        track = await track_svc.create_track(
+            maker(), b["world"]["id"], entity_id=entity,
+            requirement="optional")
+        await trans_svc.create_transition(
+            maker(), track["id"], anchor_type="sequence",
+            anchor_id=seq, boundary="start", operation="set",
+            translation_mm=list(translation), rotation_udeg=[0, 0, 0])
+        blocking.append({
+            "spatial_track_id": track["id"],
+            "screen_direction": "left_to_right",
+            "keyframes": [{
+                "time_ms": 0,
+                "transform": {"translation_mm": list(translation),
+                              "rotation_udeg": [0, 0, 0]}}],
+        })
+    async with engine.connect() as conn:
+        old_hash = (await conn.execute(text(
+            "SELECT plan_hash FROM shot_spatial_plans "
+            "WHERE shot_id = :s"),
+            {"s": b["shot"]})).scalar_one()
+    await plan_svc.put_spatial_plan(
+        maker(), b["shot"], expected_plan_hash=old_hash, plan_raw={
+            "schema_version": 1,
+            "spatial_world_id": b["world"]["id"],
+            "camera": snapshot["spatial_continuity"]["shot_plan"][
+                "camera"],
+            "blocking": blocking,
+            "axis_constraint": None,
+        })
+    binding_id = snapshot["production_world"]["binding"]["binding_id"]
+    r = await client.put(
+        f"/shots/{b['shot']}/production-world-selection",
+        json={"binding_id": binding_id,
+              "expected_binding_id": binding_id})
+    assert r.status_code == 200, r.text
+    await _m13_capture(client, b["shot"])
+
+    pkg = await _observation_package(tmp_path)
+    settings = _comfy(client, pkg)
+    generation = await _generate(client, b["shot"], settings)
+    spec4 = await _stored_spec(engine, generation.id)
+    manifest_v3 = json.loads(
+        (pkg / "manifest.json").read_text(encoding="utf-8"))
+    return b, generation, spec4, manifest_v3, settings, engine
+
+
+async def test_entity_sibling_repoint_to_valid_pair_refuses(client,
+                                                             tmp_path):
+    """Fourth-review P0 regression: repointing an entity-depth sibling
+    row to ANOTHER internally valid (artifact, Blob) pair at the same
+    manifest slot — WorkflowSpec and hash untouched — refuses BEFORE
+    any upload: the schema-4 path verifies the entire inherited M10
+    closure against the immutable lower_schema_3 (exactly what the
+    schema-3 worker would do)."""
+    from soloring.errors import SoloRingError
+
+    (b, generation, spec4, manifest_v3, settings, engine) = (
+        await _three_stream_schema4_generation(
+            client, tmp_path, tag=b"m14-r4-repoint"))
+
+    async with engine.connect() as conn:
+        rows = (await conn.execute(text(
+            "SELECT gdsi.input_key, gdsi.position, "
+            "gdsi.derived_spatial_artifact_id, gdsi.blob_hash FROM "
+            "generation_derived_spatial_inputs gdsi "
+            "WHERE gdsi.generation_id = :g "
+            "AND gdsi.artifact_role = 'spatial.entity_depth' "
+            "ORDER BY gdsi.position"),
+            {"g": generation.id})).mappings().all()
+        # another internally-valid pair: swap the two entity siblings'
+        # (artifact_id, blob_hash) at their fixed slots
+        assert len(rows) == 2
+        await conn.execute(text(
+            "UPDATE generation_derived_spatial_inputs SET "
+            "derived_spatial_artifact_id = :a, blob_hash = :h "
+            "WHERE generation_id = :g AND input_key = :k"),
+            [{"a": rows[1]["derived_spatial_artifact_id"],
+              "h": rows[1]["blob_hash"], "g": generation.id,
+              "k": rows[0]["input_key"]},
+             {"a": rows[0]["derived_spatial_artifact_id"],
+              "h": rows[0]["blob_hash"], "g": generation.id,
+              "k": rows[1]["input_key"]}])
+        await conn.commit()
+
+    from tests.test_m14_b5_worker_closure import _run
+
+    class _NoUploads:
+        uploads = []
+
+        async def upload(self, **kwargs):
+            raise AssertionError(
+                "upload reached for a repointed entity sibling")
+
+        async def upload_bytes(self, **kwargs):
+            raise AssertionError(
+                "upload reached for a repointed entity sibling")
+
+    with pytest.raises(SoloRingError) as excinfo:
+        await _run(client, generation, spec4, manifest_v3, settings,
+                   attempt="44444444-4444-4444-8444-444444444441",
+                   uploader=_NoUploads())
+    assert "DERIVED_SPATIAL" in str(excinfo.value.code)
