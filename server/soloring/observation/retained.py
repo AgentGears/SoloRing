@@ -213,16 +213,47 @@ def _resolve_a4_subject_world(placement: dict, subject: dict,
                 "a malformed transform")
         return transform
     if kind in _ENTITY_PLACEMENT_KINDS:
+        # Source review R2-P1: the binding's placement pins an EXACT
+        # {kind, id} target — resolve by the full identity with
+        # exactly-one-match semantics (the same §13.3-class discipline
+        # as the PI path): entity_track matches entity id AND
+        # spatial_track_id; entity_fixed_frame matches entity id AND
+        # spatial_frame_id. First-match lookups could silently bind the
+        # wrong historical transform.
+        def _well_formed(transform) -> bool:
+            return (isinstance(transform, dict)
+                    and isinstance(transform.get("translation_mm"), list)
+                    and isinstance(transform.get("rotation_udeg"), list))
+
         if kind == "entity_track" and captured_spatial_pack is not None:
-            for staged in captured_spatial_pack.get("staging", []):
-                if staged.get("entity_id") == subject["id"]:
-                    return staged["transform"]
+            matches = [
+                staged for staged in captured_spatial_pack.get(
+                    "staging", [])
+                if staged.get("entity_id") == subject["id"]
+                and staged.get("spatial_track_id") == placement["id"]]
+            if len(matches) != 1 or not _well_formed(
+                    matches[0].get("transform")):
+                raise _invariant(
+                    "captured schema-5 staging must hold exactly one "
+                    f"well-formed state for the exact key (entity "
+                    f"{subject['id']}, spatial track "
+                    f"{placement['id']!r}) — found {len(matches)}")
+            return matches[0]["transform"]
         if kind == "entity_fixed_frame" and captured_spatial_pack is not None:
             frames = (captured_spatial_pack.get("spatial_world", {})
                       .get("world_snapshot", {}).get("frames", []))
-            for frame in frames:
-                if frame.get("bound_entity_id") == subject["id"]:
-                    return frame["transform"]
+            matches = [
+                frame for frame in frames
+                if frame.get("bound_entity_id") == subject["id"]
+                and frame.get("spatial_frame_id") == placement["id"]]
+            if len(matches) != 1 or not _well_formed(
+                    matches[0].get("transform")):
+                raise _invariant(
+                    "captured schema-5 world frames must hold exactly "
+                    f"one well-formed frame for the exact key (entity "
+                    f"{subject['id']}, spatial frame "
+                    f"{placement['id']!r}) — found {len(matches)}")
+            return matches[0]["transform"]
         raise _invariant(
             f"captured schema-5 spatial plane has no exact placement "
             f"source for {kind} subject {subject['id']!r}")

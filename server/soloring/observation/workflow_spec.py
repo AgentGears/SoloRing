@@ -118,16 +118,35 @@ def _validate_negotiation_relational(spec: dict,
                 raise _invalid(
                     "a SUPPORTED requirement row must echo the matched "
                     "capability")
-            echoed = (capability.get("property"),
-                      capability.get("preservation"),
-                      capability.get("source_contract"))
-            requested = (requirement["property"],
-                         requirement["preservation"],
-                         requirement["source_contract"])
-            if echoed != requested:
+            # Source review R2-P0: the echoed capability must match on
+            # EVERY materializer-bearing field — the semantic tuple AND
+            # the (materializer_id, materializer_version, output_role)
+            # of the spec's pinned materialization.
+            materializations = spec["materializations"]
+            if len(materializations) != 1:
+                raise _invalid(
+                    "schema-4 validation requires exactly one "
+                    "materialization")
+            pinned = materializations[0]
+            echoed_all = (
+                capability.get("property"),
+                capability.get("preservation"),
+                capability.get("source_contract"),
+                capability.get("materializer_id"),
+                capability.get("materializer_version"),
+                capability.get("output_role"))
+            requested_all = (
+                requirement["property"],
+                requirement["preservation"],
+                requirement["source_contract"],
+                pinned["materializer"]["id"],
+                pinned["materializer"]["version"],
+                pinned["artifact_role"])
+            if echoed_all != requested_all:
                 raise _invalid(
                     "a SUPPORTED requirement row echoes a capability "
-                    "tuple other than the requested one")
+                    "tuple other than the requested one (semantic or "
+                    "materializer identity diverged)")
         elif capability is not None:
             raise _invalid(
                 f"a {verdict} requirement row cannot echo a capability")

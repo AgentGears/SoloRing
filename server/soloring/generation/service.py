@@ -348,28 +348,35 @@ async def _integrate_schema6_observation(
 
     profile_doc = package.profile_v2
     observation_block = profile_doc.get("observation")
-    mesh_depth_materializers = sorted(
+    # Source review R2-P0: the WorldObservationSpec schema-1 grammar
+    # pins EXACTLY soloring.observation.mesh_depth version 1 — resolve
+    # that one fixed entry from the captured block, never "the highest
+    # version". A block declaring only other versions leaves the spec
+    # unable to pin its required contract: typed policy refusal, the
+    # same posture as no materializer at all.
+    pinned_materializer = next(
         (m for m in (observation_block or {}).get("materializers", [])
-         if m.get("id") == "soloring.observation.mesh_depth"),
-        key=lambda m: m["version"])
-    if not mesh_depth_materializers:
+         if m.get("id") == "soloring.observation.mesh_depth"
+         and m.get("version") == 1), None)
+    if pinned_materializer is None:
         # The captured profile declares no mesh-depth observation
-        # materializer: the WorldObservationSpec cannot pin the one
-        # materializer contract it would require, so the observation
-        # refuses with the typed policy outcome — never a fabricated
-        # contract identity and never the predecessor lower-logical
-        # execution.
+        # materializer at the schema-1 pinned identity (v1): the
+        # WorldObservationSpec cannot pin the one materializer contract
+        # it would require, so the observation refuses with the typed
+        # policy outcome — never a fabricated contract identity and
+        # never the predecessor lower-logical execution.
         raise SoloRingError(
             ErrorCode.OBSERVATION_POLICY_UNSUPPORTED,
             "The captured workflow profile declares no observation "
-            "capability: a schema-6 ShotRevision cannot execute through "
-            "this package, and the pre-M14 lower-logical fallback no "
-            "longer exists.",
+            "capability at the schema-1 materializer identity "
+            "(soloring.observation.mesh_depth v1): a schema-6 "
+            "ShotRevision cannot execute through this package, and the "
+            "pre-M14 lower-logical fallback no longer exists.",
             status_code=409,
             details={"shot_revision_id": revision.id,
                      "workflow_id": release.workflow_id,
                      "workflow_version": release.workflow_version})
-    contract_hash = mesh_depth_materializers[-1]["contract_hash"]
+    contract_hash = pinned_materializer["contract_hash"]
 
     observation_spec = compile_world_observation_spec(
         shot_id=shot_id,

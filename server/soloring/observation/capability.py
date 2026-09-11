@@ -236,9 +236,37 @@ def negotiate(spec: dict, observation_block: dict) -> dict:
         and policy["version"] == spec["policy"]["version"]
         for policy in block["supported_policies"])
 
-    capabilities = {
-        (c["property"], c["preservation"], c["source_contract"]): c
-        for c in block["capabilities"]}
+    # Source review R2-P0 (frozen §17/CAP:04 exact tuple): the
+    # capability coordinate includes the MATERIALIZER identity — a
+    # semantic match whose (materializer_id, materializer_version,
+    # output_role) differs from the spec's materialization is a
+    # DIFFERENT capability tuple, never support for the requested one.
+    # Schema 1 pins exactly one materialization; negotiation is against
+    # that one execution identity.
+    materializations = spec["materializations"]
+    if len(materializations) != 1:
+        raise _bad(
+            "negotiation requires exactly one WorldObservationSpec "
+            f"materialization — got {len(materializations)}")
+    pinned_materializer = (
+        materializations[0]["materializer"]["id"],
+        materializations[0]["materializer"]["version"],
+        materializations[0]["artifact_role"])
+
+    def _exact(c: dict) -> bool:
+        return ((c["materializer_id"], c["materializer_version"],
+                 c["output_role"]) == pinned_materializer)
+
+    capabilities = {}
+    for c in block["capabilities"]:
+        key = (c["property"], c["preservation"], c["source_contract"])
+        if _exact(c):
+            # a full-tuple duplicate is rejected at block validation;
+            # the exact entry wins the semantic coordinate outright
+            if key in capabilities:
+                raise _bad(
+                    f"duplicate exact capability tuple for {key}")
+            capabilities[key] = c
     # Erratum E-1 verdict law (frozen §8.10 as amended): a property
     # declared in EITHER list is KNOWN — an unmatched tuple under a
     # known property is UNSUPPORTED; a property absent from both is the

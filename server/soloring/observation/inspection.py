@@ -74,55 +74,72 @@ async def read_captured_observation(session, generation_id: str) -> dict:
                 "disagrees with the canonicalized bytes")
 
         observation = spec["world_observation"]
-        binding = (await conn.execute(text(
+        binding_rows = (await conn.execute(text(
             "SELECT input_key, position, artifact_role, "
             "derived_observation_artifact_id, blob_hash FROM "
             "generation_derived_observation_inputs WHERE generation_id "
-            "= :g"), {"g": generation_id})).mappings().one_or_none()
-        artifact = None
-        if binding is not None:
-            artifact_row = (await conn.execute(text(
-                "SELECT id, blob_hash, materializer_id, "
-                "materializer_version, materializer_contract_hash, "
-                "parameters_json, parameters_hash, provenance_json, "
-                "provenance_hash, created_at FROM "
-                "derived_observation_artifacts WHERE id = :a"),
-                {"a": binding["derived_observation_artifact_id"]}
-            )).mappings().one_or_none()
-            if artifact_row is not None:
-                # Source review P1-4 (inspector hardening): the displayed
-                # binding/artifact identities are cross-checked against
-                # each other AND against the spec's materializer contract
-                # before presentation as captured provenance.
-                from soloring.domain.canonical import canonical_hash
-                from soloring.errors import internal_invariant
+            "= :g"), {"g": generation_id})).mappings().all()
+        # Source review R2-P1: a schema-4 Generation ALWAYS has its
+        # exact derived-observation binding — a missing or duplicated
+        # binding row is historical corruption (the worker fails closed
+        # on the same states; the inspector may not fail open).
+        from soloring.errors import internal_invariant
 
-                if artifact_row["id"] != binding[
-                        "derived_observation_artifact_id"]:
-                    raise internal_invariant(
-                        f"Generation {generation_id}: bound artifact id "
-                        "disagrees with the loaded artifact row.")
-                if artifact_row["blob_hash"] != binding["blob_hash"]:
-                    raise internal_invariant(
-                        f"Generation {generation_id}: bound Blob hash "
-                        "disagrees with the artifact row.")
-                provenance = json.loads(artifact_row["provenance_json"])
-                if canonical_hash(provenance) != (
-                        artifact_row["provenance_hash"]):
-                    raise internal_invariant(
-                        f"Generation {generation_id}: captured "
-                        "observation provenance disagrees with its hash.")
-                spec_contract = observation["spec"][
-                    "materializations"][0]["materializer"][
-                        "contract_hash"]
-                if (artifact_row["materializer_contract_hash"]
-                        != spec_contract):
-                    raise internal_invariant(
-                        f"Generation {generation_id}: the captured "
-                        "artifact's producing contract disagrees with the "
-                        "stored WorldObservationSpec materializer "
-                        "contract.")
-                artifact = {
+        if not binding_rows:
+            raise internal_invariant(
+                f"Generation {generation_id}: schema-4 Generation is "
+                "missing its mandatory derived-observation binding.")
+        if len(binding_rows) > 1:
+            raise internal_invariant(
+                f"Generation {generation_id}: carries "
+                f"{len(binding_rows)} derived-observation binding rows — "
+                "at most one is representable.")
+        binding = binding_rows[0]
+        artifact_row = (await conn.execute(text(
+            "SELECT id, blob_hash, materializer_id, "
+            "materializer_version, materializer_contract_hash, "
+            "parameters_json, parameters_hash, provenance_json, "
+            "provenance_hash, created_at FROM "
+            "derived_observation_artifacts WHERE id = :a"),
+            {"a": binding["derived_observation_artifact_id"]}
+        )).mappings().one_or_none()
+        if artifact_row is None:
+            raise internal_invariant(
+                f"Generation {generation_id}: the bound derived-"
+                "observation artifact row is missing from immutable "
+                "history.")
+        # Source review P1-4 (inspector hardening): the displayed
+        # binding/artifact identities are cross-checked against
+        # each other AND against the spec's materializer contract
+        # before presentation as captured provenance.
+        from soloring.domain.canonical import canonical_hash
+
+        if artifact_row["id"] != binding[
+                "derived_observation_artifact_id"]:
+            raise internal_invariant(
+                f"Generation {generation_id}: bound artifact id "
+                "disagrees with the loaded artifact row.")
+        if artifact_row["blob_hash"] != binding["blob_hash"]:
+            raise internal_invariant(
+                f"Generation {generation_id}: bound Blob hash "
+                "disagrees with the artifact row.")
+        provenance = json.loads(artifact_row["provenance_json"])
+        if canonical_hash(provenance) != (
+                artifact_row["provenance_hash"]):
+            raise internal_invariant(
+                f"Generation {generation_id}: captured "
+                "observation provenance disagrees with its hash.")
+        spec_contract = observation["spec"][
+            "materializations"][0]["materializer"][
+                "contract_hash"]
+        if (artifact_row["materializer_contract_hash"]
+                != spec_contract):
+            raise internal_invariant(
+                f"Generation {generation_id}: the captured "
+                "artifact's producing contract disagrees with the "
+                "stored WorldObservationSpec materializer "
+                "contract.")
+        artifact = {
                     "artifact_id": artifact_row["id"],
                     "blob_hash": artifact_row["blob_hash"],
                     "materializer_id": artifact_row["materializer_id"],

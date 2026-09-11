@@ -128,11 +128,14 @@ async def observation_readiness(session, settings, shot_id: str) -> dict:
         }
         return base
 
-    mesh_depth_materializers = sorted(
+    # Source review R2-P0: resolve the EXACT schema-1 pinned identity
+    # (soloring.observation.mesh_depth v1) — never "the highest
+    # version" (the spec grammar cannot pin any other).
+    materializer = next(
         (m for m in observation_block.get("materializers", [])
-         if m.get("id") == "soloring.observation.mesh_depth"),
-        key=lambda m: m["version"])
-    if not mesh_depth_materializers:
+         if m.get("id") == "soloring.observation.mesh_depth"
+         and m.get("version") == 1), None)
+    if materializer is None:
         base["readiness"] = "refused"
         base["policy"] = {
             "verdict": "UNSUPPORTED",
@@ -142,11 +145,12 @@ async def observation_readiness(session, settings, shot_id: str) -> dict:
             "capability_contract_hash": None,
             "explanation": (
                 "the selected observation profile declares no mesh-depth "
-                "materializer: the WorldObservationSpec cannot pin the "
-                "one materializer contract it would require"),
+                "materializer at the schema-1 pinned identity "
+                "(soloring.observation.mesh_depth v1): the "
+                "WorldObservationSpec cannot pin the one materializer "
+                "contract it would require"),
         }
         return base
-    materializer = mesh_depth_materializers[-1]
 
     from soloring.observation import (
         compile_world_observation_spec,

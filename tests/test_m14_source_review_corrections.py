@@ -723,3 +723,398 @@ async def test_generation_observation_route(client, tmp_path):
     r = await client.get(
         f"/generations/{str(uuid.uuid4())}/observation")
     assert r.status_code == 404
+
+
+# ---- R2-P0: capability/materializer identity (CAP:04 full tuple) ------------
+
+def _golden_spec_and_block():
+    spec = json.loads(
+        (FIXTURES / "m14-f06-world-observation-spec-v1.json")
+        .read_bytes().decode("utf-8"))
+    block = json.loads(
+        (FIXTURES / "m14-f06-realization-profile-observation-v1.json")
+        .read_bytes().decode("utf-8"))
+    return spec, block
+
+
+def test_two_materializer_capability_identity_is_the_exact_tuple():
+    """A block carrying mesh_depth v1 AND v2 with the capability pointing
+    at v2 does NOT support a spec pinned to v1 — the materializer
+    identity is part of the capability coordinate (frozen §17/CAP:04)."""
+    import copy
+
+    from soloring.observation import negotiate
+
+    spec, block = _golden_spec_and_block()
+    v2 = copy.deepcopy(block["materializers"][0])
+    v2["version"] = 2
+    v2["contract_hash"] = "a" * 64
+    block["materializers"].append(v2)
+    for capability in block["capabilities"]:
+        if (capability["property"], capability["preservation"]) == (
+                "occurrence.structure", "STRUCTURAL"):
+            capability["materializer_version"] = 2
+
+    result = negotiate(spec, block)
+    rows = result["requirements"]
+    structure = [row for requirement, row in zip(spec["requirements"], rows)
+                 if requirement["property"] == "occurrence.structure"]
+    (row,) = structure
+    assert row["verdict"] == "UNSUPPORTED", (
+        "a capability for a DIFFERENT materializer version never "
+        "supports the spec's pinned v1 materialization")
+    assert result["verdict"] == "UNSUPPORTED"
+
+    # the control: the same block with the capability back at v1 supports
+    spec2, block2 = _golden_spec_and_block()
+    v2b = copy.deepcopy(block2["materializers"][0])
+    v2b["version"] = 2
+    v2b["contract_hash"] = "a" * 64
+    block2["materializers"].append(v2b)
+    result2 = negotiate(spec2, block2)
+    assert result2["verdict"] == result2_verdict_expected()
+
+
+def result2_verdict_expected():
+    from soloring.observation import negotiate
+    spec, block = _golden_spec_and_block()
+    return negotiate(spec, block)["verdict"]
+
+
+def test_schema4_materializer_echo_mismatch_rejects():
+    """A self-hashed schema-4 value whose echoed capability carries a
+    DIFFERENT materializer identity than the spec's pinned materialization
+    rejects under relational validation."""
+    from soloring.errors import SoloRingError
+
+    from soloring.observation.workflow_spec import parse_workflow_spec_v4
+
+    spec4 = _resign(_valid_spec4_fixture())
+    for row in spec4["world_observation"]["negotiation"]["requirements"]:
+        if row["verdict"] == "SUPPORTED" and row["capability"]:
+            row["capability"]["materializer_version"] = 2
+            break
+    spec4 = _resign(spec4)
+    with pytest.raises(SoloRingError, match="materializer identity"):
+        parse_workflow_spec_v4(spec4)
+
+
+async def test_service_resolves_exact_v1_not_highest_version(
+        client, tmp_path):
+    """A profile declaring ONLY mesh_depth v2 (with its capability at
+    v2) refuses with the typed policy outcome: the schema-1 grammar
+    cannot pin v2, so no contract identity is fabricatable. A profile
+    with v1+v2 executes under v1 — the capability and the spec both
+    pin v1."""
+    from soloring.errors import ErrorCode, SoloRingError
+    from tests.test_m10e_generation import _spatial_settings
+    from tests.test_m10e_package3_production import _schema3_package
+    from tests.test_m14_execution import (
+        _generate,
+        _observation_profile,
+        _schema6_world,
+    )
+
+    b, _sel, _rev, _snapshot = await _schema6_world(
+        client, tag=b"m14-sr2-v2only")
+    settings_live = client._transport.app.state.settings
+    engine = _engine_of(client)
+
+    def _bump_all_versions(profile):
+        for materializer in profile["observation"]["materializers"]:
+            materializer["version"] = 2
+        for capability in profile["observation"]["capabilities"]:
+            capability["materializer_version"] = 2
+        return profile
+
+    pkg_v2_only = await _schema3_package(
+        tmp_path, mutate=lambda docs:
+        docs | {"realization-profile.json": _bump_all_versions(
+            _observation_profile())})
+    settings = _spatial_settings(settings_live, pkg_v2_only)
+
+    with pytest.raises(SoloRingError) as excinfo:
+        await _generate(client, b["shot"], settings)
+    assert excinfo.value.code == ErrorCode.OBSERVATION_POLICY_UNSUPPORTED
+    assert (await _run_query(engine, (
+        "SELECT COUNT(*) FROM generations WHERE shot_id = :s"),
+        {"s": b["shot"]})).scalar_one() == 0
+
+    # v1 + v2 both declared, capability at v1 → executes under v1
+    def _add_v2(docs):
+        import copy
+
+        profile = _observation_profile()
+        v2 = copy.deepcopy(profile["observation"]["materializers"][0])
+        v2["version"] = 2
+        v2["contract_hash"] = "b" * 64
+        profile["observation"]["materializers"].append(v2)
+        docs["realization-profile.json"] = profile
+        return docs
+
+    pkg_both = await _schema3_package(tmp_path, mutate=_add_v2)
+    settings_both = _spatial_settings(settings_live, pkg_both)
+    generation = await _generate(client, b["shot"], settings_both)
+    spec = json.loads((await _run_query(engine, (
+        "SELECT workflow_spec_json FROM generations WHERE id = :g"),
+        {"g": generation.id})).scalar_one())
+    pinned = spec["world_observation"]["spec"]["materializations"][0][
+        "materializer"]
+    assert pinned["version"] == 1, (
+        "the schema-1 grammar pins v1 — the service resolves that exact "
+        "entry even when a higher version is declared")
+
+
+
+
+# ---- R2-P1: CreativeEntity exact-target placement ---------------------------
+
+async def _entity_subject_world(client, *, tag: bytes, mode: str):
+    """A captured schema-6 world whose single mesh occurrence is bound
+    to a CreativeEntity subject with the given A4 placement mode
+    ('track' — staged via an entity spatial track; 'frame' — bound to a
+    world frame)."""
+    from soloring.spatial import revisions as wrev_svc
+    from soloring.spatial import tracks as track_svc
+    from soloring.spatial import transitions as trans_svc
+    from soloring.spatial import worlds as world_svc
+    from tests.conftest import make_tracked_maker
+    from tests.m13_seed import make_composition, mint, publish
+    from tests.test_m13_binding import _adopt, _interpretation, _publish
+    from tests.test_m13_shot_capture import _capture, _full_m13_world
+    from tests.test_m14_materializer import (
+        _mesh_doc,
+        _mesh_production_revision,
+        _write_blob,
+        structural_mesh_bytes,
+    )
+
+    b = await _full_m13_world(client, tag=tag)
+    factory = make_tracked_maker(_engine_of(client))
+    if mode == "frame":
+        async with _engine_of(client).connect() as conn:
+            eva_rev = (await conn.execute(text(
+                "SELECT revision_id FROM entity_approved_revisions "
+                "WHERE entity_id = :e"), {"e": b["eva"]})).scalar_one()
+        fr = await world_svc.create_frame(
+            factory(), b["world"]["id"], key="evaseat", name="evaseat",
+            parent_spatial_frame_id=None, bound_entity_id=b["eva"])
+        await world_svc.put_state_frame(
+            factory(), b["state"]["id"], fr["id"],
+            translation_mm=[900, 0, 300], rotation_udeg=[0, 0, 0],
+            half_extents_mm=None,
+            bound_entity_revision_id=eva_rev)
+        new_rev = await wrev_svc.capture_revision(
+            factory(), b["state"]["id"])
+        await wrev_svc.approve_revision(
+            factory(), b["state"]["id"], revision_id=new_rev["id"],
+            expected_approved_revision_id=b["rev"]["id"])
+        world_revision_id = new_rev["id"]
+    else:
+        async with _engine_of(client).connect() as conn:
+            seq = (await conn.execute(text(
+                "SELECT id FROM sequences WHERE project_id = :p "
+                "ORDER BY position LIMIT 1"),
+                {"p": b["pid"]})).scalar_one()
+        track = await track_svc.create_track(
+            factory(), b["world"]["id"], entity_id=b["eva"],
+            requirement="required")
+        await trans_svc.create_transition(
+            factory(), track["id"], anchor_type="sequence",
+            anchor_id=seq, boundary="start", operation="set",
+            translation_mm=[-800, 0, 200], rotation_udeg=[0, 0, 0])
+        world_revision_id = b["rev"]["id"]
+
+    blob = structural_mesh_bytes(_mesh_doc())
+    await _write_blob(client, blob)
+    prid = await _mesh_production_revision(
+        client, b["pid"], blob, number=600)
+    cid = await make_composition(client, b["pid"])
+    m = await mint(client, cid, prid, 0)
+    oid = m["occurrence_id"]
+    await _interpretation(client, prid)
+    await _adopt(client, cid, oid,
+                 {"kind": "creative_entity", "creative_entity_id": b["eva"]})
+    composed = (await publish(client, cid, 1))["revision"]["revision_id"]
+    pr = await _publish(client, composed, world_revision_id)
+    assert pr.status_code == 201, pr.text
+    r = await client.put(
+        f"/shots/{b['shot']}/production-world-selection",
+        json={"binding_id": pr.json()["binding_id"],
+              "expected_binding_id": None})
+    assert r.status_code == 200, r.text
+    revision, _ = await _capture(client, b["shot"])
+    snapshot = json.loads(revision.snapshot_json)
+    assert snapshot["schema_version"] == 6
+    return b, snapshot, revision
+
+
+async def _rewrite_spatial_pack(engine, revision_id: str, mutate):
+    """Rewrite the captured schema-6 snapshot's spatial plane (re-pinning
+    snapshot_hash AND the companion spatial_continuity_hash)."""
+    from soloring.domain.canonical import (
+        canonical_hash,
+        canonical_json_str,
+    )
+
+    async with engine.connect() as conn:
+        row = (await conn.execute(text(
+            "SELECT snapshot_json FROM shot_revisions WHERE id = :r"),
+            {"r": revision_id})).mappings().one()
+        snapshot = json.loads(row["snapshot_json"])
+        mutate(snapshot)
+        spatial_hash = canonical_hash(snapshot["spatial_continuity"])
+        await conn.execute(text(
+            "UPDATE shot_revisions SET snapshot_json = :sj, "
+            "snapshot_hash = :sh WHERE id = :r"),
+            {"sj": canonical_json_str(snapshot),
+             "sh": canonical_hash(snapshot), "r": revision_id})
+        await conn.execute(text(
+            "UPDATE shot_revision_spatial_worlds SET "
+            "spatial_continuity_hash = :h WHERE shot_revision_id = :r"),
+            {"h": spatial_hash, "r": revision_id})
+        await conn.commit()
+        return snapshot
+
+
+async def test_entity_track_wrong_track_fails_closed(client):
+    from soloring.errors import SoloRingError
+
+    b, snapshot, revision = await _entity_subject_world(
+        client, tag=b"m14-sr2-etrack-wrong", mode="track")
+
+    def _mutate(snap):
+        for staged in snap["spatial_continuity"]["staging"]:
+            staged["spatial_track_id"] = str(uuid.uuid4())
+
+    engine = _engine_of(client)
+    mutated = await _rewrite_spatial_pack(engine, revision.id, _mutate)
+    with pytest.raises(SoloRingError, match="exactly one"):
+        await _load_with(client, mutated)
+
+
+async def test_entity_track_duplicate_exact_target_fails_closed(client):
+    from soloring.errors import SoloRingError
+
+    b, snapshot, revision = await _entity_subject_world(
+        client, tag=b"m14-sr2-etrack-dup", mode="track")
+
+    def _mutate(snap):
+        staging = snap["spatial_continuity"]["staging"]
+        staging.append(json.loads(json.dumps(staging[0])))
+
+    engine = _engine_of(client)
+    mutated = await _rewrite_spatial_pack(engine, revision.id, _mutate)
+    with pytest.raises(SoloRingError, match="exactly one"):
+        await _load_with(client, mutated)
+
+
+async def test_entity_fixed_frame_wrong_frame_fails_closed(client):
+    from soloring.errors import SoloRingError
+
+    b, snapshot, revision = await _entity_subject_world(
+        client, tag=b"m14-sr2-eframe-wrong", mode="frame")
+
+    def _mutate(snap):
+        for frame in snap["spatial_continuity"]["spatial_world"][
+                "world_snapshot"]["frames"]:
+            if frame.get("bound_entity_id") == b["eva"]:
+                frame["spatial_frame_id"] = str(uuid.uuid4())
+
+    engine = _engine_of(client)
+    mutated = await _rewrite_spatial_pack(engine, revision.id, _mutate)
+    with pytest.raises(SoloRingError, match="exactly one"):
+        await _load_with(client, mutated)
+
+
+async def test_entity_fixed_frame_duplicate_exact_target_fails_closed(
+        client):
+    from soloring.errors import SoloRingError
+
+    b, snapshot, revision = await _entity_subject_world(
+        client, tag=b"m14-sr2-eframe-dup", mode="frame")
+
+    def _mutate(snap):
+        frames = snap["spatial_continuity"]["spatial_world"][
+            "world_snapshot"]["frames"]
+        match = next(f for f in frames
+                     if f.get("bound_entity_id") == b["eva"])
+        frames.append(json.loads(json.dumps(match)))
+
+    engine = _engine_of(client)
+    mutated = await _rewrite_spatial_pack(engine, revision.id, _mutate)
+    with pytest.raises(SoloRingError, match="exactly one"):
+        await _load_with(client, mutated)
+
+
+# ---- R2-P1: the inspector fails closed on missing/duplicate binding ----------
+
+async def test_inspector_http_missing_binding_fails_closed(
+        client, tmp_path):
+    from tests.test_m14_b5_worker_closure import _seed
+
+    b, generation, spec4, manifest_v3, settings, engine = await _seed(
+        client, tmp_path, tag=b"m14-sr2-insp-missing")
+    async with engine.connect() as conn:
+        await conn.execute(text(
+            "DELETE FROM generation_derived_observation_inputs "
+            "WHERE generation_id = :g"), {"g": generation.id})
+        await conn.commit()
+
+    r = await client.get(f"/generations/{generation.id}/observation")
+    assert r.status_code == 500, (
+        "a schema-4 Generation without its binding is historical "
+        "corruption, not a successful empty inspection")
+    assert "missing its mandatory derived-observation binding" in (
+        r.json().get("message", ""))
+
+
+async def test_inspector_http_duplicate_binding_fails_closed(
+        client, tmp_path):
+    from tests.test_m14_b5_worker_closure import _seed
+
+    b, generation, spec4, manifest_v3, settings, engine = await _seed(
+        client, tmp_path, tag=b"m14-sr2-insp-dup")
+    async with engine.connect() as conn:
+        row = (await conn.execute(text(
+            "SELECT input_key, artifact_role, "
+            "derived_observation_artifact_id, blob_hash FROM "
+            "generation_derived_observation_inputs WHERE generation_id "
+            "= :g"), {"g": generation.id})).mappings().one()
+        await conn.execute(text(
+            "INSERT INTO generation_derived_observation_inputs "
+            "(generation_id, input_key, position, artifact_role, "
+            "derived_observation_artifact_id, blob_hash) VALUES "
+            "(:g, :k, 1, :r, :a, :h)"),
+            {"g": generation.id, "k": row["input_key"] + "-x",
+             "r": row["artifact_role"],
+             "a": row["derived_observation_artifact_id"],
+             "h": row["blob_hash"]})
+        await conn.commit()
+
+    r = await client.get(f"/generations/{generation.id}/observation")
+    assert r.status_code == 500
+    assert "binding rows" in r.json().get("message", "")
+
+
+async def test_inspector_http_missing_artifact_row_fails_closed(
+        client, tmp_path):
+    from tests.test_m14_b5_worker_closure import _seed
+
+    b, generation, spec4, manifest_v3, settings, engine = await _seed(
+        client, tmp_path, tag=b"m14-sr2-insp-artifact")
+    # physical-corruption simulation: delete the artifact row with the
+    # FK enforcement disabled on this one connection (the immediate-FK
+    # schema cannot otherwise produce binding-without-artifact)
+    async with engine.connect() as conn:
+        await conn.exec_driver_sql("PRAGMA foreign_keys = OFF")
+        await conn.execute(text(
+            "DELETE FROM derived_observation_artifacts WHERE id IN ("
+            "SELECT derived_observation_artifact_id FROM "
+            "generation_derived_observation_inputs WHERE generation_id "
+            "= :g)"), {"g": generation.id})
+        await conn.commit()
+
+    r = await client.get(f"/generations/{generation.id}/observation")
+    assert r.status_code == 500
+    assert "artifact row is missing" in r.json().get("message", "")
