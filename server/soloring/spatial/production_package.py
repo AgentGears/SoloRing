@@ -279,3 +279,106 @@ __all__ = [
     "production_fingerprint_document", "boxdepth_runtime_fingerprint",
     "boxdepth_implementation_sha256",
 ]
+
+
+# ---------------------------------------------------------------------------
+# M14B-4 (frozen R2 §§15/17/18): the wan21_spatial_v1 workflow VERSION 2
+# production release. The v1 release above stays byte- and
+# meaning-immutable; v2 adds exactly the RealizationProfile schema-3
+# observation block and the descriptor schema-4 wrapper. Manifest,
+# template, and fingerprint are INHERITED from the certified v1 members
+# (the exact same documents/hashes) — no fifth artifact kind exists.
+# ---------------------------------------------------------------------------
+
+def production_observation_block() -> dict:
+    """The closed schema-3 observation block advertising ONLY what the
+    B3 materializer mechanically proves. Every capability resolves to
+    the production mesh-depth materializer and its REAL captured
+    MaterializerContract identity (the same object the service builds
+    at materialization time — never a hand-pinned digest)."""
+    from soloring.observation.capability import CAPABILITY_OUTPUT_ROLE
+    from soloring.observation.materializer import (
+        MATERIALIZER_ID,
+        MATERIALIZER_VERSION,
+        build_materializer_contract,
+        materializer_contract_hash,
+    )
+
+    def _capability(property_name: str, source_contract: str) -> dict:
+        return {
+            "property": property_name,
+            "preservation": "STRUCTURAL",
+            "source_contract": source_contract,
+            "materializer_id": MATERIALIZER_ID,
+            "materializer_version": MATERIALIZER_VERSION,
+            "output_role": CAPABILITY_OUTPUT_ROLE,
+        }
+
+    return {
+        "schema_version": 1,
+        "supported_policies": [
+            {"id": "structural-world-v1", "version": 1},
+        ],
+        "capabilities": [
+            _capability("camera.projection",
+                        "m10.camera_projection.v1"),
+            _capability("world.structure", "m10.world_depth.v1"),
+            _capability("occurrence.structure",
+                        "soloring.structural_mesh.v1"),
+            _capability("occurrence.placement", "m14.placement.v1"),
+        ],
+        "materializers": [
+            {
+                "id": MATERIALIZER_ID,
+                "version": MATERIALIZER_VERSION,
+                "contract_hash": materializer_contract_hash(
+                    build_materializer_contract()),
+                "output_role": CAPABILITY_OUTPUT_ROLE,
+                "inherited_manifest_role": "spatial.world_depth",
+            },
+        ],
+    }
+
+
+def production_profile_v3() -> dict:
+    """RealizationProfile schema 3 = the EXACT certified schema-2 value
+    (delegated validation) plus the closed observation block, at
+    workflow version 2."""
+    profile = production_profile_v2()
+    profile["schema_version"] = 3
+    profile["workflow_version"] = 2
+    profile["observation"] = production_observation_block()
+    return profile
+
+
+def production_descriptor_v4() -> dict:
+    """Descriptor schema 4: the same four content-addressed artifact
+    kinds, binding the v2 release coherently. Manifest, template, and
+    fingerprint hashes are the INHERITED v1 identities (byte-identical
+    documents); the profile hash is the schema-3 v2 profile."""
+    return production_descriptor_v4_v2()
+
+
+def production_manifest_v3_v2() -> dict:
+    """The v2 release's manifest: the EXACT certified schema-3 semantics
+    with the workflow version advanced to 2 (the package cross-identity
+    requires one workflow identity across descriptor/manifest/profile;
+    the manifest FORMAT and every binding stay the frozen schema 3)."""
+    manifest = production_manifest_v3()
+    manifest["version"] = 2
+    return manifest
+
+
+def production_descriptor_v4_v2() -> dict:
+    """Descriptor schema 4 rebinding the v2 manifest (the coherent v2
+    release: manifest v2-of-schema-3, inherited template/fingerprint,
+    profile schema 3)."""
+    return {
+        "schema_version": 4,
+        "workflow_id": "wan21_spatial_v1",
+        "workflow_version": 2,
+        "manifest_hash": _hash_json(production_manifest_v3_v2()),
+        "workflow_template_hash": _hash_json(production_template()),
+        "realization_profile_hash": _hash_json(production_profile_v3()),
+        "execution_model_fingerprint_hash": _production_fingerprint_hash(),
+    }

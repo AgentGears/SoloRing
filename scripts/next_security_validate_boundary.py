@@ -101,6 +101,9 @@ ALLOWLIST = (
     "server/soloring/generation/repository.py",
     "server/soloring/spatial/boxdepth.py",
     "tests/test_m14_mesh_depth.py",
+    "server/soloring/spatial/production_package.py",
+    "tests/test_m10e_package3_production.py",
+    "tests/test_m14_package.py",
     "tests/test_m10a_migrations.py",
     "tests/test_m11_migration.py",
     "tests/test_m12_migration.py",
@@ -131,6 +134,7 @@ M14_OWNED_PREFIXES = (
     "server/soloring/generation/repository.py",
     "server/soloring/realization/packages.py",
     "server/soloring/spatial/boxdepth.py",
+    "server/soloring/spatial/production_package.py",
     "scripts/m13_validate_boundary.py",
 )
 

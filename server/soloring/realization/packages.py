@@ -71,7 +71,7 @@ class CapturedPackageRelease:
             "manifest_hash": self.manifest_hash,
             "workflow_template_hash": self.workflow_template_hash,
         }
-        if self.schema_version in (2, 3):
+        if self.schema_version in (2, 3, 4):
             out["realization_profile_hash"] = self.realization_profile_hash
             out["execution_model_fingerprint_hash"] = (
                 self.execution_model_fingerprint_hash
@@ -108,7 +108,7 @@ def _read_descriptor(package_path: Path) -> dict:
         "schema_version", "workflow_id", "workflow_version",
         "manifest_hash", "workflow_template_hash",
     }
-    if schema in (2, 3):
+    if schema in (2, 3, 4):
         allowed_fields |= {
             "realization_profile_hash",
             "execution_model_fingerprint_hash",
@@ -119,18 +119,18 @@ def _read_descriptor(package_path: Path) -> dict:
             f"workflow-package.json carries unknown fields "
             f"{sorted(unknown)}; the descriptor field set is closed"
         )
-    if schema not in (1, 2, 3):
-        raise PackageIntegrity("descriptor schema_version must be 1, 2 or 3")
+    if schema not in (1, 2, 3, 4):
+        raise PackageIntegrity("descriptor schema_version must be 1, 2, 3 or 4")
     for field in ("workflow_id", "workflow_version", "manifest_hash",
                   "workflow_template_hash"):
         if field not in doc:
             raise PackageIntegrity(f"descriptor lacks {field}")
-    if schema in (2, 3) and (
+    if schema in (2, 3, 4) and (
         "realization_profile_hash" not in doc
         or "execution_model_fingerprint_hash" not in doc
     ):
         raise PackageIntegrity(
-            "schema-2/3 descriptor lacks profile/fingerprint hashes"
+            "schema-2/3/4 descriptor lacks profile/fingerprint hashes"
         )
     if schema == 1 and (
         "realization_profile_hash" in doc
@@ -187,7 +187,7 @@ async def capture_release(
     }
 
     profile_bytes = fingerprint_bytes = None
-    if d1["schema_version"] in (2, 3):
+    if d1["schema_version"] in (2, 3, 4):
         profile_bytes = await _read(
             profile_path, "realization-profile"
         )
@@ -253,7 +253,10 @@ class ValidatedPackage:
 
     @property
     def is_schema3(self) -> bool:
-        return self.release.schema_version == 3
+        """The manifest-v3 spatial package family (descriptor 3 or 4:
+        same four artifacts, same manifest/template semantics; v4 adds
+        the observation-capable profile schema 3)."""
+        return self.release.schema_version in (3, 4)
 
 
 def validate_package(release: CapturedPackageRelease) -> ValidatedPackage:
@@ -275,8 +278,10 @@ def validate_package(release: CapturedPackageRelease) -> ValidatedPackage:
             release.manifest_bytes.decode("utf-8")
         )
         validate_manifest_template_bindings(manifest_v1, template_graph)
-    elif release.schema_version == 3:
-        # M10E §8: descriptor schema 3 delegates ALL M10-specific parsing
+    elif release.schema_version in (3, 4):
+        # M10E §8 + M14 §18: descriptors 3 and 4 (the same four-artifact
+        # family; v4 binds the observation-capable profile-3 release)
+        # delegate ALL M10-specific parsing
         # to the frozen soloring.spatial.package3 authority (profile v2
         # through the frozen M9 parser view, manifest v3 through the frozen
         # M9 schema-2 parser view, runtime closure by exact captured

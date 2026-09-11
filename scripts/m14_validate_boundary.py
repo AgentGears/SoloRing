@@ -49,6 +49,7 @@ ALLOWED_PATTERNS = [
     r"^tests/test_m(10a_migrations|11_migration|12_migration|"
     r"13_migration|5a10_migration_gate|7c_capture|9a_package|"
     r"8a_visual|igration_m6b|igration_m6|igration_m1|igration)\.py$",
+    r"^tests/test_m10e_package3_production\.py$",
     r"^tests/test_post_m13_hygiene\.py$",
     # successor-gate extensions: exactly the two predecessor boundary
     # validators whose frozen §51 closure requires them to stay green
@@ -67,6 +68,8 @@ ALLOWED_PATTERNS = [
     r"^server/soloring/workflows/",
     r"^server/soloring/realization/",
     r"^server/soloring/spatial/",
+    # the v2 production release builder family (M14B-4)
+    r"^server/soloring/spatial/production_package\.py$",
     # worker schema-4 execution
     r"^server/soloring/worker/",
     # M14 execution-only provenance models

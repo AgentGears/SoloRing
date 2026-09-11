@@ -68,14 +68,14 @@ Disposition vocabulary:
 
 | Cell | Disposition | Exact proof owner | Claim |
 |---|---|---|---|
-| `M14-PKG:01` | PENDING | `tests/test_m14_package.py::test_m14_pkg_01` | Descriptor schema-4 coherent four-artifact capture. |
-| `M14-PKG:02` | PENDING | `tests/test_m14_package.py::test_m14_pkg_02` | Workflow identity agreement across descriptor/manifest/profile. |
-| `M14-PKG:03` | PENDING | `tests/test_m14_package.py::test_m14_pkg_03` | Captured capability contract hash bound to profile bytes. |
-| `M14-PKG:04` | PENDING | `tests/test_m14_package.py::test_m14_pkg_04` | Runtime fingerprint/template closure remains exact. |
-| `M14-PKG:05` | PENDING | `tests/test_m14_package.py::test_m14_pkg_05` | wan21_spatial_v1 v1 immutable/executable. |
-| `M14-PKG:06` | PENDING | `tests/test_m14_package.py::test_m14_pkg_06` | wan21_spatial_v1 v2 package validates. |
-| `M14-PKG:07` | PENDING | `tests/test_m14_package.py::test_m14_pkg_07` | Release-switch race cannot capture hybrid. |
-| `M14-PKG:08` | PENDING | `tests/test_m14_package.py::test_m14_pkg_08` | Recovery retains all four schema-4 package artifacts. |
+| `M14-PKG:01` | TEST | `tests/test_m14_package.py::test_m14_pkg_01` | Descriptor schema-4 coherent four-artifact capture. |
+| `M14-PKG:02` | TEST | `tests/test_m14_package.py::test_m14_pkg_02` | Workflow identity agreement across descriptor/manifest/profile. |
+| `M14-PKG:03` | TEST | `tests/test_m14_package.py::test_m14_pkg_03` | Captured capability contract hash bound to profile bytes. |
+| `M14-PKG:04` | TEST | `tests/test_m14_package.py::test_m14_pkg_04` | Runtime fingerprint/template closure remains exact. |
+| `M14-PKG:05` | TEST | `tests/test_m14_package.py::test_m14_pkg_05` | wan21_spatial_v1 v1 immutable/executable. |
+| `M14-PKG:06` | TEST | `tests/test_m14_package.py::test_m14_pkg_06` | wan21_spatial_v1 v2 package validates. |
+| `M14-PKG:07` | TEST | `tests/test_m14_package.py::test_m14_pkg_07` | Release-switch race cannot capture hybrid. |
+| `M14-PKG:08` | TEST | `tests/test_m14_package.py::test_m14_pkg_08` | Recovery retains all four schema-4 package artifacts. |
 | `M14-PKG:09` | TEST | `tests/test_m14_0_g6_g7_corpus.py::test_m14_pkg_09` | Profile schema-3 observation golden fixture/hash exact. |
 
 ## M14-MAT
