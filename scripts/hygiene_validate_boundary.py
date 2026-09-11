@@ -113,6 +113,7 @@ ALLOWLIST = (
     # and is skipped by the vocabulary scan below.
     ".gitattributes",
     "docs/SoloRing-M14-Proof-Map.md",
+    "docs/SoloRing-M14-R2-Freeze-Erratum-E1.md",
     "scripts/m14_validate_baseline.py",
     "scripts/m14_validate_boundary.py",
     "scripts/m14_validate_proof_map.py",

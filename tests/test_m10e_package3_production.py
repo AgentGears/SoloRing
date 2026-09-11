@@ -181,6 +181,18 @@ async def test_descriptor_schema4_rejected(settings, tmp_path):
     with pytest.raises(PackageIntegrity, match="do not match"):
         await capture_current_release(_settings_for(settings, d4))
 
+    # Erratum E-2 (M14 freeze, 2026-09-11): even a hash-COHERENT
+    # schema-4 descriptor over a schema-2 profile now rejects —
+    # descriptor 4 implies the observation-capable profile semantics
+    d4_coherent = await _schema3_package(
+        tmp_path, mutate=lambda docs: docs | {
+            "__descriptor__": prod.production_descriptor_v3()
+            | {"schema_version": 4}})
+    release = await capture_current_release(
+        _settings_for(settings, d4_coherent))
+    with pytest.raises(Package3Invalid, match="schema 4 requires"):
+        validate_package(release)
+
 
 async def test_manifest_v3_malformed_is_binding_invalid(
         settings, tmp_path):

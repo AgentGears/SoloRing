@@ -32,18 +32,18 @@
     "vectors": {
       "m14-f06-world-observation-spec-v1.json": "49195475e3ce29c25f650f3e265d7f90400a3bb221e11f794c38f937cc1f8988",
       "m14-f06-negotiation-result-v1.json": "2b319394735ab80da8c5e19e1b415db47511c3b3db4d33b4be11095125a3036a",
-      "m14-f06-realization-profile-observation-v1.json": "8a8d7f89e1b9fa489caef6eff629d46347960a9265c728717d30414d396e9e7a",
-      "m14-f06-workflow-spec-v4.json": "ab5883646051629fdb2f5577b0c4dd5a91e7ef88d989c84db4390e5d3d2947b5",
+      "m14-f06-realization-profile-observation-v1.json": "99b8390d812d4301acd873786b463b1a3ee6dc7e3e9f137385229faaf0506f95",
+      "m14-f06-workflow-spec-v4.json": "fbe711f9d16d33877a26f59070ed62b545e78f97ecaa2f3182910acbc1f082f1",
       "m14-f06-materializer-contract-v1.json": "dd3511218c673e7f2727d8226c3d73bfd85222bd5f9a5edb3d2e4779146f66d0",
-      "m14-f06-realization-profile-v3-full.json": "3c7b92a935787ef947135bd262e5bf17f450a651bc870f856643fcb8f88fc785"
+      "m14-f06-realization-profile-v3-full.json": "71072e913fa7e5b4e763f73c2e98f214f81834e5e539d486a9df7d2e09b4cc0b"
     },
     "vector_bytes": {
       "m14-f06-world-observation-spec-v1.json": 4107,
       "m14-f06-negotiation-result-v1.json": 1375,
-      "m14-f06-realization-profile-observation-v1.json": 1228,
+      "m14-f06-realization-profile-observation-v1.json": 1494,
       "m14-f06-workflow-spec-v4.json": 7127,
       "m14-f06-materializer-contract-v1.json": 1253,
-      "m14-f06-realization-profile-v3-full.json": 2586
+      "m14-f06-realization-profile-v3-full.json": 2852
     }
   },
   "b1": {
@@ -58,5 +58,15 @@
     "max_triangles_per_revision": 500000,
     "max_total_triangles_per_observation": 500000,
     "production_time_budget_s": 360
+  },
+  "erratum_e1": {
+    "date": "2026-09-11",
+    "scope": "\u00a78.10 verdict law, \u00a717 unsupported_capabilities grammar, \u00a718 descriptor-4-requires-profile-3, \u00a715/\u00a741 wording, affected golden vectors",
+    "observation_block_sha256": "99b8390d812d4301acd873786b463b1a3ee6dc7e3e9f137385229faaf0506f95",
+    "full_profile_sha256": "71072e913fa7e5b4e763f73c2e98f214f81834e5e539d486a9df7d2e09b4cc0b",
+    "workflow_spec_v4_sha256": "fbe711f9d16d33877a26f59070ed62b545e78f97ecaa2f3182910acbc1f082f1",
+    "negotiation_result_sha256_unchanged": "2b319394735ab80da8c5e19e1b415db47511c3b3db4d33b4be11095125a3036a",
+    "world_observation_spec_sha256_unchanged": "49195475e3ce29c25f650f3e265d7f90400a3bb221e11f794c38f937cc1f8988",
+    "materializer_contract_sha256_unchanged": "dd3511218c673e7f2727d8226c3d73bfd85222bd5f9a5edb3d2e4779146f66d0"
   }
 }

@@ -313,6 +313,17 @@ def validate_package(release: CapturedPackageRelease) -> ValidatedPackage:
 
             profile_v2 = parse_profile_v3(profile_doc)
         else:
+            if release.schema_version == 4:
+                # Erratum E-2 (frozen §18 as amended): descriptor schema
+                # 4 exists BECAUSE profile schema 3 / WorkflowSpec 4
+                # introduce the new execution semantics — a schema-4
+                # descriptor over a schema-2 profile claims the version
+                # without the semantics it identifies.
+                raise Package3Invalid(
+                    "descriptor schema 4 requires a RealizationProfile "
+                    "schema 3 (the observation-capable profile); a "
+                    "schema-2 profile under descriptor 4 is incoherent"
+                )
             profile_v2 = parse_profile_v2(
                 release.profile_bytes.decode("utf-8")
             )

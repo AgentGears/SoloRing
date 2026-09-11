@@ -75,8 +75,11 @@ def _requirement(property_: str, preservation: str, enforcement: str,
     authority.setdefault("source_id", SHOT_REV_ID)
     authority.setdefault("source_hash", _hex("source"))
     subject_kind = "shot"
+    occurrence_id = None
     if property_.startswith("occurrence."):
         subject_kind = "production_occurrence"
+        occurrence_id = authority.pop(
+            "occurrence_id", "22222222-2222-2222-2222-222222222222")
     elif property_ == "continuity.instance_feature":
         subject_kind = "production_instance"
     elif property_ == "visual.identity":
@@ -89,7 +92,7 @@ def _requirement(property_: str, preservation: str, enforcement: str,
         "enforcement": enforcement,
         "subject": {"kind": subject_kind,
                     "id": authority.get("subject_id", SHOT_ID)},
-        "occurrence_id": authority.pop("occurrence_id", None),
+        "occurrence_id": occurrence_id,
         "subkey": authority.pop("subkey", None),
         "authority": authority,
         "source_contract": contract,
@@ -307,16 +310,42 @@ def test_m14_cap_06() -> None:
 
 # ---- CAP:07 property absent → UNKNOWN --------------------------------------
 
+def _block_without_property(property_name: str) -> dict:
+    """A block declaring the property in NEITHER list — the distinct
+    UNKNOWN case per §8.10 as amended by Erratum E-1."""
+    import copy
+
+    block = copy.deepcopy(_golden_block())
+    block["capabilities"] = [c for c in block["capabilities"]
+                             if c["property"] != property_name]
+    block["unsupported_capabilities"] = [
+        c for c in block["unsupported_capabilities"]
+        if c["property"] != property_name]
+    return block
+
+
 def test_m14_cap_07() -> None:
+    # property absent from BOTH the supported and unsupported
+    # declarations → the distinct UNKNOWN verdict
+    spec = _spec([
+        _requirement("occurrence.placement", "STRUCTURAL", "REQUIRED",
+                     "m14.placement.v1"),
+    ])
+    result = negotiate(spec, _block_without_property("occurrence.placement"))
+    assert result["requirements"][0]["verdict"] == "UNKNOWN"
+    assert result["requirements"][0]["capability"] is None
+    assert result["verdict"] == "UNKNOWN"
+
+    # a property DECLARED in the unsupported list with the exact tuple →
+    # UNSUPPORTED — the frozen §15 v2 rows (N1/N2)
     spec = _spec([
         _requirement("visual.identity", "IDENTITY_APPEARANCE", "REQUIRED",
                      "m8.visual_reference_pack.v1", domain="A3",
                      source_kind="visual_reference_pack"),
     ])
     result = negotiate(spec, _golden_block())
-    assert result["requirements"][0]["verdict"] == "UNKNOWN"
-    assert result["requirements"][0]["capability"] is None
-    assert result["verdict"] == "UNKNOWN"
+    assert result["requirements"][0]["verdict"] == "UNSUPPORTED"
+    assert result["verdict"] == "UNSUPPORTED"
 
 
 # ---- CAP:08 PERMITTED_INFERENCE needs no capability ------------------------
@@ -337,25 +366,27 @@ def test_m14_cap_08() -> None:
 # ---- CAP:09 overall verdict precedence exact --------------------------------
 
 def test_m14_cap_09() -> None:
+    # precedence under the amended law: UNKNOWN (property absent from
+    # both declarations) + UNSUPPORTED (known property, unmatched tuple)
+    # → overall UNSUPPORTED dominates
     mixed = _spec([
-        _requirement("visual.identity", "IDENTITY_APPEARANCE", "REQUIRED",
-                     "m8.visual_reference_pack.v1", domain="A3",
-                     source_kind="visual_reference_pack"),
+        _requirement("occurrence.placement", "STRUCTURAL", "REQUIRED",
+                     "m14.placement.v1"),
         _requirement("world.structure", "STRUCTURAL", "REQUIRED",
                      "m10.world_depth.v9"),
     ])
-    result = negotiate(mixed, _golden_block())
+    result = negotiate(mixed, _block_without_property(
+        "occurrence.placement"))
     assert result["requirements"][0]["verdict"] == "UNKNOWN"
     assert result["requirements"][1]["verdict"] == "UNSUPPORTED"
     assert result["verdict"] == "UNSUPPORTED"  # UNSUPPORTED dominates UNKNOWN
 
     unknown_only = _spec([
-        _requirement("visual.identity", "IDENTITY_APPEARANCE", "REQUIRED",
-                     "m8.visual_reference_pack.v1", domain="A3",
-                     source_kind="visual_reference_pack"),
+        _requirement("occurrence.placement", "STRUCTURAL", "REQUIRED",
+                     "m14.placement.v1"),
     ])
-    assert negotiate(unknown_only, _golden_block())[
-        "verdict"] == "UNKNOWN"
+    assert negotiate(unknown_only, _block_without_property(
+        "occurrence.placement"))["verdict"] == "UNKNOWN"
 
     all_supported = negotiate(_golden_spec(), _golden_block())
     assert all_supported["verdict"] == "SUPPORTED"
@@ -369,14 +400,12 @@ def test_m14_cap_10() -> None:
                                        _golden_spec()) is None
 
     unknown = negotiate(_spec([
-        _requirement("visual.identity", "IDENTITY_APPEARANCE", "REQUIRED",
-                     "m8.visual_reference_pack.v1", domain="A3",
-                     source_kind="visual_reference_pack"),
-    ]), _golden_block())
+        _requirement("occurrence.placement", "STRUCTURAL", "REQUIRED",
+                     "m14.placement.v1"),
+    ]), _block_without_property("occurrence.placement"))
     spec = parse_world_observation_spec(_spec([
-        _requirement("visual.identity", "IDENTITY_APPEARANCE", "REQUIRED",
-                     "m8.visual_reference_pack.v1", domain="A3",
-                     source_kind="visual_reference_pack"),
+        _requirement("occurrence.placement", "STRUCTURAL", "REQUIRED",
+                     "m14.placement.v1"),
     ]))
     with pytest.raises(SoloRingError) as excinfo:
         require_publication_allowed(unknown, spec)
@@ -384,10 +413,25 @@ def test_m14_cap_10() -> None:
         ErrorCode.OBSERVATION_REQUIREMENT_UNKNOWN)
     assert excinfo.value.status_code == 409
     (trace,) = excinfo.value.details["requirements"]
-    assert trace["property"] == "visual.identity"
-    assert trace["preservation"] == "IDENTITY_APPEARANCE"
-    assert trace["source_contract"] == "m8.visual_reference_pack.v1"
+    assert trace["property"] == "occurrence.placement"
     assert trace["verdict"] == "UNKNOWN"
+
+    # the frozen §15 v2 rows: REQUIRED visual.identity under the initial
+    # profile → UNSUPPORTED (N1), never UNKNOWN
+    n1 = negotiate(_spec([
+        _requirement("visual.identity", "IDENTITY_APPEARANCE", "REQUIRED",
+                     "m8.visual_reference_pack.v1", domain="A3",
+                     source_kind="visual_reference_pack"),
+    ]), _golden_block())
+    n1_spec = parse_world_observation_spec(_spec([
+        _requirement("visual.identity", "IDENTITY_APPEARANCE", "REQUIRED",
+                     "m8.visual_reference_pack.v1", domain="A3",
+                     source_kind="visual_reference_pack"),
+    ]))
+    with pytest.raises(SoloRingError) as excinfo:
+        require_publication_allowed(n1, n1_spec)
+    assert excinfo.value.code == (
+        ErrorCode.OBSERVATION_REQUIREMENT_UNSUPPORTED)
 
     unsupported = negotiate(_spec([
         _requirement("world.structure", "STRUCTURAL", "REQUIRED",

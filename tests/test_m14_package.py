@@ -255,10 +255,11 @@ async def test_v2_hard_refusals(tmp_path):
                          "REQUIRED", "m8.visual_reference_pack.v1",
                          domain="A3", source_kind="visual_reference_pack")])
     verdict = negotiate(visual, block)
-    assert verdict["verdict"] in ("UNSUPPORTED", "UNKNOWN")
-    assert verdict["requirements"][0]["verdict"] in (
-        "UNSUPPORTED", "UNKNOWN")
-    assert verdict["verdict"] != "SUPPORTED"
+    assert verdict["requirements"][0]["verdict"] == "UNSUPPORTED", (
+        "Erratum E-1: the explicit unsupported declaration makes the "
+        "frozen §15 N1 row exactly UNSUPPORTED")
+    assert verdict["verdict"] == "UNSUPPORTED"
+    assert verdict["requirements"][0]["capability"] is None
 
     feature = _cap_spec([
         _cap_requirement(
@@ -266,8 +267,23 @@ async def test_v2_hard_refusals(tmp_path):
             "m13.production_instance_feature.v1", domain="A2",
             source_kind="production_world_pack", subkey="wardrobe_color")])
     verdict = negotiate(feature, block)
-    assert verdict["verdict"] in ("UNSUPPORTED", "UNKNOWN")
+    assert verdict["requirements"][0]["verdict"] == "UNSUPPORTED", (
+        "Erratum E-1: the frozen §15 N2 row is exactly UNSUPPORTED")
+    assert verdict["verdict"] == "UNSUPPORTED"
     assert verdict["requirements"][0]["capability"] is None
+
+    # the DISTINCT UNKNOWN case: a property absent from BOTH lists
+    absent = _cap_spec([
+        _cap_requirement("occurrence.placement", "STRUCTURAL",
+                         "REQUIRED", "m14.placement.v1")])
+    import copy
+
+    reduced = copy.deepcopy(block)
+    reduced["capabilities"] = [c for c in reduced["capabilities"]
+                               if c["property"] != "occurrence.placement"]
+    verdict = negotiate(absent, reduced)
+    assert verdict["requirements"][0]["verdict"] == "UNKNOWN"
+    assert verdict["verdict"] == "UNKNOWN"
 
     # shot.intent stays PERMITTED_INFERENCE, never a structural claim
     intent = _cap_spec([
@@ -278,6 +294,25 @@ async def test_v2_hard_refusals(tmp_path):
     verdict = negotiate(intent, block)
     assert verdict["verdict"] == "SUPPORTED"
     assert verdict["requirements"][0]["verdict"] == "PERMITTED_INFERENCE"
+
+
+async def test_descriptor4_requires_profile3(tmp_path):
+    """Erratum E-2: a hash-coherent schema-4 descriptor over a
+    schema-2 profile claims the version without the semantics it was
+    introduced to identify — it now REJECTS."""
+    from soloring.spatial.package3 import Package3Invalid
+
+    mixed = _write_package(
+        tmp_path / "d4-p2",
+        descriptor=production_descriptor_v4()
+        | {"realization_profile_hash": canonical_hash(
+            production_profile_v2())},
+        manifest=production_manifest_v3_v2(),
+        template=production_template(),
+        profile=production_profile_v2(),  # schema 2 under descriptor 4
+        fingerprint=production_fingerprint_document())
+    with pytest.raises(Package3Invalid, match="schema 4 requires"):
+        validate_package(await _capture(mixed))
 
 
 # ---- PKG:07 release-switch race cannot capture a hybrid ----------------------

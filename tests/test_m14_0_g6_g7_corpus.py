@@ -219,7 +219,7 @@ def test_observation_block_grammar() -> None:
     block = _vector("observation_block")
     assert set(block) == {
         "schema_version", "supported_policies", "capabilities",
-        "materializers"}
+        "unsupported_capabilities", "materializers"}
     assert block["schema_version"] == 1
     for policy in block["supported_policies"]:
         assert set(policy) == {"id", "version"}

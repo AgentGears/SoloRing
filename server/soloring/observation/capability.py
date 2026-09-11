@@ -53,11 +53,13 @@ PROFILE_V3_KEYS = frozenset({
     "parameter_overrides", "spatial", "observation"})
 OBSERVATION_BLOCK_KEYS = frozenset({
     "schema_version", "supported_policies", "capabilities",
-    "materializers"})
+    "unsupported_capabilities", "materializers"})
 SUPPORTED_POLICY_KEYS = frozenset({"id", "version"})
 CAPABILITY_KEYS = frozenset({
     "property", "preservation", "source_contract", "materializer_id",
     "materializer_version", "output_role"})
+UNSUPPORTED_CAPABILITY_KEYS = frozenset({
+    "property", "preservation", "source_contract"})
 MATERIALIZER_KEYS = frozenset({
     "id", "version", "contract_hash", "output_role",
     "inherited_manifest_role"})
@@ -145,6 +147,31 @@ def validate_observation_block(block) -> dict:
                 "duplicate capability tuple "
                 f"{tuple_key} — exact matching requires uniqueness")
         seen_capability_tuples.add(tuple_key)
+
+    # Erratum E-1 (M14 R2 freeze, 2026-09-11): the closed grammar gains
+    # `unsupported_capabilities` — the ONLY honest representation of
+    # "this property/tuple is known but unsupported" (a capability entry
+    # cannot exist without a resolvable materializer). Entries carry no
+    # materializer: they claim absence of support, never support.
+    unsupported = block["unsupported_capabilities"]
+    if not isinstance(unsupported, list):
+        raise _bad("observation.unsupported_capabilities must be an array")
+    for entry in unsupported:
+        _require_closed(entry, UNSUPPORTED_CAPABILITY_KEYS,
+                        "observation.unsupported_capabilities entry")
+        if entry["property"] not in PROPERTY_VALUES:
+            raise _bad(f"unknown unsupported property "
+                       f"{entry['property']!r}")
+        if entry["preservation"] not in PRESERVATION_VALUES:
+            raise _bad(f"unknown unsupported preservation "
+                       f"{entry['preservation']!r}")
+        tuple_key = (entry["property"], entry["preservation"],
+                     entry["source_contract"])
+        if tuple_key in seen_capability_tuples:
+            raise _bad(
+                "tuple declared both supported and unsupported: "
+                f"{tuple_key}")
+        seen_capability_tuples.add(tuple_key)
     return block
 
 
@@ -205,7 +232,14 @@ def negotiate(spec: dict, observation_block: dict) -> dict:
     capabilities = {
         (c["property"], c["preservation"], c["source_contract"]): c
         for c in block["capabilities"]}
-    known_properties = {c["property"] for c in block["capabilities"]}
+    # Erratum E-1 verdict law (frozen §8.10 as amended): a property
+    # declared in EITHER list is KNOWN — an unmatched tuple under a
+    # known property is UNSUPPORTED; a property absent from both is the
+    # only UNKNOWN. An exact unsupported-tuple match is UNSUPPORTED
+    # with no capability echo.
+    known_properties = (
+        {c["property"] for c in block["capabilities"]}
+        | {c["property"] for c in block["unsupported_capabilities"]})
 
     requirement_results = []
     for requirement in spec["requirements"]:

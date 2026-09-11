@@ -327,6 +327,7 @@ def production_observation_block() -> dict:
                         "soloring.structural_mesh.v1"),
             _capability("occurrence.placement", "m14.placement.v1"),
         ],
+        "unsupported_capabilities": production_unsupported_capabilities(),
         "materializers": [
             {
                 "id": MATERIALIZER_ID,
@@ -382,3 +383,22 @@ def production_descriptor_v4_v2() -> dict:
         "realization_profile_hash": _hash_json(production_profile_v3()),
         "execution_model_fingerprint_hash": _production_fingerprint_hash(),
     }
+
+
+def production_unsupported_capabilities() -> list:
+    """Erratum E-1: the two hard rows the frozen §15 matrix declares
+    UNSUPPORTED in v2 — explicitly represented so the mechanical verdict
+    distinguishes them from UNKNOWN (§8.10 as amended; §41 N1/N2)."""
+    return [
+        {
+            "property": "visual.identity",
+            "preservation": "IDENTITY_APPEARANCE",
+            "source_contract": "m8.visual_reference_pack.v1",
+        },
+        {
+            "property": "continuity.instance_feature",
+            "preservation": "EXACT",
+            "source_contract": (
+                "m13.production_instance_feature.v1"),
+        },
+    ]
