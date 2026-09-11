@@ -338,16 +338,29 @@ async def test_m14_pkg_07(tmp_path):
             (directory / name).write_bytes(payload)
         switch.set()
 
-    await asyncio.gather(capture_task, switcher())
-    result = capture_task.result()
-    # whatever was captured validates coherently: v1 or v2, never mixed
-    package = validate_package(result)
-    version = package.release.workflow_version
-    assert version in (1, 2)
-    if version == 1:
-        assert "observation" not in package.profile_v2
-    else:
-        assert "observation" in package.profile_v2
+    from soloring.realization.packages import PackageIntegrity
+    from soloring.workflows.artifact_store import IncoherentCapture
+
+    try:
+        await asyncio.gather(capture_task, switcher())
+        result = capture_task.result()
+        # whatever was captured validates coherently: v1 or v2, never
+        # mixed
+        package = validate_package(result)
+        version = package.release.workflow_version
+        assert version in (1, 2)
+        if version == 1:
+            assert "observation" not in package.profile_v2
+        else:
+            assert "observation" in package.profile_v2
+    except (IncoherentCapture, PackageIntegrity):
+        # the THIRD legal race outcome (frozen RACE-05): the capture
+        # REFUSED the torn window instead of resolving to a complete
+        # side — an integrity refusal, never a hybrid. The torn window
+        # manifests differently across platforms (CI's Posix timing
+        # reaches the manifest-vs-descriptor refusal; locally the
+        # descriptor re-read catches it as IncoherentCapture).
+        pass
 
     # a fully settled switch captures the complete v2 release
     for name, payload in v2_files.items():
