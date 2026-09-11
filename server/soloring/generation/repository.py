@@ -394,7 +394,8 @@ async def _add_inputs(session: AsyncSession, generation_id: str, inputs) -> None
 
 
 async def _create_returning(
-    session: AsyncSession, draft: GenerationDraft, inputs, derived_inputs=()
+    session: AsyncSession, draft: GenerationDraft, inputs, derived_inputs=(),
+    observation_binding=None,
 ) -> Generation:
     generation_id = str(uuid4())
     params = _draft_params(draft, generation_id)
@@ -421,6 +422,15 @@ async def _create_returning(
                     derived_inputs=derived_inputs,
                     ordinary_keys={i.input_key for i in inputs},
                 )
+                if observation_binding is not None:
+                    from soloring.observation.publication import (
+                        insert_generation_binding,
+                    )
+
+                    await insert_generation_binding(
+                        session,
+                        generation_id=generation_id,
+                        binding=observation_binding)
                 await session.commit()
             except SoloRingError:
                 await session.rollback()
@@ -453,7 +463,8 @@ async def _create_returning(
 
 
 async def _create_fenced(
-    engine: AsyncEngine, draft: GenerationDraft, inputs, derived_inputs=()
+    engine: AsyncEngine, draft: GenerationDraft, inputs, derived_inputs=(),
+    observation_binding=None,
 ) -> str:
     """RETURNING-less fallback: one connection, BEGIN IMMEDIATE first (§37.2).
 
@@ -533,6 +544,15 @@ async def _create_fenced(
                 derived_inputs=derived_inputs,
                 ordinary_keys={i.input_key for i in inputs},
             )
+            if observation_binding is not None:
+                from soloring.observation.publication import (
+                    insert_generation_binding,
+                )
+
+                await insert_generation_binding(
+                    conn,
+                    generation_id=generation_id,
+                    binding=observation_binding)
             await conn.exec_driver_sql("COMMIT")
             return generation_id
         except IntegrityError:
@@ -560,6 +580,7 @@ async def create_generation(
     draft: GenerationDraft,
     inputs: Sequence[ResolvedGenerationInput],
     derived_inputs: Sequence = (),
+    observation_binding=None,
 ) -> Generation:
     """Atomically persist a queued Generation plus its input bindings
     (§40) — ordinary GenerationInputs and, for schema 3, the required
@@ -568,9 +589,10 @@ async def create_generation(
     production path never attaches derived siblings in a second,
     post-Generation transaction)."""
     if sqlite_supports_returning():
-        return await _create_returning(session, draft, inputs, derived_inputs)
+        return await _create_returning(session, draft, inputs,
+                                       derived_inputs, observation_binding)
     generation_id = await _create_fenced(
-        session.bind, draft, inputs, derived_inputs)
+        session.bind, draft, inputs, derived_inputs, observation_binding)
     generation = await session.get(Generation, generation_id)
     assert generation is not None
     return generation

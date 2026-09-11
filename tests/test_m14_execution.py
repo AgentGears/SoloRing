@@ -56,9 +56,30 @@ async def _observation_package(tmp_path: Path) -> Path:
     return await _schema3_package(tmp_path, mutate=_install_observation_profile)
 
 
-async def _schema6_world(client, *, tag: bytes):
+async def _schema6_world(client, *, tag: bytes, mesh: bool = True):
     """A shot whose current capture is schema 6: full M10 world + plan +
-    a selected M13 production-world binding with one staged PI track."""
+    a selected M13 production-world binding. With mesh=True (B3 posture)
+    the direct occurrence's retained Blob is a valid structural mesh —
+    the merged spec negotiates SUPPORTED and the M14 materializer runs.
+    With mesh=False the retained Blob is non-mesh raw bytes and the
+    observation must refuse (typed unsupported representation)."""
+    if mesh:
+        from tests.test_m14_materializer import (
+            _mesh_doc,
+            _observation_world,
+        )
+
+        b, snapshot, oids, prids = await _observation_world(
+            client, tag=tag,
+            sources=[{"kind": "mesh", "mesh": _mesh_doc(),
+                      "transform": (0, 0, 0),
+                      "interpretation": (0, 0, 0)}],
+            adopt_first_mesh=True,
+            pi_translation=(-3000, 1500, -800))
+        revision = None
+        return b, {"binding_id": (
+            snapshot["production_world"]["binding"]["binding_id"])}, \
+            revision, snapshot
     b = await _full_m13_world(client, tag=tag)
     sel = await _select_binding(client, b)
     revision, _ = await _capture(client, b["shot"])
@@ -144,7 +165,9 @@ async def test_schema6_supported_generates_workflow_spec_v4(
 
     assert spec["schema_version"] == 4
     observation = spec["world_observation"]
-    assert observation["spec"]["shot_revision"]["id"] == revision.id
+    assert observation["spec"]["shot_revision"]["id"] == (
+        revision.id if revision is not None else (
+            await _latest_revision_id(engine, b["shot"])))
     assert observation["negotiation"]["verdict"] == "SUPPORTED"
     assert observation["spec"]["captured_domains"][
         "production_world_hash"] is not None
@@ -163,13 +186,17 @@ async def test_schema6_supported_generates_workflow_spec_v4(
     parse_workflow_spec_v4(spec)
 
 
-async def test_schema6_shared_subset_bytes_equal_schema5_twin(
+async def test_schema6_mesh_changes_control_bytes_vs_m10_twin(
         client, tmp_path):
-    """E4 at the integration seam: with zero production meshes the
-    schema-4 world-depth control bytes equal the exact M10 schema-5
-    execution of the same captured world."""
+    """Anti-wrapper at the integration seam (frozen §40): a retained mesh
+    in the schema-6 observation CHANGES the actual world-depth control
+    bytes consumed for the observation binding — the M14 observation
+    artifact digest differs from the M10-only twin's, and the mesh
+    contributes non-background pixels (MAT:08 evidence at the service
+    level; the zero-mesh byte-identity proof lives at the materializer
+    seam in tests/test_m14_mesh_depth.py)."""
     b, _sel, _rev, _snapshot = await _schema6_world(
-        client, tag=b"m14a3-e4")
+        client, tag=b"m14b3-antiwrapper")
     pkg = await _observation_package(tmp_path)
     settings = _comfy(client, pkg)
     engine = client._transport.app.state.engine
@@ -182,9 +209,23 @@ async def test_schema6_shared_subset_bytes_equal_schema5_twin(
     assert json.loads(revision.snapshot_json)["schema_version"] == 5
     gen5 = await _generate(client, twin, settings)
 
-    assert (await _world_depth_blob(engine, gen6.id)) == (
-        await _world_depth_blob(engine, gen5.id)), (
-        "zero-mesh schema-4 world depth must equal the exact M10 bytes")
+    observation_blob = (await _observation_world_blob(engine, gen6.id))
+    m10_twin_blob = await _world_depth_blob(engine, gen5.id)
+    assert observation_blob is not None, (
+        "the schema-6 mesh observation must bind an observation artifact")
+    assert observation_blob != m10_twin_blob, (
+        "the retained mesh must change the world-depth control bytes "
+        "(anti-wrapper: metadata-only storage cannot close M14)")
+
+
+async def _observation_world_blob(engine, generation_id: str):
+    async with engine.connect() as conn:
+        row = (await conn.execute(text(
+            "SELECT blob_hash FROM "
+            "generation_derived_observation_inputs WHERE generation_id = "
+            ":g AND artifact_role = 'observation.world_depth'"),
+            {"g": generation_id})).mappings().one_or_none()
+    return row["blob_hash"] if row else None
 
 
 async def _twin_schema5_shot(client, b) -> str:
@@ -376,3 +417,11 @@ def _minimal_observation_pairing() -> dict:
     return {"spec": spec, "negotiation": negotiation,
             "profile_hash": _hex("profile"),
             "capability_contract_hash": canonical_hash(block)}
+
+
+async def _latest_revision_id(engine, shot: str):
+    async with engine.connect() as conn:
+        return (await conn.execute(text(
+            "SELECT id FROM shot_revisions WHERE shot_id = :s "
+            "ORDER BY revision_number DESC LIMIT 1"),
+            {"s": shot})).scalar_one()

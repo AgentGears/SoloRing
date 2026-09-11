@@ -89,14 +89,14 @@ Disposition vocabulary:
 | `M14-MAT:05` | TEST | `tests/test_m14_materializer.py::test_m14_mat_05` | Composition-owned interpretation + transform composition exact. |
 | `M14-MAT:06` | TEST | `tests/test_m14_materializer.py::test_m14_mat_06` | A4 spatial-owned interpretation + placement composition exact. |
 | `M14-MAT:07` | TEST | `tests/test_m14_materializer.py::test_m14_mat_07` | PI captured spatial-state matching/composition exact. |
-| `M14-MAT:08` | PENDING | `tests/test_m14_materializer.py::test_m14_mat_08` | Mesh contribution reaches world-depth non-background pixels. |
-| `M14-MAT:09` | PENDING | `tests/test_m14_materializer.py::test_m14_mat_09` | Zero-mesh schema-4 bytes == exact M10 bytes. |
-| `M14-MAT:10` | PENDING | `tests/test_m14_materializer.py::test_m14_mat_10` | Deterministic repeat under same materializer contract → identical digest. |
-| `M14-MAT:11` | TEST | `tests/test_m14_derived_storage.py::test_same_coordinate_same_bytes_converges` | Identical concurrent publication converges. |
-| `M14-MAT:12` | TEST | `tests/test_m14_derived_storage.py::test_same_coordinate_different_bytes_invariant` | Conflicting same-coordinate bytes fail invariant. |
-| `M14-MAT:13` | TEST | `tests/test_m14_derived_storage.py::test_materializer_contract_hash_in_convergence_identity` | materializer_contract_hash participates in convergence identity. |
-| `M14-MAT:14` | PENDING | `tests/test_m14_materializer.py::test_m14_mat_14` | Retained mesh suppresses exact identity-matched M10 proxy once; inherited entity-depth double-conditioning for the same subject refuses in schema 1. |
-| `M14-MAT:15` | PENDING | `tests/test_m14_materializer.py::test_m14_mat_15` | observation.world_depth media/frame/encoding/binding grammar exact. |
+| `M14-MAT:08` | TEST | `tests/test_m14_mesh_depth.py::test_m14_mat_08` | Mesh contribution reaches world-depth non-background pixels. |
+| `M14-MAT:09` | TEST | `tests/test_m14_mesh_depth.py::test_m14_mat_09` | Zero-mesh schema-4 bytes == exact M10 bytes. |
+| `M14-MAT:10` | TEST | `tests/test_m14_mesh_depth.py::test_m14_mat_10` | Deterministic repeat under same materializer contract → identical digest. |
+| `M14-MAT:11` | TEST | `tests/test_m14_mesh_depth.py::test_m14_mat_11_real_concurrent_publication` | Identical concurrent publication converges. |
+| `M14-MAT:12` | TEST | `tests/test_m14_mesh_depth.py::test_m14_mat_12_same_coordinate_different_bytes` | Conflicting same-coordinate bytes fail invariant. |
+| `M14-MAT:13` | TEST | `tests/test_m14_mesh_depth.py::test_m14_mat_13_contract_hash_is_coordinate` | materializer_contract_hash participates in convergence identity. |
+| `M14-MAT:14` | TEST | `tests/test_m14_mesh_depth.py::test_m14_mat_14` | Retained mesh suppresses exact identity-matched M10 proxy once; inherited entity-depth double-conditioning for the same subject refuses in schema 1. |
+| `M14-MAT:15` | TEST | `tests/test_m14_mesh_depth.py::test_m14_mat_15` | observation.world_depth media/frame/encoding/binding grammar exact. |
 
 ## M14-HIST
 

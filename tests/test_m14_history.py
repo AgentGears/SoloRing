@@ -71,7 +71,11 @@ async def test_m14_hist_01(client, tmp_path):
     assert observation["spec_hash"] == hashlib.sha256(
         canonical_json_bytes(embedded)).hexdigest()
     assert embedded["shot_revision"]["id"] == generation.shot_revision_id
-    assert embedded["materializations"][0]["source_occurrence_ids"] == []
+    assert embedded["materializations"][0]["source_occurrence_ids"] == [
+        occ["occurrence_id"]
+        for occ in embedded["production_occurrences"]], (
+        "the materialization source list is exactly the retained "
+        "ProductionOccurrence objects in captured order")
 
 
 async def test_m14_hist_02(client, tmp_path):

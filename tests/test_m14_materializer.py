@@ -115,7 +115,8 @@ async def _mesh_production_revision(client, pid: str, blob: bytes,
 
 
 async def _observation_world(client, *, tag: bytes, sources: list[dict],
-                             adopt_first_mesh: bool = True):
+                             adopt_first_mesh: bool = True,
+                             pi_translation=(100, 0, 0)):
     """A captured schema-6 world whose composition has the given direct
     sources: {"kind": "mesh"|"nonmesh", "mesh": doc?, "transform": (x,y,z),
     "interpretation": (x,y,z)?}. Returns (b, snapshot, oids, prids)."""
@@ -167,7 +168,7 @@ async def _observation_world(client, *, tag: bytes, sources: list[dict],
             f"/production-instance-spatial-tracks/{track}/transitions",
             json={"anchor_type": "sequence", "anchor_id": seq,
                   "boundary": "start", "operation": "set",
-                  "transform": {"translation_mm": [100, 0, 0],
+                  "transform": {"translation_mm": list(pi_translation),
                                 "rotation_udeg": [0, 0, 0]}})
         assert r.status_code == 201, r.text
         b["pi_track"] = track

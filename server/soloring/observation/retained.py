@@ -79,9 +79,11 @@ class RetainedMeshSource:
     placement_source_hash: str
     subject_local_to_world: dict
     realization_local_to_world: dict
-    structure_requirement: dict
-    placement_requirement: dict
-    occurrence_object: dict
+    authority_subject_kind: str = ""
+    authority_subject_id: str = ""
+    structure_requirement: dict = field(default=None)
+    placement_requirement: dict = field(default=None)
+    occurrence_object: dict = field(default=None)
 
 
 @dataclass(frozen=True)
@@ -477,6 +479,10 @@ async def load_retained_mesh_sources(
             placement_source_hash=placement_source_hash,
             subject_local_to_world=second,
             realization_local_to_world=composed,
+            authority_subject_kind=(
+                subject["authority_subject"]["kind"] if subject else ""),
+            authority_subject_id=(
+                subject["authority_subject"]["id"] if subject else ""),
             structure_requirement=structure_requirement,
             placement_requirement=placement_requirement,
             occurrence_object=occurrence_object))
@@ -500,3 +506,33 @@ async def load_retained_mesh_sources(
         unsupported_requirements=unsupported_entries,
         total_triangles=total_triangles,
         query_count=queries)
+
+
+def merge_retained_into_spec(spec: dict, outcome: RetainedLoadOutcome) -> dict:
+    """Fold the B1 consumer outcome into a compiled base spec (frozen
+    §§8.5/10/28): occurrence structure/placement requirements for every
+    direct occurrence (recognized meshes contribute both; nested and
+    non-mesh contribute their typed unsupported structure requirement),
+    the ProductionOccurrence objects in captured order, and the
+    materialization source list. Rebuilds through the strict builder so
+    canonical ordering and the full grammar hold."""
+    from soloring.observation.spec import build_world_observation_spec
+
+    requirements = list(spec["requirements"])
+    for source in outcome.sources:
+        requirements.append(source.structure_requirement)
+        requirements.append(source.placement_requirement)
+    requirements.extend(outcome.unsupported_requirements)
+
+    materialization = dict(spec["materializations"][0])
+    materialization["source_occurrence_ids"] = [
+        source.occurrence_id for source in outcome.sources]
+
+    return build_world_observation_spec(
+        shot_revision_id=spec["shot_revision"]["id"],
+        plan_hash=spec["shot_revision"]["plan_hash"],
+        captured_domains=spec["captured_domains"],
+        requirements=requirements,
+        production_occurrences=[
+            source.occurrence_object for source in outcome.sources],
+        materializations=[materialization])

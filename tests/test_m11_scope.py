@@ -129,6 +129,8 @@ def test_no_execution_source_delta_in_m11_owned_diff():
         "server/soloring/generation/service.py",
         "server/soloring/realization/packages.py",
         "server/soloring/errors.py",
+        "server/soloring/generation/repository.py",
+        "server/soloring/spatial/boxdepth.py",
     )
     offenders = sorted(
         p for p in changed

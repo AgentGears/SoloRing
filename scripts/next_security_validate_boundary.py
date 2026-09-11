@@ -98,6 +98,9 @@ ALLOWLIST = (
     "tests/test_m11_recovery.py",
     "tests/test_m12_recovery.py",
     "tests/test_m13_recovery.py",
+    "server/soloring/generation/repository.py",
+    "server/soloring/spatial/boxdepth.py",
+    "tests/test_m14_mesh_depth.py",
     "tests/test_m10a_migrations.py",
     "tests/test_m11_migration.py",
     "tests/test_m12_migration.py",
@@ -125,7 +128,9 @@ M14_OWNED_PREFIXES = (
     "server/alembic/versions/0015_m14_world_observation_execution.py",
     "server/soloring/db/models.py",
     "server/soloring/generation/service.py",
+    "server/soloring/generation/repository.py",
     "server/soloring/realization/packages.py",
+    "server/soloring/spatial/boxdepth.py",
     "scripts/m13_validate_boundary.py",
 )
 

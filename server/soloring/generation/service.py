@@ -288,6 +288,7 @@ async def _realize_spatial_inputs(
 
 async def _integrate_schema6_observation(
     session: AsyncSession,
+    settings,
     *,
     shot_id: str,
     revision,
@@ -296,9 +297,12 @@ async def _integrate_schema6_observation(
     release,
     package,
 ) -> dict:
-    """Frozen M14 R2 §§7.2/8.11/25.1 (E10): compile → negotiate → typed
-    refusal before publication, or hand the exact observation facts to
-    the WorkflowSpec-4 wrapper. Every authority fact comes from the
+    """Frozen M14 R2 §§7.2/8.11/25.1 (E10) + §§14/24 (B3): compile →
+    load retained closure → merge occurrence authority → negotiate →
+    typed refusal before publication, or materialize the deterministic
+    observation.world_depth, publish/converge the artifact, and hand the
+    exact observation facts + binding to the WorkflowSpec-4 wrapper and
+    the Generation publication unit. Every authority fact comes from the
     captured ShotRevision value and its immutable companion rows — no
     current-state resolution."""
     from sqlalchemy import text as _text
@@ -307,6 +311,11 @@ async def _integrate_schema6_observation(
         compile_world_observation_spec,
         negotiate,
         require_publication_allowed,
+    )
+    from soloring.assets.blob_store import BlobStore as _BlobStore
+    from soloring.observation.retained import (
+        load_retained_mesh_sources,
+        merge_retained_into_spec,
     )
     from soloring.spatial import schemas as spatial_schemas
 
@@ -373,17 +382,137 @@ async def _integrate_schema6_observation(
         visual_reference_pack_hash=visual_hash,
         materializer_contract_hash=contract_hash,
     )
+
+    # B1: the set-oriented retained closure consumer (batched immutable
+    # lookups; recognition before interpretation; caps enforced at the
+    # loader). The merged spec carries the occurrence authority so the
+    # negotiation below sees every direct occurrence's real contract.
+    store = _BlobStore(settings)
+
+    def _read_blob(blob_hash: str) -> bytes:
+        return store.path_for_hash(blob_hash).read_bytes()
+
+    retained = await load_retained_mesh_sources(
+        session, _read_blob,
+        captured_production_world=snapshot["production_world"],
+        captured_spatial_pack=spatial_pack)
+    observation_spec = merge_retained_into_spec(observation_spec, retained)
+
     negotiation = negotiate(observation_spec, observation_block)
     # §8.11: the typed refusal fires here — before any Generation row,
     # Comfy submission, worker dispatch, or prompt fallback exists.
     require_publication_allowed(negotiation, observation_spec)
+
+    observation_binding = None
+    observation_contract = None
+    if retained.sources:
+        # §14.3: the same CreativeEntity conditioned by both a retained
+        # mesh and an inherited entity-depth stream refuses — checked
+        # BEFORE any materialization work.
+        from soloring.observation.materializer import (
+            build_materializer_contract,
+            build_provenance,
+            check_duplicate_conditioning,
+            materialize_observation_world_depth,
+            materializer_contract_hash as _mch,
+            parameters_hash as _parameters_hash,
+            provenance_hash as _ph,
+            ARTIFACT_ROLE as _ROLE,
+            MATERIALIZER_ID as _MID,
+            MATERIALIZER_VERSION as _MVER,
+        )
+        from soloring.observation.publication import (
+            ObservationBinding,
+            publish_observation_artifact,
+        )
+
+        check_duplicate_conditioning(retained.sources, spatial_pack)
+
+        # §25.1: deterministic materialization BEFORE publication, outside
+        # any writer fence.
+        result = materialize_observation_world_depth(
+            spatial_pack, retained.sources)
+        contract = build_materializer_contract()
+        contract_hash_actual = _mch(contract)
+        parameters = dict(_PARAMETERS_REF)
+        ph = _parameters_hash()
+        provenance = build_provenance(
+            project_id=await _project_id_for_shot(session, shot_id),
+            observation_spec_hash=canonical_hash(observation_spec),
+            materializer_contract_hash=contract_hash_actual,
+            parameters_hash=ph,
+            source_retained_blob_hashes=[
+                source.retained_blob_hash for source in retained.sources],
+            execution_package={
+                "workflow_id": release.workflow_id,
+                "workflow_version": release.workflow_version,
+                "manifest_hash": release.manifest_hash,
+                "workflow_template_hash": release.workflow_template_hash,
+                "realization_profile_hash": (
+                    release.realization_profile_hash),
+                "execution_model_fingerprint_hash": (
+                    release.execution_model_fingerprint_hash),
+            })
+        blob_bytes = b"".join(result.frames)
+        import hashlib as _hl
+
+        if _hl.sha256(blob_bytes).hexdigest() != result.digest:
+            raise internal_invariant(
+                "Materialized observation bytes disagree with the "
+                "artifact digest.")
+        async with session.bind.connect() as _pub:
+            artifact_id = await publish_observation_artifact(
+                _pub, store,
+                project_id=await _project_id_for_shot(session, shot_id),
+                observation_spec_hash=canonical_hash(observation_spec),
+                materializer_id=_MID,
+                materializer_version=_MVER,
+                materializer_contract_hash=contract_hash_actual,
+                parameters=parameters,
+                parameters_hash=ph,
+                provenance=provenance,
+                provenance_hash_value=_ph(provenance),
+                blob_bytes=blob_bytes)
+        from soloring.spatial.package3 import (
+            resolve_derived_binding as _resolve_world_key,
+        )
+
+        world_input_key, _node, _field = _resolve_world_key(
+            package.manifest_v3, _ROLE_INHERITED, 0)
+        observation_binding = ObservationBinding(
+            input_key=world_input_key, position=0,
+            artifact_id=artifact_id,
+            blob_hash=_hl.sha256(blob_bytes).hexdigest())
+        observation_contract = {
+            "contract": contract, "contract_hash": contract_hash_actual}
 
     return {
         "spec": observation_spec,
         "negotiation": negotiation,
         "profile_hash": package.release.realization_profile_hash,
         "capability_contract_hash": canonical_hash(observation_block),
+        "observation_binding": observation_binding,
+        "observation_contract": observation_contract,
     }
+
+
+_PARAMETERS_REF = {
+    "width": 832, "height": 480, "frames": 17, "time_base_num": 1,
+    "time_base_den": 17, "mode": "L", "background": 255}
+_ROLE_INHERITED = "spatial.world_depth"
+
+
+async def _project_id_for_shot(session, shot_id: str) -> str:
+    from sqlalchemy import text as _text
+
+    row = (await session.execute(_text(
+        "SELECT project_id FROM shots WHERE id = :s"),
+        {"s": shot_id})).mappings().one_or_none()
+    if row is None or row["project_id"] is None:
+        raise internal_invariant(
+            "Observation publication could not resolve the Shot-owning "
+            "Project.")
+    return row["project_id"]
 
 
 async def create_generation_request(
@@ -526,7 +655,7 @@ async def create_generation_request(
         # PD-1A lower-logical projection below is reachable ONLY for
         # schema ≤ 5 snapshots with an empty captured M10 plane.
         observation_integration = await _integrate_schema6_observation(
-            session, shot_id=shot_id, revision=revision,
+            session, settings, shot_id=shot_id, revision=revision,
             snapshot=snapshot, spatial_pack=spatial_pack,
             release=release, package=package)
         lower_view = None
@@ -838,7 +967,10 @@ async def create_generation_request(
         workflow_spec_hash=spec_hash,
     )
     return await repo.create_generation(
-        session, draft, inputs, derived_inputs=derived_bindings)
+        session, draft, inputs, derived_inputs=derived_bindings,
+        observation_binding=(
+            observation_integration["observation_binding"]
+            if observation_integration is not None else None))
 
 
 async def list_generations(session: AsyncSession, shot_id: str) -> list[Generation]:

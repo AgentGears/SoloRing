@@ -61,6 +61,8 @@ M14_OWNED_PREFIXES = (
     "server/soloring/observation/",
     "server/soloring/generation/service.py",
     "server/soloring/realization/packages.py",
+    "server/soloring/generation/repository.py",
+    "server/soloring/spatial/boxdepth.py",
 )
 
 
