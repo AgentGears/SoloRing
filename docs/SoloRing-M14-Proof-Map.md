@@ -20,8 +20,8 @@ Disposition vocabulary:
 | `M14-BASE:02` | TEST | `tests/test_m14_0_baseline.py::test_m14_base_02` | Immutable M13 tag/commit unchanged. |
 | `M14-BASE:03` | TEST | `tests/test_m14_0_baseline.py::test_m14_base_03` | Migration predecessor exactly 0014. |
 | `M14-BASE:04` | TEST | `tests/test_m14_base_corpus.py::test_m14_base_04` | WorkflowSpec schema-1/2/3 regression corpus green. |
-| `M14-BASE:05` | PENDING | `tests/test_m14_base_corpus.py::test_m14_base_05` | ShotRevision schema-1..6 historical corpus green. |
-| `M14-BASE:06` | PENDING | `tests/test_m14_base_corpus.py::test_m14_base_06` | Predecessor proof/boundary/security validators green. |
+| `M14-BASE:05` | TEST | `tests/test_m14_base_corpus.py::test_m14_base_05` | ShotRevision schema-1..6 historical corpus green. |
+| `M14-BASE:06` | TEST | `tests/test_m14_base_corpus.py::test_m14_base_06` | Predecessor proof/boundary/security validators green. |
 
 ## M14-OBS
 
@@ -45,7 +45,7 @@ Disposition vocabulary:
 | `M14-OBS:16` | TEST | `tests/test_m14_obs.py::test_m14_obs_16` | Exact captured shot_revision_id drives compiler; schema-6 never enters the predecessor lower-logical fail-open path; zero current Shot resolver calls. |
 | `M14-OBS:17` | TEST | `tests/test_m14_obs.py::test_m14_obs_17` | All executable structural meshes require exact interpretation. |
 | `M14-OBS:18` | TEST | `tests/test_m14_0_g6_g7_corpus.py::test_m14_obs_18` | Golden WorldObservationSpec fixture bytes/hash exact. |
-| `M14-OBS:19` | PENDING | `tests/test_m14_obs.py::test_m14_obs_19` | Current production-world resolver unavailable does not affect historical compiler/inspector path. |
+| `M14-OBS:19` | TEST | `tests/test_m14_obs.py::test_m14_obs_19` | Current production-world resolver unavailable does not affect historical compiler/inspector path. |
 
 ## M14-CAP
 
@@ -120,8 +120,8 @@ Disposition vocabulary:
 | Cell | Disposition | Exact proof owner | Claim |
 |---|---|---|---|
 | `M14-EXEC:01` | TEST | `tests/test_m14_execution.py::test_m14_exec_01` | Schema-4 lower_schema_3 uses one shared inherited helper. |
-| `M14-EXEC:02` | PENDING | `tests/test_m14_execution.py::test_m14_exec_02` | Pre-publication materialization completed before Generation commit. |
-| `M14-EXEC:03` | PENDING | `tests/test_m14_execution.py::test_m14_exec_03` | Generation + WorkflowSpec-4 + exact artifact binding atomic. |
+| `M14-EXEC:02` | TEST | `tests/test_m14_execution.py::test_m14_exec_02` | Pre-publication materialization completed before Generation commit. |
+| `M14-EXEC:03` | TEST | `tests/test_m14_execution.py::test_m14_exec_03` | Generation + WorkflowSpec-4 + exact artifact binding atomic. |
 | `M14-EXEC:04` | TEST | `tests/test_m14_derived_storage.py::test_no_fake_asset_or_generation_input_for_m14_closure` | Schema-4 creates no fake Asset / dishonest GenerationInput. |
 | `M14-EXEC:05` | TEST | `tests/test_m14_b5_worker_closure.py::test_m14_exec_05` | Worker makes zero current production-world resolver calls. |
 | `M14-EXEC:06` | TEST | `tests/test_m14_b5_increment3.py::test_m14_exec_06_full_pipeline_runtime_gate` | Runtime availability gate occurs before Comfy submission. |

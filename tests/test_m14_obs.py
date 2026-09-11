@@ -775,3 +775,110 @@ async def test_m14_obs_17(client) -> None:
     assert outcome.sources == []
     (entry,) = outcome.unsupported
     assert entry.source_contract == "unrecognized.retained_blob"
+
+
+# ---- M14-OBS:19 resolver-unavailable isolation -----------------------------
+
+async def test_m14_obs_19(client, tmp_path) -> None:
+    """M14-OBS:19 current production-world resolver unavailable does not
+    affect the historical compiler/inspector path.
+
+    With the Shot's current production-world selection deleted, the
+    current resolver reports M13 absent — and the captured revision's
+    historical inspector returns the exact captured graph while the
+    historical compiler (compile from the captured schema-6 value +
+    set-oriented retained closure load) reproduces the exact stored
+    WorldObservationSpec hash. Current availability is not an input to
+    either path."""
+    from sqlalchemy import text as _sa_text
+
+    from soloring.production_world.inspection import (
+        inspect_production_world,
+        read_captured_production_world,
+    )
+    from tests.conftest import make_tracked_maker
+    from tests.test_m14_execution import (
+        _comfy,
+        _generate,
+        _latest_revision_id,
+        _observation_package,
+        _schema6_world,
+        _stored_spec,
+    )
+
+    b, _sel, _rev, snapshot = await _schema6_world(
+        client, tag=b"m14-obs19")
+    engine = client._transport.app.state.engine
+    maker = make_tracked_maker(engine)
+    revision_id = await _latest_revision_id(engine, b["shot"])
+
+    async with maker() as session:
+        before = await read_captured_production_world(
+            session, revision_id)
+
+    pkg = await _observation_package(tmp_path)
+    generation = await _generate(client, b["shot"], _comfy(client, pkg))
+    spec = await _stored_spec(engine, generation.id)
+    stored_spec_hash = spec["world_observation"]["spec_hash"]
+    stored_spec = spec["world_observation"]["spec"]
+
+    # make the CURRENT production-world resolver unavailable for the shot
+    binding_id = snapshot["production_world"]["binding"]["binding_id"]
+    r = await client.request(
+        "DELETE", f"/shots/{b['shot']}/production-world-selection",
+        json={"expected_binding_id": binding_id})
+    assert r.status_code == 200, r.text
+
+    async with maker() as session:
+        status = await inspect_production_world(session, b["shot"])
+        assert status["selected"] is False, (
+            "premise: the current resolver no longer resolves a "
+            "production world for this shot")
+        after = await read_captured_production_world(
+            session, revision_id)
+    assert after == before, (
+        "the historical inspector is a pure captured-graph read — "
+        "current availability is not an input")
+
+    # the historical compiler path over the SAME captured revision: the
+    # companion hashes + captured value reproduce the stored spec hash
+    async with engine.connect() as conn:
+        row = (await conn.execute(_sa_text(
+            "SELECT srsw.spatial_continuity_hash, "
+            "srpw.production_world_hash FROM shot_revisions sr "
+            "LEFT JOIN shot_revision_spatial_worlds srsw "
+            "  ON srsw.shot_revision_id = sr.id "
+            "LEFT JOIN shot_revision_production_worlds srpw "
+            "  ON srpw.shot_revision_id = sr.id "
+            "WHERE sr.id = :rid"), {"rid": revision_id})).mappings().one()
+    from soloring.domain.canonical import canonical_hash
+    from soloring.observation.retained import (
+        load_retained_mesh_sources,
+        merge_retained_into_spec,
+    )
+    from soloring.spatial import schemas as spatial_schemas
+    from tests.test_m14_materializer import _reader
+
+    visual_pack = snapshot.get("visual_reference_pack")
+    recomputed = compile_world_observation_spec(
+        shot_id=b["shot"],
+        shot_revision_id=revision_id,
+        plan_hash=spatial_schemas.plan_hash(
+            snapshot["spatial_continuity"]["shot_plan"]),
+        captured_schema_6=snapshot,
+        spatial_continuity_hash=row["spatial_continuity_hash"],
+        production_world_hash=row["production_world_hash"],
+        visual_reference_pack_hash=(
+            canonical_hash(visual_pack) if visual_pack else None),
+        materializer_contract_hash=CONTRACT_HASH,
+    )
+    async with engine.connect() as conn:
+        retained = await load_retained_mesh_sources(
+            conn, _reader(client),
+            captured_production_world=snapshot["production_world"],
+            captured_spatial_pack=snapshot["spatial_continuity"])
+    recomputed = merge_retained_into_spec(recomputed, retained)
+    assert world_observation_spec_hash(recomputed) == (
+        world_observation_spec_hash(stored_spec)) == stored_spec_hash, (
+        "the compiler + retained closure reproduce the stored "
+        "observation identity with the current resolver unavailable")

@@ -425,3 +425,132 @@ async def _latest_revision_id(engine, shot: str):
             "SELECT id FROM shot_revisions WHERE shot_id = :s "
             "ORDER BY revision_number DESC LIMIT 1"),
             {"s": shot})).scalar_one()
+
+
+# ---- M14-EXEC:02 materialization before Generation commit ------------------
+
+async def test_m14_exec_02(client, tmp_path, monkeypatch):
+    """M14-EXEC:02 pre-publication materialization completed before
+    Generation commit (frozen §33.2 ordering).
+
+    At the moment the Generation publication unit opens — the
+    repository entry — the derived observation artifact row and its
+    Blob bytes are ALREADY durable and zero Generation rows exist:
+    materialization and publication ran to completion outside the
+    writer fence, before the Generation transaction."""
+    b, _sel, _rev, _snapshot = await _schema6_world(
+        client, tag=b"m14-exec02")
+    pkg = await _observation_package(tmp_path)
+    settings = _comfy(client, pkg)
+    engine = client._transport.app.state.engine
+
+    from soloring.generation import repository as repo
+
+    real_create = repo.create_generation
+    observed: dict = {}
+
+    async def _spy_create(session, draft, inputs, *args, **kwargs):
+        async with engine.connect() as conn:
+            rows = (await conn.execute(text(
+                "SELECT id, blob_hash, provenance_hash FROM "
+                "derived_observation_artifacts"))).mappings().all()
+            observed["pre_commit_generation_count"] = (
+                await conn.execute(text(
+                    "SELECT COUNT(*) FROM generations WHERE shot_id = :s"),
+                    {"s": b["shot"]})).scalar_one()
+        assert rows, (
+            "the observation artifact must exist before the publication "
+            "unit opens")
+        (observed["artifact"],) = [dict(r) for r in rows]
+        blob = observed["artifact"]["blob_hash"]
+        live_settings = client._transport.app.state.settings
+        blob_path = (live_settings.blob_dir / "sha256" / blob[:2]
+                     / blob[2:4] / blob)
+        observed["blob_bytes"] = blob_path.read_bytes()
+        return await real_create(session, draft, inputs, *args, **kwargs)
+
+    monkeypatch.setattr(repo, "create_generation", _spy_create)
+    generation = await _generate(client, b["shot"], settings)
+
+    import hashlib
+
+    assert observed["pre_commit_generation_count"] == 0, (
+        "no Generation row may exist when the publication unit opens")
+    assert hashlib.sha256(
+        observed["blob_bytes"]).hexdigest() == (
+        observed["artifact"]["blob_hash"]), (
+        "the physically published Blob IS the artifact's content digest")
+
+    # the committed binding references the exact PRE-committed artifact
+    async with engine.connect() as conn:
+        binding = (await conn.execute(text(
+            "SELECT derived_observation_artifact_id, blob_hash FROM "
+            "generation_derived_observation_inputs WHERE generation_id "
+            "= :g"), {"g": generation.id})).mappings().one()
+    assert binding["derived_observation_artifact_id"] == (
+        observed["artifact"]["id"])
+    assert binding["blob_hash"] == observed["artifact"]["blob_hash"]
+
+
+# ---- M14-EXEC:03 publication unit atomicity --------------------------------
+
+async def test_m14_exec_03(client, tmp_path, monkeypatch):
+    """M14-EXEC:03 Generation + WorkflowSpec-4 + exact artifact binding
+    atomic.
+
+    A uniqueness violation fired INSIDE the publication unit (a second
+    real insert of the same binding at the same coordinate) rolls the
+    whole unit back: no Generation row, no WorkflowSpec, no binding
+    survives. The owner-free artifact remains — publication precedes
+    the Generation unit by design (§33.2/§33.3)."""
+    b, _sel, _rev, _snapshot = await _schema6_world(
+        client, tag=b"m14-exec03")
+    pkg = await _observation_package(tmp_path)
+    settings = _comfy(client, pkg)
+    engine = client._transport.app.state.engine
+
+    from soloring.errors import SoloRingError as _SRE
+    from soloring.observation import publication
+
+    real_insert = publication.insert_generation_binding
+    calls = {"n": 0}
+
+    async def _double_insert(conn, *, generation_id, binding):
+        await real_insert(conn, generation_id=generation_id,
+                          binding=binding)
+        calls["n"] += 1
+        if calls["n"] == 1:
+            # the SAME real insert again: the table's own coordinate
+            # uniqueness refuses inside the open publication unit
+            await real_insert(conn, generation_id=generation_id,
+                              binding=binding)
+
+    monkeypatch.setattr(
+        publication, "insert_generation_binding", _double_insert)
+
+    with pytest.raises(_SRE):
+        await _generate(client, b["shot"], settings)
+
+    async with engine.connect() as conn:
+        generation_count = (await conn.execute(text(
+            "SELECT COUNT(*) FROM generations WHERE shot_id = :s"),
+            {"s": b["shot"]})).scalar_one()
+        input_count = (await conn.execute(text(
+            "SELECT COUNT(*) FROM generation_inputs"))).scalar_one()
+        spatial_count = (await conn.execute(text(
+            "SELECT COUNT(*) FROM "
+            "generation_derived_spatial_inputs"))).scalar_one()
+        binding_count = (await conn.execute(text(
+            "SELECT COUNT(*) FROM "
+            "generation_derived_observation_inputs"))).scalar_one()
+        artifact_count = (await conn.execute(text(
+            "SELECT COUNT(*) FROM "
+            "derived_observation_artifacts"))).scalar_one()
+    assert generation_count == 0, "no half-Generation may survive"
+    assert input_count == 0
+    assert spatial_count == 0
+    assert binding_count == 0, (
+        "the failed binding insert leaves no binding row behind")
+    assert artifact_count == 1, (
+        "the owner-free artifact remains published — convergence "
+        "preceded the Generation unit (RACE-07 posture)")
