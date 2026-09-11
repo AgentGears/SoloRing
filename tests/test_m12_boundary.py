@@ -90,12 +90,32 @@ def test_m12_has_no_generation_executor_or_render_source_delta():
     changed = {line for line in out.splitlines() if line.strip()}
     forbidden = ("executor", "worker", "comfy", "render", "generation/",
                  "workflows/", "realization")
+    # M14 implementation succession (frozen R2 @ 68f910f5, authorized
+    # 2026-09-10): the authorized M14 execution-integration surface is
+    # carved out of this M12 "no execution content" gate exactly as
+    # later slices carved their surfaces into earlier boundary gates.
+    # The M14 boundary validator owns these paths' classification.
+    m14_owned = (
+        "server/soloring/observation/",
+        "server/soloring/generation/service.py",
+        "server/soloring/realization/packages.py",
+        "server/soloring/errors.py",
+        "server/soloring/generation/repository.py",
+        "server/soloring/spatial/boxdepth.py",
+        "server/soloring/generation/rerun.py",
+        "server/soloring/worker/comfy_pipeline.py",
+        "server/soloring/workflows/artifact_store.py",
+        "server/soloring/worker/execution.py",
+        "server/soloring/api/generations.py",
+        "server/soloring/api/realization.py",
+    )
     offenders = sorted(
         p for p in changed
         if any(m in p.lower() for m in forbidden)
         and not p.startswith(("tests/", "scripts/", ".github/"))
         # spatial/math.py is the pinned value-grammar reuse seam, not a write
         and p != "server/soloring/spatial/math.py"
+        and not p.startswith(m14_owned)
     )
     assert offenders == [], offenders
 

@@ -252,8 +252,8 @@ def test_migration_head_is_exactly_0013(tmp_path, monkeypatch):
     ver = con.execute("SELECT version_num FROM alembic_version").fetchone()[0]
     files = sorted(p.name for p in VERSIONS.glob("0*.py"))
     con.close()
-    assert ver == "0014_m13_authority_complete_world"  # M13 advances the head
-    assert files[-1] == "0014_m13_authority_complete_world.py"
+    assert ver == "0015_m14_world_observation_execution"  # M14 advances the head
+    assert files[-1] == "0015_m14_world_observation_execution.py"
 
 
 def test_0012_predecessor_database_upgrades_cleanly_to_0013(tmp_path, monkeypatch):

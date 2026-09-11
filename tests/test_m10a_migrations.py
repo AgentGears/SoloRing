@@ -43,8 +43,9 @@ def _downgrade(tmp_path, monkeypatch, target):
 
 def test_migrations_present_and_chained():
     files = sorted(p.name for p in VERSIONS.glob("0*.py"))
-    assert files[-2:] == ["0013_m12_composition_occurrences.py",
-                          "0014_m13_authority_complete_world.py"]
+    assert files[-3:] == ["0013_m12_composition_occurrences.py",
+                          "0014_m13_authority_complete_world.py",
+                          "0015_m14_world_observation_execution.py"]
     m10 = (VERSIONS / "0010_m10_spatial_cinematic_continuity.py").read_text()
     assert 'down_revision: Union[str, None] = "0009_m8_visual_identity"' in m10
     m11 = (VERSIONS / "0011_m10_derived_spatial_execution.py").read_text()

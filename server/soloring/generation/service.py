@@ -286,6 +286,257 @@ async def _realize_spatial_inputs(
     return block, tuple(bindings)
 
 
+async def _integrate_schema6_observation(
+    session: AsyncSession,
+    settings,
+    *,
+    shot_id: str,
+    revision,
+    snapshot: dict,
+    spatial_pack: dict,
+    release,
+    package,
+) -> dict:
+    """Frozen M14 R2 §§7.2/8.11/25.1 (E10) + §§14/24 (B3): compile →
+    load retained closure → merge occurrence authority → negotiate →
+    typed refusal before publication, or materialize the deterministic
+    observation.world_depth, publish/converge the artifact, and hand the
+    exact observation facts + binding to the WorkflowSpec-4 wrapper and
+    the Generation publication unit. Every authority fact comes from the
+    captured ShotRevision value and its immutable companion rows — no
+    current-state resolution."""
+    from sqlalchemy import text as _text
+
+    from soloring.observation import (
+        compile_world_observation_spec,
+        negotiate,
+        require_publication_allowed,
+    )
+    from soloring.assets.blob_store import BlobStore as _BlobStore
+    from soloring.observation.retained import (
+        load_retained_mesh_sources,
+        merge_retained_into_spec,
+    )
+    from soloring.spatial import schemas as spatial_schemas
+
+    row = (await session.execute(_text(
+        "SELECT srsw.spatial_continuity_hash, srpw.production_world_hash "
+        "FROM shot_revisions sr "
+        "LEFT JOIN shot_revision_spatial_worlds srsw "
+        "  ON srsw.shot_revision_id = sr.id "
+        "LEFT JOIN shot_revision_production_worlds srpw "
+        "  ON srpw.shot_revision_id = sr.id "
+        "WHERE sr.id = :rid"), {"rid": revision.id})).mappings().one_or_none()
+    if row is None:
+        raise internal_invariant("ShotRevision row vanished mid-request")
+    spatial_continuity_hash = row["spatial_continuity_hash"]
+    production_world_hash = row["production_world_hash"]
+    if spatial_pack is None or spatial_continuity_hash is None:
+        raise internal_invariant(
+            "schema-6 capture without its embedded M10 spatial plane — "
+            "schema 6 requires the exact schema-5 base (frozen M13 §17.2)")
+    if canonical_hash(spatial_pack) != spatial_continuity_hash:
+        raise internal_invariant(
+            "captured schema-6 spatial plane disagrees with the stored "
+            "continuity hash")
+    if production_world_hash is None:
+        raise internal_invariant(
+            "schema-6 capture without its production-world companion row")
+
+    visual_pack = snapshot.get("visual_reference_pack")
+    visual_hash = canonical_hash(visual_pack) if visual_pack else None
+
+    profile_doc = package.profile_v2
+    observation_block = profile_doc.get("observation")
+    # Source review R2-P0: the WorldObservationSpec schema-1 grammar
+    # pins EXACTLY soloring.observation.mesh_depth version 1 — resolve
+    # that one fixed entry from the captured block, never "the highest
+    # version". A block declaring only other versions leaves the spec
+    # unable to pin its required contract: typed policy refusal, the
+    # same posture as no materializer at all.
+    pinned_materializer = next(
+        (m for m in (observation_block or {}).get("materializers", [])
+         if m.get("id") == "soloring.observation.mesh_depth"
+         and m.get("version") == 1), None)
+    if pinned_materializer is None:
+        # The captured profile declares no mesh-depth observation
+        # materializer at the schema-1 pinned identity (v1): the
+        # WorldObservationSpec cannot pin the one materializer contract
+        # it would require, so the observation refuses with the typed
+        # policy outcome — never a fabricated contract identity and
+        # never the predecessor lower-logical execution.
+        raise SoloRingError(
+            ErrorCode.OBSERVATION_POLICY_UNSUPPORTED,
+            "The captured workflow profile declares no observation "
+            "capability at the schema-1 materializer identity "
+            "(soloring.observation.mesh_depth v1): a schema-6 "
+            "ShotRevision cannot execute through this package, and the "
+            "pre-M14 lower-logical fallback no longer exists.",
+            status_code=409,
+            details={"shot_revision_id": revision.id,
+                     "workflow_id": release.workflow_id,
+                     "workflow_version": release.workflow_version})
+    contract_hash = pinned_materializer["contract_hash"]
+
+    observation_spec = compile_world_observation_spec(
+        shot_id=shot_id,
+        shot_revision_id=revision.id,
+        plan_hash=spatial_schemas.plan_hash(
+            spatial_pack["shot_plan"]),
+        captured_schema_6=snapshot,
+        spatial_continuity_hash=spatial_continuity_hash,
+        production_world_hash=production_world_hash,
+        visual_reference_pack_hash=visual_hash,
+        materializer_contract_hash=contract_hash,
+    )
+
+    # B1: the set-oriented retained closure consumer (batched immutable
+    # lookups; recognition before interpretation; caps enforced at the
+    # loader). The merged spec carries the occurrence authority so the
+    # negotiation below sees every direct occurrence's real contract.
+    store = _BlobStore(settings)
+
+    def _read_blob(blob_hash: str) -> bytes:
+        return store.path_for_hash(blob_hash).read_bytes()
+
+    retained = await load_retained_mesh_sources(
+        session, _read_blob,
+        captured_production_world=snapshot["production_world"],
+        captured_spatial_pack=spatial_pack)
+    observation_spec = merge_retained_into_spec(observation_spec, retained)
+
+    negotiation = negotiate(observation_spec, observation_block)
+    # §8.11: the typed refusal fires here — before any Generation row,
+    # Comfy submission, worker dispatch, or prompt fallback exists.
+    require_publication_allowed(negotiation, observation_spec)
+
+    observation_binding = None
+    observation_contract = None
+    # Source review P0-1 (frozen §§14.2/19/25.1): EVERY supported
+    # schema-4 observation materializes, publishes, and binds its
+    # observation.world_depth — including the zero-retained-mesh subset
+    # (the materializer's empty-source case is the exact M10 path).
+    # A schema-4 Generation is never published without its exact
+    # derived-observation binding.
+    from soloring.observation.materializer import (
+        build_materializer_contract,
+        build_provenance,
+        check_duplicate_conditioning,
+        materialize_observation_world_depth,
+        materializer_contract_hash as _mch,
+        parameters_hash as _parameters_hash,
+        provenance_hash as _ph,
+        ARTIFACT_ROLE as _ROLE,
+        MATERIALIZER_ID as _MID,
+        MATERIALIZER_VERSION as _MVER,
+    )
+    from soloring.observation.publication import (
+        ObservationBinding,
+        publish_observation_artifact,
+    )
+    from soloring.errors import internal_invariant
+
+    check_duplicate_conditioning(retained.sources, spatial_pack)
+
+    # Source review P0-2: the contract that will PRODUCE the bytes must
+    # be the exact contract the captured capability negotiated under —
+    # a package captured under contract A never materializes under a
+    # diverged runtime contract B (frozen §36.3 invariant semantics).
+    contract = build_materializer_contract()
+    contract_hash_actual = _mch(contract)
+    if contract_hash_actual != contract_hash:
+        raise internal_invariant(
+            "The runtime MaterializerContract "
+            f"{contract_hash_actual} differs from the contract "
+            f"{contract_hash} captured by the selected observation "
+            "profile — the observation would negotiate under one "
+            "contract and materialize under another.")
+
+    # §25.1: deterministic materialization BEFORE publication, outside
+    # any writer fence.
+    result = materialize_observation_world_depth(
+        spatial_pack, retained.sources)
+    parameters = dict(_PARAMETERS_REF)
+    ph = _parameters_hash()
+    provenance = build_provenance(
+        project_id=await _project_id_for_shot(session, shot_id),
+        observation_spec_hash=canonical_hash(observation_spec),
+        materializer_contract_hash=contract_hash_actual,
+        parameters_hash=ph,
+        source_retained_blob_hashes=[
+            source.retained_blob_hash for source in retained.sources],
+        execution_package={
+            "workflow_id": release.workflow_id,
+            "workflow_version": release.workflow_version,
+            "manifest_hash": release.manifest_hash,
+            "workflow_template_hash": release.workflow_template_hash,
+            "realization_profile_hash": (
+                release.realization_profile_hash),
+            "execution_model_fingerprint_hash": (
+                release.execution_model_fingerprint_hash),
+        })
+    blob_bytes = b"".join(result.frames)
+    import hashlib as _hl
+
+    if _hl.sha256(blob_bytes).hexdigest() != result.digest:
+        raise internal_invariant(
+            "Materialized observation bytes disagree with the "
+            "artifact digest.")
+    async with session.bind.connect() as _pub:
+        artifact_id = await publish_observation_artifact(
+            _pub, store,
+            project_id=await _project_id_for_shot(session, shot_id),
+            observation_spec_hash=canonical_hash(observation_spec),
+            materializer_id=_MID,
+            materializer_version=_MVER,
+            materializer_contract_hash=contract_hash_actual,
+            parameters=parameters,
+            parameters_hash=ph,
+            provenance=provenance,
+            provenance_hash_value=_ph(provenance),
+            blob_bytes=blob_bytes)
+    from soloring.spatial.package3 import (
+        resolve_derived_binding as _resolve_world_key,
+    )
+
+    world_input_key, _node, _field = _resolve_world_key(
+        package.manifest_v3, _ROLE_INHERITED, 0)
+    observation_binding = ObservationBinding(
+        input_key=world_input_key, position=0,
+        artifact_id=artifact_id,
+        blob_hash=_hl.sha256(blob_bytes).hexdigest())
+    observation_contract = {
+        "contract": contract, "contract_hash": contract_hash_actual}
+
+    return {
+        "spec": observation_spec,
+        "negotiation": negotiation,
+        "profile_hash": package.release.realization_profile_hash,
+        "capability_contract_hash": canonical_hash(observation_block),
+        "observation_binding": observation_binding,
+        "observation_contract": observation_contract,
+    }
+
+
+_PARAMETERS_REF = {
+    "width": 832, "height": 480, "frames": 17, "time_base_num": 1,
+    "time_base_den": 17, "mode": "L", "background": 255}
+_ROLE_INHERITED = "spatial.world_depth"
+
+
+async def _project_id_for_shot(session, shot_id: str) -> str:
+    from sqlalchemy import text as _text
+
+    row = (await session.execute(_text(
+        "SELECT project_id FROM shots WHERE id = :s"),
+        {"s": shot_id})).mappings().one_or_none()
+    if row is None or row["project_id"] is None:
+        raise internal_invariant(
+            "Observation publication could not resolve the Shot-owning "
+            "Project.")
+    return row["project_id"]
+
+
 async def create_generation_request(
     session: AsyncSession, shot_id: str, *, settings: "Settings | None" = None
 ) -> Generation:
@@ -348,10 +599,15 @@ async def create_generation_request(
     # schema-3 realization path below may consume; with no captured
     # package release (non-comfy executors) the M10D-era fail-closed
     # posture is preserved — nothing queues, nothing persists.
+    # Frozen M14 R2 §7.2/E10: schema 6 recovers the SAME embedded M10
+    # spatial plane from the captured value — the predecessor
+    # lower-logical fallback is no longer a permitted consequence of a
+    # schema-6 capture.
     snapshot = json.loads(revision.snapshot_json)
+    snapshot_schema = snapshot.get("schema_version")
     spatial_pack = (
         snapshot.get("spatial_continuity")
-        if snapshot.get("schema_version") == 5 else None
+        if snapshot_schema in (5, 6) else None
     )
     if spatial_pack is not None and release is None:
         assert_pre_m10e_spatial_execution_fence(revision)
@@ -413,7 +669,19 @@ async def create_generation_request(
     authority_nonempty = bool(
         (snapshot.get("visual_reference_pack") or {}).get("anchors")
     )
-    if package_is_schema3 and spatial_pack is None:
+    observation_integration = None
+    if snapshot_schema == 6:
+        # Frozen M14 R2 E10: schema 6 compiles, negotiates, and either
+        # refuses with a typed pre-publication outcome or wraps the exact
+        # lower execution meaning as WorkflowSpec schema 4. The M10F
+        # PD-1A lower-logical projection below is reachable ONLY for
+        # schema ≤ 5 snapshots with an empty captured M10 plane.
+        observation_integration = await _integrate_schema6_observation(
+            session, settings, shot_id=shot_id, revision=revision,
+            snapshot=snapshot, spatial_pack=spatial_pack,
+            release=release, package=package)
+        lower_view = None
+    elif package_is_schema3 and spatial_pack is None:
         from soloring.spatial.package3 import (
             project_lower_logical_execution_view,
         )
@@ -658,6 +926,28 @@ async def create_generation_request(
             spatial_realization=spatial_block,
         )
         validate_spec_v3(spec)
+        if observation_integration is not None:
+            # Frozen M14 R2 §19: schema 4 wraps the EXACT schema-3 value
+            # (validated above by the frozen schema-3 validator) with the
+            # independently hashed observation facts. The M10 plane was
+            # recovered through the same _realize_spatial_inputs path as
+            # schema 5 — the shared subset is literal, not emulated.
+            if spatial_block is None:
+                raise internal_invariant(
+                    "schema-6 observation integration without the "
+                    "recovered M10 spatial realization block")
+            from soloring.observation.workflow_spec import (
+                build_workflow_spec_v4,
+            )
+
+            spec = build_workflow_spec_v4(
+                lower_schema_3=spec,
+                observation_spec=observation_integration["spec"],
+                negotiation_result=observation_integration["negotiation"],
+                profile_hash=observation_integration["profile_hash"],
+                capability_contract_hash=observation_integration[
+                    "capability_contract_hash"],
+            )
     elif realization_spec is not None:
         # §16.2: schema 2 preserves all schema-1 fields and adds model +
         # realization; no empty schema-2 is ever emitted (§16.1).
@@ -699,7 +989,10 @@ async def create_generation_request(
         workflow_spec_hash=spec_hash,
     )
     return await repo.create_generation(
-        session, draft, inputs, derived_inputs=derived_bindings)
+        session, draft, inputs, derived_inputs=derived_bindings,
+        observation_binding=(
+            observation_integration["observation_binding"]
+            if observation_integration is not None else None))
 
 
 async def list_generations(session: AsyncSession, shot_id: str) -> list[Generation]:

@@ -27,6 +27,11 @@ ALLOWLIST = (
     "tests/m10f_scale_fixture.py",
     "tests/test_m10f_scale.py",
     "tests/test_post_m13_hygiene.py",
+    "tests/test_m7c_capture.py",
+    "tests/test_m9a_package.py",
+    "tests/test_migration.py",
+    "tests/test_migration_m1.py",
+    "tests/test_migration_m6.py",
     "tests/test_audit2_authority.py",
     "tests/test_audit3_gate.py",
     "tests/test_audit_m1.py",
@@ -57,6 +62,33 @@ ALLOWLIST = (
     "tests/test_m13_shot_capture.py",
     "tests/test_m13_scale.py",
     "tests/test_m13_recovery.py",
+    "server/soloring/generation/repository.py",
+    "server/soloring/spatial/boxdepth.py",
+    "tests/test_m14_mesh_depth.py",
+    "server/soloring/spatial/production_package.py",
+    "tests/test_m10e_package3_production.py",
+    "tests/test_m14_package.py",
+    "server/soloring/generation/rerun.py",
+    "server/soloring/worker/comfy_pipeline.py",
+    "server/soloring/workflows/artifact_store.py",
+    "server/soloring/worker/execution.py",
+    "tests/test_m14_source_review_corrections.py",
+    "server/soloring/api/generations.py",
+    "server/soloring/api/realization.py",
+    "tests/test_m14_b5_hist12.py",
+    "tests/test_m14_b5_worker_closure.py",
+    "tests/test_m14_b5_increment3.py",
+    "tests/test_m14_ui.py",
+    "tests/test_m14_scale.py",
+    "tests/test_m14_gpu_gate.py",
+    "tests/test_m10a_migrations.py",
+    "tests/test_m11_migration.py",
+    "tests/test_m12_migration.py",
+    "tests/test_m13_migration.py",
+    "tests/test_m5a10_migration_gate.py",
+    "tests/test_m8a_visual.py",
+    "tests/test_migration_m6b.py",
+    "tests/test_post_m13_hygiene.py",
     "apps/web/src/components/ProductionWorldPanel.tsx",
     "apps/web/src/__tests__/PostM13Hygiene.test.tsx",
     "apps/web/package.json",
@@ -86,7 +118,73 @@ ALLOWLIST = (
     # post-merge R8 determinism correction (CI run 34362011109):
     # test-scoped park budget in the APR-032/033 race proof only
     "tests/test_m7d_relations.py",
+    # M14 implementation slices (frozen R2 @ 68f910f5, authorized
+    # 2026-09-10): the authorized M14 surface extends this allowlist so
+    # the hygiene boundary stays GREEN across the M14 closure, exactly
+    # as the security remediation extended it before. M14 vocabulary is
+    # legitimate inside the M14-owned surface (see M14_OWNED_PREFIXES)
+    # and is skipped by the vocabulary scan below.
+    ".gitattributes",
+    "docs/SoloRing-M14-Proof-Map.md",
+    "docs/SoloRing-M14-R2-Freeze-Erratum-E1.md",
+    "scripts/m14_validate_baseline.py",
+    "scripts/m14_validate_boundary.py",
+    "scripts/m14_validate_proof_map.py",
+    "scripts/m14_validate_source_fit.py",
+    "tests/fixtures/m14/",
+    "tests/test_m14_0_baseline.py",
+    "tests/test_m14_0_g6_g7_corpus.py",
+    "tests/test_m14_obs.py",
+    "tests/test_m14_capabilities.py",
+    "tests/test_m14_execution.py",
+    "tests/test_m14_history.py",
+    "tests/test_m14_base_corpus.py",
+    "tests/test_m14_materializer.py",
+    "tests/test_m11_scope.py",
+    "tests/test_m12_boundary.py",
+    "server/soloring/observation/",
+    "server/soloring/errors.py",
+    "server/soloring/generation/service.py",
+    "server/soloring/realization/packages.py",
+    "server/soloring/recovery/backup.py",
+    "server/alembic/versions/0015_m14_world_observation_execution.py",
+    "server/soloring/db/models.py",
+    "tests/test_m14_derived_storage.py",
+    "tests/test_m11_recovery.py",
+    "tests/test_m12_recovery.py",
+    "tests/test_m13_recovery.py",
+    "scripts/m13_validate_boundary.py",
 )
+
+M14_OWNED_PREFIXES = (
+    "docs/SoloRing-M14-",
+    "scripts/m14_validate_",
+    "tests/fixtures/m14/",
+    "tests/test_m14",
+    "server/soloring/observation/",
+    "server/soloring/errors.py",
+    "server/soloring/recovery/backup.py",
+    "server/alembic/versions/0015_m14_world_observation_execution.py",
+    "server/soloring/db/models.py",
+    "server/soloring/generation/service.py",
+    "server/soloring/generation/rerun.py",
+    "server/soloring/worker/comfy_pipeline.py",
+    "server/soloring/workflows/artifact_store.py",
+    "server/soloring/worker/execution.py",
+    "tests/test_m14_source_review_corrections.py",
+    "server/soloring/api/generations.py",
+    "server/soloring/api/realization.py",
+    "server/soloring/generation/repository.py",
+    "server/soloring/realization/packages.py",
+    "server/soloring/spatial/boxdepth.py",
+    "server/soloring/spatial/production_package.py",
+    "scripts/m13_validate_boundary.py",
+)
+
+
+def m14_owned(path: str) -> bool:
+    return path.startswith(M14_OWNED_PREFIXES)
+
 
 M14_PATTERNS = [
     (r"\bObservationSpec\b", "M14 ObservationSpec"),
@@ -128,10 +226,16 @@ def main() -> int:
             errors.append(f"changed file outside the hygiene allowlist: {f}")
 
     versions = REPO / "server" / "alembic" / "versions"
-    mig_0015 = [p.name for p in versions.glob("*.py")
-                if p.stem >= "0015"]
-    if mig_0015:
-        errors.append(f"migration at/beyond 0015 exists: {mig_0015}")
+    # M14B-2 succession (frozen R2 §23, authorized 2026-09-10): exactly
+    # ONE migration at/beyond 0015 is admitted — the frozen M14
+    # migration. Anything else (0016+, or a different 0015) still
+    # rejects; this is NOT a general future-migration allowance.
+    admitted_0015 = "0015_m14_world_observation_execution.py"
+    mig_beyond = [p.name for p in versions.glob("*.py")
+                  if p.stem >= "0015" and p.name != admitted_0015]
+    if mig_beyond:
+        errors.append(f"migration at/beyond 0015 beyond the frozen M14 "
+                      f"migration exists: {mig_beyond}")
 
     for f in changed:
         p = REPO / f
@@ -139,6 +243,8 @@ def main() -> int:
                                           "next_security_validate_"
                                           "boundary.py")):
             continue  # boundary validators' own scan patterns name the vocabulary
+        if m14_owned(f):
+            continue  # authorized M14 surface legitimately uses M14 vocabulary
         src = p.read_text(encoding="utf-8", errors="replace")
         for pattern, what in M14_PATTERNS:
             if re.search(pattern, src, re.I):
@@ -162,8 +268,8 @@ def main() -> int:
         for e in errors:
             print(f"HYGIENE-BOUNDARY INVALID: {e}", file=sys.stderr)
         return 1
-    print("Hygiene boundary clean: allowlist-scoped diff, head still "
-          "0014, no M14 semantics, no new tables.")
+    print("Hygiene boundary clean: allowlist-scoped diff, only the frozen "
+          "M14 0015 migration, no unauthorized M14 semantics.")
     return 0
 
 

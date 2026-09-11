@@ -364,3 +364,30 @@ def _facet_status_rows(authority, result, package) -> list[dict]:
             "issue_code": outcome.issue_code,
         })
     return rows
+
+
+@router.get("/shots/{shot_id}/observation-readiness")
+async def get_observation_readiness(
+    shot_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """M14 frozen §31 UX/API surface: the observation execution-readiness
+    projection — selected policy/profile, ordered requirement rows
+    traced property → preservation → authority/source → source contract
+    → verdict with per-requirement explanations, capture currency, the
+    captured observation hash, and the latest bound artifact
+    provenance. A pure projection over the last captured revision and
+    the current package: it captures, materializes, and persists
+    nothing."""
+    settings = getattr(request.app.state, "settings", None)
+    from soloring.settings import get_settings
+
+    settings = settings or get_settings()
+    if not is_uuid(shot_id):
+        raise not_found(
+            ErrorCode.SHOT_NOT_FOUND, f"Shot {shot_id!r} not found.")
+
+    from soloring.observation.readiness import observation_readiness
+
+    return await observation_readiness(session, settings, shot_id)

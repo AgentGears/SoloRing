@@ -119,6 +119,25 @@ def test_no_execution_source_delta_in_m11_owned_diff():
         "executor", "worker", "comfy", "realization", "render",
         "generation/", "workflows/",
     )
+    # M14 implementation succession (frozen R2 @ 68f910f5, authorized
+    # 2026-09-10): the authorized M14 execution-integration surface is
+    # carved out of this M11 boundary exactly as the M12/M13/hygiene/
+    # next-security gates were carved. The M14 boundary validator owns
+    # these paths' classification.
+    m14_owned = (
+        "server/soloring/observation/",
+        "server/soloring/generation/service.py",
+        "server/soloring/realization/packages.py",
+        "server/soloring/errors.py",
+        "server/soloring/generation/repository.py",
+        "server/soloring/spatial/boxdepth.py",
+        "server/soloring/generation/rerun.py",
+        "server/soloring/worker/comfy_pipeline.py",
+        "server/soloring/workflows/artifact_store.py",
+        "server/soloring/worker/execution.py",
+        "server/soloring/api/generations.py",
+        "server/soloring/api/realization.py",
+    )
     offenders = sorted(
         p for p in changed
         if any(m in p.lower() for m in forbidden_markers)
@@ -126,6 +145,7 @@ def test_no_execution_source_delta_in_m11_owned_diff():
         # (§20.0; M11-PROOF:04 requires the ci.yml validator step) — the
         # claim under test is that no executor/live-render SOURCE changed
         and not p.startswith(("tests/", "scripts/", ".github/"))
+        and not p.startswith(m14_owned)
     )
     assert offenders == [], f"execution source touched by M11: {offenders}"
 

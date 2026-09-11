@@ -71,7 +71,7 @@ class CapturedPackageRelease:
             "manifest_hash": self.manifest_hash,
             "workflow_template_hash": self.workflow_template_hash,
         }
-        if self.schema_version in (2, 3):
+        if self.schema_version in (2, 3, 4):
             out["realization_profile_hash"] = self.realization_profile_hash
             out["execution_model_fingerprint_hash"] = (
                 self.execution_model_fingerprint_hash
@@ -108,7 +108,7 @@ def _read_descriptor(package_path: Path) -> dict:
         "schema_version", "workflow_id", "workflow_version",
         "manifest_hash", "workflow_template_hash",
     }
-    if schema in (2, 3):
+    if schema in (2, 3, 4):
         allowed_fields |= {
             "realization_profile_hash",
             "execution_model_fingerprint_hash",
@@ -119,18 +119,18 @@ def _read_descriptor(package_path: Path) -> dict:
             f"workflow-package.json carries unknown fields "
             f"{sorted(unknown)}; the descriptor field set is closed"
         )
-    if schema not in (1, 2, 3):
-        raise PackageIntegrity("descriptor schema_version must be 1, 2 or 3")
+    if schema not in (1, 2, 3, 4):
+        raise PackageIntegrity("descriptor schema_version must be 1, 2, 3 or 4")
     for field in ("workflow_id", "workflow_version", "manifest_hash",
                   "workflow_template_hash"):
         if field not in doc:
             raise PackageIntegrity(f"descriptor lacks {field}")
-    if schema in (2, 3) and (
+    if schema in (2, 3, 4) and (
         "realization_profile_hash" not in doc
         or "execution_model_fingerprint_hash" not in doc
     ):
         raise PackageIntegrity(
-            "schema-2/3 descriptor lacks profile/fingerprint hashes"
+            "schema-2/3/4 descriptor lacks profile/fingerprint hashes"
         )
     if schema == 1 and (
         "realization_profile_hash" in doc
@@ -187,7 +187,7 @@ async def capture_release(
     }
 
     profile_bytes = fingerprint_bytes = None
-    if d1["schema_version"] in (2, 3):
+    if d1["schema_version"] in (2, 3, 4):
         profile_bytes = await _read(
             profile_path, "realization-profile"
         )
@@ -253,7 +253,10 @@ class ValidatedPackage:
 
     @property
     def is_schema3(self) -> bool:
-        return self.release.schema_version == 3
+        """The manifest-v3 spatial package family (descriptor 3 or 4:
+        same four artifacts, same manifest/template semantics; v4 adds
+        the observation-capable profile schema 3)."""
+        return self.release.schema_version in (3, 4)
 
 
 def validate_package(release: CapturedPackageRelease) -> ValidatedPackage:
@@ -275,8 +278,10 @@ def validate_package(release: CapturedPackageRelease) -> ValidatedPackage:
             release.manifest_bytes.decode("utf-8")
         )
         validate_manifest_template_bindings(manifest_v1, template_graph)
-    elif release.schema_version == 3:
-        # M10E §8: descriptor schema 3 delegates ALL M10-specific parsing
+    elif release.schema_version in (3, 4):
+        # M10E §8 + M14 §18: descriptors 3 and 4 (the same four-artifact
+        # family; v4 binds the observation-capable profile-3 release)
+        # delegate ALL M10-specific parsing
         # to the frozen soloring.spatial.package3 authority (profile v2
         # through the frozen M9 parser view, manifest v3 through the frozen
         # M9 schema-2 parser view, runtime closure by exact captured
@@ -293,9 +298,35 @@ def validate_package(release: CapturedPackageRelease) -> ValidatedPackage:
         manifest_v3 = parse_manifest_v3(
             release.manifest_bytes.decode("utf-8")
         )
-        profile_v2 = parse_profile_v2(
-            release.profile_bytes.decode("utf-8")
-        )
+        # Frozen M14 §17/§19: the captured realization-profile artifact
+        # may be schema 2 or schema 3. Schema 3 is exactly schema 2 plus
+        # the closed observation block; its inherited semantics are
+        # validated by DELEGATION inside parse_profile_v3 (which itself
+        # defers to the frozen parse_profile_v2 through a schema-2 view),
+        # so this seam accepts the M14 profile without forking any
+        # schema-2 meaning. No descriptor/manifest/package semantics
+        # change here.
+        profile_doc = json.loads(release.profile_bytes.decode("utf-8"))
+        if (isinstance(profile_doc, dict)
+                and profile_doc.get("schema_version") == 3):
+            from soloring.observation.capability import parse_profile_v3
+
+            profile_v2 = parse_profile_v3(profile_doc)
+        else:
+            if release.schema_version == 4:
+                # Erratum E-2 (frozen §18 as amended): descriptor schema
+                # 4 exists BECAUSE profile schema 3 / WorkflowSpec 4
+                # introduce the new execution semantics — a schema-4
+                # descriptor over a schema-2 profile claims the version
+                # without the semantics it identifies.
+                raise Package3Invalid(
+                    "descriptor schema 4 requires a RealizationProfile "
+                    "schema 3 (the observation-capable profile); a "
+                    "schema-2 profile under descriptor 4 is incoherent"
+                )
+            profile_v2 = parse_profile_v2(
+                release.profile_bytes.decode("utf-8")
+            )
         try:
             fingerprint_v3 = json.loads(
                 release.fingerprint_bytes.decode("utf-8")

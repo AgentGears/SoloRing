@@ -219,6 +219,37 @@ async def _create_rerun_fenced(
                         "bh": row["blob_hash"],
                     },
                 )
+            # M14 §26 (HIST:04): Exact Rerun copies the EXACT
+            # derived-observation binding (artifact id + Blob hash pair)
+            # verbatim — never rematerialized, never reselected.
+            observation_inputs = (
+                await conn.execute(
+                    text(
+                        "SELECT input_key, position, artifact_role, "
+                        "derived_observation_artifact_id, blob_hash "
+                        "FROM generation_derived_observation_inputs "
+                        "WHERE generation_id = :gid ORDER BY position"),
+                    {"gid": source_generation_id},
+                )
+            ).mappings().all()
+            for row in observation_inputs:
+                await conn.execute(
+                    text(
+                        "INSERT INTO "
+                        "generation_derived_observation_inputs "
+                        "(generation_id, input_key, position, "
+                        "artifact_role, derived_observation_artifact_id, "
+                        "blob_hash) VALUES "
+                        "(:gid, :ik, :pos, :role, :aid, :bh)"),
+                    {
+                        "gid": generation_id,
+                        "ik": row["input_key"],
+                        "pos": row["position"],
+                        "role": row["artifact_role"],
+                        "aid": row["derived_observation_artifact_id"],
+                        "bh": row["blob_hash"],
+                    },
+                )
             await conn.exec_driver_sql("COMMIT")
             return generation_id
         except IntegrityError:

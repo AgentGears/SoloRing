@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
 import json
 import logging
 import time
@@ -608,6 +609,184 @@ async def _drive(
                 manifest = lower.manifest
                 template_graph = json.loads(json.dumps(lower.template))
                 schema3_lower = lower
+            elif spec.get("schema_version") == 4:
+                # M14 frozen R2 §25.3: schema-4 historical execution
+                # reads the persisted execution closure ONLY — WorkflowSpec
+                # 4 (verified bytes + nested observation/negotiation
+                # hashes), the exact derived-observation binding + Blob +
+                # provenance against the CAPTURED contract hash (never
+                # today's materializer), the captured package closure by
+                # hash, the runtime-availability gate, then submission.
+                # Zero current production-world resolution; no
+                # re-negotiation against a newer profile.
+                from soloring.domain.canonical import (
+                    canonical_hash as _spec_hash,
+                )
+                from soloring.errors import internal_invariant
+                from soloring.observation.worker_inputs import (
+                    execute_schema4_derived_inputs,
+                )
+                from soloring.observation.capability import (
+                    parse_profile_v3,
+                )
+                from soloring.observation.workflow_spec import (
+                    parse_workflow_spec_v4,
+                )
+                from soloring.spatial.package3 import (
+                    check_runtime_closure,
+                    parse_manifest_v3,
+                )
+
+                spec4 = parse_workflow_spec_v4(spec)
+                if _spec_hash(spec4) != generation.workflow_spec_hash:
+                    raise internal_invariant(
+                        "Schema-4 workflow spec bytes disagree with the "
+                        "persisted workflow_spec_hash.")
+                lower = spec4["lower_schema_3"]
+                manifest = parse_manifest_v3(
+                    manifest_bytes.decode("utf-8")
+                )
+                # A schema-4 Generation executes a descriptor-4 package,
+                # whose profile is schema 3 (Erratum E-1c): parse it with
+                # THE strict schema-3 parser — its inherited schema-2
+                # semantics arrive by delegation, and the observation
+                # block validates through the same frozen grammar the
+                # negotiation used at capture time.
+                profile = parse_profile_v3(
+                    (
+                        await artifact_store.get_profile(
+                            lower["spatial_realization"][
+                                "realization_profile_hash"
+                            ]
+                        )
+                    ).decode("utf-8")
+                )
+                # Source review P1-4: the retained profile IS the profile
+                # the stored observation negotiated under — its hash and
+                # its observation block's canonical hash must equal the
+                # identities the schema-4 wrapper pins.
+                from soloring.domain.canonical import (
+                    canonical_hash as _v4_canonical_hash,
+                )
+                from soloring.errors import (
+                    internal_invariant as _v4_invariant,
+                )
+                from soloring.observation.capability import (
+                    capability_contract_hash as _v4_capability_hash,
+                )
+
+                observation_block_v4 = spec4["world_observation"]
+                retained_profile_hash = lower["spatial_realization"][
+                    "realization_profile_hash"]
+                if (observation_block_v4["profile_hash"]
+                        != retained_profile_hash
+                        or _v4_canonical_hash(profile)
+                        != retained_profile_hash):
+                    raise _v4_invariant(
+                        "Schema-4 stored observation profile_hash "
+                        "disagrees with the retained realization profile "
+                        "the worker loaded.")
+                if (observation_block_v4["capability_contract_hash"]
+                        != _v4_capability_hash(profile)):
+                    raise _v4_invariant(
+                        "Schema-4 stored capability_contract_hash "
+                        "disagrees with the retained profile's "
+                        "observation block.")
+                # Third-review P1: the spec's PINNED materializer — id,
+                # version, output role, AND contract hash — must be the
+                # exact retained profile's materializer entry. Artifact-
+                # to-spec equality alone cannot prove profile-to-spec
+                # equality.
+                from soloring.observation.materializer import (
+                    MATERIALIZER_ID as _PINNED_MID,
+                    MATERIALIZER_VERSION as _PINNED_MVER,
+                )
+
+                retained_entry = next(
+                    (m for m in profile["observation"].get(
+                        "materializers", [])
+                     if m.get("id") == _PINNED_MID
+                     and m.get("version") == _PINNED_MVER), None)
+                pinned_materializer = observation_block_v4["spec"][
+                    "materializations"][0]
+                if (retained_entry is None
+                        or pinned_materializer["materializer"][
+                            "contract_hash"]
+                        != retained_entry["contract_hash"]
+                        or retained_entry.get("output_role")
+                        != pinned_materializer["artifact_role"]):
+                    raise _v4_invariant(
+                        "The stored WorldObservationSpec's pinned "
+                        "materializer contract is not the exact "
+                        "retained profile's materializer entry.")
+                # Third-review P1: integrity replay of the pure
+                # negotiation against the EXACT captured profile (by
+                # hash) — the stored NegotiationResult must be the one
+                # this profile produces for this spec. This is never a
+                # renegotiation against current state.
+                from soloring.domain.canonical import (
+                    canonical_json_bytes as _v4_bytes,
+                )
+                from soloring.observation import (
+                    negotiate as _v4_replay_negotiate,
+                )
+
+                replayed = _v4_replay_negotiate(
+                    observation_block_v4["spec"],
+                    profile["observation"])
+                if (_v4_bytes(replayed)
+                        != _v4_bytes(observation_block_v4[
+                            "negotiation"])):
+                    raise _v4_invariant(
+                        "The stored NegotiationResult is not the one the "
+                        "retained captured profile produces for the "
+                        "stored WorldObservationSpec.")
+                fingerprint_doc = json.loads(
+                    (
+                        await artifact_store.get_fingerprint(
+                            lower["model"][
+                                "execution_model_fingerprint_hash"
+                            ]
+                        )
+                    ).decode("utf-8")
+                )
+                unproven = check_runtime_closure(
+                    profile["spatial"], fingerprint=fingerprint_doc,
+                    template=template_graph)
+                if unproven:
+                    raise internal_invariant(
+                        "Schema-4 captured profile runtime requirements "
+                        f"not closed by captured fingerprint/template: "
+                        f"{unproven}")
+                # EXEC:06 — the runtime availability gate precedes any
+                # Comfy submission (dispatch may claim earlier).
+                verify_schema3_runtime_environment(
+                    fingerprint_doc, settings)
+                async with factory() as session:
+                    schema3_derived = await execute_schema4_derived_inputs(
+                        session, blob_store,
+                        generation_id=generation_id,
+                        attempt_id=attempt_id,
+                        workflow_spec_v4=spec4,
+                        manifest_v3=manifest,
+                        client=ClientUploader(client),
+                    )
+                # The observation binding fulfills the inherited
+                # world-depth SLOT: pure translation binds supplied
+                # transport to the spec's derived-artifact roles, so the
+                # schema-4 observation input is presented at its slot
+                # role ('spatial.world_depth', the same node/field the
+                # loader resolved from the captured manifest binding).
+                # The persisted binding role 'observation.world_depth'
+                # is untouched — this is presentation at the seam, never
+                # a rewrite of stored meaning.
+                schema3_derived = [
+                    dataclasses.replace(
+                        v, artifact_role="spatial.world_depth")
+                    if v.artifact_role == "observation.world_depth"
+                    else v
+                    for v in schema3_derived]
+                spec = lower  # the inherited schema-3 execution meaning
             elif spec.get("schema_version") == 3:
                 # M10 frozen r3 §2.2/§48: schema-3 historical execution
                 # reads captured state ONLY. The v3 manifest/profile/
@@ -1045,6 +1224,21 @@ async def _drive(
             logical_schema_version=spec["schema_version"],
         ).manifest
     elif spec.get("schema_version") == 3:
+        from soloring.spatial.package3 import parse_manifest_v3
+        from soloring.workflows.manifest import parse_manifest_v2
+
+        manifest_v3_doc = parse_manifest_v3(
+            (await artifact_store.get_manifest(generation.manifest_hash))
+            .decode("utf-8")
+        )
+        inherited = {k: v for k, v in manifest_v3_doc.items()
+                     if k != "spatial_bindings"}
+        inherited["schema_version"] = "2"
+        manifest = parse_manifest_v2(inherited)
+    elif spec.get("schema_version") == 4:
+        # M14 §25.3: schema-4 output interpretation is the inherited
+        # schema-3 (manifest-v3 minus spatial_bindings → v2) view of the
+        # lower value — one shared helper, no reinterpretation.
         from soloring.spatial.package3 import parse_manifest_v3
         from soloring.workflows.manifest import parse_manifest_v2
 

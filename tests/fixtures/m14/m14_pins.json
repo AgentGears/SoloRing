@@ -1,0 +1,72 @@
+{
+  "frozen_plan": {
+    "file": "SoloRing-M14-Production-World-Observation-Compilation-and-Execution-Implementation-Plan-R2-frozen.md",
+    "sha256": "68f910f5ff132fe00345fc41fa07f25e650d74ccd3f7ec445822194c03bde860",
+    "bytes": 118086,
+    "lines": 3132,
+    "proof_cells": 90,
+    "stop_conditions": 36
+  },
+  "implementation_predecessor": {
+    "commit": "20429b3bf2ead3ca6c1d2402d5028e500bd4f9e8",
+    "tree": "0a755efeeb9c87f1168f77e6905413affa435240"
+  },
+  "m13_identity": {
+    "commit": "384a46d3a5c68d7d81784befc338aa8621b93fbd",
+    "tree": "a360a58bde22f9e692680232af56d5613d273702",
+    "tag": "M13",
+    "tag_object": "d8b0c6f52253a139cce3fc2f4ca712f856b6737a"
+  },
+  "migration_predecessor": "0014_m13_authority_complete_world",
+  "normative_documents": {
+    "SoloRing-Product-and-Production-Architecture-v1.3.md": "6f48a47d8ff98528d662ba4d0e5efbdc3d87f357e06ba55efcf64f84bb337d2d",
+    "SoloRing-Architecture-Pattern-Register-v2.3.md": "57900204f9d336985e13268a5f21de372f815feec9b19bd56bf2408c62001a6",
+    "SoloRing-Capability-and-Ownership-Map-v1.3.md": "773d86a4b842843826fb12a38b4f745523fc9c8969f581d230793b0298b47323",
+    "SoloRing-Gap-and-Dependency-Graph-v1.3.md": "a3dbb42098477930cec9ac581250594eff686624f8d1baf37eb6b85267a0d6dd",
+    "SoloRing-Implementation-Roadmap-v1.1.md": "ff345256a48e356eb1722988e150cda5bf1295747f028fac89ee0706b821c27b",
+    "SoloRing-Full-Sequence-Product-Pressure-Test-v1-Rerun-v1.3.md": "92b38a08a66ffc0e04edfd3919bdb95156a1e7debe0659c888660f3bb827397d"
+  },
+  "f06": {
+    "evidence_record": "5bd57a2512eae3b223e7a24944b3a7f9815116c443e02e94152988bdaf74275b",
+    "generator": "a33da69a28e551239f264e2daed7238bfca743c5b60ac727773d32bce510b57e",
+    "vectors": {
+      "m14-f06-world-observation-spec-v1.json": "49195475e3ce29c25f650f3e265d7f90400a3bb221e11f794c38f937cc1f8988",
+      "m14-f06-negotiation-result-v1.json": "2b319394735ab80da8c5e19e1b415db47511c3b3db4d33b4be11095125a3036a",
+      "m14-f06-realization-profile-observation-v1.json": "99b8390d812d4301acd873786b463b1a3ee6dc7e3e9f137385229faaf0506f95",
+      "m14-f06-workflow-spec-v4.json": "fbe711f9d16d33877a26f59070ed62b545e78f97ecaa2f3182910acbc1f082f1",
+      "m14-f06-materializer-contract-v1.json": "dd3511218c673e7f2727d8226c3d73bfd85222bd5f9a5edb3d2e4779146f66d0",
+      "m14-f06-realization-profile-v3-full.json": "71072e913fa7e5b4e763f73c2e98f214f81834e5e539d486a9df7d2e09b4cc0b"
+    },
+    "vector_bytes": {
+      "m14-f06-world-observation-spec-v1.json": 4107,
+      "m14-f06-negotiation-result-v1.json": 1375,
+      "m14-f06-realization-profile-observation-v1.json": 1494,
+      "m14-f06-workflow-spec-v4.json": 7127,
+      "m14-f06-materializer-contract-v1.json": 1253,
+      "m14-f06-realization-profile-v3-full.json": 2852
+    }
+  },
+  "b1": {
+    "evidence_record": "6a73bf0cfbaf201fdebbf282899c7cbc2176b4e081d7b89b6b5d373dcffaabd5",
+    "evidence_record_bytes": 12882,
+    "protocol_r2": "563265ad416d0bc55d65b424e19cd7c54c4196e841a4c1da93f358304024457c",
+    "harness_v2": "f7957b498a5cf119db010d6665ecf984ddb14bf4dba8b0de2f1b61b462939631"
+  },
+  "resource_policy": {
+    "max_retained_mesh_bytes_per_revision": 100000000,
+    "max_vertices_per_revision": 3000000,
+    "max_triangles_per_revision": 500000,
+    "max_total_triangles_per_observation": 500000,
+    "production_time_budget_s": 360
+  },
+  "erratum_e1": {
+    "date": "2026-09-11",
+    "scope": "\u00a78.10 verdict law, \u00a717 unsupported_capabilities grammar, \u00a718 descriptor-4-requires-profile-3, \u00a715/\u00a741 wording, affected golden vectors",
+    "observation_block_sha256": "99b8390d812d4301acd873786b463b1a3ee6dc7e3e9f137385229faaf0506f95",
+    "full_profile_sha256": "71072e913fa7e5b4e763f73c2e98f214f81834e5e539d486a9df7d2e09b4cc0b",
+    "workflow_spec_v4_sha256": "fbe711f9d16d33877a26f59070ed62b545e78f97ecaa2f3182910acbc1f082f1",
+    "negotiation_result_sha256_unchanged": "2b319394735ab80da8c5e19e1b415db47511c3b3db4d33b4be11095125a3036a",
+    "world_observation_spec_sha256_unchanged": "49195475e3ce29c25f650f3e265d7f90400a3bb221e11f794c38f937cc1f8988",
+    "materializer_contract_sha256_unchanged": "dd3511218c673e7f2727d8226c3d73bfd85222bd5f9a5edb3d2e4779146f66d0"
+  }
+}

@@ -140,57 +140,78 @@ def materialize_depth_mm(continuity_pack: dict) -> np.ndarray:
     for f in range(F):
         t = f / (F - 1) if F > 1 else 0.0
         tris, eids = [], []
-        for fr in frames:
-            if fr.get("half_extents_mm") is None:
-                continue  # frameless landmarks stay invisible (§107.1)
-            corners = _box_corners(
-                fr["transform"]["translation_mm"],
-                fr["half_extents_mm"],
-                [v / 1_000_000 for v in fr["transform"]["rotation_udeg"]])
-            for tri in BOX_FACES:
-                tris.append(corners[list(tri)])
-                eids.append(0)
-        for idx, st in enumerate(entities, start=1):
-            pos = st["transform"]["translation_mm"]
-            rot = [v / 1_000_000
-                   for v in st["transform"]["rotation_udeg"]]
-            half = st.get("proxy_half_extents_mm",
-                          list(pins.PROXY_DEFAULT_ENTITY_HALF_EXTENTS_MM))
-            corners = _box_corners(pos, half, rot)
-            for tri in BOX_FACES:
-                tris.append(corners[list(tri)])
-                eids.append(idx)
-        plan_kfs = continuity_pack["shot_plan"]["camera"]["keyframes"]
-        pose = _interp_keyframes(
-            [{"t": k["time_ms"],
-              "value": k["transform"]["translation_mm"] + k["transform"][
-                  "rotation_udeg"]} for k in plan_kfs],
-            t * 4000.0)  # 17-frame span over 4s shot; §47 policy
-        tvals = _interp_keyframes(
-            [{"t": k["time_ms"],
-              "value": k["transform"]["translation_mm"]} for k in plan_kfs],
-            t * 4000.0)
-        rvals = _interp_keyframes(
-            [{"t": k["time_ms"],
-              "value": [v / 1_000_000
-                        for v in k["transform"]["rotation_udeg"]]}
-             for k in plan_kfs], t * 4000.0)
-        R = _euler_xyz_to_r(rvals)
-        c2w = np.eye(4)
-        c2w[:3, :3] = R
-        c2w[:3, 3] = tvals
-        w2c = np.linalg.inv(c2w)[:3, :]
-        optics = continuity_pack["shot_plan"]["camera"]
-        # pinhole: fx = fy = focal * width / sensor_width; principal center
-        focal = optics["focal_length_um"]
-        sensor_w = optics["sensor_width_um"]
-        fx = fy = focal * W / sensor_w
-        cam = {"w2c_3x4": w2c.tolist(), "fx": fx, "fy": fy,
-               "cx": W / 2.0, "cy": H / 2.0}
+        _accumulate_world_frame_tris(frames, tris, eids)
+        _accumulate_proxy_tris(entities, tris, eids, start_index=1)
+        cam = _camera_for_frame(continuity_pack, t, W, H)
         depth, _ = _rasterize(np.array(tris) if tris else np.zeros(
             (0, 3, 3)), eids, cam, W, H, near, far)
         out.append(depth)
     return np.stack(out).astype(np.float32)
+
+
+def _accumulate_world_frame_tris(frames, tris, eids) -> None:
+    """Extent-bearing world frames in the frozen canonical order; the
+    rasterizer instance id 0 is reserved for world-frame geometry."""
+    for fr in frames:
+        if fr.get("half_extents_mm") is None:
+            continue  # frameless landmarks stay invisible (§107.1)
+        corners = _box_corners(
+            fr["transform"]["translation_mm"],
+            fr["half_extents_mm"],
+            [v / 1_000_000 for v in fr["transform"]["rotation_udeg"]])
+        for tri in BOX_FACES:
+            tris.append(corners[list(tri)])
+            eids.append(0)
+
+
+def _accumulate_proxy_tris(entities, tris, eids, *, start_index: int,
+                           skip_entity_ids=frozenset()) -> None:
+    """Staged-entity proxy boxes under the box-standin-v1 policy, in the
+    frozen canonical (entity_id, spatial_track_id) order. Entities whose
+    id is in skip_entity_ids are suppressed — identity-based only (frozen
+    M14 §14.3); retained-mesh instances take their structural place."""
+    p = pins
+    idx = start_index
+    for st in entities:
+        if st.get("entity_id") in skip_entity_ids:
+            continue
+        pos = st["transform"]["translation_mm"]
+        rot = [v / 1_000_000 for v in st["transform"]["rotation_udeg"]]
+        half = st.get("proxy_half_extents_mm",
+                      list(p.PROXY_DEFAULT_ENTITY_HALF_EXTENTS_MM))
+        corners = _box_corners(pos, half, rot)
+        for tri in BOX_FACES:
+            tris.append(corners[list(tri)])
+            eids.append(idx)
+        idx += 1
+
+
+def _camera_for_frame(continuity_pack: dict, t: float, W: int, H: int) -> dict:
+    """The frozen §47 camera for one frame fraction: keyframe-interpolated
+    pose + pinhole optics. Shared by the M10 and M14 materializer paths —
+    the camera math is never forked (frozen M14 §14.1)."""
+    plan_kfs = continuity_pack["shot_plan"]["camera"]["keyframes"]
+    tvals = _interp_keyframes(
+        [{"t": k["time_ms"],
+          "value": k["transform"]["translation_mm"]} for k in plan_kfs],
+        t * 4000.0)
+    rvals = _interp_keyframes(
+        [{"t": k["time_ms"],
+          "value": [v / 1_000_000
+                    for v in k["transform"]["rotation_udeg"]]}
+         for k in plan_kfs], t * 4000.0)
+    R = _euler_xyz_to_r(rvals)
+    c2w = np.eye(4)
+    c2w[:3, :3] = R
+    c2w[:3, 3] = tvals
+    w2c = np.linalg.inv(c2w)[:3, :]
+    optics = continuity_pack["shot_plan"]["camera"]
+    # pinhole: fx = fy = focal * width / sensor_width; principal center
+    focal = optics["focal_length_um"]
+    sensor_w = optics["sensor_width_um"]
+    fx = fy = focal * W / sensor_w
+    return {"w2c_3x4": w2c.tolist(), "fx": fx, "fy": fy,
+            "cx": W / 2.0, "cy": H / 2.0}
 
 
 def encode_control_pngs(depth_mm: np.ndarray) -> list[bytes]:
@@ -222,6 +243,64 @@ def encode_control_pngs(depth_mm: np.ndarray) -> list[bytes]:
 def materialize(continuity_pack: dict) -> list[bytes]:
     """Complete D0 materialization: pack -> 17 PNG control frames."""
     return encode_control_pngs(materialize_depth_mm(continuity_pack))
+
+
+def materialize_composite_depth_mm(
+    continuity_pack: dict,
+    mesh_tris_world,
+    *,
+    suppressed_entity_ids=frozenset(),
+) -> np.ndarray:
+    """M14 mesh-aware composite (frozen R2 §14.4): world-frame geometry,
+    then retained occurrences (pre-transformed world-space triangles in
+    captured Composition order), then non-suppressed staged proxies —
+    one shared depth buffer under the inherited strict-nearer z test.
+
+    Shares the EXACT camera, rasterization, and encoding primitives with
+    the M10 path; the input iteration order is the only addition. Pure
+    refactor seam of the certified materializer (§14.1: reuse, not a
+    second renderer).
+    """
+    p = pins
+    W, H, F = p.GRAMMAR_WIDTH, p.GRAMMAR_HEIGHT, p.GRAMMAR_FRAMES
+    near, far = 1.0, 100000.0
+    world = continuity_pack["spatial_world"]["world_snapshot"]
+    frames = sorted(world["frames"],
+                    key=lambda f: (f["frame_key"], f["spatial_frame_id"]))
+    entities = sorted(continuity_pack["staging"],
+                      key=lambda s: (s["entity_id"], s["spatial_track_id"]))
+    mesh_tris = (np.asarray(mesh_tris_world, dtype=np.float64)
+                 if len(mesh_tris_world) else np.zeros((0, 3, 3)))
+    # proxies follow the meshes in the instance-id space
+    proxy_start = 1 + len(mesh_tris)
+    out = []
+    for f in range(F):
+        t = f / (F - 1) if F > 1 else 0.0
+        tris, eids = [], []
+        _accumulate_world_frame_tris(frames, tris, eids)
+        for mi, tri in enumerate(mesh_tris, start=1):
+            tris.append(tri)
+            eids.append(mi)
+        _accumulate_proxy_tris(entities, tris, eids,
+                               start_index=proxy_start,
+                               skip_entity_ids=suppressed_entity_ids)
+        cam = _camera_for_frame(continuity_pack, t, W, H)
+        depth, _ = _rasterize(np.array(tris) if tris else np.zeros(
+            (0, 3, 3)), eids, cam, W, H, near, far)
+        out.append(depth)
+    return np.stack(out).astype(np.float32)
+
+
+def materialize_composite(
+    continuity_pack: dict,
+    mesh_tris_world,
+    *,
+    suppressed_entity_ids=frozenset(),
+) -> list[bytes]:
+    """Complete M14 composite D0 materialization -> 17 PNG frames."""
+    return encode_control_pngs(materialize_composite_depth_mm(
+        continuity_pack, mesh_tris_world,
+        suppressed_entity_ids=suppressed_entity_ids))
 
 
 def artifact_digest(frames: list[bytes]) -> str:

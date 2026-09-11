@@ -319,12 +319,13 @@ def _stamp(data_dir, head: str) -> None:
 
 def test_m13_recovery_01(tmp_path):
     """M13-RECOVERY:01 — supported-head dispatch incl. 0014."""
-    assert rb.EXPECTED_ALEMBIC_HEAD == "0014_m13_authority_complete_world"
+    assert rb.EXPECTED_ALEMBIC_HEAD == "0015_m14_world_observation_execution"
     assert rb.SUPPORTED_RESTORE_ALEMBIC_HEADS == {
         "0011_m10_derived_spatial_execution",
         "0012_m11_reusable_production_revisions",
         "0013_m12_composition_occurrences",
         "0014_m13_authority_complete_world",
+        "0015_m14_world_observation_execution",
     }
 
 
@@ -333,7 +334,7 @@ def test_m13_recovery_03(tmp_path):
     data_dir = tmp_path / "data"
     data_dir.mkdir()
     ids = asyncio.run(_seed_full(data_dir))
-    _stamp(data_dir, "0014_m13_authority_complete_world")
+    _stamp(data_dir, "0015_m14_world_observation_execution")
     con = sqlite3.connect(data_dir / "soloring.db")
     con.execute(
         "UPDATE composition_spatial_bindings SET binding_json = "
@@ -351,14 +352,15 @@ def test_m13_recovery_04(tmp_path):
     data_dir = tmp_path / "data"
     data_dir.mkdir()
     asyncio.run(_seed_full(data_dir))
-    _stamp(data_dir, "0014_m13_authority_complete_world")
+    _stamp(data_dir, "0015_m14_world_observation_execution")
     con = sqlite3.connect(data_dir / "soloring.db")
     try:
         found = rb._blob_fk_inventory(con)
     finally:
         con.close()
-    assert found == set(rb.M11_BLOB_FK_COLUMNS)
-    assert len(found) == 7
+    assert set(rb.M11_BLOB_FK_COLUMNS) <= found
+    assert found == set(rb.M14_BLOB_FK_COLUMNS)
+    assert len(found) == 8
 
 
 def test_m13_recovery_05(tmp_path):
@@ -368,7 +370,7 @@ def test_m13_recovery_05(tmp_path):
     data_dir = tmp_path / "data"
     data_dir.mkdir()
     ids = asyncio.run(_seed_full(data_dir))
-    _stamp(data_dir, "0014_m13_authority_complete_world")
+    _stamp(data_dir, "0015_m14_world_observation_execution")
     con = sqlite3.connect(data_dir / "soloring.db")
     # make today's authority evolve: soft-delete the pinned PI track and
     # drop the current selection (the binding is now stale but immutable)

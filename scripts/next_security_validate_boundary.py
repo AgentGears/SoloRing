@@ -64,7 +64,104 @@ ALLOWLIST = (
     "docs/hygiene/post-m13-hygiene-implementation-record.md",
     "scripts/hygiene_validate_boundary.py",
     ".github/workflows/ci.yml",
+    # M14 implementation slices (frozen R2 @ 68f910f5, authorized
+    # 2026-09-10): the authorized M14 surface extends this allowlist so
+    # the security boundary stays GREEN across the M14 closure, exactly
+    # as this slice extended the hygiene allowlist before it. The
+    # blanket backend-change rejection below carves out only the
+    # M14-owned surface.
+    ".gitattributes",
+    "docs/SoloRing-M14-Proof-Map.md",
+    "docs/SoloRing-M14-R2-Freeze-Erratum-E1.md",
+    "scripts/m14_validate_baseline.py",
+    "scripts/m14_validate_boundary.py",
+    "scripts/m14_validate_proof_map.py",
+    "scripts/m14_validate_source_fit.py",
+    "tests/fixtures/m14/",
+    "tests/test_m14_0_baseline.py",
+    "tests/test_m14_0_g6_g7_corpus.py",
+    "tests/test_m14_obs.py",
+    "tests/test_m14_capabilities.py",
+    "tests/test_m14_execution.py",
+    "tests/test_m14_history.py",
+    "tests/test_m14_base_corpus.py",
+    "tests/test_m14_ui.py",
+    "tests/test_m14_scale.py",
+    "tests/test_m14_gpu_gate.py",
+    "tests/test_m14_materializer.py",
+    "tests/test_m11_scope.py",
+    "tests/test_m12_boundary.py",
+    "server/soloring/observation/",
+    "server/soloring/errors.py",
+    "server/soloring/generation/service.py",
+    "server/soloring/realization/packages.py",
+    "server/soloring/recovery/backup.py",
+    "server/alembic/versions/0015_m14_world_observation_execution.py",
+    "server/soloring/db/models.py",
+    "tests/test_m14_derived_storage.py",
+    "tests/test_m11_recovery.py",
+    "tests/test_m12_recovery.py",
+    "tests/test_m13_recovery.py",
+    "server/soloring/generation/repository.py",
+    "server/soloring/spatial/boxdepth.py",
+    "tests/test_m14_mesh_depth.py",
+    "server/soloring/spatial/production_package.py",
+    "tests/test_m10e_package3_production.py",
+    "tests/test_m14_package.py",
+    "server/soloring/generation/rerun.py",
+    "server/soloring/worker/comfy_pipeline.py",
+    "server/soloring/workflows/artifact_store.py",
+    "server/soloring/worker/execution.py",
+    "tests/test_m14_source_review_corrections.py",
+    "server/soloring/api/generations.py",
+    "server/soloring/api/realization.py",
+    "tests/test_m14_b5_hist12.py",
+    "tests/test_m14_b5_worker_closure.py",
+    "tests/test_m14_b5_increment3.py",
+    "tests/test_m10a_migrations.py",
+    "tests/test_m11_migration.py",
+    "tests/test_m12_migration.py",
+    "tests/test_m13_migration.py",
+    "tests/test_m5a10_migration_gate.py",
+    "tests/test_m8a_visual.py",
+    "tests/test_migration_m6b.py",
+    "tests/test_post_m13_hygiene.py",
+    "tests/test_m7c_capture.py",
+    "tests/test_m9a_package.py",
+    "tests/test_migration.py",
+    "tests/test_migration_m1.py",
+    "tests/test_migration_m6.py",
+    "scripts/m13_validate_boundary.py",
 )
+
+M14_OWNED_PREFIXES = (
+    "docs/SoloRing-M14-",
+    "scripts/m14_validate_",
+    "tests/fixtures/m14/",
+    "tests/test_m14",
+    "server/soloring/observation/",
+    "server/soloring/errors.py",
+    "server/soloring/recovery/backup.py",
+    "server/alembic/versions/0015_m14_world_observation_execution.py",
+    "server/soloring/db/models.py",
+    "server/soloring/generation/service.py",
+    "server/soloring/generation/rerun.py",
+    "server/soloring/worker/comfy_pipeline.py",
+    "server/soloring/workflows/artifact_store.py",
+    "server/soloring/worker/execution.py",
+    "tests/test_m14_source_review_corrections.py",
+    "server/soloring/api/generations.py",
+    "server/soloring/api/realization.py",
+    "server/soloring/generation/repository.py",
+    "server/soloring/realization/packages.py",
+    "server/soloring/spatial/boxdepth.py",
+    "server/soloring/spatial/production_package.py",
+    "scripts/m13_validate_boundary.py",
+)
+
+
+def m14_owned(path: str) -> bool:
+    return path.startswith(M14_OWNED_PREFIXES)
 
 M14_PATTERNS = [
     (r"\bObservationSpec\b", "M14 ObservationSpec"),
@@ -160,19 +257,27 @@ def main(repo: Path = REPO) -> int:
     changed = [f for f in git("diff", "--name-only", f"{base}..HEAD",
                               repo=repo).splitlines() if f.strip()]
     for f in changed:
-        if f.startswith("server/"):
+        if f.startswith("server/") and not m14_owned(f):
             errors.append(f"backend change outside the security slice: {f}")
-        if f.startswith("server/alembic/"):
+        if (f.startswith("server/alembic/")
+                and f != ("server/alembic/versions/"
+                          "0015_m14_world_observation_execution.py")):
             errors.append(f"alembic change outside the security slice: {f}")
         if not path_allowed(f, allowlist):
             errors.append(f"changed file outside the {mode}-mode "
                           f"allowlist: {f}")
 
     versions = repo / "server" / "alembic" / "versions"
-    mig_0015 = [p.name for p in versions.glob("*.py")
-                if p.stem >= "0015"]
-    if mig_0015:
-        errors.append(f"migration at/beyond 0015 exists: {mig_0015}")
+    # M14B-2 succession (frozen R2 §23, authorized 2026-09-10): exactly
+    # ONE migration at/beyond 0015 is admitted — the frozen M14
+    # migration. Anything else (0016+, or a different 0015) still
+    # rejects; this is NOT a general future-migration allowance.
+    admitted_0015 = "0015_m14_world_observation_execution.py"
+    mig_beyond = [p.name for p in versions.glob("*.py")
+                  if p.stem >= "0015" and p.name != admitted_0015]
+    if mig_beyond:
+        errors.append(f"migration at/beyond 0015 beyond the frozen M14 "
+                      f"migration exists: {mig_beyond}")
 
     # frozen §17: Next major other than 15
     pkg = json.loads((repo / "apps" / "web" / "package.json")
@@ -189,6 +294,8 @@ def main(repo: Path = REPO) -> int:
                                           "boundary.py",
                                           "hygiene_validate_boundary.py")):
             continue  # boundary validators' own scan patterns name the vocabulary
+        if m14_owned(f):
+            continue  # authorized M14 surface legitimately uses M14 vocabulary
         src = p.read_text(encoding="utf-8", errors="replace")
         for pattern, what in M14_PATTERNS:
             if re.search(pattern, src, re.I):
@@ -200,7 +307,7 @@ def main(repo: Path = REPO) -> int:
         return 1
     print(f"Next-security boundary clean (mode={mode}, base={base[:12]}…): "
           f"{'security-slice' if mode == 'predecessor' else 'post-M13 union'} "
-          "allowlist scoped, no server/alembic change, head still 0014, "
+          "allowlist scoped, only the frozen M14 0015 migration, "
           "Next major exactly 15, no M14 semantics"
           + ("; checked-in predecessor evidence exact."
              if mode == "published" else ""))

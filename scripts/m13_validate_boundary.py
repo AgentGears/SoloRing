@@ -52,6 +52,24 @@ def git_changed_files() -> list[str]:
     return [f for f in out.stdout.splitlines() if f.strip()]
 
 
+# M14 implementation succession (frozen R2 @ 68f910f5, authorized
+# 2026-09-10): the authorized M14 execution-integration surface is
+# carved out of the M13 "no execution-module changes" rule — exactly as
+# later slices carved their surfaces into earlier boundary gates. The
+# M14 boundary validator owns these paths' classification.
+M14_OWNED_PREFIXES = (
+    "server/soloring/observation/",
+    "server/soloring/generation/service.py",
+    "server/soloring/realization/packages.py",
+    "server/soloring/generation/repository.py",
+    "server/soloring/spatial/boxdepth.py",
+    "server/soloring/generation/rerun.py",
+    "server/soloring/worker/comfy_pipeline.py",
+    "server/soloring/workflows/artifact_store.py",
+    "server/soloring/worker/execution.py",
+)
+
+
 def main() -> int:
     errors: list[str] = []
     # 1. M13-owned surface carries no M14 semantics
@@ -69,7 +87,8 @@ def main() -> int:
     for changed in git_changed_files():
         if re.search(
                 r"soloring/(executors|worker|realization|generation"
-                r"|workflows)/", changed):
+                r"|workflows)/", changed) and not changed.startswith(
+                    M14_OWNED_PREFIXES):
             errors.append(
                 f"M13 modified execution/runtime module: {changed}")
     if errors:

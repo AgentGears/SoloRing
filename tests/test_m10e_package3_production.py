@@ -156,14 +156,42 @@ async def test_descriptor_malformed_fails(settings, tmp_path):
 
 
 async def test_descriptor_schema4_rejected(settings, tmp_path):
-    """The descriptor gate stays closed beyond 1/2/3 (E-014 posture):
-    schema 4 trips either the closed field set or the version range."""
+    """M14B-4 succession (frozen R2 §18, authorized 2026-09-11): a
+    COHERENT descriptor schema 4 is now admitted (the wan21 v2 release
+    family). The gate stays closed BEYOND the admitted family: schema 5
+    trips the closed version range, and an incoherent schema-4
+    descriptor (v1 members rebound under a v4 wrapper) still fails
+    capture — the E-014 posture survives as 'no unbound schema
+    promotion'."""
     d = await _schema3_package(
         tmp_path, mutate=lambda docs: docs | {
             "__descriptor__": prod.production_descriptor_v3()
-            | {"schema_version": 4}})
-    with pytest.raises(PackageIntegrity, match="unknown fields|1, 2 or 3"):
+            | {"schema_version": 5}})
+    with pytest.raises(PackageIntegrity,
+                       match="unknown fields|1, 2, 3 or 4"):
         await capture_current_release(_settings_for(settings, d))
+
+    # a schema-4 descriptor with a NON-matching member hash refuses at
+    # capture (the D1 declared-hash equality is schema-family-blind)
+    d4 = await _schema3_package(
+        tmp_path, mutate=lambda docs: docs | {
+            "__descriptor__": prod.production_descriptor_v3()
+            | {"schema_version": 4,
+               "manifest_hash": "0" * 64}})
+    with pytest.raises(PackageIntegrity, match="do not match"):
+        await capture_current_release(_settings_for(settings, d4))
+
+    # Erratum E-2 (M14 freeze, 2026-09-11): even a hash-COHERENT
+    # schema-4 descriptor over a schema-2 profile now rejects —
+    # descriptor 4 implies the observation-capable profile semantics
+    d4_coherent = await _schema3_package(
+        tmp_path, mutate=lambda docs: docs | {
+            "__descriptor__": prod.production_descriptor_v3()
+            | {"schema_version": 4}})
+    release = await capture_current_release(
+        _settings_for(settings, d4_coherent))
+    with pytest.raises(Package3Invalid, match="schema 4 requires"):
+        validate_package(release)
 
 
 async def test_manifest_v3_malformed_is_binding_invalid(
