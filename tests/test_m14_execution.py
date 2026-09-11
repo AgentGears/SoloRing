@@ -21,6 +21,9 @@ from soloring.errors import ErrorCode, SoloRingError
 from soloring.generation.service import create_generation_request
 
 from tests import test_m14_gpu_gate as _gate
+from tests.test_m14_gpu_gate import (  # noqa: F401  (fixture)
+    gate_executor as _gate_executor,
+)
 from tests.m13_seed import make_composition, mint, publish, seed_base
 from tests.test_m10e_generation import _spatial_seed, _spatial_settings
 from tests.test_m10e_package3_production import _schema3_package
@@ -561,8 +564,7 @@ async def test_m14_exec_03(client, tmp_path, monkeypatch):
 
 # ---- M14-EXEC:08 real production workflow consumes exact control ------------
 
-@_gate.requires_live_executor
-async def test_m14_exec_08(client, tmp_path):
+async def test_m14_exec_08(client, tmp_path, _gate_executor):
     """M14-EXEC:08 the real production workflow consumes the EXACT
     retained control and imports a Take candidate.
 
@@ -636,8 +638,7 @@ async def test_m14_exec_08(client, tmp_path):
 
 # ---- M14-EXEC:09 zero production-authority mutation -------------------------
 
-@_gate.requires_live_executor
-async def test_m14_exec_09(client, tmp_path):
+async def test_m14_exec_09(client, tmp_path, _gate_executor):
     """M14-EXEC:09 the Generation/Take cycle causes ZERO
     production-authority mutation: every authority table's content
     digest is identical before and after a full real execution."""
@@ -670,8 +671,7 @@ async def test_m14_exec_09(client, tmp_path):
 
 # ---- M14-EXEC:10 same-world/new-camera + anti-wrapper -----------------------
 
-@_gate.requires_live_executor
-async def test_m14_exec_10(client, tmp_path):
+async def test_m14_exec_10(client, tmp_path, _gate_executor):
     """M14-EXEC:10 the full same-world/new-camera SHOOT THE WORLD gate
     with the anti-wrapper proof: the SAME frozen world executes under
     two distinct new cameras — both produce Takes, each camera's

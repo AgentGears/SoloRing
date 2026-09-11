@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
 import json
 import logging
 import time
@@ -625,13 +626,15 @@ async def _drive(
                 from soloring.observation.worker_inputs import (
                     execute_schema4_derived_inputs,
                 )
+                from soloring.observation.capability import (
+                    parse_profile_v3,
+                )
                 from soloring.observation.workflow_spec import (
                     parse_workflow_spec_v4,
                 )
                 from soloring.spatial.package3 import (
                     check_runtime_closure,
                     parse_manifest_v3,
-                    parse_profile_v2,
                 )
 
                 spec4 = parse_workflow_spec_v4(spec)
@@ -643,7 +646,13 @@ async def _drive(
                 manifest = parse_manifest_v3(
                     manifest_bytes.decode("utf-8")
                 )
-                profile = parse_profile_v2(
+                # A schema-4 Generation executes a descriptor-4 package,
+                # whose profile is schema 3 (Erratum E-1c): parse it with
+                # THE strict schema-3 parser — its inherited schema-2
+                # semantics arrive by delegation, and the observation
+                # block validates through the same frozen grammar the
+                # negotiation used at capture time.
+                profile = parse_profile_v3(
                     (
                         await artifact_store.get_profile(
                             lower["spatial_realization"][
@@ -682,6 +691,21 @@ async def _drive(
                         manifest_v3=manifest,
                         client=ClientUploader(client),
                     )
+                # The observation binding fulfills the inherited
+                # world-depth SLOT: pure translation binds supplied
+                # transport to the spec's derived-artifact roles, so the
+                # schema-4 observation input is presented at its slot
+                # role ('spatial.world_depth', the same node/field the
+                # loader resolved from the captured manifest binding).
+                # The persisted binding role 'observation.world_depth'
+                # is untouched — this is presentation at the seam, never
+                # a rewrite of stored meaning.
+                schema3_derived = [
+                    dataclasses.replace(
+                        v, artifact_role="spatial.world_depth")
+                    if v.artifact_role == "observation.world_depth"
+                    else v
+                    for v in schema3_derived]
                 spec = lower  # the inherited schema-3 execution meaning
             elif spec.get("schema_version") == 3:
                 # M10 frozen r3 §2.2/§48: schema-3 historical execution

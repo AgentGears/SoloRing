@@ -26,6 +26,15 @@ from sqlalchemy import text
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 GATE_COMFY_URL = "http://127.0.0.1:8188"
+GATE_COMFY_DIR = Path(r"C:/AI/M10R3-evidence/executor/comfy")
+GATE_COMFY_EXE = Path(r"C:/AI/ComfyUI/venv/Scripts/python.exe")
+GATE_COMFY_PYDEPS = Path(r"C:/AI/M10R3-evidence/executor/pydeps")
+GATE_WRAPPER_DIR = (GATE_COMFY_DIR / "custom_nodes"
+                    / "ComfyUI-WanVideoWrapper")
+GATE_ATTESTATION = (REPO_ROOT / "data" / "m14b6-gate-fingerprint"
+                    / "deployment_attestation.json")
+PINNED_COMFYUI_COMMIT = "b963f4ad210a42841ab23dfc28a84143a0cce227"
+PINNED_WRAPPER_COMMIT = "088128b224242e110d3906c6750e9a3a348a659b"
 GATE_MODEL_ROOTS = {
     "diffusion_models": Path(
         r"C:/AI/M10R3-evidence/executor/comfy/models/diffusion_models"),
@@ -71,15 +80,97 @@ def gate_comfy_serving() -> bool:
         return False
 
 
-requires_live_executor = pytest.mark.skipif(
-    not gate_comfy_serving(),
-    reason="the certified Comfy executor is not serving — the real GPU "
-           "source gate runs on the production machine only")
+@pytest.fixture(scope="module")
+def gate_executor():
+    """Launch the certified pinned executor in the M10E production
+    posture (ComfyUI b963f4ad + ComfyUI-WanVideoWrapper 088128b2, only
+    that node whitelisted) and publish the v4 deployment attestation the
+    gate settings consume. On machines without the pinned executor the
+    gate skips — it runs on the production class only."""
+    import os
+    import subprocess
+    import time as _time
+
+    if not (GATE_COMFY_DIR.is_dir() and GATE_COMFY_EXE.is_file()
+            and GATE_WRAPPER_DIR.is_dir()):
+        pytest.skip(
+            "the pinned certified executor is not installed — the real "
+            "GPU source gate runs on the production machine only")
+
+    def _rev(path: Path) -> str:
+        out = subprocess.run(
+            ["git", "-C", str(path), "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=30)
+        if out.returncode != 0:
+            pytest.skip(f"cannot read git revision of {path}")
+        return out.stdout.strip()
+
+    comfy_commit = _rev(GATE_COMFY_DIR)
+    wrapper_commit = _rev(GATE_WRAPPER_DIR)
+    assert comfy_commit == PINNED_COMFYUI_COMMIT, (
+        f"executor ComfyUI commit {comfy_commit} is not the frozen pin")
+    assert wrapper_commit == PINNED_WRAPPER_COMMIT, (
+        f"executor WanVideoWrapper commit {wrapper_commit} is not the "
+        "frozen pin")
+
+    subprocess.run(
+        ["powershell", "-NoProfile", "-Command",
+         "Get-NetTCPConnection -LocalPort 8188 -State Listen "
+         "-ErrorAction SilentlyContinue | Select-Object -ExpandProperty "
+         "OwningProcess | ForEach-Object { Stop-Process -Id $_ -Force }"],
+        capture_output=True, timeout=30)
+    log = open(REPO_ROOT / "data" / "m14b6-gate-comfy.log", "wb")
+    subprocess.Popen(
+        [str(GATE_COMFY_EXE), "main.py", "--listen", "127.0.0.1",
+         "--port", "8188", "--disable-all-custom-nodes",
+         "--whitelist-custom-nodes", "ComfyUI-WanVideoWrapper",
+         "--output-directory", "output"],
+        cwd=str(GATE_COMFY_DIR),
+        env={**os.environ, "PYTHONPATH": str(GATE_COMFY_PYDEPS)},
+        creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+        stdout=log, stderr=subprocess.STDOUT)
+
+    deadline = _time.monotonic() + 180
+    while _time.monotonic() < deadline:
+        if gate_comfy_serving():
+            break
+        _time.sleep(1.0)
+    else:
+        pytest.fail("the certified gate executor did not become ready")
+
+    out = subprocess.run(
+        ["powershell", "-NoProfile", "-Command",
+         "Get-NetTCPConnection -LocalPort 8188 -State Listen | "
+         "Select-Object -First 1 -ExpandProperty OwningProcess"],
+        capture_output=True, text=True, timeout=30)
+    pid = int(out.stdout.strip())
+
+    from soloring.executors.comfy.capability_record import (
+        build_deployment_attestation,
+        capture_process_start_fingerprint,
+    )
+
+    doc = build_deployment_attestation(
+        comfyui_commit=comfy_commit,
+        gguf_commit=wrapper_commit,  # the single whitelisted custom node
+        launched_at=_time.strftime("%Y-%m-%dT%H:%M:%S+00:00"),
+        pid=pid,
+        process_start_fingerprint=capture_process_start_fingerprint(pid),
+        executor_origin=GATE_COMFY_URL,
+        custom_node_whitelist=("ComfyUI-WanVideoWrapper",))
+    GATE_ATTESTATION.parent.mkdir(parents=True, exist_ok=True)
+    GATE_ATTESTATION.write_text(json.dumps(doc, indent=2),
+                                encoding="utf-8")
+    yield {"comfyui_commit": comfy_commit,
+           "wrapper_commit": wrapper_commit, "pid": pid}
 
 
-def _gate_mesh_doc() -> dict:
-    """A gate-visible structural mesh: ~1.2 m across at the world
-    origin, where both gate cameras aim."""
+def _gate_mesh_doc(*, shift_mm: int = 0) -> dict:
+    """A gate-visible structural mesh: ~1.2 m across near the world
+    origin, where both gate cameras aim. ``shift_mm`` keeps per-world
+    blob contents distinct when one test database carries several gate
+    worlds."""
+    shift = shift_mm
     return {
         "schema_version": 1,
         "kind": "soloring.structural_mesh",
@@ -88,42 +179,90 @@ def _gate_mesh_doc() -> dict:
             "depth_positive_axis": "+z", "forward_axis": "-z",
             "linear_unit": "millimeter", "vector_convention": "column"},
         "vertices_mm": [
-            [-600, 0, 0], [600, 0, 0], [-600, 900, 0],
-            [-600, 0, 1100], [600, 900, 1100], [0, 1500, 550]],
+            [-600 + shift, 0, 0], [600 + shift, 0, 0],
+            [-600 + shift, 900, 0], [-600 + shift, 0, 1100],
+            [600 + shift, 900, 1100], [shift, 1500, 550]],
         "triangles": [[0, 1, 5], [0, 3, 4], [2, 4, 5], [0, 2, 5],
                       [1, 4, 5], [0, 1, 2], [1, 2, 4], [0, 3, 2]],
     }
 
 
 async def gate_world(client, *, tag: bytes, camera: dict):
-    """A captured schema-6 world whose direct occurrence carries the
-    gate mesh under its exact interpretation and placement, captured at
-    the given NEW camera (the plan is re-put at the gate view before the
-    binding re-selection and re-capture)."""
+    """A captured schema-6 world in the full production posture: the
+    gate mesh occurrence under its exact interpretation and placement,
+    TWO Track-staged characters (the certified template consumes three
+    control streams — world + two entity depths), and the plan re-put
+    at the given NEW camera before the binding re-selection and
+    re-capture."""
     from tests.conftest import make_tracked_maker
-    from tests.test_m13_shot_capture import _capture as _m13_capture
+    from tests.test_m13_shot_capture import (
+        _capture as _m13_capture,
+        _entity_approved,
+    )
     from tests.test_m14_materializer import _observation_world
+
+    import zlib
 
     b, snapshot, oids, prids = await _observation_world(
         client, tag=tag,
-        sources=[{"kind": "mesh", "mesh": _gate_mesh_doc(),
+        sources=[{"kind": "mesh",
+                  "mesh": _gate_mesh_doc(
+                      shift_mm=zlib.crc32(tag) % 400),
                   "transform": (0, 0, 0), "interpretation": (0, 0, 0)}],
         adopt_first_mesh=False)
 
-    from soloring.spatial import plans as plan_svc
-
     engine = client._transport.app.state.engine
     maker = make_tracked_maker(engine)
+
+    # the second staged character (the first is the world's eva)
+    mark, _markrev = await _entity_approved(
+        client, b["pid"], "character", "Mark")
+    async with engine.connect() as conn:
+        await conn.execute(text(
+            "INSERT INTO shot_entity_dependencies (shot_id, entity_id, "
+            "role, position) VALUES (:s, :e, 'cast', 9)"),
+            {"s": b["shot"], "e": mark})
+        await conn.commit()
+
+    from soloring.spatial import plans as plan_svc
+    from soloring.spatial import tracks as track_svc
+    from soloring.spatial import transitions as trans_svc
+
+    async with engine.connect() as conn:
+        seq = (await conn.execute(text(
+            "SELECT id FROM sequences WHERE project_id = :p "
+            "ORDER BY position LIMIT 1"),
+            {"p": b["pid"]})).scalar_one()
+    blocking = []
+    for entity, translation in ((b["eva"], [-1500, 0, 200]),
+                                (mark, [1300, 0, -900])):
+        track = await track_svc.create_track(
+            maker(), b["world"]["id"], entity_id=entity,
+            requirement="optional")
+        await trans_svc.create_transition(
+            maker(), track["id"], anchor_type="sequence", anchor_id=seq,
+            boundary="start", operation="set",
+            translation_mm=list(translation), rotation_udeg=[0, 0, 0])
+        blocking.append({
+            "spatial_track_id": track["id"],
+            "screen_direction": "left_to_right",
+            "keyframes": [{
+                "time_ms": 0,
+                "transform": {"translation_mm": list(translation),
+                              "rotation_udeg": [0, 0, 0]}}],
+        })
+
     async with engine.connect() as conn:
         old_hash = (await conn.execute(text(
-            "SELECT plan_hash FROM spatial_plans WHERE shot_id = :s"),
+            "SELECT plan_hash FROM shot_spatial_plans "
+            "WHERE shot_id = :s"),
             {"s": b["shot"]})).scalar_one()
     await plan_svc.put_spatial_plan(
         maker(), b["shot"], expected_plan_hash=old_hash, plan_raw={
             "schema_version": 1,
             "spatial_world_id": b["world"]["id"],
             "camera": json.loads(json.dumps(camera)),
-            "blocking": [],
+            "blocking": blocking,
             "axis_constraint": None,
         })
 
@@ -157,11 +296,10 @@ def gate_settings(client, tmp_path: Path):
         "text_encoders"]
     settings.comfy_model_root_vae = GATE_MODEL_ROOTS["vae"]
 
-    attestation = (REPO_ROOT / "data" / "comfy-fingerprint" /
-                   "deployment_attestation.json")
+    attestation = GATE_ATTESTATION
     assert attestation.is_file(), (
-        "the certified v4 launcher attestation is missing — launch the "
-        "executor via scripts/launch_comfy.py before the source gate")
+        "the gate attestation is missing — the gate_executor fixture "
+        "launches and attests the certified executor first")
     dst = (settings.data_dir / "comfy-fingerprint" /
            "deployment_attestation.json")
     dst.parent.mkdir(parents=True, exist_ok=True)
@@ -249,21 +387,33 @@ _AUTHORITY_TABLES = (
     ("composition_identity_operation_targets", "operation_id"),
     ("composition_occurrences", "id"),
     ("composition_occurrence_authority_subjects", "occurrence_id"),
-    ("production_world_bindings", "binding_id"),
+    ("composition_spatial_bindings", "id"),
+    ("composition_spatial_binding_subjects", "binding_id"),
+    ("composition_spatial_binding_entries", "binding_id"),
+    ("shot_production_world_selections", "shot_id"),
+    ("shot_revision_production_instance_feature_states",
+     "shot_revision_id"),
+    ("shot_revision_production_instance_spatial_states",
+     "shot_revision_id"),
     ("production_instance_features", "id"),
     ("production_instance_feature_transitions", "id"),
     ("production_instance_spatial_tracks", "id"),
     ("production_instance_spatial_transitions", "id"),
     ("spatial_worlds", "id"),
     ("spatial_world_states", "id"),
-    ("spatial_world_state_frames", "state_id"),
+    ("spatial_world_state_frames", "spatial_world_state_id"),
     ("spatial_world_revisions", "id"),
-    ("spatial_world_axes", "id"),
+    ("spatial_axes", "id"),
+    ("spatial_world_revision_axes", "spatial_world_revision_id"),
     ("shot_revisions", "id"),
     ("shot_revision_spatial_worlds", "shot_revision_id"),
     ("shot_revision_production_worlds", "shot_revision_id"),
-    ("blobs", "hash"),
 )
+
+# NOTE: the blobs table is deliberately NOT in the inventory — it is
+# content-addressed storage for execution products (the imported Take
+# video is REQUIRED to add a row); the retained bytes stay pinned by
+# the immutable closure rows above, whose digests are asserted.
 
 
 async def authority_snapshot(engine) -> dict[str, str]:

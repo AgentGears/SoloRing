@@ -71,7 +71,13 @@ def _build_execution_spec(generation, attempt_id: str) -> GenerationExecutionSpe
 
 
 def spec_outputs(workflow_spec: dict) -> tuple[ExpectedOutput, ...]:
-    """Expected outputs from the CAPTURED logical spec (M4)."""
+    """Expected outputs from the CAPTURED logical spec (M4).
+
+    WorkflowSpec schema 4 wraps the exact schema-3 logical value: its
+    outputs ARE the lower_schema_3 outputs (shared subset — the wrapper
+    adds no executor-visible outputs of its own)."""
+    if workflow_spec.get("schema_version") == 4:
+        workflow_spec = workflow_spec["lower_schema_3"]
     return tuple(
         ExpectedOutput(
             name=o["name"],

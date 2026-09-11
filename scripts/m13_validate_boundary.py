@@ -65,6 +65,8 @@ M14_OWNED_PREFIXES = (
     "server/soloring/spatial/boxdepth.py",
     "server/soloring/generation/rerun.py",
     "server/soloring/worker/comfy_pipeline.py",
+    "server/soloring/workflows/artifact_store.py",
+    "server/soloring/worker/execution.py",
 )
 
 
