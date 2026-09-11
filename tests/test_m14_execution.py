@@ -20,6 +20,7 @@ from soloring.domain.canonical import canonical_hash
 from soloring.errors import ErrorCode, SoloRingError
 from soloring.generation.service import create_generation_request
 
+from tests import test_m14_gpu_gate as _gate
 from tests.m13_seed import make_composition, mint, publish, seed_base
 from tests.test_m10e_generation import _spatial_seed, _spatial_settings
 from tests.test_m10e_package3_production import _schema3_package
@@ -554,3 +555,178 @@ async def test_m14_exec_03(client, tmp_path, monkeypatch):
     assert artifact_count == 1, (
         "the owner-free artifact remains published — convergence "
         "preceded the Generation unit (RACE-07 posture)")
+
+
+
+
+# ---- M14-EXEC:08 real production workflow consumes exact control ------------
+
+@_gate.requires_live_executor
+async def test_m14_exec_08(client, tmp_path):
+    """M14-EXEC:08 the real production workflow consumes the EXACT
+    retained control and imports a Take candidate.
+
+    Full chain on the certified executor: schema-6 capture at a new
+    gate camera → v2 package (its captured materializer contract equal
+    to the live runtime identity) → schema-4 Generation → real worker
+    drive → real Comfy submission whose uploaded world-depth frames are
+    byte-identical to the persisted observation artifact → imported
+    video:0 Take."""
+    from tests.test_m14_gpu_gate import (
+        GATE_CAM_A,
+        PINNED_LIVE_CONTRACT_HASH,
+        drive_real,
+        gate_settings,
+        gate_world,
+        observation_artifact,
+        take_blob,
+    )
+
+    b, _snapshot, _revision, _oids, _prids = await gate_world(
+        client, tag=b"m14-gate-08", camera=GATE_CAM_A)
+    settings = gate_settings(client, tmp_path)
+
+    from soloring.observation.materializer import (
+        build_materializer_contract,
+        materializer_contract_hash,
+    )
+
+    live_contract = materializer_contract_hash(
+        build_materializer_contract())
+    assert live_contract == PINNED_LIVE_CONTRACT_HASH, (
+        "STOP condition (frozen B6): the production MaterializerContract "
+        f"computed on this runtime is {live_contract}, not the captured "
+        "identity — review stop, never a patch")
+
+    generation = await _generate(client, b["shot"], settings)
+    engine = client._transport.app.state.engine
+    artifact = await observation_artifact(engine, generation.id)
+    assert artifact["materializer_contract_hash"] == live_contract, (
+        "the persisted artifact coordinate carries the live contract")
+
+    status, recording = await drive_real(client, settings, generation.id)
+    assert status == "succeeded", (
+        f"the real executor drive must succeed — got {status}")
+
+    take = await take_blob(engine, generation.id)
+    assert take is not None and take["output_key"] == "video:0", (
+        "the real output imports as a Take candidate")
+
+    # the EXACT-control proof: the world-depth frames uploaded to the
+    # executor concatenate to the persisted observation artifact bytes
+    settings_live = client._transport.app.state.settings
+    blob_path = (settings_live.blob_dir / "sha256"
+                 / artifact["blob_hash"][:2]
+                 / artifact["blob_hash"][2:4] / artifact["blob_hash"])
+    retained_bytes = blob_path.read_bytes()
+    import hashlib
+
+    assert hashlib.sha256(retained_bytes).hexdigest() == (
+        artifact["blob_hash"])
+    uploaded = [data for name, data in recording.uploads
+                if "world_depth" in name or "observation" in name
+                or name.split("/")[-1].startswith("d0-")]
+    assert uploaded, (
+        "the executor submission must carry the observation control "
+        f"frames — uploads were {[n for n, _ in recording.uploads]}")
+    assert b"".join(uploaded) == retained_bytes, (
+        "the submitted control frames must be byte-identical to the "
+        "persisted observation artifact")
+
+
+# ---- M14-EXEC:09 zero production-authority mutation -------------------------
+
+@_gate.requires_live_executor
+async def test_m14_exec_09(client, tmp_path):
+    """M14-EXEC:09 the Generation/Take cycle causes ZERO
+    production-authority mutation: every authority table's content
+    digest is identical before and after a full real execution."""
+    from tests.test_m14_gpu_gate import (
+        GATE_CAM_B,
+        authority_snapshot,
+        drive_real,
+        gate_settings,
+        gate_world,
+        take_blob,
+    )
+
+    b, _snapshot, _revision, _oids, _prids = await gate_world(
+        client, tag=b"m14-gate-09", camera=GATE_CAM_B)
+    settings = gate_settings(client, tmp_path)
+    engine = client._transport.app.state.engine
+
+    before = await authority_snapshot(engine)
+    generation = await _generate(client, b["shot"], settings)
+    status, _recording = await drive_real(client, settings, generation.id)
+    assert status == "succeeded"
+    assert await take_blob(engine, generation.id) is not None
+    after = await authority_snapshot(engine)
+
+    assert after == before, (
+        "a real Generation/Take cycle must not mutate any production "
+        f"authority table — diverged: "
+        f"{[t for t in before if before[t] != after[t]]}")
+
+
+# ---- M14-EXEC:10 same-world/new-camera + anti-wrapper -----------------------
+
+@_gate.requires_live_executor
+async def test_m14_exec_10(client, tmp_path):
+    """M14-EXEC:10 the full same-world/new-camera SHOOT THE WORLD gate
+    with the anti-wrapper proof: the SAME frozen world executes under
+    two distinct new cameras — both produce Takes, each camera's
+    observation control differs (the raster is camera-dependent), and
+    the observation control materially differs from the M10-only twin
+    (the retained mesh changed the submitted bytes — metadata-only
+    storage cannot pass)."""
+    from tests.test_m14_gpu_gate import (
+        GATE_CAM_A,
+        GATE_CAM_B,
+        drive_real,
+        gate_settings,
+        gate_world,
+        observation_artifact,
+        take_blob,
+    )
+
+    settings = gate_settings(client, tmp_path)
+    engine = client._transport.app.state.engine
+
+    b_a, _snap_a, _rev_a, _oids_a, _prids_a = await gate_world(
+        client, tag=b"m14-gate-10a", camera=GATE_CAM_A)
+    gen_a = await _generate(client, b_a["shot"], settings)
+    art_a = await observation_artifact(engine, gen_a.id)
+
+    b_b, _snap_b, _rev_b, _oids_b, _prids_b = await gate_world(
+        client, tag=b"m14-gate-10b", camera=GATE_CAM_B)
+    gen_b = await _generate(client, b_b["shot"], settings)
+    art_b = await observation_artifact(engine, gen_b.id)
+
+    assert art_a["blob_hash"] != art_b["blob_hash"], (
+        "two distinct gate cameras over the same retained world must "
+        "produce distinct observation controls")
+
+    # the anti-wrapper twin: the same shot captured WITHOUT its M13
+    # selection executes the plain M10 path; its world-depth bytes must
+    # differ from the observation control
+    r = await client.request(
+        "DELETE",
+        f"/shots/{b_a['shot']}/production-world-selection",
+        json={"expected_binding_id": _snap_a["production_world"][
+            "binding"]["binding_id"]})
+    assert r.status_code == 200, r.text
+    from tests.test_m13_shot_capture import _capture as _m13_capture
+
+    _rev_twin, _ = await _m13_capture(client, b_a["shot"])
+    gen_twin = await _generate(client, b_a["shot"], settings)
+    twin_blob = await _world_depth_blob(engine, gen_twin.id)
+    assert twin_blob != art_a["blob_hash"], (
+        "anti-wrapper: the retained mesh must change the submitted "
+        "world-depth control vs the M10-only twin")
+
+    status_a, _rec_a = await drive_real(client, settings, gen_a.id)
+    status_b, _rec_b = await drive_real(client, settings, gen_b.id)
+    assert status_a == "succeeded" and status_b == "succeeded", (
+        f"both gate executions must produce Takes — {status_a}/{status_b}")
+    assert await take_blob(engine, gen_a.id) is not None
+    assert await take_blob(engine, gen_b.id) is not None

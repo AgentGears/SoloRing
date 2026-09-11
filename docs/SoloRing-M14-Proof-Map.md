@@ -126,9 +126,9 @@ Disposition vocabulary:
 | `M14-EXEC:05` | TEST | `tests/test_m14_b5_worker_closure.py::test_m14_exec_05` | Worker makes zero current production-world resolver calls. |
 | `M14-EXEC:06` | TEST | `tests/test_m14_b5_increment3.py::test_m14_exec_06_full_pipeline_runtime_gate` | Runtime availability gate occurs before Comfy submission. |
 | `M14-EXEC:07` | TEST | `tests/test_m14_b5_worker_closure.py::test_m14_exec_07` | Exact observation artifact binds inherited spatial.world_depth coordinate. |
-| `M14-EXEC:08` | PENDING | `tests/test_m14_execution.py::test_m14_exec_08` | Real production workflow consumes exact retained control and imports Take. |
-| `M14-EXEC:09` | PENDING | `tests/test_m14_execution.py::test_m14_exec_09` | Generation/Take causes zero production-authority mutation. |
-| `M14-EXEC:10` | PENDING | `tests/test_m14_execution.py::test_m14_exec_10` | Full same-world/new-camera SHOOT THE WORLD + anti-wrapper source gate passes. |
+| `M14-EXEC:08` | TEST | `tests/test_m14_execution.py::test_m14_exec_08` | Real production workflow consumes exact retained control and imports Take. |
+| `M14-EXEC:09` | TEST | `tests/test_m14_execution.py::test_m14_exec_09` | Generation/Take causes zero production-authority mutation. |
+| `M14-EXEC:10` | TEST | `tests/test_m14_execution.py::test_m14_exec_10` | Full same-world/new-camera SHOOT THE WORLD + anti-wrapper source gate passes. |
 
 ## M14-SCALE
 
