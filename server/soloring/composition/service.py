@@ -590,6 +590,41 @@ async def patch_working_occurrence(
             )
             # identity-preservation predicate (frozen §7.5): same lineage only
             old_kind = row.source_kind
+            # M15C (frozen R6 §15): a direct same-ProductionObject
+            # ProductionRevision source change refuses — compatibility
+            # assessment + explicit apply is the only ordinary path.
+            # Cross-object changes still route to replace_as_new below.
+            if (old_kind == "production_revision"
+                    and source["kind"] == "production_revision"
+                    and source["revision_id"]
+                    != row.production_revision_id):
+                swap_owners = (await conn.execute(
+                    text("SELECT id, production_object_id FROM "
+                         "production_revisions WHERE id IN (:a, :b)"),
+                    {"a": row.production_revision_id,
+                     "b": source["revision_id"]},
+                )).fetchall()
+                swap_objects = {r.id: r.production_object_id
+                                for r in swap_owners}
+                if (swap_objects.get(row.production_revision_id)
+                        is not None
+                        and swap_objects.get(source["revision_id"])
+                        == swap_objects[row.production_revision_id]):
+                    raise SoloRingError(
+                        ErrorCode.PRODUCTION_REVISION_UPDATE_REQUIRES_COMPATIBILITY,
+                        "a direct Production Revision update requires an "
+                        "M15 compatibility assessment and explicit apply",
+                        status_code=409,
+                        details={
+                            "composition_id": composition_id,
+                            "occurrence_id": occurrence_id,
+                            "current_revision_id":
+                                row.production_revision_id,
+                            "requested_revision_id":
+                                source["revision_id"],
+                            "required_action": "compatibility_assessment",
+                        },
+                    )
             if source["kind"] != old_kind:
                 raise SoloRingError(
                     ErrorCode.VALIDATION_ERROR,

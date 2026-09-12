@@ -279,3 +279,21 @@ async def list_revision_updates(
 
     return await compat.revision_updates(
         session, production_object_id=production_object_id)
+
+
+@router.post(
+    "/production-compatibility-assessments/{assessment_id}/apply",
+    response_model=None,
+)
+async def apply_compatibility_assessment(
+    assessment_id: str,
+    body: dict,
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    """M15C explicit apply (frozen R6 S17.3)."""
+    from soloring.compatibility import service as compat
+
+    result = await compat.apply_assessment(
+        session, assessment_id=assessment_id,
+        selected_uses=body.get("uses"))
+    return JSONResponse(result, status_code=200)

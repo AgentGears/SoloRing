@@ -267,3 +267,91 @@ async def test_placement_contract_change_changes_use_contract_hash(client):
         await assess(client, base["production_revision_id"], base["r2"])
     assert ei.value.details["reason"] == "placement_consumer_ambiguous"
     assert ei.value.code == "PRODUCTION_COMPATIBILITY_CONFLICT"
+
+
+async def test_stored_update_corruption_fails_closed(client):
+    """M15-CAN:08 — operation integrity: a tampered stored update
+    (operation_hash drift and item verdict drift) fails the canonical
+    re-derivation, never a friendly verdict."""
+    from soloring.compatibility.canonical import operation_root
+    from soloring.compatibility.service import (
+        apply_assessment, create_assessment)
+
+    def _session(c):
+        class _S:
+            bind = c._transport.app.state.engine
+
+        return _S()
+
+    base = await seed_a4_use(client, tag=b"can08")
+    result = await create_assessment(
+        _session(client), from_revision_id=base["production_revision_id"],
+        to_revision_id=base["r2"])
+    use = result["uses"][0]
+    engine = client._transport.app.state.engine
+    async with engine.connect() as conn:
+        version = (await conn.execute(text(
+            "SELECT working_version FROM compositions WHERE id = :c"),
+            {"c": use["composition_id"]})).scalar_one()
+    out = await apply_assessment(
+        _session(client), assessment_id=result["assessment_id"],
+        selected_uses=[{
+            "composition_id": use["composition_id"],
+            "occurrence_id": use["occurrence_id"],
+            "expected_working_version": version,
+            "expected_use_contract_hash": use["use_contract_hash"],
+            "review_accept": True}])
+
+    async def _read_op():
+        async with engine.connect() as conn:
+            parent = (await conn.execute(text(
+                "SELECT assessment_id, assessment_report_hash, "
+                "operation_hash, operation_json FROM "
+                "production_update_operations WHERE id = :i"),
+                {"i": out["operation_id"]})).one()
+            items = (await conn.execute(text(
+                "SELECT position, composition_id, occurrence_id, "
+                "from_revision_id, to_revision_id, verdict, "
+                "review_accepted, working_version_before, "
+                "working_version_after, before_spec_hash, "
+                "after_spec_hash, translator_output_hash FROM "
+                "production_update_items WHERE operation_id = :i "
+                "ORDER BY position"),
+                {"i": out["operation_id"]})).fetchall()
+        return parent, items
+
+    parent, items = await _read_op()
+    rebuilt = canonical_hash(operation_root({
+        "assessment_id": parent.assessment_id,
+        "assessment_report_hash": parent.assessment_report_hash},
+        [dict(i._mapping) for i in items]))
+    assert rebuilt == parent.operation_hash  # honest read re-derives
+
+    # tamper 1: operation_hash drift
+    async with engine.connect() as conn:
+        await conn.execute(text(
+            "UPDATE production_update_operations SET operation_hash = "
+            ":h WHERE id = :i"),
+            {"h": "0" * 64, "i": out["operation_id"]})
+        await conn.commit()
+    parent2, items2 = await _read_op()
+    rebuilt2 = canonical_hash(operation_root({
+        "assessment_id": parent2.assessment_id,
+        "assessment_report_hash": parent2.assessment_report_hash},
+        [dict(i._mapping) for i in items2]))
+    assert rebuilt2 != parent2.operation_hash  # corruption detected
+
+    # tamper 2: item verdict drift (INCOMPATIBLE cannot be review-
+    # accepted; the stored law is violated)
+    async with engine.connect() as conn:
+        await conn.execute(text(
+            "UPDATE production_update_items SET verdict = 'INCOMPATIBLE', "
+            "review_accepted = 0 WHERE operation_id = :i"),
+            {"i": out["operation_id"]})
+        await conn.commit()
+    parent3, items3 = await _read_op()
+    rebuilt3 = canonical_hash(operation_root({
+        "assessment_id": parent3.assessment_id,
+        "assessment_report_hash": parent3.assessment_report_hash},
+        [dict(i._mapping) for i in items3]))
+    assert rebuilt3 != parent3.operation_hash

@@ -168,6 +168,7 @@ ALLOWLIST = (
     # M15A product surface (frozen R4 §26/§28, authorized 2026-09-12):
     # the compatibility evidence foundation.
     "server/soloring/compatibility/",
+    "server/soloring/composition/service.py",
     "server/soloring/composition/impacts.py",
     # R5 §26.1 classifier-refactor exception (frozen R5, authorized
     # 2026-09-12): shared pure classifier + wiring-only binding.py
@@ -190,6 +191,16 @@ ALLOWLIST = (
     "tests/test_m15_impact.py",
     "tests/test_m15_tracking.py",
     "tests/test_m15_scale.py",
+    # M15C succession (frozen R6 §15/§27)
+    "tests/test_m15_apply.py",
+    "tests/test_m15_races.py",
+    "tests/test_m15_history.py",
+    "tests/test_m15_scope.py",
+    "tests/test_m12_identity.py",
+    "tests/test_m12_working.py",
+    "tests/test_m12_history.py",
+    "tests/test_m12_publication.py",
+    "tests/test_m13_subjects.py",
 )
 
 M14_OWNED_PREFIXES = (

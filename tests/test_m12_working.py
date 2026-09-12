@@ -271,11 +271,18 @@ async def test_identity_preserving_edits(engine, factory):
                      "VALUES (:r, :o, 2, '{}', :h, :n)"),
                 {"r": rid2, "o": obj, "h": "2" * 64, "n": NOW})
             await conn.commit()
-    out = await patch_working_occurrence(
-        factory(), cid, occ, scope="composition_working_state",
-        expected_working_version=4,
-        source={"kind": "production_revision", "revision_id": rid2})
-    assert out["occurrence_id"] == occ  # same identity, new source revision
+    # M15C succession (frozen R6 §27): the same-object direct swap is
+    # the M15 compatibility seam now — the ordinary PATCH refuses with
+    # the typed action pointer; identity preservation through the new
+    # mechanism is owned by M15-APPLY:06.
+    with pytest.raises(SoloRingError) as ei:
+        await patch_working_occurrence(
+            factory(), cid, occ, scope="composition_working_state",
+            expected_working_version=4,
+            source={"kind": "production_revision", "revision_id": rid2})
+    assert ei.value.code == (
+        "PRODUCTION_REVISION_UPDATE_REQUIRES_COMPATIBILITY")
+    assert ei.value.details["occurrence_id"] == occ
 
 
 async def test_cross_object_source_update_requires_replace_as_new(engine, factory):

@@ -153,6 +153,67 @@ async def test_publish_unchanged_working_state_converges(engine, factory):
     assert c3 is False and d3["revision_id"] == d1["revision_id"]
 
 
+
+async def _m15c_move_source(factory, rids, cid, occ, version):
+    """M15C succession (frozen R6 §27): the same-lineage working
+    source moves through assessment + review-accepted apply; fixture
+    revisions are canonicalized so the M15 verifier accepts them."""
+    import hashlib as _hl
+
+    from soloring.compatibility.service import (
+        apply_assessment, create_assessment)
+    from soloring.production.canonical import (
+        RetainedBlobClosure,
+        production_revision_snapshot_json as _sj,
+    )
+
+    async with factory() as s:
+        async with s.bind.connect() as conn:
+            for _idx, _rid in enumerate(rids):
+                _bh = _hl.sha256(
+                    f"m12-pub-m15c-r{_idx}".encode()).hexdigest()
+                await conn.execute(
+                    text("INSERT INTO blobs (hash, path, size_bytes, "
+                         "detected_media_type, created_at) VALUES "
+                         "(:h, :p, 16, NULL, :n)"),
+                    {"h": _bh,
+                     "p": f"sha256/{_bh[:2]}/{_bh[2:4]}/{_bh}",
+                     "n": "2026-01-01T00:00:00.000Z"})
+                _closure = RetainedBlobClosure(
+                    blob_hash=_bh, size_bytes=16, media_type=None)
+                await conn.execute(
+                    text("DELETE FROM production_revision_closures "
+                         "WHERE production_revision_id = :r"),
+                    {"r": _rid})
+                await conn.execute(
+                    text("INSERT INTO production_revision_closures "
+                         "(production_revision_id, contract_key, "
+                         "contract_version, blob_hash, size_bytes, "
+                         "media_type) VALUES "
+                         "(:r, 'retained_blob', 1, :bh, 16, NULL)"),
+                    {"r": _rid, "bh": _bh})
+                _snap = _sj(_closure)
+                await conn.execute(
+                    text("UPDATE production_revisions SET "
+                         "snapshot_json = :sj, snapshot_hash = :sh "
+                         "WHERE id = :r"),
+                    {"sj": _snap,
+                     "sh": _hl.sha256(_snap.encode()).hexdigest(),
+                     "r": _rid})
+            await conn.commit()
+    assessment = await create_assessment(
+        factory(), from_revision_id=rids[0], to_revision_id=rids[1])
+    use = assessment["uses"][0]
+    await apply_assessment(
+        factory(), assessment_id=assessment["assessment_id"],
+        selected_uses=[{
+            "composition_id": use["composition_id"],
+            "occurrence_id": use["occurrence_id"],
+            "expected_working_version": version,
+            "expected_use_contract_hash": use["use_contract_hash"],
+            "review_accept": True}])
+
+
 async def test_publish_changed_working_state_creates_next_revision(engine, factory):
     """M12-PUB:05 + :06 surviving IDs + :08 tokens untouched."""
     pid = await _seed_project(factory)
@@ -162,10 +223,7 @@ async def test_publish_changed_working_state_creates_next_revision(engine, facto
 
     d1, _ = await publish_composition_revision(
         factory(), cid, expected_working_version=1)
-    await patch_working_occurrence(
-        factory(), cid, occ, scope="composition_working_state",
-        expected_working_version=1,
-        source={"kind": "production_revision", "revision_id": rids[1]})
+    await _m15c_move_source(factory, rids, cid, occ, 1)
     d2, created = await publish_composition_revision(
         factory(), cid, expected_working_version=2)
     assert created and d2["revision_number"] == 2
@@ -363,11 +421,13 @@ async def test_old_revision_ignores_current_working_edits(engine, factory):
         factory(), cid, expected_working_version=1)
     snapshot_before = d1["snapshot_json"]
 
+    from soloring.composition.service import patch_working_occurrence
+
     await patch_working_occurrence(
         factory(), cid, occ, scope="composition_working_state",
         expected_working_version=1, display_name="Renamed",
-        transform={"translation_mm": [9, 9, 9], "rotation_udeg": [0, 0, 0]},
-        source={"kind": "production_revision", "revision_id": rids[1]})
+        transform={"translation_mm": [9, 9, 9], "rotation_udeg": [0, 0, 0]})
+    await _m15c_move_source(factory, rids, cid, occ, 2)
     await patch_composition_metadata(
         factory(), cid, expected_metadata_version=0, name="Renamed Lobby")
 

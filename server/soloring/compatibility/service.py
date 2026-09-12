@@ -173,3 +173,12 @@ async def revision_updates(session, *, production_object_id: str) -> dict:
     async with session.bind.connect() as conn:
         return await update_discovery(
             conn, production_object_id=production_object_id)
+
+
+async def apply_assessment(session, *, assessment_id: str,
+                           selected_uses: list) -> dict:
+    from soloring.compatibility.apply import apply_revision_update
+
+    return await apply_revision_update(
+        session, assessment_id=assessment_id,
+        selected_uses=selected_uses)

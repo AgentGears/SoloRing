@@ -228,21 +228,19 @@ async def test_direct_source_swap_is_the_intended_m15_seam(
     cid = await _comp(factory, pid)
     occ = await _mint(factory, cid, _spec(rids[0]), 0)
 
-    try:
-        out = await patch_working_occurrence(
+    # M15C landed (frozen R6 §15): the ordinary PATCH ends on the
+    # typed-refusal branch — the only identity-preserving source swap
+    # is the M15 compatibility assessment + explicit apply
+    with pytest.raises(SoloRingError) as ei:
+        await patch_working_occurrence(
             factory(), cid, occ, scope=SCOPE, expected_working_version=1,
             source={"kind": "production_revision",
                     "revision_id": rids[1]})
-    except SoloRingError as exc:
-        # post-M15C frozen state (§15): typed refusal, no mutation
-        assert exc.code == "PRODUCTION_REVISION_UPDATE_REQUIRES_COMPATIBILITY"
-        assert exc.details["required_action"] == "compatibility_assessment"
-        assert exc.details["current_revision_id"] == rids[0]
-        assert exc.details["requested_revision_id"] == rids[1]
-    else:
-        # pre-M15 state (this slice): predecessor behavior — the
-        # identity-preserving direct swap the frozen plan succeeds
-        assert out["occurrence_id"] == occ
+    assert ei.value.code == (
+        "PRODUCTION_REVISION_UPDATE_REQUIRES_COMPATIBILITY")
+    assert ei.value.details["required_action"] == "compatibility_assessment"
+    assert ei.value.details["current_revision_id"] == rids[0]
+    assert ei.value.details["requested_revision_id"] == rids[1]
 
     # cross-lineage always routes to replace_as_new, before and after M15
     async with factory() as s:

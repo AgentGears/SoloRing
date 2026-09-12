@@ -61,7 +61,7 @@ REC 4 / UI 6 / SCALE 7 — total 127.
 | `M15-CAN:05` | TEST | `tests/test_m15_canonical.py::test_report_hash_from_normalized_children` | report identity |
 | `M15-CAN:06` | TEST | `tests/test_m15_canonical.py::test_update_operation_hash_exact` | update audit identity |
 | `M15-CAN:07` | TEST | `tests/test_m15_canonical.py::test_stored_assessment_corruption_fails_closed` | parent/child integrity |
-| `M15-CAN:08` | PENDING | `tests/test_m15_canonical.py::test_stored_update_corruption_fails_closed` | operation integrity |
+| `M15-CAN:08` | TEST | `tests/test_m15_canonical.py::test_stored_update_corruption_fails_closed` | operation integrity |
 | `M15-CAN:09` | TEST | `tests/test_m15_canonical.py::test_feature_transition_set_change_changes_use_contract_hash` | A2 transition closure |
 | `M15-CAN:10` | TEST | `tests/test_m15_canonical.py::test_spatial_transition_set_change_changes_use_contract_hash` | A4 transition closure |
 | `M15-CAN:11` | TEST | `tests/test_m15_canonical.py::test_placement_contract_change_changes_use_contract_hash` | exact placement consumer |
@@ -135,49 +135,49 @@ REC 4 / UI 6 / SCALE 7 — total 127.
 
 | Cell | Disposition | Exact proof owner | Claim |
 |---|---|---|---|
-| `M15-APPLY:01` | PENDING | `tests/test_m15_apply.py::test_compatible_as_is_updates_selected_working_source_only` | core apply |
-| `M15-APPLY:02` | PENDING | `tests/test_m15_apply.py::test_translation_verdict_pins_exact_translator` | translation apply evidence |
-| `M15-APPLY:03` | PENDING | `tests/test_m15_apply.py::test_review_requires_explicit_acceptance` | review gate |
-| `M15-APPLY:04` | PENDING | `tests/test_m15_apply.py::test_incompatible_cannot_be_forced` | hard block |
-| `M15-APPLY:05` | PENDING | `tests/test_m15_apply.py::test_each_composition_working_version_increments_once` | version law |
-| `M15-APPLY:06` | PENDING | `tests/test_m15_apply.py::test_occurrence_identity_unchanged` | APR-103 |
-| `M15-APPLY:07` | PENDING | `tests/test_m15_apply.py::test_instance_feature_and_subject_rows_unchanged` | persistent state |
-| `M15-APPLY:08` | PENDING | `tests/test_m15_apply.py::test_instance_spatial_rows_unchanged` | spatial subject |
-| `M15-APPLY:09` | PENDING | `tests/test_m15_apply.py::test_stale_use_contract_rolls_back_all` | fenced apply |
-| `M15-APPLY:10` | PENDING | `tests/test_m15_apply.py::test_exact_retry_is_idempotent` | duplicate apply |
-| `M15-APPLY:11` | PENDING | `tests/test_m15_apply.py::test_partial_apply_stales_remaining_same_composition_uses` | partial semantics |
-| `M15-APPLY:12` | PENDING | `tests/test_m15_apply.py::test_direct_patch_source_swap_cannot_bypass_compatibility` | bypass closure |
-| `M15-APPLY:13` | PENDING | `tests/test_m15_apply.py::test_parent_incompatible_summary_does_not_block_selected_compatible_use` | per-use authority |
-| `M15-APPLY:14` | PENDING | `tests/test_m15_apply.py::test_update_operation_fk_pins_exact_assessment_report_hash` | report pin backstop |
-| `M15-APPLY:15` | PENDING | `tests/test_m15_scope.py::test_all_direct_production_revision_source_mutation_paths_are_gated` | no backdoor source swap |
-| `M15-APPLY:16` | PENDING | `tests/test_m15_apply.py::test_partial_apply_response_lists_stale_remaining_uses` | explicit continuation semantics |
+| `M15-APPLY:01` | TEST | `tests/test_m15_apply.py::test_review_accepted_use_updates_selected_working_source_only` | core apply |
+| `M15-APPLY:02` | TEST | `tests/test_m15_apply.py::test_review_accepted_translation_dimension_pins_exact_translator` | translation apply evidence |
+| `M15-APPLY:03` | TEST | `tests/test_m15_apply.py::test_review_requires_explicit_acceptance` | review gate |
+| `M15-APPLY:04` | TEST | `tests/test_m15_apply.py::test_incompatible_cannot_be_forced` | hard block |
+| `M15-APPLY:05` | TEST | `tests/test_m15_apply.py::test_each_composition_working_version_increments_once` | version law |
+| `M15-APPLY:06` | TEST | `tests/test_m15_apply.py::test_occurrence_identity_unchanged` | APR-103 |
+| `M15-APPLY:07` | TEST | `tests/test_m15_apply.py::test_instance_feature_and_subject_rows_unchanged` | persistent state |
+| `M15-APPLY:08` | TEST | `tests/test_m15_apply.py::test_instance_spatial_rows_unchanged` | spatial subject |
+| `M15-APPLY:09` | TEST | `tests/test_m15_apply.py::test_stale_use_contract_rolls_back_all` | fenced apply |
+| `M15-APPLY:10` | TEST | `tests/test_m15_apply.py::test_exact_retry_is_idempotent` | duplicate apply |
+| `M15-APPLY:11` | TEST | `tests/test_m15_apply.py::test_partial_apply_stales_remaining_same_composition_uses` | partial semantics |
+| `M15-APPLY:12` | TEST | `tests/test_m15_apply.py::test_direct_patch_source_swap_cannot_bypass_compatibility` | bypass closure |
+| `M15-APPLY:13` | TEST | `tests/test_m15_apply.py::test_parent_incompatible_summary_does_not_block_selected_review_accepted_use` | per-use authority |
+| `M15-APPLY:14` | TEST | `tests/test_m15_apply.py::test_update_operation_fk_pins_exact_assessment_report_hash` | report pin backstop |
+| `M15-APPLY:15` | TEST | `tests/test_m15_scope.py::test_all_direct_production_revision_source_mutation_paths_are_gated` | no backdoor source swap |
+| `M15-APPLY:16` | TEST | `tests/test_m15_apply.py::test_partial_apply_response_lists_stale_remaining_uses` | explicit continuation semantics |
 
 ## M15-RACE
 
 | Cell | Disposition | Exact proof owner | Claim |
 |---|---|---|---|
-| `M15-RACE:01` | PENDING | `tests/test_m15_races.py::test_assessment_vs_working_edit_no_hybrid` | coherent assess |
-| `M15-RACE:02` | PENDING | `tests/test_m15_races.py::test_three_identical_assessments_converge` | assessment convergence |
-| `M15-RACE:03` | PENDING | `tests/test_m15_races.py::test_apply_vs_working_edit_refuses_atomically` | stale version |
-| `M15-RACE:04` | PENDING | `tests/test_m15_races.py::test_apply_vs_feature_contract_edit_refuses` | non-working-version dependency |
-| `M15-RACE:05` | PENDING | `tests/test_m15_races.py::test_duplicate_apply_cannot_double_increment` | apply convergence |
-| `M15-RACE:06` | PENDING | `tests/test_m15_races.py::test_apply_vs_spatial_transition_edit_refuses` | non-working-version spatial dependency |
-| `M15-RACE:07` | PENDING | `tests/test_m15_races.py::test_tracking_policy_aba_is_rejected` | CAS generation safety |
+| `M15-RACE:01` | TEST | `tests/test_m15_races.py::test_assessment_vs_working_edit_no_hybrid` | coherent assess |
+| `M15-RACE:02` | TEST | `tests/test_m15_races.py::test_three_identical_assessments_converge` | assessment convergence |
+| `M15-RACE:03` | TEST | `tests/test_m15_races.py::test_apply_vs_working_edit_refuses_atomically` | stale version |
+| `M15-RACE:04` | TEST | `tests/test_m15_races.py::test_apply_vs_feature_contract_edit_refuses` | non-working-version dependency |
+| `M15-RACE:05` | TEST | `tests/test_m15_races.py::test_duplicate_apply_cannot_double_increment` | apply convergence |
+| `M15-RACE:06` | TEST | `tests/test_m15_races.py::test_apply_vs_spatial_transition_edit_refuses` | non-working-version spatial dependency |
+| `M15-RACE:07` | TEST | `tests/test_m15_races.py::test_tracking_policy_aba_is_rejected` | CAS generation safety |
 
 ## M15-HIST
 
 | Cell | Disposition | Exact proof owner | Claim |
 |---|---|---|---|
-| `M15-HIST:01` | PENDING | `tests/test_m15_history.py::test_old_composition_revision_byte_identical_after_update` | published history |
-| `M15-HIST:02` | PENDING | `tests/test_m15_history.py::test_old_binding_byte_identical_after_update` | binding history |
-| `M15-HIST:03` | PENDING | `tests/test_m15_history.py::test_old_shot_revision_byte_identical_after_update` | Shot history |
-| `M15-HIST:04` | PENDING | `tests/test_m15_history.py::test_current_shot_selection_unchanged_by_update` | current pinned Shot |
-| `M15-HIST:05` | PENDING | `tests/test_m15_history.py::test_future_publish_and_binding_pin_target_revision` | future world |
-| `M15-HIST:06` | PENDING | `tests/test_m15_history.py::test_future_shot_captures_target_revision` | future Shot |
-| `M15-HIST:07` | PENDING | `tests/test_m15_history.py::test_exact_rerun_old_shot_uses_source_with_m15_current_resolvers_poisoned` | captured-only history |
-| `M15-HIST:08` | PENDING | `tests/test_m15_history.py::test_compatibility_translation_never_rewrites_historical_source_bytes` | APR-099/104 |
-| `M15-HIST:09` | PENDING | `tests/test_m15_history.py::test_chair_07_fallen_state_survives_r2_to_r3_update` | headline continuity |
-| `M15-HIST:10` | PENDING | `tests/test_m15_history.py::test_old_exact_rerun_ignores_all_m15_evidence_and_tracking` | M15 not historical dependency |
+| `M15-HIST:01` | TEST | `tests/test_m15_history.py::test_old_composition_revision_byte_identical_after_update` | published history |
+| `M15-HIST:02` | TEST | `tests/test_m15_history.py::test_old_binding_byte_identical_after_update` | binding history |
+| `M15-HIST:03` | TEST | `tests/test_m15_history.py::test_old_shot_revision_byte_identical_after_update` | Shot history |
+| `M15-HIST:04` | TEST | `tests/test_m15_history.py::test_current_shot_selection_unchanged_by_update` | current pinned Shot |
+| `M15-HIST:05` | TEST | `tests/test_m15_history.py::test_future_publish_and_binding_pin_target_revision` | future world |
+| `M15-HIST:06` | TEST | `tests/test_m15_history.py::test_future_shot_captures_target_revision` | future Shot |
+| `M15-HIST:07` | TEST | `tests/test_m15_history.py::test_exact_rerun_old_shot_uses_source_with_m15_current_resolvers_poisoned` | captured-only history |
+| `M15-HIST:08` | TEST | `tests/test_m15_history.py::test_compatibility_translation_never_rewrites_historical_source_bytes` | APR-099/104 |
+| `M15-HIST:09` | TEST | `tests/test_m15_history.py::test_chair_07_fallen_state_survives_r2_to_r3_update` | headline continuity |
+| `M15-HIST:10` | TEST | `tests/test_m15_history.py::test_old_exact_rerun_ignores_all_m15_evidence_and_tracking` | M15 not historical dependency |
 
 ## M15-REC
 

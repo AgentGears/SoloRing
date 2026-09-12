@@ -183,8 +183,29 @@ async def test_m13_subject_10(client):
     adopted_at = r.json()["created_at"]
 
     # production_revision -> production_revision: adoption survives
-    await patch_source(client, cid, oid, 2, kind="production_revision",
-                       revision_id=prid2)
+    # (M15C succession, frozen R6 §27: the source now moves through
+    # assessment + review-accepted apply over HTTP)
+    from soloring.compatibility.canonical import verify_stored_assessment
+    from sqlalchemy import text as _text
+
+    engine = client._transport.app.state.engine
+    r2 = await client.post(
+        f"/production-revisions/{base['production_revision_id']}"
+        "/compatibility-assessments",
+        json={"to_revision_id": prid2})
+    assert r2.status_code == 201, r2.text
+    assessment = r2.json()
+    use = assessment["uses"][0]
+    r3 = await client.post(
+        f"/production-compatibility-assessments/"
+        f"{assessment['assessment_id']}/apply",
+        json={"uses": [{
+            "composition_id": use["composition_id"],
+            "occurrence_id": use["occurrence_id"],
+            "expected_working_version": 2,
+            "expected_use_contract_hash": use["use_contract_hash"],
+            "review_accept": True}]})
+    assert r3.status_code == 200, r3.text
     r = await _get(client, cid, oid)
     assert r.json()["subject_kind"] == "creative_entity"
     assert r.json()["created_at"] == adopted_at

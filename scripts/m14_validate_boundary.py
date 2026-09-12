@@ -113,6 +113,14 @@ ALLOWED_PATTERNS = [
     r"^server/alembic/versions/0016_m15_revision_compatibility\.py$",
     r"^server/soloring/api/production\.py$",
     r"^server/soloring/api/compositions\.py$",
+    # M15C succession (frozen R6 §15/§27, authorized 2026-09-12):
+    # the PATCH typed refusal + the M12 direct-swap proof/expectation
+    r"^server/soloring/composition/service\.py$",
+    r"^tests/test_m12_identity\.py$",
+    r"^tests/test_m12_working\.py$",
+    r"^tests/test_m12_history\.py$",
+    r"^tests/test_m12_publication\.py$",
+    r"^tests/test_m13_subjects\.py$",
     r"^server/soloring/api/schemas/production\.py$",
 ]
 

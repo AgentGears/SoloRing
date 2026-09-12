@@ -6,6 +6,7 @@ import json
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy import text as _text
 
 from soloring.domain.ids import new_uuid
 
@@ -81,12 +82,65 @@ async def test_old_revision_keeps_exact_old_source_after_update(engine, factory)
     occ = (await _mint(factory, cid, _spec(rids[0]), 0))["occurrence_id"]
     d1, _ = await publish_composition_revision(
         factory(), cid, expected_working_version=1)
-    from soloring.composition.service import patch_working_occurrence
+    # M15C succession (frozen R6 §27): the working source now moves
+    # through the M15 machinery — assessment + explicit review-accepted
+    # apply. The identity-fixture second revision carries a raw '{}'
+    # snapshot; make it M11-canonical so the assessment verifier
+    # accepts it (the frozen claim under test is the OLD revision's
+    # byte stability, which is indifferent to the target's snapshot).
+    from soloring.production.canonical import (
+        RetainedBlobClosure,
+        production_revision_snapshot_json as _sj,
+    )
+    import hashlib as _hl
 
-    await patch_working_occurrence(
-        factory(), cid, occ, scope="composition_working_state",
-        expected_working_version=1,
-        source={"kind": "production_revision", "revision_id": rids[1]})
+    async with factory() as s:
+        async with s.bind.connect() as conn:
+            for _idx, _rid in enumerate(rids):
+                _bh = _hl.sha256(
+                    f"m12-hist-m15c-r{_idx}".encode()).hexdigest()
+                await conn.execute(_text(
+                    "INSERT INTO blobs (hash, path, size_bytes, "
+                    "detected_media_type, created_at) VALUES "
+                    "(:h, :p, 16, NULL, :n)"),
+                    {"h": _bh,
+                     "p": f"sha256/{_bh[:2]}/{_bh[2:4]}/{_bh}",
+                     "n": NOW})
+                _closure = RetainedBlobClosure(
+                    blob_hash=_bh, size_bytes=16, media_type=None)
+                await conn.execute(_text(
+                    "DELETE FROM production_revision_closures "
+                    "WHERE production_revision_id = :r"),
+                    {"r": _rid})
+                await conn.execute(_text(
+                    "INSERT INTO production_revision_closures "
+                    "(production_revision_id, contract_key, "
+                    "contract_version, blob_hash, size_bytes, "
+                    "media_type) VALUES "
+                    "(:r, 'retained_blob', 1, :bh, 16, NULL)"),
+                    {"r": _rid, "bh": _bh})
+                _snap = _sj(_closure)
+                await conn.execute(_text(
+                    "UPDATE production_revisions SET snapshot_json = :sj, "
+                    "snapshot_hash = :sh WHERE id = :r"),
+                    {"sj": _snap,
+                     "sh": _hl.sha256(_snap.encode()).hexdigest(),
+                     "r": _rid})
+            await conn.commit()
+    from soloring.compatibility.service import (
+        apply_assessment, create_assessment)
+
+    assessment = await create_assessment(
+        factory(), from_revision_id=rids[0], to_revision_id=rids[1])
+    use = assessment["uses"][0]
+    await apply_assessment(
+        factory(), assessment_id=assessment["assessment_id"],
+        selected_uses=[{
+            "composition_id": use["composition_id"],
+            "occurrence_id": use["occurrence_id"],
+            "expected_working_version": 1,
+            "expected_use_contract_hash": use["use_contract_hash"],
+            "review_accept": True}])
     d1_again = await load_composition_revision_detail(
         factory(), d1["revision_id"])
     parsed = json.loads(d1_again["snapshot_json"])
