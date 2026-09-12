@@ -22,9 +22,23 @@ from soloring.errors import ErrorCode
 async def create_assessment(
         session: AsyncSession, *, from_revision_id: str,
         to_revision_id: str) -> dict:
-    return await assess_revision_update(
+    result = await assess_revision_update(
         session, from_revision_id=from_revision_id,
         to_revision_id=to_revision_id)
+    if result.get("assessment_id") is None:
+        return result
+    # Frozen R6 S9.2/S17.1: the advisory diagnostic block is a
+    # RESPONSE-TIME projection of CURRENT state — never part of
+    # scope_hash/report_hash/immutable identity, never replayed from
+    # report_json. Convergent calls therefore report fresh diagnostics
+    # over the same immutable assessment.
+    from soloring.compatibility.impact import advisory_references
+
+    async with session.bind.connect() as conn:
+        advisory = await advisory_references(
+            conn, production_revision_id=from_revision_id)
+    result["advisory"] = advisory
+    return result
 
 
 async def read_assessment(

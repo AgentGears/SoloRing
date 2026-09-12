@@ -121,22 +121,31 @@ async def test_spatial_contracts_enter_use_hash(client):
 
 async def test_published_composition_refs_are_advisory_only(client):
     """M15-IMPACT:04 — immutable published refs appear as advisory
-    diagnostics, labeled, excluded from the report hash."""
+    diagnostics in the S17.1 POST response, labeled, all three
+    categories present, excluded from the report hash."""
+    from soloring.compatibility.service import create_assessment
+
     base = await seed_a4_use(client, tag=b"imp04")
     await publish(client, base["composition_id"], 1)
-    inv = await impact_inventory(
-        _session(client), production_revision_id=(
-            base["production_revision_id"]))
-    advisory = inv["advisory"]
+    r = await client.post(
+        f"/production-revisions/{base['production_revision_id']}"
+        "/compatibility-assessments",
+        json={"to_revision_id": base["r2"]})
+    assert r.status_code == 201, r.text
+    result = r.json()
+    advisory = result["advisory"]
     assert advisory["advisory_only"] is True
     assert advisory["mutated_by_apply"] is False
+    # all three frozen diagnostic categories are present in the POST
+    # response, keyed and countable
+    for key in ("published_composition_references",
+                "historical_shot_references",
+                "current_shot_selections"):
+        assert key in advisory and isinstance(advisory[key], list)
     assert len(advisory["published_composition_references"]) == 1
     ref = advisory["published_composition_references"][0]
     assert ref["composition_id"] == base["composition_id"]
 
-    result = await create_assessment(
-        _maker_session(client), from_revision_id=(
-            base["production_revision_id"]), to_revision_id=base["r2"])
     engine = client._transport.app.state.engine
     async with engine.connect() as conn:
         report = json.loads((await conn.execute(text(
@@ -144,6 +153,7 @@ async def test_published_composition_refs_are_advisory_only(client):
             "production_compatibility_assessments WHERE id = :a"),
             {"a": result["assessment_id"]})).scalar_one())
     assert "published_composition_references" not in json.dumps(report)
+    assert "advisory" not in json.dumps(report)
 
 
 async def test_current_shot_selections_are_advisory_and_unchanged(client):
@@ -208,6 +218,23 @@ async def test_advisory_count_drift_does_not_change_assessment_identity(
     assert second["assessment_id"] == first["assessment_id"]
     assert second["report_hash"] == first["report_hash"]
     assert len(second["uses"]) == 2
+
+    # the operational half of IMPACT:07 through the HTTP surface: a
+    # convergent 200 keeps the immutable identity but reports the
+    # CURRENT advisory state (fresh counts), never a stale replay
+    r = await client.post(
+        f"/production-revisions/{base['production_revision_id']}"
+        "/compatibility-assessments",
+        json={"to_revision_id": base["r2"]})
+    assert r.status_code == 200 and r.json()["converged"] is True
+    http_second = r.json()
+    assert http_second["assessment_id"] == first["assessment_id"]
+    assert http_second["report_hash"] == first["report_hash"]
+    assert len(http_second["advisory"][
+        "published_composition_references"]) == len(inv_after[
+        "advisory"]["published_composition_references"])
+    assert http_second["advisory"]["advisory_only"] is True
+    assert http_second["advisory"]["mutated_by_apply"] is False
 
 
 async def test_nested_composition_sources_not_m15_update_targets(client):
