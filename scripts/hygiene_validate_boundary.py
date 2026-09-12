@@ -154,6 +154,17 @@ ALLOWLIST = (
     "tests/test_m12_recovery.py",
     "tests/test_m13_recovery.py",
     "scripts/m13_validate_boundary.py",
+    # M15 implementation slices (frozen R4 @ 7410a012, authorized
+    # 2026-09-12): the authorized M15 proof scaffold extends this
+    # allowlist so the hygiene boundary stays GREEN across the M15
+    # closure, exactly as the M14 slice extended it before. M15-0 adds
+    # only the scaffold surface; product-source slices append their
+    # reviewed paths when they land. M15-owned files are skipped by the
+    # vocabulary scan below (see M15_OWNED_PREFIXES).
+    "docs/SoloRing-M15-Proof-Map.md",
+    "scripts/m15_validate_proof_map.py",
+    "tests/fixtures/m15/",
+    "tests/test_m15_baseline.py",
 )
 
 M14_OWNED_PREFIXES = (
@@ -184,6 +195,20 @@ M14_OWNED_PREFIXES = (
 
 def m14_owned(path: str) -> bool:
     return path.startswith(M14_OWNED_PREFIXES)
+
+# M15 successor surface (frozen R4 @ 7410a012): M15 characterizes and
+# fences predecessor seams, so M15-owned files may legitimately reference
+# M14 vocabulary (e.g. predecessor scope/pin assertions).
+M15_OWNED_PREFIXES = (
+    "docs/SoloRing-M15-",
+    "scripts/m15_validate_",
+    "tests/fixtures/m15/",
+    "tests/test_m15",
+)
+
+
+def m15_owned(path: str) -> bool:
+    return path.startswith(M15_OWNED_PREFIXES)
 
 
 M14_PATTERNS = [
@@ -243,8 +268,8 @@ def main() -> int:
                                           "next_security_validate_"
                                           "boundary.py")):
             continue  # boundary validators' own scan patterns name the vocabulary
-        if m14_owned(f):
-            continue  # authorized M14 surface legitimately uses M14 vocabulary
+        if m14_owned(f) or m15_owned(f):
+            continue  # authorized M14/M15 surface legitimately uses M14 vocabulary
         src = p.read_text(encoding="utf-8", errors="replace")
         for pattern, what in M14_PATTERNS:
             if re.search(pattern, src, re.I):

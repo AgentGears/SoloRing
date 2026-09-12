@@ -132,6 +132,16 @@ ALLOWLIST = (
     "tests/test_migration_m1.py",
     "tests/test_migration_m6.py",
     "scripts/m13_validate_boundary.py",
+    # M15 implementation slices (frozen R4 @ 7410a012, authorized
+    # 2026-09-12): the authorized M15 proof scaffold extends this
+    # allowlist so the security boundary stays GREEN across the M15
+    # closure, exactly as the M14 slice extended it before. M15-0 adds
+    # only the scaffold surface; product-source slices append their
+    # reviewed paths when they land.
+    "docs/SoloRing-M15-Proof-Map.md",
+    "scripts/m15_validate_proof_map.py",
+    "tests/fixtures/m15/",
+    "tests/test_m15_baseline.py",
 )
 
 M14_OWNED_PREFIXES = (

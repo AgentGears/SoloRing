@@ -86,6 +86,17 @@ ALLOWED_PATTERNS = [
     # CI validator wiring + byte-exactness attributes for pinned fixtures
     r"^\.github/workflows/ci\.yml$",
     r"^\.gitattributes$",
+    # M15 implementation slices (frozen R4 @ 7410a012, authorized
+    # 2026-09-12): the authorized M15 proof scaffold and tests extend
+    # this allowlist so the M14 boundary stays GREEN across the M15
+    # closure — the same succession mechanism this validator carved
+    # for its own predecessors above (frozen M15 R4 §27). M15-0 adds
+    # only the scaffold surface; product-source slices append their
+    # reviewed paths when they land.
+    r"^docs/SoloRing-M15-[^/]+\.md$",
+    r"^scripts/m15_validate_[a-z0-9_]+\.py$",
+    r"^tests/fixtures/m15/[^/]+$",
+    r"^tests/test_m15[a-z0-9_]*\.py$",
 ]
 
 FORBIDDEN_PATTERNS = [
