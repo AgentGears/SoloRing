@@ -1,8 +1,8 @@
 """M15 proof-map validator (frozen R4 §31/§36).
 
 Validates docs/SoloRing-M15-Proof-Map.md for:
-  * exactly 126 unique cells across the frozen R5 families
-    (BASE 10 / MIG 10 / CAN 11 / EVAL 20 / TRANS 9 / IMPACT 8 /
+  * exactly 127 unique cells across the frozen R5 families
+    (BASE 11 / MIG 10 / CAN 11 / EVAL 20 / TRANS 9 / IMPACT 8 /
      TRACK 8 / APPLY 16 / RACE 7 / HIST 10 / REC 4 / UI 6 / SCALE 7),
     with the
     diagnostic cardinalities derived mechanically from the hard-coded
@@ -30,7 +30,7 @@ REPO = Path(__file__).resolve().parents[1]
 MAP_PATH = REPO / "docs" / "SoloRing-M15-Proof-Map.md"
 
 REQUIRED_CELLS: dict[str, tuple[str, ...]] = {
-    "M15-BASE": tuple(f"M15-BASE:{n:02d}" for n in range(1, 11)),
+    "M15-BASE": tuple(f"M15-BASE:{n:02d}" for n in range(1, 12)),
     "M15-MIG": tuple(f"M15-MIG:{n:02d}" for n in range(1, 11)),
     "M15-CAN": tuple(f"M15-CAN:{n:02d}" for n in range(1, 12)),
     "M15-EVAL": tuple(f"M15-EVAL:{n:02d}" for n in range(1, 21)),
@@ -47,7 +47,7 @@ REQUIRED_CELLS: dict[str, tuple[str, ...]] = {
 
 # Frozen R4 §31 diagnostic cardinalities — derived counts must equal these.
 FROZEN_FAMILY_COUNTS: dict[str, int] = {
-    "M15-BASE": 10,
+    "M15-BASE": 11,
     "M15-MIG": 10,
     "M15-CAN": 11,
     "M15-EVAL": 20,
@@ -61,7 +61,7 @@ FROZEN_FAMILY_COUNTS: dict[str, int] = {
     "M15-UI": 6,
     "M15-SCALE": 7,
 }
-FROZEN_TOTAL = 126
+FROZEN_TOTAL = 127
 
 ROW_RE = re.compile(
     r"^\|\s*`?(M15-[A-Z-]+:[0-9]+)`?\s*\|\s*(TEST|PENDING)"

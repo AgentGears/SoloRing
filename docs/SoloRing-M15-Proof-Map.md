@@ -15,9 +15,9 @@ Disposition vocabulary:
 
 M15 has no STRUCTURAL cells: the frozen §31 map assigns every cell a
 test owner. Diagnostic cardinalities (derived mechanically by the
-validator from the hard-coded inventory): BASE 10 / MIG 10 / CAN 11 /
+validator from the hard-coded inventory): BASE 11 / MIG 10 / CAN 11 /
 EVAL 20 / TRANS 9 / IMPACT 8 / TRACK 8 / APPLY 16 / RACE 7 / HIST 10 /
-REC 4 / UI 6 / SCALE 7 — total 126.
+REC 4 / UI 6 / SCALE 7 — total 127.
 
 ## M15-BASE
 
@@ -31,8 +31,9 @@ REC 4 / UI 6 / SCALE 7 — total 126.
 | `M15-BASE:06` | TEST | `tests/test_m15_baseline.py::test_direct_source_swap_is_the_intended_m15_seam` | source-fit characterization |
 | `M15-BASE:07` | TEST | `tests/test_m15_baseline.py::test_m12_direct_patch_proof_has_explicit_m15_successor` | behavioral succession is named, not disabled |
 | `M15-BASE:08` | TEST | `tests/test_m15_placement_shared_classifier.py::test_m13_and_m15_use_one_shared_placement_classifier` | one pure/no-I/O product-code owner of placement classification |
-| `M15-BASE:09` | TEST | `tests/test_m15_placement_shared_classifier.py::test_m13_published_behavior_matches_pinned_m14_across_full_case_matrix` | semantics-preserving M13 refactor across all six issue codes + clean/ambiguous cases |
+| `M15-BASE:09` | TEST | `tests/test_m15_placement_shared_classifier.py::test_m13_published_behavior_matches_isolated_pinned_m14_across_reachable_case_matrix` | semantics-preserving M13 refactor against isolated exact M14 across the five named reachable issue outputs + clean/ambiguous cases; no current-checkout soloring imports |
 | `M15-BASE:10` | TEST | `tests/test_m15_placement_seam_probe.py::test_working_state_twin_oracle_matches_published_shared_classifier` | working/published caller wiring congruence |
+| `M15-BASE:11` | TEST | `tests/test_m15_placement_shared_classifier.py::test_reserved_spatial_interpretation_invalid_remains_unreachable_from_published_path` | `BINDING_SPATIAL_INTERPRETATION_INVALID` is vocabulary-reserved/unreachable in pinned M14 and not newly reachable after refactor |
 
 ## M15-MIG
 

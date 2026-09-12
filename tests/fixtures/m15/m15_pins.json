@@ -1,11 +1,11 @@
 {
   "frozen_plan": {
-    "file": "SoloRing-M15-Safe-Reusable-Revision-Evolution-Implementation-Plan-R5-frozen.md",
-    "sha256": "ef492ef39de6edc5df68c3f0e77e79c9540ac3c661dd8aa5116b789d716ab64c",
-    "bytes": 114311,
-    "lines": 2959,
-    "proof_cells": 126,
-    "stop_conditions": 45
+    "file": "SoloRing-M15-Safe-Reusable-Revision-Evolution-Implementation-Plan-R6-frozen.md",
+    "sha256": "b781f8157156babd9dc73e0397071708dac398e51a6658a91071da4dc9442c83",
+    "bytes": 121269,
+    "lines": 3012,
+    "proof_cells": 127,
+    "stop_conditions": 47
   },
   "implementation_predecessor": {
     "commit": "89298e793c651e9e8b9164912c76e3595867a60a",

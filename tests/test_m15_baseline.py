@@ -92,9 +92,9 @@ def test_m14_commit_tree_and_tag_baseline() -> None:
     """M15-BASE:01 — exact M14 predecessor identity (frozen R4 header)."""
     pins = json.loads(PINS.read_text(encoding="utf-8"))
     assert pins["frozen_plan"]["sha256"] == (
-        "ef492ef39de6edc5df68c3f0e77e79c9540ac3c661"
-        "dd8aa5116b789d716ab64c")
-    assert pins["frozen_plan"]["proof_cells"] == 126
+        "b781f8157156babd9dc73e0397071708dac398e51a6658a910"
+        "71da4dc9442c83")
+    assert pins["frozen_plan"]["proof_cells"] == 127
     assert pins["implementation_predecessor"] == {
         "commit": M14_COMMIT, "tree": M14_TREE}
     assert pins["m14_identity"]["tag_object"] == M14_TAG_OBJECT
