@@ -159,6 +159,11 @@ ALLOWLIST = (
     "tests/test_m15_placement_seam_probe.py",
     "tests/test_m15a_smoke.py",
     "tests/test_m15_placement_shared_classifier.py",
+    "server/soloring/compatibility/impact.py",
+    "server/soloring/api/compositions.py",
+    "tests/test_m15_impact.py",
+    "tests/test_m15_tracking.py",
+    "tests/test_m15_scale.py",
 )
 
 M15_OWNED_PREFIXES = (
@@ -173,6 +178,7 @@ M15_OWNED_PREFIXES = (
     "server/alembic/versions/0016_m15_revision_compatibility.py",
     "server/soloring/api/production.py",
     "server/soloring/api/schemas/production.py",
+    "server/soloring/api/compositions.py",
     "server/soloring/composition/impacts.py",
 )
 

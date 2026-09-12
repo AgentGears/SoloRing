@@ -107,3 +107,55 @@ async def assessment_or_404(
         raise not_found(
             ErrorCode.PRODUCTION_REVISION_NOT_FOUND,
             f"compatibility assessment {assessment_id!r} not found")
+
+
+async def impact_inventory(session, *, production_revision_id: str) -> dict:
+    """M15B read-only affected-work inventory (frozen R6 S9)."""
+    from soloring.compatibility.impact import (
+        advisory_references, direct_working_uses)
+
+    async with session.bind.connect() as conn:
+        uses = await direct_working_uses(
+            conn, production_revision_id=production_revision_id)
+        advisory = await advisory_references(
+            conn, production_revision_id=production_revision_id)
+    return {"production_revision_id": production_revision_id,
+            "use_count": len(uses), "uses": uses,
+            "advisory": advisory}
+
+
+async def read_tracking(session, *, composition_id: str,
+                        occurrence_id: str) -> dict:
+    from soloring.compatibility.impact import tracking_policy
+
+    async with session.bind.connect() as conn:
+        return await tracking_policy(
+            conn, composition_id=composition_id,
+            occurrence_id=occurrence_id)
+
+
+async def put_tracking(session, *, composition_id: str,
+                       occurrence_id: str, mode: str,
+                       expected_policy_version: int) -> dict:
+    from soloring.compatibility.impact import put_tracking_policy
+
+    async with session.bind.connect() as conn:
+        await conn.exec_driver_sql("BEGIN IMMEDIATE")
+        try:
+            result = await put_tracking_policy(
+                conn, composition_id=composition_id,
+                occurrence_id=occurrence_id, mode=mode,
+                expected_policy_version=expected_policy_version)
+            await conn.commit()
+            return result
+        except Exception:
+            await conn.rollback()
+            raise
+
+
+async def revision_updates(session, *, production_object_id: str) -> dict:
+    from soloring.compatibility.impact import update_discovery
+
+    async with session.bind.connect() as conn:
+        return await update_discovery(
+            conn, production_object_id=production_object_id)

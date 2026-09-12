@@ -266,3 +266,16 @@ async def list_compatibility_uses(
     page = await compat.list_uses(
         session, assessment_id, cursor=cursor, limit=limit)
     return CompatibilityUsePage(**page)
+
+
+@router.get("/production-objects/{production_object_id}/revision-updates")
+async def list_revision_updates(
+    production_object_id: str,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """M15B update discovery (frozen R6 S16.2): concrete candidates
+    only; never creates an assessment."""
+    from soloring.compatibility import service as compat
+
+    return await compat.revision_updates(
+        session, production_object_id=production_object_id)

@@ -98,6 +98,8 @@ ALLOWED_PATTERNS = [
     r"^tests/fixtures/m15/[^/]+$",
     r"^tests/test_m15[a-z0-9_]*\.py$",
     r"^tests/m15_seed\.py$",
+    # M15B surface (frozen R6 §28, authorized 2026-09-12)
+    r"^tests/test_m15_(impact|tracking|scale)\.py$",
     # M15A product surface (frozen R4 §26/§28, authorized 2026-09-12):
     # the compatibility evidence foundation + its narrow API seams
     r"^server/soloring/compatibility/",
@@ -110,6 +112,7 @@ ALLOWED_PATTERNS = [
     r"^server/soloring/composition/impacts\.py$",
     r"^server/alembic/versions/0016_m15_revision_compatibility\.py$",
     r"^server/soloring/api/production\.py$",
+    r"^server/soloring/api/compositions\.py$",
     r"^server/soloring/api/schemas/production\.py$",
 ]
 

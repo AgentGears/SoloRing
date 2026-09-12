@@ -109,27 +109,27 @@ REC 4 / UI 6 / SCALE 7 — total 127.
 
 | Cell | Disposition | Exact proof owner | Claim |
 |---|---|---|---|
-| `M15-IMPACT:01` | PENDING | `tests/test_m15_impact.py::test_direct_working_uses_enumerated_exactly` | updateable use set |
-| `M15-IMPACT:02` | PENDING | `tests/test_m15_impact.py::test_feature_contracts_enter_use_hash` | state dependency |
-| `M15-IMPACT:03` | PENDING | `tests/test_m15_impact.py::test_spatial_contracts_enter_use_hash` | spatial dependency |
-| `M15-IMPACT:04` | PENDING | `tests/test_m15_impact.py::test_published_composition_refs_are_advisory_only` | immutable published refs |
-| `M15-IMPACT:05` | PENDING | `tests/test_m15_impact.py::test_current_shot_selections_are_advisory_and_unchanged` | no Shot pointer mutation |
-| `M15-IMPACT:06` | PENDING | `tests/test_m15_impact.py::test_historical_shot_refs_are_advisory_only` | history isolation |
-| `M15-IMPACT:07` | PENDING | `tests/test_m15_impact.py::test_advisory_count_drift_does_not_change_assessment_identity` | advisory distinction |
-| `M15-IMPACT:08` | PENDING | `tests/test_m15_impact.py::test_nested_composition_sources_not_m15_update_targets` | scope boundary |
+| `M15-IMPACT:01` | TEST | `tests/test_m15_impact.py::test_direct_working_uses_enumerated_exactly` | updateable use set |
+| `M15-IMPACT:02` | TEST | `tests/test_m15_impact.py::test_feature_contracts_enter_use_hash` | state dependency |
+| `M15-IMPACT:03` | TEST | `tests/test_m15_impact.py::test_spatial_contracts_enter_use_hash` | spatial dependency |
+| `M15-IMPACT:04` | TEST | `tests/test_m15_impact.py::test_published_composition_refs_are_advisory_only` | immutable published refs |
+| `M15-IMPACT:05` | TEST | `tests/test_m15_impact.py::test_current_shot_selections_are_advisory_and_unchanged` | no Shot pointer mutation |
+| `M15-IMPACT:06` | TEST | `tests/test_m15_impact.py::test_historical_shot_refs_are_advisory_only` | history isolation |
+| `M15-IMPACT:07` | TEST | `tests/test_m15_impact.py::test_advisory_count_drift_does_not_change_assessment_identity` | advisory distinction |
+| `M15-IMPACT:08` | TEST | `tests/test_m15_impact.py::test_nested_composition_sources_not_m15_update_targets` | scope boundary |
 
 ## M15-TRACK
 
 | Cell | Disposition | Exact proof owner | Claim |
 |---|---|---|---|
-| `M15-TRACK:01` | PENDING | `tests/test_m15_tracking.py::test_absence_means_pinned_without_backfill` | default semantics |
-| `M15-TRACK:02` | PENDING | `tests/test_m15_tracking.py::test_track_compatible_requires_explicit_opt_in` | explicit policy |
-| `M15-TRACK:03` | PENDING | `tests/test_m15_tracking.py::test_tracking_offer_never_mutates_source` | no auto-follow |
-| `M15-TRACK:04` | PENDING | `tests/test_m15_tracking.py::test_update_offer_resolves_concrete_revision_ids` | no stored latest |
-| `M15-TRACK:05` | PENDING | `tests/test_m15_tracking.py::test_tracking_policy_cas` | current policy race safety |
-| `M15-TRACK:06` | PENDING | `tests/test_m15_tracking.py::test_policy_version_never_aba_after_authored_cycle` | monotonic authored policy |
-| `M15-TRACK:07` | PENDING | `tests/test_m15_tracking.py::test_terminated_tracked_occurrence_is_inert_and_not_offered` | occurrence lifecycle |
-| `M15-TRACK:08` | PENDING | `tests/test_m15_tracking.py::test_discovery_returns_concrete_newer_candidates_and_creates_no_assessment` | no hidden latest/implicit assess |
+| `M15-TRACK:01` | TEST | `tests/test_m15_tracking.py::test_absence_means_pinned_without_backfill` | default semantics |
+| `M15-TRACK:02` | TEST | `tests/test_m15_tracking.py::test_track_compatible_requires_explicit_opt_in` | explicit policy |
+| `M15-TRACK:03` | TEST | `tests/test_m15_tracking.py::test_tracking_offer_never_mutates_source` | no auto-follow |
+| `M15-TRACK:04` | TEST | `tests/test_m15_tracking.py::test_update_offer_resolves_concrete_revision_ids` | no stored latest |
+| `M15-TRACK:05` | TEST | `tests/test_m15_tracking.py::test_tracking_policy_cas` | current policy race safety |
+| `M15-TRACK:06` | TEST | `tests/test_m15_tracking.py::test_policy_version_never_aba_after_authored_cycle` | monotonic authored policy |
+| `M15-TRACK:07` | TEST | `tests/test_m15_tracking.py::test_terminated_tracked_occurrence_is_inert_and_not_offered` | occurrence lifecycle |
+| `M15-TRACK:08` | TEST | `tests/test_m15_tracking.py::test_discovery_returns_concrete_newer_candidates_and_creates_no_assessment` | no hidden latest/implicit assess |
 
 ## M15-APPLY
 
@@ -203,10 +203,10 @@ REC 4 / UI 6 / SCALE 7 — total 127.
 
 | Cell | Disposition | Exact proof owner | Claim |
 |---|---|---|---|
-| `M15-SCALE:01` | PENDING | `tests/test_m15_scale.py::test_10_100_1000_impact_uses_bounded_query_classes` | bounded SQL |
-| `M15-SCALE:02` | PENDING | `tests/test_m15_scale.py::test_no_per_occurrence_feature_select_loop` | feature batching |
-| `M15-SCALE:03` | PENDING | `tests/test_m15_scale.py::test_no_per_occurrence_spatial_select_loop` | spatial batching |
-| `M15-SCALE:04` | PENDING | `tests/test_m15_scale.py::test_historical_diagnostic_counts_are_batched` | history batching |
-| `M15-SCALE:05` | PENDING | `tests/test_m15_scale.py::test_scale_evidence_records_cpu_memory_bytes` | evidence |
-| `M15-SCALE:06` | PENDING | `tests/test_m15_scale.py::test_scale_run_leaves_zero_repository_residue` | hygiene |
-| `M15-SCALE:07` | PENDING | `tests/test_m15_scale.py::test_assessment_scale_records_writer_fence_duration` | SQLite contention evidence |
+| `M15-SCALE:01` | TEST | `tests/test_m15_scale.py::test_10_100_1000_impact_uses_bounded_query_classes` | bounded SQL |
+| `M15-SCALE:02` | TEST | `tests/test_m15_scale.py::test_no_per_occurrence_feature_select_loop` | feature batching |
+| `M15-SCALE:03` | TEST | `tests/test_m15_scale.py::test_no_per_occurrence_spatial_select_loop` | spatial batching |
+| `M15-SCALE:04` | TEST | `tests/test_m15_scale.py::test_historical_diagnostic_counts_are_batched` | history batching |
+| `M15-SCALE:05` | TEST | `tests/test_m15_scale.py::test_scale_evidence_records_cpu_memory_bytes` | evidence |
+| `M15-SCALE:06` | TEST | `tests/test_m15_scale.py::test_scale_run_leaves_zero_repository_residue` | hygiene |
+| `M15-SCALE:07` | TEST | `tests/test_m15_scale.py::test_assessment_scale_records_writer_fence_duration` | SQLite contention evidence |

@@ -46,6 +46,9 @@ from soloring.production.canonical import (
     build_production_revision_snapshot,
 )
 from soloring.production_world.binding import _entry_is_identity
+from soloring.production_world.placement_consumer import (
+    classify_placement_consumer_from_facts,
+)
 from soloring.production_world.canonical import verify_stored_interpretation
 from soloring.spatial.targets import (
     classify_entity_a4_targets,
@@ -473,6 +476,222 @@ def _evaluate_use(*, src: dict, tgt: dict, contract_value: dict,
     return evidence, translator
 
 
+def _in_clause(values: list, prefix: str) -> tuple[str, dict]:
+    marks = ", ".join(f":{prefix}{i}" for i in range(len(values)))
+    params = {f"{prefix}{i}": v for i, v in enumerate(values)}
+    return marks, params
+
+
+async def _batched_subjects(
+        conn, *, uses_rows, project_id: str) -> dict:
+    """One adoption query + bounded CE validity/claim queries."""
+    comp_ids = sorted({r.composition_id for r in uses_rows})
+    marks, params = _in_clause(comp_ids, "c")
+    rows = (await conn.execute(text(
+        f"SELECT a.composition_id, a.occurrence_id, a.subject_kind, "
+        f"a.creative_entity_id FROM "
+        f"composition_occurrence_authority_subjects a "
+        f"WHERE a.composition_id IN ({marks}) "
+        f"ORDER BY a.composition_id, a.occurrence_id"),
+        params)).fetchall()
+    out: dict[tuple, dict | None] = {}
+    ce_ids = sorted({r.creative_entity_id for r in rows
+                     if r.subject_kind == "creative_entity"})
+    ent_by_id = {}
+    claims_by_ce: dict[str, list[str]] = {}
+    if ce_ids:
+        emarks, eparams = _in_clause(ce_ids, "e")
+        for ent in (await conn.execute(text(
+                f"SELECT id, project_id, deleted_at FROM "
+                f"creative_entities WHERE id IN ({emarks})"),
+                eparams)).fetchall():
+            ent_by_id[ent.id] = ent
+        for claim in (await conn.execute(text(
+                f"SELECT a.creative_entity_id, a.occurrence_id FROM "
+                f"composition_occurrence_authority_subjects a "
+                f"WHERE a.composition_id IN ({marks}) "
+                f"AND a.creative_entity_id IN ({emarks}) "
+                f"AND NOT EXISTS ("
+                f"  SELECT 1 FROM composition_identity_operation_sources s"
+                f"  JOIN composition_identity_operations op "
+                f"  ON op.id = s.operation_id "
+                f"  WHERE op.composition_id = a.composition_id "
+                f"  AND s.occurrence_id = a.occurrence_id "
+                f"  AND s.terminates_identity = 1) "
+                f"ORDER BY a.creative_entity_id, a.occurrence_id"),
+                params | eparams)).fetchall():
+            claims_by_ce.setdefault(
+                claim.creative_entity_id, []).append(
+                claim.occurrence_id)
+    for r in rows:
+        key = (r.composition_id, r.occurrence_id)
+        if r.subject_kind == "production_instance":
+            out[key] = {"kind": "production_instance",
+                        "id": r.occurrence_id}
+            continue
+        ent = ent_by_id.get(r.creative_entity_id)
+        if ent is None or ent.deleted_at is not None:
+            out[key] = {"kind": "creative_entity",
+                        "id": r.creative_entity_id,
+                        "invalid": "missing_or_deleted"}
+            continue
+        if ent.project_id != project_id:
+            out[key] = {"kind": "creative_entity",
+                        "id": r.creative_entity_id,
+                        "invalid": "cross_project"}
+            continue
+        if len(claims_by_ce.get(r.creative_entity_id, [])) > 1:
+            out[key] = {"kind": "creative_entity",
+                        "id": r.creative_entity_id,
+                        "invalid": "overlapping_active_claim"}
+            continue
+        out[key] = {"kind": "creative_entity",
+                    "id": r.creative_entity_id,
+                    "project_id": ent.project_id}
+    return out
+
+
+async def _batched_feature_contracts(conn, uses_rows) -> dict:
+    """One feature query + one transition query for ALL uses."""
+    comp_ids = sorted({r.composition_id for r in uses_rows})
+    marks, params = _in_clause(comp_ids, "c")
+    feats = (await conn.execute(text(
+        f"SELECT id, composition_id, occurrence_id, key, kind, "
+        f"value_type, name, enum_values_json, unit FROM "
+        f"production_instance_features "
+        f"WHERE composition_id IN ({marks}) AND deleted_at IS NULL "
+        f"ORDER BY composition_id, occurrence_id, key, id"),
+        params)).fetchall()
+    per_key: dict[tuple, list] = {}
+    feat_ids = [f.id for f in feats]
+    trans_by_feat: dict[str, list[dict]] = {}
+    if feat_ids:
+        tmarks, tparams = _in_clause(feat_ids, "f")
+        for t in (await conn.execute(text(
+                f"SELECT feature_id, id, anchor_type, anchor_id, "
+                f"boundary, operation, value_json, value_hash FROM "
+                f"production_instance_feature_transitions "
+                f"WHERE feature_id IN ({tmarks}) "
+                f"ORDER BY feature_id, id"),
+                tparams)).fetchall():
+            trans_by_feat.setdefault(t.feature_id, []).append({
+                "transition_id": t.id,
+                "anchor_type": t.anchor_type,
+                "anchor_id": t.anchor_id,
+                "boundary": t.boundary,
+                "operation": t.operation,
+                "value_json": json.loads(t.value_json)
+                if t.value_json is not None else None,
+                "value_hash": t.value_hash})
+    for f in feats:
+        per_key.setdefault(
+            (f.composition_id, f.occurrence_id), []).append({
+                "feature_id": f.id, "key": f.key, "kind": f.kind,
+                "value_type": f.value_type, "name": f.name,
+                "enum_values": json.loads(f.enum_values_json)
+                if f.enum_values_json is not None else None,
+                "unit": f.unit,
+                "active_transition_set_hash": canonical_hash(
+                    trans_by_feat.get(f.id, []))})
+    return per_key
+
+
+async def _batched_track_contracts(conn, uses_rows, *, project_id: str):
+    """One track query + one transition query + bounded per-WORLD
+    context loads (approved revision + verified world + CE
+    classification per distinct world), never per occurrence."""
+    comp_ids = sorted({r.composition_id for r in uses_rows})
+    marks, params = _in_clause(comp_ids, "c")
+    trks = (await conn.execute(text(
+        f"SELECT id, composition_id, occurrence_id, spatial_world_id, "
+        f"requirement FROM production_instance_spatial_tracks "
+        f"WHERE composition_id IN ({marks}) AND deleted_at IS NULL "
+        f"ORDER BY composition_id, occurrence_id, id"),
+        params)).fetchall()
+    track_ids = [t.id for t in trks]
+    trans_by_track: dict[str, list[dict]] = {}
+    if track_ids:
+        tmarks, tparams = _in_clause(track_ids, "t")
+        for t in (await conn.execute(text(
+                f"SELECT spatial_track_id, id, anchor_type, anchor_id, "
+                f"boundary, operation, x_mm, y_mm, z_mm, yaw_udeg, "
+                f"pitch_udeg, roll_udeg FROM "
+                f"production_instance_spatial_transitions "
+                f"WHERE spatial_track_id IN ({tmarks}) "
+                f"AND deleted_at IS NULL "
+                f"ORDER BY spatial_track_id, id"),
+                tparams)).fetchall():
+            trans_by_track.setdefault(t.spatial_track_id, []).append({
+                "transition_id": t.id,
+                "anchor_type": t.anchor_type,
+                "anchor_id": t.anchor_id,
+                "boundary": t.boundary,
+                "operation": t.operation,
+                "translation_mm": [t.x_mm, t.y_mm, t.z_mm]
+                if t.x_mm is not None else None,
+                "rotation_udeg": [t.yaw_udeg, t.pitch_udeg, t.roll_udeg]
+                if t.yaw_udeg is not None else None})
+    per_key: dict[tuple, list] = {}
+    targets_by_occ: dict[tuple, list[dict]] = {}
+    for t in trks:
+        key = (t.composition_id, t.occurrence_id)
+        per_key.setdefault(key, []).append({
+            "track_id": t.id,
+            "spatial_world_id": t.spatial_world_id,
+            "requirement": t.requirement,
+            "active_transition_set_hash": canonical_hash(
+                trans_by_track.get(t.id, []))})
+        targets_by_occ.setdefault(key, {}).setdefault(
+            t.spatial_world_id, []).append(
+            {"kind": "production_instance_track", "id": t.id})
+
+    # bounded world-context cache: one approved-revision query for all
+    # distinct worlds, one verified load + CE classification per world
+    world_ids = sorted({t.spatial_world_id for t in trks})
+    context_cache: dict[str, dict | None] = {}
+    if world_ids:
+        wmarks, wparams = _in_clause(world_ids, "w")
+        approved_by_world = {r.world_id: r.approved_revision_id
+                             for r in (await conn.execute(text(
+                                 f"SELECT spatial_world_id AS world_id, "
+                                 f"approved_revision_id FROM "
+                                 f"spatial_world_states "
+                                 f"WHERE spatial_world_id IN ({wmarks}) "
+                                 f"AND approved_revision_id IS NOT NULL"),
+                                 wparams)).fetchall()}
+        # worlds must have a UNIQUE approved revision to be a context
+        counts: dict[str, int] = {}
+        worlds_rows = (await conn.execute(text(
+            f"SELECT id FROM spatial_worlds "
+            f"WHERE id IN ({wmarks}) AND deleted_at IS NULL "
+            f"AND project_id = :p"),
+            wparams | {"p": project_id})).fetchall()
+        valid_worlds = {r.id for r in worlds_rows}
+        for w in world_ids:
+            if w not in valid_worlds or approved_by_world.get(w) is None:
+                context_cache[w] = None
+                continue
+            wr = await load_world_revision_with_world(
+                conn, spatial_world_revision_id=approved_by_world[w])
+            context_cache[w] = wr
+
+    contexts_by_occ: dict[tuple, list[dict]] = {}
+    for key, by_world in targets_by_occ.items():
+        ctxs = []
+        for wid, targets in by_world.items():
+            wr = context_cache.get(wid)
+            ctxs.append({
+                "world_id": wid,
+                "project_id": wr["project_id"] if wr else None,
+                "approved_revision": {
+                    "id": wr["verified"]["id"],
+                    "snapshot_hash": wr["verified"]["snapshot_hash"]}
+                if wr else None,
+                "targets": targets})
+        contexts_by_occ[key] = ctxs
+    return per_key, contexts_by_occ
+
+
 async def assess_revision_update(
         session: AsyncSession, *, from_revision_id: str,
         to_revision_id: str) -> dict:
@@ -532,15 +751,43 @@ async def assess_revision_update(
             tgt_interp = await _interpretation(
                 conn, tgt["id"], tgt)
 
+            # Frozen R6 S13.1 step 5 / S24: batched contract loading —
+            # adoptions, features, tracks, and world contexts load in
+            # bounded query classes, never one SELECT per occurrence.
+            subjects = await _batched_subjects(
+                conn, uses_rows=uses_rows, project_id=src["project_id"])
+            features = await _batched_feature_contracts(conn, uses_rows)
+            tracks, world_contexts = await _batched_track_contracts(
+                conn, uses_rows, project_id=src["project_id"])
+
             normalized: list[dict] = []
             for row in uses_rows:
                 comp = comps[row.composition_id]
-                subject = await _adoption(
-                    conn, row.composition_id, row.occurrence_id,
-                    src["project_id"])
-                resolution = await resolve_placement_consumer(
-                    conn, working_row=row, subject=subject, revision=src,
-                    source_interpretation_hash=src_interp[1])
+                subject = subjects.get(
+                    (row.composition_id, row.occurrence_id))
+                subject_fact = None
+                if subject is not None:
+                    invalid = subject.get("invalid")
+                    subject_fact = {
+                        "kind": subject["kind"], "id": subject["id"],
+                        "valid": not invalid,
+                        "invalid_detail": {"reason": invalid}
+                        if invalid else None}
+                contexts = world_contexts.get(
+                    (row.composition_id, row.occurrence_id), [])
+                facts = {
+                    "occurrence_id": row.occurrence_id,
+                    "subject": subject_fact,
+                    "world_contexts": contexts,
+                    "transform_is_identity": _entry_is_identity(row),
+                    "revision": {
+                        "id": row.production_revision_id,
+                        "project_id": src["project_id"],
+                        "closed": True,
+                        "interpretation_hash": src_interp[1],
+                    },
+                }
+                resolution = classify_placement_consumer_from_facts(facts)
                 if resolution["outcome"] == "UNRESOLVED":
                     detail = dict(resolution.get("detail") or {})
                     detail.pop("occurrence_id", None)
@@ -566,14 +813,10 @@ async def assess_revision_update(
                     "placement_contract":
                         resolution.get("placement_contract")
                         or {"owner": "A6_COMPOSITION"},
-                    "active_instance_feature_contracts":
-                        await _feature_contracts(
-                            conn, row.composition_id,
-                            row.occurrence_id),
-                    "active_instance_spatial_tracks":
-                        await _track_contracts(
-                            conn, row.composition_id,
-                            row.occurrence_id),
+                    "active_instance_feature_contracts": features.get(
+                        (row.composition_id, row.occurrence_id), []),
+                    "active_instance_spatial_tracks": tracks.get(
+                        (row.composition_id, row.occurrence_id), []),
                     "source_revision": {
                         "id": src["id"],
                         "snapshot_hash": src["snapshot_hash"],

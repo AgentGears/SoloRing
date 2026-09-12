@@ -184,6 +184,12 @@ ALLOWLIST = (
     "tests/test_m15_placement_seam_probe.py",
     "tests/test_m15a_smoke.py",
     "tests/test_m15_placement_shared_classifier.py",
+    # M15B surface (frozen R6 §28, authorized 2026-09-12)
+    "server/soloring/compatibility/impact.py",
+    "server/soloring/api/compositions.py",
+    "tests/test_m15_impact.py",
+    "tests/test_m15_tracking.py",
+    "tests/test_m15_scale.py",
 )
 
 M14_OWNED_PREFIXES = (
