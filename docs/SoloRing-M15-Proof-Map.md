@@ -1,6 +1,6 @@
 # SoloRing M15 Proof Map
 
-Frozen R4 §31: the machine-checkable M15 proof inventory (121 cells).
+Frozen R5 §31: the machine-checkable M15 proof inventory (126 cells).
 Validated by `python scripts/m15_validate_proof_map.py` (Backend CI, before tests).
 
 Disposition vocabulary:
@@ -15,9 +15,9 @@ Disposition vocabulary:
 
 M15 has no STRUCTURAL cells: the frozen §31 map assigns every cell a
 test owner. Diagnostic cardinalities (derived mechanically by the
-validator from the hard-coded inventory): BASE 7 / MIG 10 / CAN 11 /
-EVAL 18 / TRANS 9 / IMPACT 8 / TRACK 8 / APPLY 16 / RACE 7 / HIST 10 /
-REC 4 / UI 6 / SCALE 7 — total 121.
+validator from the hard-coded inventory): BASE 10 / MIG 10 / CAN 11 /
+EVAL 20 / TRANS 9 / IMPACT 8 / TRACK 8 / APPLY 16 / RACE 7 / HIST 10 /
+REC 4 / UI 6 / SCALE 7 — total 126.
 
 ## M15-BASE
 
@@ -30,6 +30,9 @@ REC 4 / UI 6 / SCALE 7 — total 121.
 | `M15-BASE:05` | TEST | `tests/test_m15_baseline.py::test_m15_source_scope_excludes_execution_source` | no execution-source expansion |
 | `M15-BASE:06` | TEST | `tests/test_m15_baseline.py::test_direct_source_swap_is_the_intended_m15_seam` | source-fit characterization |
 | `M15-BASE:07` | TEST | `tests/test_m15_baseline.py::test_m12_direct_patch_proof_has_explicit_m15_successor` | behavioral succession is named, not disabled |
+| `M15-BASE:08` | TEST | `tests/test_m15_placement_shared_classifier.py::test_m13_and_m15_use_one_shared_placement_classifier` | one pure/no-I/O product-code owner of placement classification |
+| `M15-BASE:09` | TEST | `tests/test_m15_placement_shared_classifier.py::test_m13_published_behavior_matches_pinned_m14_across_full_case_matrix` | semantics-preserving M13 refactor across all six issue codes + clean/ambiguous cases |
+| `M15-BASE:10` | TEST | `tests/test_m15_placement_seam_probe.py::test_working_state_twin_oracle_matches_published_shared_classifier` | working/published caller wiring congruence |
 
 ## M15-MIG
 
@@ -84,6 +87,8 @@ REC 4 / UI 6 / SCALE 7 — total 121.
 | `M15-EVAL:16` | TEST | `tests/test_m15_evaluator.py::test_manual_backward_same_lineage_assessment_is_directional` | rollback without identity loss |
 | `M15-EVAL:17` | TEST | `tests/test_m15_evaluator.py::test_multiworld_or_ambiguous_placement_consumer_refuses_without_a6_fallback` | no hidden world/tie-break/fallback |
 | `M15-EVAL:18` | TEST | `tests/test_m15_evaluator.py::test_emitted_a4_contract_requires_source_interpretation_and_exact_world_context` | predecessor A4 prerequisite is mechanical |
+| `M15-EVAL:19` | TEST | `tests/test_m15_evaluator.py::test_semantically_equal_interpretations_are_satisfied_even_when_parent_hashes_differ` | semantic equality, not parent-pinned hash equality |
+| `M15-EVAL:20` | TEST | `tests/test_m15_evaluator.py::test_evaluator_v1_distinct_legal_revisions_never_emit_auto_pass_verdict` | documented v1 retained-byte limitation |
 
 ## M15-TRANS
 

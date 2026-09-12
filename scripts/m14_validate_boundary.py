@@ -101,6 +101,10 @@ ALLOWED_PATTERNS = [
     # M15A product surface (frozen R4 §26/§28, authorized 2026-09-12):
     # the compatibility evidence foundation + its narrow API seams
     r"^server/soloring/compatibility/",
+    # R5 §26.1 classifier-refactor exception: the shared pure
+    # placement-consumer classifier + wiring-only binding.py
+    r"^server/soloring/production_world/placement_consumer\.py$",
+    r"^server/soloring/production_world/binding\.py$",
     # FK-consumer registry succession (frozen R4 §11 M15 tables join the
     # exhaustive M12 occurrence-FK inventory)
     r"^server/soloring/composition/impacts\.py$",

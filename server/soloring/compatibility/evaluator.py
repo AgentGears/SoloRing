@@ -45,10 +45,7 @@ from soloring.production.canonical import (
     RetainedBlobClosure,
     build_production_revision_snapshot,
 )
-from soloring.production_world.binding import (
-    _entry_is_identity,
-    _verify_interpretation_unused,
-)
+from soloring.production_world.binding import _entry_is_identity
 from soloring.production_world.canonical import verify_stored_interpretation
 from soloring.spatial.targets import (
     classify_entity_a4_targets,
@@ -147,15 +144,16 @@ async def _interpretation(conn: AsyncConnection, rid: str,
     return canonical, row.interpretation_hash
 
 
-async def _world_contexts(
+async def _load_world_contexts(
         conn: AsyncConnection, *, subject: dict | None,
         pi_occurrence_id: str | None) -> list[dict]:
-    """Applicable predecessor world contexts for one consumer.
-
-    PI: worlds holding an ACTIVE PI track. CE: project worlds whose
-    M10 classification returns at least one A4 candidate for the
-    entity. Each context carries its uniquely-approved revision."""
-    contexts: dict[str, dict] = {}
+    """I/O adapter (R5 S6.5.1): load applicable predecessor world
+    contexts as classifier facts. PI: worlds holding an ACTIVE PI
+    track. CE: project worlds whose M10 classification returns at
+    least one A4 candidate. Contexts carry their uniquely-approved
+    revision when one exists. No classification decision is made
+    here."""
+    targets_by_world: dict[str, list[dict]] = {}
     if subject is not None and subject["kind"] == "creative_entity":
         worlds = (await conn.execute(text(
             "SELECT id FROM spatial_worlds "
@@ -171,9 +169,8 @@ async def _world_contexts(
             candidates = await classify_entity_a4_targets(
                 conn, world=w, entity_ids=[subject["id"]])
             if candidates.get(subject["id"]):
-                contexts[world_row.id] = {
-                    "world_id": world_row.id, "w": w,
-                    "targets": candidates[subject["id"]]}
+                targets_by_world[world_row.id] = candidates[
+                    subject["id"]]
     else:
         tracks = (await conn.execute(text(
             "SELECT spatial_world_id, id FROM "
@@ -181,23 +178,28 @@ async def _world_contexts(
             "WHERE occurrence_id = :o AND deleted_at IS NULL "
             "ORDER BY id"),
             {"o": pi_occurrence_id})).fetchall()
-        by_world: dict[str, list[dict]] = {}
         for track in tracks:
-            by_world.setdefault(track.spatial_world_id, []).append(
+            targets_by_world.setdefault(track.spatial_world_id, []).append(
                 {"kind": "production_instance_track", "id": track.id})
-        for world_id in by_world:
-            approved = await _unique_approved_revision(conn, world_id)
-            if approved is None:
-                contexts[world_id] = {
-                    "world_id": world_id, "w": None,
-                    "targets": by_world[world_id], "unapproved": True}
-                continue
-            w = await load_world_revision_with_world(
-                conn, spatial_world_revision_id=approved)
-            contexts[world_id] = {
-                "world_id": world_id, "w": w,
-                "targets": by_world[world_id]}
-    return list(contexts.values())
+
+    contexts: list[dict] = []
+    for world_id in sorted(targets_by_world):
+        approved = await _unique_approved_revision(conn, world_id)
+        if approved is None:
+            contexts.append({
+                "world_id": world_id, "project_id": None,
+                "approved_revision": None,
+                "targets": targets_by_world[world_id]})
+            continue
+        w = await load_world_revision_with_world(
+            conn, spatial_world_revision_id=approved)
+        contexts.append({
+            "world_id": world_id, "project_id": w["project_id"],
+            "approved_revision": {
+                "id": w["verified"]["id"],
+                "snapshot_hash": w["verified"]["snapshot_hash"]},
+            "targets": targets_by_world[world_id]})
+    return contexts
 
 
 async def _unique_approved_revision(
@@ -213,63 +215,40 @@ async def _unique_approved_revision(
 
 async def resolve_placement_consumer(
         conn: AsyncConnection, *, working_row,
-        subject: dict | None, revision: dict) -> dict:
-    """§6.5.1 CLEAN_A6 / UNIQUE_A4 / UNRESOLVED projection.
+        subject: dict | None, revision: dict,
+        source_interpretation_hash: str | None) -> dict:
+    """§6.5.1 projection through the SINGLE shared pure classifier.
 
-    Composed from the predecessor primitives in derive_candidate's
-    exact prerequisite order; UNRESOLVED is never coerced to A6 or
-    resolved by incidental ordering."""
-    if subject is None:
-        # no authority subject → no A4 consumer in the predecessor rule
-        return {"outcome": "CLEAN_A6"}
+    This is an I/O adapter: it loads facts and calls
+    classify_placement_consumer_from_facts; no placement decision is
+    encoded here (frozen R5 §6.5.1)."""
+    from soloring.production_world.placement_consumer import (
+        classify_placement_consumer_from_facts,
+    )
 
-    contexts = await _world_contexts(
+    contexts = await _load_world_contexts(
         conn, subject=subject, pi_occurrence_id=working_row.occurrence_id)
-    if not contexts:
-        return {"outcome": "CLEAN_A6"}
-    if len(contexts) > 1:
-        return {
-            "outcome": "UNRESOLVED", "reason": "multi_world_context",
-            "worlds": sorted(c["world_id"] for c in contexts)}
-    context = contexts[0]
-    if context.get("unapproved"):
-        return {"outcome": "UNRESOLVED",
-                "reason": "no_unique_approved_world_revision"}
-
-    targets = context["targets"]
-    if len(targets) != 1:
-        return {"outcome": "UNRESOLVED", "reason": "multi_a4_target",
-                "targets": targets}
-
-    # derive_candidate's exact prerequisite order on the working row
-    if not _entry_is_identity(working_row):
-        return {"outcome": "UNRESOLVED",
-                "reason": "BINDING_COMPOSITION_TRANSFORM_CONFLICT"}
-    if revision["blob_hash"] is None:
-        return {"outcome": "UNRESOLVED",
-                "reason": "BINDING_SUBJECT_INVALID"}
-    interp = await _verify_interpretation_unused(
-        conn, working_row.production_revision_id,
-        revision["snapshot_hash"], revision["blob_hash"])
-    if interp is None:
-        return {"outcome": "UNRESOLVED",
-                "reason": "BINDING_SPATIAL_INTERPRETATION_REQUIRED"}
-    w = context["w"]
-    if w["project_id"] != revision["project_id"]:
-        return {"outcome": "UNRESOLVED",
-                "reason": "BINDING_PROJECT_MISMATCH"}
-    return {
-        "outcome": "UNIQUE_A4",
-        "placement_contract": {
-            "owner": "A4_SPATIAL",
-            "spatial_world_id": context["world_id"],
-            "spatial_world_revision_id": w["verified"]["id"],
-            "spatial_world_revision_hash":
-                w["verified"]["snapshot_hash"],
-            "target_kind": targets[0]["kind"],
-            "target_id": targets[0]["id"],
+    if subject is None:
+        subject_fact = None
+    else:
+        invalid = subject.get("invalid")
+        subject_fact = {
+            "kind": subject["kind"], "id": subject["id"],
+            "valid": not invalid,
+            "invalid_detail": {"reason": invalid} if invalid else None}
+    facts = {
+        "occurrence_id": working_row.occurrence_id,
+        "subject": subject_fact,
+        "world_contexts": contexts,
+        "transform_is_identity": _entry_is_identity(working_row),
+        "revision": {
+            "id": working_row.production_revision_id,
+            "project_id": revision["project_id"],
+            "closed": True,  # row verified by _load_verified_revision
+            "interpretation_hash": source_interpretation_hash,
         },
     }
+    return classify_placement_consumer_from_facts(facts)
 
 
 async def _feature_contracts(
@@ -394,6 +373,14 @@ async def _adoption(conn: AsyncConnection, composition_id: str,
             "project_id": ent.project_id}
 
 
+def _semantic_projection(canonical: dict) -> tuple:
+    """R5 §6.5.3 meaning-bearing schema-1 semantic projection."""
+    transform = canonical["realization_local_to_subject_local"]
+    return (canonical["schema_version"],
+            tuple(transform["translation_mm"]),
+            tuple(transform["rotation_udeg"]))
+
+
 def _evaluate_use(*, src: dict, tgt: dict, contract_value: dict,
                   src_interp: tuple, tgt_interp: tuple) -> tuple[dict, dict]:
     """§6.2-§6.6 dimension results + translator evidence for one use."""
@@ -448,13 +435,17 @@ def _evaluate_use(*, src: dict, tgt: dict, contract_value: dict,
                     "source_interpretation_hash": src_hash,
                     "target_interpretation_hash": None,
                     "reason": "target interpretation missing"}}
-        elif src_hash == tgt_hash:
+        elif _semantic_projection(src_canonical) == _semantic_projection(
+                tgt_canonical):
+            # R5 §6.5.3: exact schema-1 semantic value equality is the
+            # predicate; parent-pinned hashes remain evidence pins only.
             evidence["spatial_interpretation"] = {
                 "status": "SATISFIED",
                 "evidence": {
                     "placement_owner": "A4_SPATIAL",
                     "source_interpretation_hash": src_hash,
-                    "target_interpretation_hash": tgt_hash}}
+                    "target_interpretation_hash": tgt_hash,
+                    "semantic_equality": True}}
         else:
             reason = frame_bridge_supported(src_canonical, tgt_canonical)
             if reason is None:
@@ -547,21 +538,17 @@ async def assess_revision_update(
                 subject = await _adoption(
                     conn, row.composition_id, row.occurrence_id,
                     src["project_id"])
-                if subject is not None and subject.get("invalid"):
-                    raise _conflict(
-                        "placement_consumer_ambiguous",
-                        composition_id=row.composition_id,
-                        occurrence_id=row.occurrence_id,
-                        issue="BINDING_SUBJECT_INVALID",
-                        detail=subject["invalid"])
                 resolution = await resolve_placement_consumer(
-                    conn, working_row=row, subject=subject, revision=src)
+                    conn, working_row=row, subject=subject, revision=src,
+                    source_interpretation_hash=src_interp[1])
                 if resolution["outcome"] == "UNRESOLVED":
+                    detail = dict(resolution.get("detail") or {})
+                    detail.pop("occurrence_id", None)
                     raise _conflict(
                         "placement_consumer_ambiguous",
                         composition_id=row.composition_id,
                         occurrence_id=row.occurrence_id,
-                        issue=resolution["reason"])
+                        issue=resolution["reason"], **detail)
                 contract = {
                     "composition_id": row.composition_id,
                     "occurrence_id": row.occurrence_id,

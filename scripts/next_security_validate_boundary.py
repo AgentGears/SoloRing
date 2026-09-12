@@ -145,6 +145,9 @@ ALLOWLIST = (
     # M15A product surface (frozen R4 §26/§28, authorized 2026-09-12)
     "server/soloring/compatibility/",
     "server/soloring/composition/impacts.py",
+    # R5 §26.1 classifier-refactor exception (authorized 2026-09-12)
+    "server/soloring/production_world/placement_consumer.py",
+    "server/soloring/production_world/binding.py",
     "server/alembic/versions/0016_m15_revision_compatibility.py",
     "server/soloring/api/production.py",
     "server/soloring/api/schemas/production.py",
@@ -155,6 +158,7 @@ ALLOWLIST = (
     "tests/test_m15_translation.py",
     "tests/test_m15_placement_seam_probe.py",
     "tests/test_m15a_smoke.py",
+    "tests/test_m15_placement_shared_classifier.py",
 )
 
 M15_OWNED_PREFIXES = (
@@ -164,6 +168,8 @@ M15_OWNED_PREFIXES = (
     "tests/test_m15",
     "tests/m15_seed.py",
     "server/soloring/compatibility/",
+    "server/soloring/production_world/placement_consumer.py",
+    "server/soloring/production_world/binding.py",
     "server/alembic/versions/0016_m15_revision_compatibility.py",
     "server/soloring/api/production.py",
     "server/soloring/api/schemas/production.py",

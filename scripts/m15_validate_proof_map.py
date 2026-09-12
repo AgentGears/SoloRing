@@ -1,9 +1,10 @@
 """M15 proof-map validator (frozen R4 §31/§36).
 
 Validates docs/SoloRing-M15-Proof-Map.md for:
-  * exactly 121 unique cells across the frozen families
-    (BASE 7 / MIG 10 / CAN 11 / EVAL 18 / TRANS 9 / IMPACT 8 / TRACK 8 /
-     APPLY 16 / RACE 7 / HIST 10 / REC 4 / UI 6 / SCALE 7), with the
+  * exactly 126 unique cells across the frozen R5 families
+    (BASE 10 / MIG 10 / CAN 11 / EVAL 20 / TRANS 9 / IMPACT 8 /
+     TRACK 8 / APPLY 16 / RACE 7 / HIST 10 / REC 4 / UI 6 / SCALE 7),
+    with the
     diagnostic cardinalities derived mechanically from the hard-coded
     inventory and checked against the frozen counts;
   * closed disposition vocabulary {TEST, PENDING} — the frozen §31 map
@@ -29,10 +30,10 @@ REPO = Path(__file__).resolve().parents[1]
 MAP_PATH = REPO / "docs" / "SoloRing-M15-Proof-Map.md"
 
 REQUIRED_CELLS: dict[str, tuple[str, ...]] = {
-    "M15-BASE": tuple(f"M15-BASE:{n:02d}" for n in range(1, 8)),
+    "M15-BASE": tuple(f"M15-BASE:{n:02d}" for n in range(1, 11)),
     "M15-MIG": tuple(f"M15-MIG:{n:02d}" for n in range(1, 11)),
     "M15-CAN": tuple(f"M15-CAN:{n:02d}" for n in range(1, 12)),
-    "M15-EVAL": tuple(f"M15-EVAL:{n:02d}" for n in range(1, 19)),
+    "M15-EVAL": tuple(f"M15-EVAL:{n:02d}" for n in range(1, 21)),
     "M15-TRANS": tuple(f"M15-TRANS:{n:02d}" for n in range(1, 10)),
     "M15-IMPACT": tuple(f"M15-IMPACT:{n:02d}" for n in range(1, 9)),
     "M15-TRACK": tuple(f"M15-TRACK:{n:02d}" for n in range(1, 9)),
@@ -46,10 +47,10 @@ REQUIRED_CELLS: dict[str, tuple[str, ...]] = {
 
 # Frozen R4 §31 diagnostic cardinalities — derived counts must equal these.
 FROZEN_FAMILY_COUNTS: dict[str, int] = {
-    "M15-BASE": 7,
+    "M15-BASE": 10,
     "M15-MIG": 10,
     "M15-CAN": 11,
-    "M15-EVAL": 18,
+    "M15-EVAL": 20,
     "M15-TRANS": 9,
     "M15-IMPACT": 8,
     "M15-TRACK": 8,
@@ -60,7 +61,7 @@ FROZEN_FAMILY_COUNTS: dict[str, int] = {
     "M15-UI": 6,
     "M15-SCALE": 7,
 }
-FROZEN_TOTAL = 121
+FROZEN_TOTAL = 126
 
 ROW_RE = re.compile(
     r"^\|\s*`?(M15-[A-Z-]+:[0-9]+)`?\s*\|\s*(TEST|PENDING)"

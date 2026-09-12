@@ -1,5 +1,5 @@
 {
-  "frozen_plan_sha256": "7410a01226361ff81a951b17a03ec093c4d85bade52484793879f7560fecfe11",
+  "frozen_plan_sha256": "ef492ef39de6edc5df68c3f0e77e79c9540ac3c661dd8aa5116b789d716ab64c",
   "consumer_kind": "composition_working_occurrence/v1",
   "evaluator": {
     "id": "soloring.production_revision_compatibility",

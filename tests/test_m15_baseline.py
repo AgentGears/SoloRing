@@ -50,8 +50,6 @@ PROHIBITED_PREFIXES = (
     "server/soloring/worker/",
     "server/soloring/executors/",
 )
-PLACEMENT_CLASSIFIER = "server/soloring/production_world/binding.py"
-
 # Frozen R4 §28/BASE:03 — the M11–M14 validator battery CI wires ahead
 # of pytest; M15 must never regress a frozen predecessor gate.
 _PREDECESSOR_VALIDATORS = (
@@ -94,8 +92,9 @@ def test_m14_commit_tree_and_tag_baseline() -> None:
     """M15-BASE:01 — exact M14 predecessor identity (frozen R4 header)."""
     pins = json.loads(PINS.read_text(encoding="utf-8"))
     assert pins["frozen_plan"]["sha256"] == (
-        "7410a01226361ff81a951b17a03ec093c4d85bade52484793879f7560fecfe11")
-    assert pins["frozen_plan"]["proof_cells"] == 121
+        "ef492ef39de6edc5df68c3f0e77e79c9540ac3c661"
+        "dd8aa5116b789d716ab64c")
+    assert pins["frozen_plan"]["proof_cells"] == 126
     assert pins["implementation_predecessor"] == {
         "commit": M14_COMMIT, "tree": M14_TREE}
     assert pins["m14_identity"]["tag_object"] == M14_TAG_OBJECT
@@ -199,12 +198,18 @@ def test_m15_source_scope_excludes_execution_source() -> None:
     violations = [p for p in changed if p.startswith(PROHIBITED_PREFIXES)]
     assert not violations, (
         f"execution-source paths changed under M15: {violations}")
-    assert PLACEMENT_CLASSIFIER not in changed, (
-        "the M13 placement classifier changed — frozen §26.1 requires "
-        "reuse without extraction or semantic modification (STOP)")
-    # the pure seam the frozen §8 projection must reuse is present
-    assert (REPO / PLACEMENT_CLASSIFIER).is_file(), (
-        f"placement classifier missing: {PLACEMENT_CLASSIFIER}")
+    # frozen R5 §26.1 source-scope rule: under production_world/, only
+    # the two named classifier-refactor files may change (NEW shared
+    # classifier + wiring-only binding.py), semantics-frozen by BASE:09
+    pw_changed = sorted(
+        p for p in changed
+        if p.startswith("server/soloring/production_world/"))
+    assert pw_changed == [
+        "server/soloring/production_world/binding.py",
+        "server/soloring/production_world/placement_consumer.py"], (
+        f"unauthorized production_world changes: {pw_changed}")
+    assert (REPO / "server/soloring/production_world/"
+            "placement_consumer.py").is_file()
 
 
 async def test_direct_source_swap_is_the_intended_m15_seam(

@@ -135,30 +135,78 @@ async def test_media_type_change_requires_review(client):
 
 
 async def test_equal_spatial_interpretation_is_compatible(client):
-    """M15-EVAL:04 — identical interpretation VALUES bridge exactly.
-
-    M13 interpretations pin their parent revision, so equal VALUES on
-    distinct revisions still carry distinct hashes; the exact frame
-    bridge proves equality with a zero delta."""
+    """M15-EVAL:04 — semantic interpretation equality (frozen R5
+    §6.5.3): identical schema-1 values on distinct parent-pinned
+    hashes are SATISFIED; hash inequality alone never creates
+    translation."""
     base = await seed_a4_use(client, tag=b"ev04",
                              source_translation=(4, 5, 6),
                              target_translation=(4, 5, 6))
     result = await assess(
         client, base["production_revision_id"], base["r2"])
     use = result["uses"][0]
-    assert use["dimensions"]["spatial_interpretation"] == (
-        "TRANSLATION_REQUIRED")
-    assert use["translator_output_hash"]
+    assert use["dimensions"]["spatial_interpretation"] == "SATISFIED"
+    assert use["translator_output_hash"] is None
 
     engine = client._transport.app.state.engine
     async with engine.connect() as conn:
-        params = (await conn.execute(text(
-            "SELECT translator_parameters_json FROM "
+        dims = json.loads((await conn.execute(text(
+            "SELECT dimension_results_json FROM "
             "production_compatibility_uses "
             "WHERE assessment_id = :a AND position = 0"),
-            {"a": result["assessment_id"]})).scalar_one()
-    assert json.loads(params)["source_local_to_target_local"][
-        "translation_mm"] == [0, 0, 0]
+            {"a": result["assessment_id"]})).scalar_one())
+    evidence = dims["spatial_interpretation"]["evidence"]
+    assert evidence["semantic_equality"] is True
+    assert evidence["source_interpretation_hash"] != (
+        evidence["target_interpretation_hash"])
+
+
+async def test_semantically_equal_interpretations_are_satisfied_even_when_parent_hashes_differ(
+        client):
+    """M15-EVAL:19 — semantic equality, not parent-pinned hash
+    equality (frozen R5 §6.5.3): zero translation evidence is emitted
+    and the spatial dimension is SATISFIED while both exact hashes
+    remain pinned and distinct in the use contract."""
+    base = await seed_a4_use(client, tag=b"ev19",
+                             source_translation=(1, 2, 3),
+                             target_translation=(1, 2, 3))
+    result = await assess(
+        client, base["production_revision_id"], base["r2"])
+    engine = client._transport.app.state.engine
+    async with engine.connect() as conn:
+        row = (await conn.execute(text(
+            "SELECT use_contract_json, dimension_results_json, "
+            "translator_output_hash FROM "
+            "production_compatibility_uses "
+            "WHERE assessment_id = :a AND position = 0"),
+            {"a": result["assessment_id"]})).one()
+    contract = json.loads(row.use_contract_json)
+    assert contract["source_revision"]["spatial_interpretation_hash"] != (
+        contract["target_revision"]["spatial_interpretation_hash"])
+    assert json.loads(row.dimension_results_json)[
+        "spatial_interpretation"]["status"] == "SATISFIED"
+    assert row.translator_output_hash is None
+
+
+async def test_evaluator_v1_distinct_legal_revisions_never_emit_auto_pass_verdict(
+        client):
+    """M15-EVAL:20 — documented v1 retained-byte limitation (frozen
+    R5 §6.8): legal distinct same-object revisions fold to at least
+    REQUIRES_REVIEW; neither automatic-pass verdict is emitted."""
+    base = await seed_a4_use(client, tag=b"ev20",
+                             source_translation=(0, 0, 0),
+                             target_translation=(0, 0, 0))
+    # spatial dimension SATISFIED by semantic equality, yet the changed
+    # retained blob keeps the verdict at REQUIRES_REVIEW
+    result = await assess(
+        client, base["production_revision_id"], base["r2"])
+    use = result["uses"][0]
+    assert use["dimensions"]["spatial_interpretation"] == "SATISFIED"
+    assert use["dimensions"]["retained_consumption"] == "REVIEW_REQUIRED"
+    assert use["verdict"] == "REQUIRES_REVIEW"
+    assert result["verdict_counts"]["COMPATIBLE_AS_IS"] == 0
+    assert result["verdict_counts"][
+        "COMPATIBLE_VIA_DETERMINISTIC_TRANSLATION"] == 0
 
 
 async def test_exact_frame_bridge_yields_translation_verdict(client):
