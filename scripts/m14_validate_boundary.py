@@ -121,6 +121,8 @@ ALLOWED_PATTERNS = [
     r"^tests/test_m12_history\.py$",
     r"^tests/test_m12_publication\.py$",
     r"^tests/test_m13_subjects\.py$",
+    # M15D surface (frozen R6 §28, authorized 2026-09-12)
+    r"^tests/test_m15_(recovery|api)\.py$",
     r"^server/soloring/api/schemas/production\.py$",
 ]
 

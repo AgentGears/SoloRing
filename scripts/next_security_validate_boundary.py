@@ -175,6 +175,19 @@ ALLOWLIST = (
     "tests/test_m12_history.py",
     "tests/test_m12_publication.py",
     "tests/test_m13_subjects.py",
+    "tests/test_m15_recovery.py",
+    "tests/test_m15_api.py",
+    # M15D frontend surface (frozen R6 §28, authorized 2026-09-12)
+    "apps/web/src/components/M15UpdateSummary.tsx",
+    "apps/web/src/components/M15TrackingBadge.tsx",
+    "apps/web/src/components/M15HistoryMessage.tsx",
+    "apps/web/src/components/M15CompatibilitySection.tsx",
+    "apps/web/src/__tests__/m15-update-summary.test.tsx",
+    "apps/web/src/__tests__/m15-tracking.test.tsx",
+    "apps/web/src/__tests__/m15-history-message.test.tsx",
+    "apps/web/src/components/ProductionLibrary.tsx",
+    "apps/web/src/components/WorldSetWorkspace.tsx",
+    "apps/web/src/lib/api.client.ts",
 )
 
 M15_OWNED_PREFIXES = (

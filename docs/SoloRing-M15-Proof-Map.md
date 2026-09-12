@@ -183,21 +183,21 @@ REC 4 / UI 6 / SCALE 7 — total 127.
 
 | Cell | Disposition | Exact proof owner | Claim |
 |---|---|---|---|
-| `M15-REC:01` | PENDING | `tests/test_m15_recovery.py::test_0016_backup_restore_preserves_m15_rows_and_hashes` | head-0016 liveness |
-| `M15-REC:02` | PENDING | `tests/test_m15_recovery.py::test_0015_backup_restores_without_inventing_m15_state` | predecessor restore |
-| `M15-REC:03` | PENDING | `tests/test_m15_recovery.py::test_corrupt_restored_assessment_fails_integrity` | recovery corruption |
-| `M15-REC:04` | PENDING | `tests/test_m15_recovery.py::test_unsupported_future_restore_head_fails_closed` | future-head refusal |
+| `M15-REC:01` | TEST | `tests/test_m15_recovery.py::test_0016_backup_restore_preserves_m15_rows_and_hashes` | head-0016 liveness |
+| `M15-REC:02` | TEST | `tests/test_m15_recovery.py::test_0015_backup_restores_without_inventing_m15_state` | predecessor restore |
+| `M15-REC:03` | TEST | `tests/test_m15_recovery.py::test_corrupt_restored_assessment_fails_integrity` | recovery corruption |
+| `M15-REC:04` | TEST | `tests/test_m15_recovery.py::test_unsupported_future_restore_head_fails_closed` | future-head refusal |
 
 ## M15-UI
 
 | Cell | Disposition | Exact proof owner | Claim |
 |---|---|---|---|
-| `M15-UI:01` | PENDING | `apps/web/src/__tests__/m15-update-summary.test.tsx::shows exact four-verdict impact groups` | impact UX |
-| `M15-UI:02` | PENDING | `apps/web/src/__tests__/m15-update-summary.test.tsx::requires explicit review acceptance and disables incompatible uses` | review/block UX |
-| `M15-UI:03` | PENDING | `apps/web/src/__tests__/m15-tracking.test.tsx::pinned_and_track_compatible_modes_are_explicit` | tracking UX |
-| `M15-UI:04` | PENDING | `apps/web/src/__tests__/m15-history-message.test.tsx::states_current_only_and_history_unchanged` | history message |
-| `M15-UI:05` | PENDING | `tests/test_m15_api.py::test_http_surface_uses_backend_verdict_trace_not_frontend_reinterpretation` | one authority interpretation |
-| `M15-UI:06` | PENDING | `apps/web/src/__tests__/m15-update-summary.test.tsx::compatibility_does_not_claim_geometric_fit_or_visual_identity` | product-honesty boundary |
+| `M15-UI:01` | TEST | `apps/web/src/__tests__/m15-update-summary.test.tsx::shows exact four-verdict impact groups` | impact UX |
+| `M15-UI:02` | TEST | `apps/web/src/__tests__/m15-update-summary.test.tsx::requires explicit review acceptance and disables incompatible uses` | review/block UX |
+| `M15-UI:03` | TEST | `apps/web/src/__tests__/m15-tracking.test.tsx::pinned_and_track_compatible_modes_are_explicit` | tracking UX |
+| `M15-UI:04` | TEST | `apps/web/src/__tests__/m15-history-message.test.tsx::states_current_only_and_history_unchanged` | history message |
+| `M15-UI:05` | TEST | `tests/test_m15_api.py::test_http_surface_uses_backend_verdict_trace_not_frontend_reinterpretation` | one authority interpretation |
+| `M15-UI:06` | TEST | `apps/web/src/__tests__/m15-update-summary.test.tsx::compatibility_does_not_claim_geometric_fit_or_visual_identity` | product-honesty boundary |
 
 ## M15-SCALE
 

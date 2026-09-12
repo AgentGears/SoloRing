@@ -10,6 +10,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import M15CompatibilitySection from "@/components/M15CompatibilitySection";
 import { SpatialInterpretationSection } from "@/components/ProductionWorldPanel";
 
 import { asApiError, type ApiError } from "@/lib/api.shared";
@@ -282,6 +283,8 @@ export default function ProductionLibrary({ projectId }: { projectId: string }) 
               <SpatialInterpretationSection revisionId={detail.revision_id} />
             </div>
           )}
+
+          <M15CompatibilitySection projectId={projectId} />
         </div>
       )}
     </section>

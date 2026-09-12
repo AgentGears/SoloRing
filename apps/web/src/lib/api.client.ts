@@ -1130,3 +1130,67 @@ export async function listCompositionRevisionsPublic(
   return getJson(
     `${BASE}/compositions/${compositionId}/revisions`);
 }
+
+// --- M15 compatibility surfaces (frozen R6 §16/§17) --------------------------
+
+export interface UpdateCandidate {
+  revision_id: string;
+  revision_number: number;
+  snapshot_hash: string;
+}
+
+export interface UpdateDiscovery {
+  production_object_id: string;
+  tracked_use_count: number;
+  assessment_created: boolean;
+  uses: {
+    composition_id: string;
+    occurrence_id: string;
+    mode: string;
+    current_revision_id: string;
+    current_revision_number: number;
+    candidates: UpdateCandidate[];
+    assessment_created: boolean;
+  }[];
+}
+
+export interface CompatibilityAssessment {
+  assessment_id: string;
+  report_hash: string;
+  overall_verdict: string;
+  verdict_counts: Record<string, number>;
+  converged: boolean;
+  advisory: {
+    published_composition_references: unknown[];
+    historical_shot_references: unknown[];
+    current_shot_selections: unknown[];
+    advisory_only: boolean;
+    mutated_by_apply: boolean;
+  };
+  uses: {
+    composition_id: string;
+    occurrence_id: string;
+    verdict: string;
+    dimensions: Record<string, string>;
+    translator_output_hash: string | null;
+  }[];
+}
+
+export async function getRevisionUpdates(
+  productionObjectId: string,
+): Promise<UpdateDiscovery> {
+  return fetchJson<UpdateDiscovery>(
+    `${BASE}/production-objects/${productionObjectId}/revision-updates`,
+  );
+}
+
+export async function getCompatibilityAssessment(
+  fromRevisionId: string,
+  toRevisionId: string,
+): Promise<CompatibilityAssessment> {
+  return fetchJson<CompatibilityAssessment>(
+    `${BASE}/production-revisions/${fromRevisionId}` +
+      "/compatibility-assessments",
+    { method: "POST", body: JSON.stringify({ to_revision_id: toRevisionId }) },
+  );
+}
