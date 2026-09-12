@@ -159,14 +159,34 @@ async def apply_revision_update(
                 selected_uses, uses)
             if committed is not None:
                 cdoc = json.loads(committed.operation_json)
+                after_by_key = {(i["composition_id"],
+                                 i["occurrence_id"]):
+                                i["after_spec_hash"]
+                                for i in cdoc["items"]}
                 for sel in selected_uses:
-                    row_source = (await conn.execute(text(
-                        "SELECT production_revision_id FROM "
+                    row = (await conn.execute(text(
+                        "SELECT production_revision_id, display_name, "
+                        "visible, x_mm, y_mm, z_mm, yaw_udeg, "
+                        "pitch_udeg, roll_udeg FROM "
                         "composition_working_occurrences WHERE "
                         "composition_id = :c AND occurrence_id = :o"),
                         {"c": sel["composition_id"],
-                         "o": sel["occurrence_id"]})).scalar_one()
-                    if row_source != tgt["id"]:
+                         "o": sel["occurrence_id"]})).one_or_none()
+                    if row is None:
+                        raise _conflict(
+                            "occurrence_inactive",
+                            composition_id=sel["composition_id"],
+                            occurrence_id=sel["occurrence_id"])
+                    # frozen R6 §14.2: EVERY selected working row must
+                    # equal its recorded after spec — the full hash
+                    # (source + display_name + visible + transform), a
+                    # later non-source edit must NOT converge as a
+                    # retry
+                    current_after = canonical_hash(
+                        _working_spec(row, tgt["id"]))
+                    if (current_after
+                            != after_by_key[(sel["composition_id"],
+                                              sel["occurrence_id"])]):
                         raise _conflict(
                             "stale_working_version",
                             composition_id=sel["composition_id"],

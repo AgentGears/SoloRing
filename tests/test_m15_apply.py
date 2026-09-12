@@ -392,6 +392,37 @@ async def test_exact_retry_is_idempotent(client):
     assert after == version  # no double increment
     assert ops == 1
 
+    # frozen §14.2 precision: the retry proof compares the COMPLETE
+    # after-spec hash, so a later NON-SOURCE edit (display name) must
+    # break idempotent convergence even though the row is still on the
+    # target revision — target-revision equality alone is too weak
+    from soloring.composition.service import patch_working_occurrence
+    from tests.conftest import make_tracked_maker
+
+    maker = make_tracked_maker(engine)
+    await patch_working_occurrence(
+        maker(), sel["composition_id"], sel["occurrence_id"],
+        scope="composition_working_state",
+        expected_working_version=version, display_name="Late edit")
+    async with engine.connect() as conn:
+        bumped = (await conn.execute(text(
+            "SELECT working_version FROM compositions WHERE id = :c"),
+            {"c": sel["composition_id"]})).scalar_one()
+    with pytest.raises(SoloRingError) as ei:
+        await apply_assessment(
+            _sess(client), assessment_id=result["assessment_id"],
+            selected_uses=[dict(retry_sel,
+                                expected_working_version=bumped)])
+    assert ei.value.code == "PRODUCTION_COMPATIBILITY_CONFLICT"
+    assert ei.value.details["reason"] in ("stale_working_version",
+                                          "stale_use_contract")
+    # and no third operation appeared
+    async with engine.connect() as conn:
+        ops2 = (await conn.execute(text(
+            "SELECT COUNT(*) FROM production_update_operations"
+        ))).scalar_one()
+    assert ops2 == 1
+
 
 async def test_partial_apply_stales_remaining_same_composition_uses(
         client):

@@ -191,47 +191,105 @@ async def _version(client, base):
 
 
 async def test_future_shot_captures_target_revision(client):
-    """M15-HIST:06 — a post-apply capture pins the target revision
-    through the captured production world."""
-    base = await seed_a4_use(client, tag=b"hi06")
-    await _assess_and_apply(client, base)
-    shot_id = await _capture_shot(client, base)
+    """M15-HIST:06 — a post-apply future Shot reaches the REAL
+    schema-6 capture path (M10-ready world + spatial plan + shot deps +
+    production-world selection + binding + capture) and the captured
+    production-world graph pins the TARGET ProductionRevision. A
+    capture that falls short of schema 6 FAILS the cell."""
+    from soloring.compatibility.service import (
+        apply_assessment, create_assessment)
+    from tests.m13_seed import publish, seed_second_revision
+    from tests.test_m13_binding import _adopt, _interpretation
+    from tests.test_m13_shot_capture import _full_m13_world
+
+    b = await _full_m13_world(client, tag=b"hi06-m15c")
+    pid = b["pid"]
     engine = client._transport.app.state.engine
 
-    async def _shot_rev_id():
-        async with engine.connect() as conn:
-            return (await conn.execute(text(
-                "SELECT id FROM shot_revisions WHERE shot_id = :s "
-                "ORDER BY created_at DESC LIMIT 1"),
-                {"s": shot_id})).scalar_one()
+    # a working chair occurrence of r1 that is A4-eligible in this
+    # world (subject + interpretation + optional staged track)
+    from tests.m13_seed import make_composition, mint
 
-    srid = await _shot_rev_id()
+    cid = await make_composition(client, pid)
+    occ = (await mint(client, cid, b["production_revision_id"], 0,
+                      name="Chair 7"))["occurrence_id"]
+    await _interpretation(client, b["production_revision_id"])
+    # r2 needs its own interpretation: the A4 consumer's spatial
+    # dimension is BLOCKED without a target interpretation
+    r2 = await seed_second_revision(client, b, number=2)
+    await _interpretation(client, r2, translation=(4, 0, 0))
+    await _adopt(client, cid, occ, {"kind": "production_instance"})
+    r = await client.post(
+        f"/spatial-worlds/{b['world']['id']}/production-instance-tracks",
+        json={"occurrence_id": occ, "requirement": "optional"})
+    assert r.status_code == 201, r.text
+
+    # the M15 evolution: r1 → r2 through assessment + review-accepted
+    # apply
+    assessment = await create_assessment(
+        _sess(client), from_revision_id=b["production_revision_id"],
+        to_revision_id=r2)
+    use = assessment["uses"][0]
+    async with engine.connect() as conn:
+        version = (await conn.execute(text(
+            "SELECT working_version FROM compositions WHERE id = :c"),
+            {"c": cid})).scalar_one()
+    out = await apply_assessment(
+        _sess(client), assessment_id=assessment["assessment_id"],
+        selected_uses=[{
+            "composition_id": cid,
+            "occurrence_id": occ,
+            "expected_working_version": version,
+            "expected_use_contract_hash": use["use_contract_hash"],
+            "review_accept": True}])
+    assert out["idempotent"] is False
+
+    # the frozen M15 future-Shot sequence (§1.5): publish the updated
+    # working state, bind it to the shot's world revision, SELECT the
+    # binding, capture
+    pub = await publish(client, cid, version + 1)
+    crev = pub["revision"]["revision_id"]
+    from tests.test_m13_binding import _publish
+
+    pr = await client.post(
+        f"/composition-revisions/{crev}/spatial-bindings",
+        json={"spatial_world_revision_id": b["rev"]["id"]})
+    assert pr.status_code in (200, 201), pr.text
+    binding_id = pr.json()["binding_id"]
+    r = await client.put(
+        f"/shots/{b['shot']}/production-world-selection",
+        json={"binding_id": binding_id, "expected_binding_id": None})
+    assert r.status_code in (200, 201), r.text
+
+    from soloring.domain import revisions as rev_svc
+    from tests.conftest import make_tracked_maker
+
+    maker = make_tracked_maker(engine)
+    revision = await rev_svc.capture_revision(maker(), b["shot"])
+
+    # the capture MUST be schema 6 with a pinned production world —
+    # no vacuous branch
+    snapshot = json.loads(revision.snapshot_json)
+    assert snapshot["schema_version"] == 6, (
+        f"expected the schema-6 capture path, got schema "
+        f"{snapshot['schema_version']}")
     async with engine.connect() as conn:
         srpw = (await conn.execute(text(
-            "SELECT composition_revision_id FROM "
+            "SELECT composition_revision_id, binding_id FROM "
             "shot_revision_production_worlds "
             "WHERE shot_revision_id = :s"),
-            {"s": srid})).fetchall()
-    # a schema-6 capture pins the CURRENT composition revision, whose
-    # occurrence rows now reference the updated source (r2)
-    if srpw:
-        async with engine.connect() as conn:
-            pinned = (await conn.execute(text(
-                "SELECT production_revision_id FROM "
-                "composition_revision_occurrences WHERE "
-                "composition_revision_id = :r AND occurrence_id = :o"),
-                {"r": srpw[0].composition_revision_id,
-                 "o": base["occurrence_id"]})).scalar_one()
-        assert pinned == base["r2"]
-    else:
-        # schema fell short of 6 (no production world content); the
-        # frozen claim then holds vacuously for this fixture, but the
-        # captured snapshot must still exist
-        async with engine.connect() as conn:
-            n = (await conn.execute(text(
-                "SELECT COUNT(*) FROM shot_revisions WHERE shot_id = :s"),
-                {"s": shot_id})).scalar_one()
-        assert n >= 1
+            {"s": revision.id})).fetchall()
+        assert srpw, "schema-6 capture wrote no production-world row"
+        pinned = (await conn.execute(text(
+            "SELECT production_revision_id FROM "
+            "composition_revision_occurrences WHERE "
+            "composition_revision_id = :r AND occurrence_id = :o"),
+            {"r": srpw[0].composition_revision_id,
+             "o": occ})).scalar_one()
+        assert srpw[0].binding_id == binding_id
+    # the captured graph pins the TARGET revision (r2) — the frozen
+    # future-Shot claim, proven relationally
+    assert pinned == r2
 
 
 async def test_exact_rerun_old_shot_uses_source_with_m15_current_resolvers_poisoned(
