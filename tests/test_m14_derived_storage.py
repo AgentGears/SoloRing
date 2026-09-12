@@ -128,7 +128,7 @@ async def test_migration_upgrade_creates_exact_schema(tmp_path, monkeypatch):
     conn = _connect(db)
     head = conn.execute(
         "SELECT version_num FROM alembic_version").fetchone()[0]
-    assert head == "0015_m14_world_observation_execution"
+    assert head == "0016_m15_revision_compatibility"
 
     tables = {r[0] for r in conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table'")}
@@ -384,7 +384,11 @@ async def test_recovery_blob_fk_inventory_eight_paths(
         "0013_m12_composition_occurrences",
         "0014_m13_authority_complete_world",
         "0015_m14_world_observation_execution",
+        # M15A: 0016 restores with the exact published M14 inventory
+        "0016_m15_revision_compatibility",
     }), SUPPORTED_RESTORE_ALEMBIC_HEADS
+    assert _blob_fk_policy_for_head(
+        "0016_m15_revision_compatibility") == M14_BLOB_FK_COLUMNS
 
     # the physical 0015 schema carries the eighth FK path
     db = tmp_path / "soloring.db"; _upgrade(tmp_path, monkeypatch)

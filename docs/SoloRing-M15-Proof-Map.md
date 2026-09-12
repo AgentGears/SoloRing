@@ -35,69 +35,69 @@ REC 4 / UI 6 / SCALE 7 — total 121.
 
 | Cell | Disposition | Exact proof owner | Claim |
 |---|---|---|---|
-| `M15-MIG:01` | PENDING | `tests/test_m15_migration.py::test_0016_adds_exact_five_tables` | exact additive schema |
-| `M15-MIG:02` | PENDING | `tests/test_m15_migration.py::test_0016_alters_no_predecessor_table` | no predecessor rebuild |
-| `M15-MIG:03` | PENDING | `tests/test_m15_migration.py::test_0016_constraints_and_indexes_exact` | exact DDL contract |
-| `M15-MIG:04` | PENDING | `tests/test_m15_migration.py::test_0016_downgrade_empty_succeeds` | empty downgrade |
-| `M15-MIG:05` | PENDING | `tests/test_m15_migration.py::test_0016_downgrade_any_m15_state_fails_before_ddl` | fail-closed authored state |
-| `M15-MIG:06` | PENDING | `tests/test_m15_migration.py::test_no_backfilled_tracking_or_compatibility_decisions` | no invented decisions |
-| `M15-MIG:07` | PENDING | `tests/test_m15_migration.py::test_foreign_key_check_clean` | FK integrity |
-| `M15-MIG:08` | PENDING | `tests/test_m15_migration.py::test_migration_roundtrip_leaves_no_temp_tables` | migration hygiene |
-| `M15-MIG:09` | PENDING | `tests/test_m15_migration.py::test_orm_migration_parity_exact_for_all_five_tables` | ORM/DDL parity |
-| `M15-MIG:10` | PENDING | `tests/test_m15_migration.py::test_0016_blob_fk_inventory_unchanged_from_m14` | no new Blob liveness path |
+| `M15-MIG:01` | TEST | `tests/test_m15_migration.py::test_0016_adds_exact_five_tables` | exact additive schema |
+| `M15-MIG:02` | TEST | `tests/test_m15_migration.py::test_0016_alters_no_predecessor_table` | no predecessor rebuild |
+| `M15-MIG:03` | TEST | `tests/test_m15_migration.py::test_0016_constraints_and_indexes_exact` | exact DDL contract |
+| `M15-MIG:04` | TEST | `tests/test_m15_migration.py::test_0016_downgrade_empty_succeeds` | empty downgrade |
+| `M15-MIG:05` | TEST | `tests/test_m15_migration.py::test_0016_downgrade_any_m15_state_fails_before_ddl` | fail-closed authored state |
+| `M15-MIG:06` | TEST | `tests/test_m15_migration.py::test_no_backfilled_tracking_or_compatibility_decisions` | no invented decisions |
+| `M15-MIG:07` | TEST | `tests/test_m15_migration.py::test_foreign_key_check_clean` | FK integrity |
+| `M15-MIG:08` | TEST | `tests/test_m15_migration.py::test_migration_roundtrip_leaves_no_temp_tables` | migration hygiene |
+| `M15-MIG:09` | TEST | `tests/test_m15_migration.py::test_orm_migration_parity_exact_for_all_five_tables` | ORM/DDL parity |
+| `M15-MIG:10` | TEST | `tests/test_m15_migration.py::test_0016_blob_fk_inventory_unchanged_from_m14` | no new Blob liveness path |
 
 ## M15-CAN
 
 | Cell | Disposition | Exact proof owner | Claim |
 |---|---|---|---|
-| `M15-CAN:01` | PENDING | `tests/test_m15_canonical.py::test_four_verdict_grammar_exact` | closed verdict vocabulary |
-| `M15-CAN:02` | PENDING | `tests/test_m15_canonical.py::test_dimension_status_grammar_exact` | closed dimension vocabulary |
-| `M15-CAN:03` | PENDING | `tests/test_m15_canonical.py::test_use_contract_canonical_ordering` | deterministic use hash |
-| `M15-CAN:04` | PENDING | `tests/test_m15_canonical.py::test_scope_hash_from_ordered_use_hashes` | scope identity |
-| `M15-CAN:05` | PENDING | `tests/test_m15_canonical.py::test_report_hash_from_normalized_children` | report identity |
-| `M15-CAN:06` | PENDING | `tests/test_m15_canonical.py::test_update_operation_hash_exact` | update audit identity |
-| `M15-CAN:07` | PENDING | `tests/test_m15_canonical.py::test_stored_assessment_corruption_fails_closed` | parent/child integrity |
+| `M15-CAN:01` | TEST | `tests/test_m15_canonical.py::test_four_verdict_grammar_exact` | closed verdict vocabulary |
+| `M15-CAN:02` | TEST | `tests/test_m15_canonical.py::test_dimension_status_grammar_exact` | closed dimension vocabulary |
+| `M15-CAN:03` | TEST | `tests/test_m15_canonical.py::test_use_contract_canonical_ordering` | deterministic use hash |
+| `M15-CAN:04` | TEST | `tests/test_m15_canonical.py::test_scope_hash_from_ordered_use_hashes` | scope identity |
+| `M15-CAN:05` | TEST | `tests/test_m15_canonical.py::test_report_hash_from_normalized_children` | report identity |
+| `M15-CAN:06` | TEST | `tests/test_m15_canonical.py::test_update_operation_hash_exact` | update audit identity |
+| `M15-CAN:07` | TEST | `tests/test_m15_canonical.py::test_stored_assessment_corruption_fails_closed` | parent/child integrity |
 | `M15-CAN:08` | PENDING | `tests/test_m15_canonical.py::test_stored_update_corruption_fails_closed` | operation integrity |
-| `M15-CAN:09` | PENDING | `tests/test_m15_canonical.py::test_feature_transition_set_change_changes_use_contract_hash` | A2 transition closure |
-| `M15-CAN:10` | PENDING | `tests/test_m15_canonical.py::test_spatial_transition_set_change_changes_use_contract_hash` | A4 transition closure |
-| `M15-CAN:11` | PENDING | `tests/test_m15_canonical.py::test_placement_contract_change_changes_use_contract_hash` | exact placement consumer |
+| `M15-CAN:09` | TEST | `tests/test_m15_canonical.py::test_feature_transition_set_change_changes_use_contract_hash` | A2 transition closure |
+| `M15-CAN:10` | TEST | `tests/test_m15_canonical.py::test_spatial_transition_set_change_changes_use_contract_hash` | A4 transition closure |
+| `M15-CAN:11` | TEST | `tests/test_m15_canonical.py::test_placement_contract_change_changes_use_contract_hash` | exact placement consumer |
 
 ## M15-EVAL
 
 | Cell | Disposition | Exact proof owner | Claim |
 |---|---|---|---|
-| `M15-EVAL:01` | PENDING | `tests/test_m15_evaluator.py::test_same_object_distinct_revision_required` | exact lineage law |
-| `M15-EVAL:02` | PENDING | `tests/test_m15_evaluator.py::test_changed_retained_blob_requires_review_without_equivalence_evidence` | no false AS_IS over changed bytes |
-| `M15-EVAL:03` | PENDING | `tests/test_m15_evaluator.py::test_media_type_change_requires_review` | media dimension |
-| `M15-EVAL:04` | PENDING | `tests/test_m15_evaluator.py::test_equal_spatial_interpretation_is_compatible` | spatial equality |
-| `M15-EVAL:05` | PENDING | `tests/test_m15_evaluator.py::test_exact_frame_bridge_yields_translation_verdict` | deterministic translator verdict |
-| `M15-EVAL:06` | PENDING | `tests/test_m15_evaluator.py::test_unsupported_frame_delta_requires_review` | no approximation |
-| `M15-EVAL:07` | PENDING | `tests/test_m15_evaluator.py::test_missing_required_target_interpretation_is_incompatible` | hard block |
-| `M15-EVAL:08` | PENDING | `tests/test_m15_evaluator.py::test_persistent_state_subject_identity_preserves_occurrence_contract` | state contract |
-| `M15-EVAL:09` | PENDING | `tests/test_m15_evaluator.py::test_verdict_precedence` | fold law |
-| `M15-EVAL:10` | PENDING | `tests/test_m15_evaluator.py::test_corrupt_revision_is_not_friendly_incompatibility` | corruption distinction |
-| `M15-EVAL:11` | PENDING | `tests/test_m15_evaluator.py::test_unimplemented_future_dimensions_not_claimed` | no speculative compatibility |
-| `M15-EVAL:12` | PENDING | `tests/test_m15_evaluator.py::test_completed_assessment_can_be_nonpass_verdict` | operational/domain separation |
-| `M15-EVAL:13` | PENDING | `tests/test_m15_evaluator.py::test_parent_summary_fold_exact_and_not_apply_gate` | assessment summary semantics |
-| `M15-EVAL:14` | PENDING | `tests/test_m15_evaluator.py::test_zero_current_uses_returns_no_current_uses_without_persistence` | empty-scope law |
-| `M15-EVAL:15` | PENDING | `tests/test_m15_evaluator.py::test_spatial_relevance_follows_resolved_placement_owner` | consumer-specific placement |
-| `M15-EVAL:16` | PENDING | `tests/test_m15_evaluator.py::test_manual_backward_same_lineage_assessment_is_directional` | rollback without identity loss |
-| `M15-EVAL:17` | PENDING | `tests/test_m15_evaluator.py::test_multiworld_or_ambiguous_placement_consumer_refuses_without_a6_fallback` | no hidden world/tie-break/fallback |
-| `M15-EVAL:18` | PENDING | `tests/test_m15_evaluator.py::test_emitted_a4_contract_requires_source_interpretation_and_exact_world_context` | predecessor A4 prerequisite is mechanical |
+| `M15-EVAL:01` | TEST | `tests/test_m15_evaluator.py::test_same_object_distinct_revision_required` | exact lineage law |
+| `M15-EVAL:02` | TEST | `tests/test_m15_evaluator.py::test_changed_retained_blob_requires_review_without_equivalence_evidence` | no false AS_IS over changed bytes |
+| `M15-EVAL:03` | TEST | `tests/test_m15_evaluator.py::test_media_type_change_requires_review` | media dimension |
+| `M15-EVAL:04` | TEST | `tests/test_m15_evaluator.py::test_equal_spatial_interpretation_is_compatible` | spatial equality |
+| `M15-EVAL:05` | TEST | `tests/test_m15_evaluator.py::test_exact_frame_bridge_yields_translation_verdict` | deterministic translator verdict |
+| `M15-EVAL:06` | TEST | `tests/test_m15_evaluator.py::test_unsupported_frame_delta_requires_review` | no approximation |
+| `M15-EVAL:07` | TEST | `tests/test_m15_evaluator.py::test_missing_required_target_interpretation_is_incompatible` | hard block |
+| `M15-EVAL:08` | TEST | `tests/test_m15_evaluator.py::test_persistent_state_subject_identity_preserves_occurrence_contract` | state contract |
+| `M15-EVAL:09` | TEST | `tests/test_m15_evaluator.py::test_verdict_precedence` | fold law |
+| `M15-EVAL:10` | TEST | `tests/test_m15_evaluator.py::test_corrupt_revision_is_not_friendly_incompatibility` | corruption distinction |
+| `M15-EVAL:11` | TEST | `tests/test_m15_evaluator.py::test_unimplemented_future_dimensions_not_claimed` | no speculative compatibility |
+| `M15-EVAL:12` | TEST | `tests/test_m15_evaluator.py::test_completed_assessment_can_be_nonpass_verdict` | operational/domain separation |
+| `M15-EVAL:13` | TEST | `tests/test_m15_evaluator.py::test_parent_summary_fold_exact_and_not_apply_gate` | assessment summary semantics |
+| `M15-EVAL:14` | TEST | `tests/test_m15_evaluator.py::test_zero_current_uses_returns_no_current_uses_without_persistence` | empty-scope law |
+| `M15-EVAL:15` | TEST | `tests/test_m15_evaluator.py::test_spatial_relevance_follows_resolved_placement_owner` | consumer-specific placement |
+| `M15-EVAL:16` | TEST | `tests/test_m15_evaluator.py::test_manual_backward_same_lineage_assessment_is_directional` | rollback without identity loss |
+| `M15-EVAL:17` | TEST | `tests/test_m15_evaluator.py::test_multiworld_or_ambiguous_placement_consumer_refuses_without_a6_fallback` | no hidden world/tie-break/fallback |
+| `M15-EVAL:18` | TEST | `tests/test_m15_evaluator.py::test_emitted_a4_contract_requires_source_interpretation_and_exact_world_context` | predecessor A4 prerequisite is mechanical |
 
 ## M15-TRANS
 
 | Cell | Disposition | Exact proof owner | Claim |
 |---|---|---|---|
-| `M15-TRANS:01` | PENDING | `tests/test_m15_translation.py::test_frame_bridge_schema_and_identity` | versioned translator |
-| `M15-TRANS:02` | PENDING | `tests/test_m15_translation.py::test_frame_bridge_integer_equivalence` | exact shared-subset semantics |
-| `M15-TRANS:03` | PENDING | `tests/test_m15_translation.py::test_rotation_outside_v1_refuses_translation` | bounded subset |
-| `M15-TRANS:04` | PENDING | `tests/test_m15_translation.py::test_translation_parameters_and_output_hash_persisted` | inspectable evidence |
-| `M15-TRANS:05` | PENDING | `tests/test_m15_translation.py::test_forged_translator_pin_fails_integrity` | anti-forgery |
-| `M15-TRANS:06` | PENDING | `tests/test_m15_translation.py::test_translation_never_mutates_source_or_target_revision` | authority isolation |
-| `M15-TRANS:07` | PENDING | `tests/test_m15_translation.py::test_translation_evidence_retained_when_overall_use_requires_review` | dimension controls pins |
-| `M15-TRANS:08` | PENDING | `tests/test_m15_translation.py::test_frame_bridge_only_applies_to_a4_consumer_and_mutates_no_authority` | applicability boundary |
-| `M15-TRANS:09` | PENDING | `tests/test_m15_translation.py::test_frame_bridge_overflow_refuses_without_wrap` | arithmetic safety |
+| `M15-TRANS:01` | TEST | `tests/test_m15_translation.py::test_frame_bridge_schema_and_identity` | versioned translator |
+| `M15-TRANS:02` | TEST | `tests/test_m15_translation.py::test_frame_bridge_integer_equivalence` | exact shared-subset semantics |
+| `M15-TRANS:03` | TEST | `tests/test_m15_translation.py::test_rotation_outside_v1_refuses_translation` | bounded subset |
+| `M15-TRANS:04` | TEST | `tests/test_m15_translation.py::test_translation_parameters_and_output_hash_persisted` | inspectable evidence |
+| `M15-TRANS:05` | TEST | `tests/test_m15_translation.py::test_forged_translator_pin_fails_integrity` | anti-forgery |
+| `M15-TRANS:06` | TEST | `tests/test_m15_translation.py::test_translation_never_mutates_source_or_target_revision` | authority isolation |
+| `M15-TRANS:07` | TEST | `tests/test_m15_translation.py::test_translation_evidence_retained_when_overall_use_requires_review` | dimension controls pins |
+| `M15-TRANS:08` | TEST | `tests/test_m15_translation.py::test_frame_bridge_only_applies_to_a4_consumer_and_mutates_no_authority` | applicability boundary |
+| `M15-TRANS:09` | TEST | `tests/test_m15_translation.py::test_frame_bridge_overflow_refuses_without_wrap` | arithmetic safety |
 
 ## M15-IMPACT
 

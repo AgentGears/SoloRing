@@ -97,6 +97,16 @@ ALLOWED_PATTERNS = [
     r"^scripts/m15_validate_[a-z0-9_]+\.py$",
     r"^tests/fixtures/m15/[^/]+$",
     r"^tests/test_m15[a-z0-9_]*\.py$",
+    r"^tests/m15_seed\.py$",
+    # M15A product surface (frozen R4 §26/§28, authorized 2026-09-12):
+    # the compatibility evidence foundation + its narrow API seams
+    r"^server/soloring/compatibility/",
+    # FK-consumer registry succession (frozen R4 §11 M15 tables join the
+    # exhaustive M12 occurrence-FK inventory)
+    r"^server/soloring/composition/impacts\.py$",
+    r"^server/alembic/versions/0016_m15_revision_compatibility\.py$",
+    r"^server/soloring/api/production\.py$",
+    r"^server/soloring/api/schemas/production\.py$",
 ]
 
 FORBIDDEN_PATTERNS = [

@@ -165,6 +165,20 @@ ALLOWLIST = (
     "scripts/m15_validate_proof_map.py",
     "tests/fixtures/m15/",
     "tests/test_m15_baseline.py",
+    # M15A product surface (frozen R4 §26/§28, authorized 2026-09-12):
+    # the compatibility evidence foundation.
+    "server/soloring/compatibility/",
+    "server/soloring/composition/impacts.py",
+    "server/alembic/versions/0016_m15_revision_compatibility.py",
+    "server/soloring/api/production.py",
+    "server/soloring/api/schemas/production.py",
+    "tests/m15_seed.py",
+    "tests/test_m15_migration.py",
+    "tests/test_m15_canonical.py",
+    "tests/test_m15_evaluator.py",
+    "tests/test_m15_translation.py",
+    "tests/test_m15_placement_seam_probe.py",
+    "tests/test_m15a_smoke.py",
 )
 
 M14_OWNED_PREFIXES = (
@@ -204,6 +218,9 @@ M15_OWNED_PREFIXES = (
     "scripts/m15_validate_",
     "tests/fixtures/m15/",
     "tests/test_m15",
+    "tests/m15_seed.py",
+    "server/soloring/compatibility/",
+    "server/alembic/versions/0016_m15_revision_compatibility.py",
 )
 
 
@@ -256,11 +273,15 @@ def main() -> int:
     # migration. Anything else (0016+, or a different 0015) still
     # rejects; this is NOT a general future-migration allowance.
     admitted_0015 = "0015_m14_world_observation_execution.py"
+    # M15A succession (frozen R4 §11, authorized 2026-09-12): exactly
+    # ONE further migration is admitted — the frozen M15 0016.
+    admitted_0016 = "0016_m15_revision_compatibility.py"
     mig_beyond = [p.name for p in versions.glob("*.py")
-                  if p.stem >= "0015" and p.name != admitted_0015]
+                  if p.stem >= "0015" and p.name not in (
+                      admitted_0015, admitted_0016)]
     if mig_beyond:
-        errors.append(f"migration at/beyond 0015 beyond the frozen M14 "
-                      f"migration exists: {mig_beyond}")
+        errors.append(f"migration at/beyond 0015 beyond the frozen M14/"
+                      f"M15 migrations exists: {mig_beyond}")
 
     for f in changed:
         p = REPO / f
@@ -285,7 +306,15 @@ def main() -> int:
         if not p.is_file() or not f.endswith((".py",)):
             continue
         src = p.read_text(encoding="utf-8", errors="replace")
+        admitted_m15_tables = {
+            "production_compatibility_assessments",
+            "production_compatibility_uses",
+            "composition_occurrence_revision_tracking",
+            "production_update_operations",
+            "production_update_items"}
         for m in re.finditer(r'CREATE TABLE\s+"?(\w+)"?', src, re.I):
+            if f.endswith("0016_m15_revision_compatibility.py") and                     m.group(1) in admitted_m15_tables:
+                continue  # the frozen M15 §11 tables
             errors.append(f"{f}: new table {m.group(1)} in migration "
                           "source")
 

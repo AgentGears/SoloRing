@@ -142,7 +142,37 @@ ALLOWLIST = (
     "scripts/m15_validate_proof_map.py",
     "tests/fixtures/m15/",
     "tests/test_m15_baseline.py",
+    # M15A product surface (frozen R4 §26/§28, authorized 2026-09-12)
+    "server/soloring/compatibility/",
+    "server/soloring/composition/impacts.py",
+    "server/alembic/versions/0016_m15_revision_compatibility.py",
+    "server/soloring/api/production.py",
+    "server/soloring/api/schemas/production.py",
+    "tests/m15_seed.py",
+    "tests/test_m15_migration.py",
+    "tests/test_m15_canonical.py",
+    "tests/test_m15_evaluator.py",
+    "tests/test_m15_translation.py",
+    "tests/test_m15_placement_seam_probe.py",
+    "tests/test_m15a_smoke.py",
 )
+
+M15_OWNED_PREFIXES = (
+    "docs/SoloRing-M15-",
+    "scripts/m15_validate_",
+    "tests/fixtures/m15/",
+    "tests/test_m15",
+    "tests/m15_seed.py",
+    "server/soloring/compatibility/",
+    "server/alembic/versions/0016_m15_revision_compatibility.py",
+    "server/soloring/api/production.py",
+    "server/soloring/api/schemas/production.py",
+    "server/soloring/composition/impacts.py",
+)
+
+
+def m15_owned(path: str) -> bool:
+    return path.startswith(M15_OWNED_PREFIXES)
 
 M14_OWNED_PREFIXES = (
     "docs/SoloRing-M14-",
@@ -267,11 +297,15 @@ def main(repo: Path = REPO) -> int:
     changed = [f for f in git("diff", "--name-only", f"{base}..HEAD",
                               repo=repo).splitlines() if f.strip()]
     for f in changed:
-        if f.startswith("server/") and not m14_owned(f):
+        if f.startswith("server/") and not (
+                m14_owned(f) or m15_owned(f)):
             errors.append(f"backend change outside the security slice: {f}")
         if (f.startswith("server/alembic/")
-                and f != ("server/alembic/versions/"
-                          "0015_m14_world_observation_execution.py")):
+                and f not in (
+                    "server/alembic/versions/"
+                    "0015_m14_world_observation_execution.py",
+                    "server/alembic/versions/"
+                    "0016_m15_revision_compatibility.py")):
             errors.append(f"alembic change outside the security slice: {f}")
         if not path_allowed(f, allowlist):
             errors.append(f"changed file outside the {mode}-mode "
@@ -283,11 +317,14 @@ def main(repo: Path = REPO) -> int:
     # migration. Anything else (0016+, or a different 0015) still
     # rejects; this is NOT a general future-migration allowance.
     admitted_0015 = "0015_m14_world_observation_execution.py"
+    # M15A succession (frozen R4 §11, authorized 2026-09-12)
+    admitted_0016 = "0016_m15_revision_compatibility.py"
     mig_beyond = [p.name for p in versions.glob("*.py")
-                  if p.stem >= "0015" and p.name != admitted_0015]
+                  if p.stem >= "0015" and p.name not in (
+                      admitted_0015, admitted_0016)]
     if mig_beyond:
-        errors.append(f"migration at/beyond 0015 beyond the frozen M14 "
-                      f"migration exists: {mig_beyond}")
+        errors.append(f"migration at/beyond 0015 beyond the frozen M14/"
+                      f"M15 migrations exists: {mig_beyond}")
 
     # frozen §17: Next major other than 15
     pkg = json.loads((repo / "apps" / "web" / "package.json")

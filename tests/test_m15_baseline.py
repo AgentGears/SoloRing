@@ -132,19 +132,20 @@ def test_migration_head_is_0015_before_m15() -> None:
     """M15-BASE:02 — predecessor migration head exactly 0015.
 
     The predecessor-tree assertion is timeless. The current-head
-    posture — no migration beyond 0015 — is the M15-0 scope guard that
-    M15A supersedes when 0016 lands (frozen §11), mirroring the M14
-    base03 mid-flight precedent."""
+    posture was the M15-0 scope guard (no migration beyond 0015) and is
+    superseded by M15A (frozen §11): the head is now exactly the frozen
+    0016, the single admitted successor — the M14 base03 mid-flight
+    precedent."""
     pre = _migration_names(M14_COMMIT)
     assert pre, "predecessor migration listing empty"
     assert pre[-1] == f"{MIGRATION_PREDECESSOR}.py"
     head = _migration_names("HEAD")
     assert head, "current migration listing empty"
-    assert head[-1] == f"{MIGRATION_PREDECESSOR}.py", (
-        f"current migration head is not {MIGRATION_PREDECESSOR}: "
-        f"{head[-1:]}")
-    beyond = [m for m in head if m > f"{MIGRATION_PREDECESSOR}.py"]
-    assert not beyond, f"migrations beyond 0015 exist: {beyond}"
+    assert head[-1] == "0016_m15_revision_compatibility.py", (
+        f"current migration head is not the frozen 0016: {head[-1:]}")
+    beyond = [m for m in head
+              if m > "0016_m15_revision_compatibility.py"]
+    assert not beyond, f"migrations beyond 0016 exist: {beyond}"
 
 
 def test_predecessor_proof_validators_green() -> None:

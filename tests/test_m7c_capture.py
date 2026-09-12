@@ -603,8 +603,8 @@ def test_migration_files_and_head_is_0009():
     to 0009 only with M8A's visual-identity migration."""
     versions = BASE_DIR / "server" / "alembic" / "versions"
     files = sorted(p.name for p in versions.glob("*.py"))
-    assert files[-1] == "0015_m14_world_observation_execution.py"
-    assert len(files) == 15
+    assert files[-1] == "0016_m15_revision_compatibility.py"
+    assert len(files) == 16  # M15A added 0016
 
 
 # --- Reuse integrity fail-closed ----------------------------------------------------------------

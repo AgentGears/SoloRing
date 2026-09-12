@@ -14,6 +14,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from soloring.api.deps import get_session
 from soloring.api.schemas.production import (
     ClosureRead,
+    CompatibilityAssessmentRead,
+    CompatibilityAssessmentRequest,
+    CompatibilityUsePage,
     ProductionObjectCreate,
     ProductionObjectDetail,
     ProductionObjectPatch,
@@ -210,3 +213,56 @@ async def get_revision(
         ],
         physical_integrity="not_full_hash_verified_in_this_view",
     )
+
+
+# --- M15 compatibility assessments (frozen R4 §17) --------------------------
+
+
+@router.post(
+    "/production-revisions/{from_revision_id}/compatibility-assessments",
+    response_model=None,
+)
+async def create_compatibility_assessment(
+    from_revision_id: str,
+    body: CompatibilityAssessmentRequest,
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    from soloring.compatibility import service as compat
+
+    result = await compat.create_assessment(
+        session, from_revision_id=from_revision_id,
+        to_revision_id=body.to_revision_id)
+    code = 200 if (result.get("converged")
+                   or result["scope_status"] == "NO_CURRENT_USES") else 201
+    return JSONResponse(result, status_code=code)
+
+
+@router.get(
+    "/production-compatibility-assessments/{assessment_id}",
+    response_model=CompatibilityAssessmentRead,
+)
+async def read_compatibility_assessment(
+    assessment_id: str,
+    session: AsyncSession = Depends(get_session),
+) -> CompatibilityAssessmentRead:
+    from soloring.compatibility import service as compat
+
+    return CompatibilityAssessmentRead(
+        **await compat.read_assessment(session, assessment_id))
+
+
+@router.get(
+    "/production-compatibility-assessments/{assessment_id}/uses",
+    response_model=CompatibilityUsePage,
+)
+async def list_compatibility_uses(
+    assessment_id: str,
+    cursor: int = 0,
+    limit: int = 50,
+    session: AsyncSession = Depends(get_session),
+) -> CompatibilityUsePage:
+    from soloring.compatibility import service as compat
+
+    page = await compat.list_uses(
+        session, assessment_id, cursor=cursor, limit=limit)
+    return CompatibilityUsePage(**page)

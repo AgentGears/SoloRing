@@ -258,7 +258,7 @@ def test_populated_0005_to_0006_preserves_state_and_zero_inference(
         assert raised, "uq_shots_scene_position not enforced"
 
         assert con.execute("SELECT version_num FROM alembic_version"
-                           ).fetchone()[0] == "0015_m14_world_observation_execution"
+                           ).fetchone()[0] == "0016_m15_revision_compatibility"
     finally:
         con.close()
 
