@@ -100,6 +100,34 @@ def _bind(node_inputs: dict, field: object, value: Any,
     node_inputs[field] = value
 
 
+def _reserve_target(
+    graph: dict,
+    bound_targets: set[tuple[str, str]],
+    *,
+    node: object,
+    field: object,
+    what: str,
+) -> None:
+    """Reserve an exact node/field before schema-3 spatial binding.
+
+    Prompt, parameter, and seed writes happen after spatial binding in the
+    mutation sequence, so their targets must be owned before the spatial
+    writer runs; otherwise a derived control can be silently overwritten.
+    """
+    inputs = _node_inputs(graph, node, what)
+    if not isinstance(field, str) or not field:
+        raise TranslationFailed(f"{what}: manifest declares no field binding")
+    if field not in inputs:
+        raise TranslationFailed(
+            f"{what}: node {node!r} has no input field {field!r}")
+    target = (node, field)
+    if target in bound_targets:
+        raise TranslationFailed(
+            f"{what}: node/field {node}/{field} is already owned by an "
+            "incompatible binding")
+    bound_targets.add(target)
+
+
 def build_comfy_prompt(
     *,
     workflow_spec: dict,
@@ -138,9 +166,33 @@ def build_comfy_prompt(
             raise TranslationFailed(
                 "schema3_derived supplied without a captured manifest-v3 "
                 "document")
+        from soloring.spatial.package3 import (
+            project_schema3_spatial_control_subset,
+        )
         from soloring.workflows.manifest import parse_manifest_v2
 
         spatial_keys = frozenset(manifest["spatial_bindings"])
+        active_spatial_keys: list[str] = []
+        for entry in (workflow_spec.get("spatial_realization") or {}).get(
+                "derived_artifacts") or []:
+            if not isinstance(entry, dict) or not isinstance(
+                    entry.get("input_key"), str) or not entry["input_key"]:
+                raise TranslationFailed(
+                    "captured spatial realization has a malformed "
+                    "derived input_key")
+            active_spatial_keys.append(entry["input_key"])
+        if len(set(active_spatial_keys)) != len(active_spatial_keys):
+            raise TranslationFailed(
+                "captured spatial realization has duplicate derived "
+                "input_key values")
+        try:
+            graph = project_schema3_spatial_control_subset(
+                manifest, graph, active_spatial_keys)
+        except SoloRingError as exc:
+            raise TranslationFailed(
+                f"schema-3 spatial control projection failed: "
+                f"{exc.message}") from exc
+
         inherited = {k: v for k, v in manifest.items()
                      if k != "spatial_bindings"}
         inherited["schema_version"] = "2"
@@ -148,7 +200,6 @@ def build_comfy_prompt(
     else:
         manifest_doc = manifest
 
-    # --- inputs: bind by LOGICAL identity (input_key, position) ------------
     by_slot: dict[tuple[str, int], MaterializedComfyInput] = {}
     declared_keys: set[str] = set()
     bound_targets: set[tuple[str, str]] = set()
@@ -162,16 +213,21 @@ def build_comfy_prompt(
 
     for key, decl in manifest_doc.inputs.items():
         if key in spatial_keys:
-            continue  # derived spatial input: bound below from uploads only
+            continue
         if (
             getattr(decl, "source_role", None) is None
             and not getattr(decl, "is_realization_input", False)
         ):
-            continue  # the prompt input: handled below, not a reference input
+            continue
         declared_keys.add(key)
         what = f"input {key!r}"
         node_inputs = _node_inputs(graph, decl.node, what)
-        bound_targets.add((decl.node, decl.field))
+        target = (decl.node, decl.field)
+        if target in bound_targets:
+            raise TranslationFailed(
+                f"{what}: node/field {decl.node}/{decl.field} is already "
+                "owned by an incompatible binding")
+        bound_targets.add(target)
 
         slots = sorted(
             (m for m in materialized if m.input_key == key),
@@ -206,30 +262,28 @@ def build_comfy_prompt(
                 "captured manifest"
             )
 
-    # --- schema-3 derived controls: exact manifest-v3 node/field ------------
-    if schema3_derived is not None:
-        _bind_schema3_derived(
-            graph, manifest, schema3_derived, workflow_spec, bound_targets)
-
-    # --- prompt ---------------------------------------------------------------
+    # Reserve every target that will be written after the spatial writer.
+    # This turns target ownership into one closed set and prevents later
+    # prompt/parameter/seed writes from silently replacing a derived control.
     prompt_decl = manifest_doc.inputs.get("prompt")
     if prompt_decl is not None:
-        node_inputs = _node_inputs(graph, prompt_decl.node, "prompt")
-        _bind(node_inputs, prompt_decl.field,
-              workflow_spec["prompt"], prompt_decl.node, "prompt")
+        _reserve_target(
+            graph, bound_targets, node=prompt_decl.node,
+            field=prompt_decl.field, what="prompt")
 
-    # --- parameters: RESOLVED captured values, never defaults -----------------
-    for name, value in workflow_spec.get("parameters", {}).items():
+    parameter_decls: dict[str, object] = {}
+    for name in workflow_spec.get("parameters", {}):
         decl = manifest_doc.parameters.get(name)
         what = f"parameter {name!r}"
         if decl is None:
             raise TranslationFailed(
                 f"{what}: captured parameter has no manifest binding"
             )
-        node_inputs = _node_inputs(graph, decl.node, what)
-        _bind(node_inputs, decl.field, value, decl.node, what)
+        _reserve_target(
+            graph, bound_targets, node=decl.node, field=decl.field,
+            what=what)
+        parameter_decls[name] = decl
 
-    # --- seed: only when the manifest explicitly binds it ----------------------
     seed_decl = getattr(manifest_doc, "seed", None)
     captured_seed = workflow_spec.get("seed")
     if captured_seed is not None:
@@ -238,11 +292,30 @@ def build_comfy_prompt(
                 "captured seed is non-null but the historical manifest "
                 "declares no seed binding"
             )
+        _reserve_target(
+            graph, bound_targets, node=seed_decl.node, field=seed_decl.field,
+            what="seed")
+
+    if schema3_derived is not None:
+        _bind_schema3_derived(
+            graph, manifest, schema3_derived, workflow_spec, bound_targets)
+
+    if prompt_decl is not None:
+        node_inputs = _node_inputs(graph, prompt_decl.node, "prompt")
+        _bind(node_inputs, prompt_decl.field,
+              workflow_spec["prompt"], prompt_decl.node, "prompt")
+
+    for name, value in workflow_spec.get("parameters", {}).items():
+        decl = parameter_decls[name]
+        what = f"parameter {name!r}"
+        node_inputs = _node_inputs(graph, decl.node, what)
+        _bind(node_inputs, decl.field, value, decl.node, what)
+
+    if captured_seed is not None:
         node_inputs = _node_inputs(graph, seed_decl.node, "seed")
         _bind(node_inputs, seed_decl.field, captured_seed,
               seed_decl.node, "seed")
 
-    # --- outputs: nodes must exist; the captured contract is untouched ---------
     for name, decl in manifest_doc.outputs.items():
         if not isinstance(decl.node, str) or not decl.node:
             raise TranslationFailed(f"output {name!r}: no node binding")
@@ -251,7 +324,6 @@ def build_comfy_prompt(
                 f"output {name!r}: template has no node {decl.node!r}"
             )
 
-    # --- marker: exact namespace, conflict-rejected ------------------------------
     marker = submission_marker(generation_id, attempt_id)
     conflicting = template.get("extra_data")
     if isinstance(conflicting, dict) and "soloring" in conflicting:
@@ -272,15 +344,7 @@ def _bind_schema3_derived(
     bound_targets: set[tuple[str, str]],
 ) -> None:
     """Bind each verified uploaded schema-3 derived reference to the exact
-    node/field certified by the captured manifest v3 (M10E §17.4).
-
-    Fails closed on: workflow-spec expectation vs transport disagreement
-    (missing/extra/duplicate/mismatched role/position/input_key), missing
-    manifest binding, unsupported binding format, absent upload reference,
-    missing template node/field, or two logical sources targeting one
-    node/field incompatibly. Dispatch keys on the verified derived
-    collection + spatial_bindings — never the inherited
-    ``source.kind == "shot_reference"`` string."""
+    node/field certified by the captured manifest v3 (M10E §17.4)."""
     spec_entries = {
         e["input_key"]: e
         for e in (
@@ -347,26 +411,12 @@ def _bind_schema3_derived(
 def _bind_schema3_control_stream(
     graph: dict, key: str, verified, node: str, field: str, what: str,
 ) -> None:
-    """Frozen soloring.spatial.v1 consumption semantics (M10E §5.2,
-    completing the M10A binding contract to the CERTIFIED §114 executor
-    shape): the target node/field is an IMAGE-TENSOR input, so the
-    uploaded control frames must enter through LoadImage nodes batched
-    into a frame video — exactly the consumption machinery the certified
-    smoke executed. The expansion is deterministic from the explicit
-    captured binding + the verified uploaded frame set: node ids are
-    namespaced ``{input_key}::load::{i}`` / ``{input_key}::batch::{i}``
-    and can never alias template nodes (enforced); the manifest's exact
-    node/field receives the chain-head LINK. No heuristic discovery of
-    existing nodes occurs."""
     refs = tuple(verified.frame_references or ())
     if not refs and verified.execution_reference:
         refs = (verified.execution_reference,)
     if not refs:
         raise TranslationFailed(
             f"{what} has no uploaded executor reference")
-    # R4 §2.6: the COMPLETE generated-id set is checked against the
-    # captured template BEFORE any graph mutation — load::0..N-1 and
-    # batch::1..N-1 (batch::0 is never generated).
     generated = [f"{key}::load::{i}" for i in range(len(refs))]
     generated += [f"{key}::batch::{i}" for i in range(1, len(refs))]
     clash = [nid for nid in generated if nid in graph]
