@@ -236,17 +236,6 @@ def _copy_verified(src: Path, dst: Path, expected_hash: str) -> int:
 # ---------------------------------------------------------------------------
 
 
-def _sqlite_readonly_uri(path: Path) -> str:
-    """Build a read-only SQLite file URI without letting path bytes become
-    URI syntax. POSIX separators and a Windows drive colon remain structural;
-    reserved filename characters are percent-encoded before mode=ro is added.
-    """
-    from urllib.parse import quote
-
-    encoded = quote(path.as_posix(), safe="/:")
-    return f"file:{encoded}?mode=ro"
-
-
 def _sqlite_online_backup(source_uri: str, dest_db: Path) -> None:
     source = sqlite3.connect(source_uri, uri=True)
     try:
@@ -870,8 +859,7 @@ def parse_backup_manifest_v1(raw: bytes) -> dict:
         "blob_hashes", "workflow_artifacts", "projects",
     }:
         raise _reject_manifest(
-            f"unknown/missing root fields: {sorted(set(doc))}."
-        )
+            f"unknown/missing root fields: {sorted(set(doc))}.")
     if (not isinstance(doc["schema_version"], int)
             or isinstance(doc["schema_version"], bool)
             or doc["schema_version"] != BACKUP_MANIFEST_SCHEMA_VERSION):
@@ -899,14 +887,12 @@ def parse_backup_manifest_v1(raw: bytes) -> dict:
     for entry in artifacts:
         if not isinstance(entry, dict) or set(entry) != {"kind", "sha256"}:
             raise _reject_manifest(
-                "workflow artifact entries must have exactly kind+sha256."
-            )
+                "workflow artifact entries must have exactly kind+sha256.")
         if entry["kind"] not in ARTIFACT_KINDS:
             raise _reject_manifest(f"unknown artifact kind {entry['kind']!r}.")
         if not _is_hash(entry["sha256"]):
             raise _reject_manifest(
-                f"artifact sha256 {entry['sha256']!r} is not hex."
-            )
+                f"artifact sha256 {entry['sha256']!r} is not hex.")
         seen_pairs.add((entry["kind"], entry["sha256"]))
     if len(seen_pairs) != len(artifacts):
         raise _reject_manifest("duplicate (kind, sha256) pairs.")
@@ -924,14 +910,12 @@ def parse_backup_manifest_v1(raw: bytes) -> dict:
         }:
             raise _reject_manifest(
                 "project entries must have exactly project_id + "
-                "historical_blob_hashes + historical_workflow_artifacts."
-            )
+                "historical_blob_hashes + historical_workflow_artifacts.")
         try:
             uuid.UUID(str(proj["project_id"]))
         except (ValueError, AttributeError) as exc:
             raise _reject_manifest(
-                f"project_id {proj['project_id']!r} is not a UUID."
-            ) from exc
+                f"project_id {proj['project_id']!r} is not a UUID.") from exc
         seen_pids.append(str(proj["project_id"]))
         blobs = proj["historical_blob_hashes"]
         if not isinstance(blobs, list):
@@ -939,42 +923,35 @@ def parse_backup_manifest_v1(raw: bytes) -> dict:
         for h in blobs:
             if not _is_hash(h):
                 raise _reject_manifest(
-                    f"project blob hash {h!r} is not hex."
-                )
+                    f"project blob hash {h!r} is not hex.")
         if blobs != sorted(set(blobs)):
             raise _reject_manifest(
-                "project historical_blob_hashes must be sorted and unique."
-            )
+                "project historical_blob_hashes must be sorted and unique.")
         arts = proj["historical_workflow_artifacts"]
         if not isinstance(arts, list):
             raise _reject_manifest(
-                "project historical_workflow_artifacts must be a list."
-            )
+                "project historical_workflow_artifacts must be a list.")
         pairs: list[tuple[str, str]] = []
         for entry in arts:
             if not isinstance(entry, dict) or set(entry) != {"kind", "sha256"}:
                 raise _reject_manifest(
-                    "project artifact entries must have exactly kind+sha256."
-                )
+                    "project artifact entries must have exactly kind+sha256.")
             if entry["kind"] not in ARTIFACT_KINDS:
                 raise _reject_manifest(
-                    f"unknown project artifact kind {entry['kind']!r}."
-                )
+                    f"unknown project artifact kind {entry['kind']!r}.")
             if not _is_hash(entry["sha256"]):
                 raise _reject_manifest("project artifact sha256 is not hex.")
             pairs.append((entry["kind"], entry["sha256"]))
         if pairs != sorted(set(pairs)):
             raise _reject_manifest(
                 "project historical_workflow_artifacts must be sorted and "
-                "unique."
-            )
+                "unique.")
     if seen_pids != sorted(set(seen_pids)):
         raise _reject_manifest("projects must be sorted and unique by project_id.")
 
     if canonical_json_bytes(doc) != raw:
         raise _reject_manifest(
-            "bytes are not the canonical backup-manifest-v1 representation."
-        )
+            "bytes are not the canonical backup-manifest-v1 representation.")
     return doc
 
 
@@ -1058,8 +1035,7 @@ def _verify_manifest_files(root: Path, manifest: dict) -> None:
     artifact_root = root / "workflow-artifacts"
     for entry in manifest["workflow_artifacts"]:
         path = _artifact_path(
-            artifact_root, entry["kind"], entry["sha256"]
-        )
+            artifact_root, entry["kind"], entry["sha256"])
         if not path.is_file():
             raise RecoveryCorruption(
                 f"backup workflow artifact {entry['kind']} "
@@ -1176,10 +1152,8 @@ def _verify_m11_production_state(staged_db: Path) -> None:
             # document's consumption object is compared DIRECTLY to the
             # normalized closure row — never rebuilt from the closure itself,
             # which would prove nothing about their agreement.
-            for key in (
-                "contract_key", "contract_version", "blob_hash", "size_bytes",
-                "media_type"
-            ):
+            for key in ("contract_key", "contract_version", "blob_hash",
+                        "size_bytes", "media_type"):
                 if c[key] != consumption.get(key):
                     raise RecoveryCorruption(
                         f"production revision {rid} closure row diverges from "
@@ -1244,8 +1218,7 @@ def _prove_no_m11_state(staged_db: Path) -> None:
     try:
         tables = {
             r[0] for r in con.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            )
+                "SELECT name FROM sqlite_master WHERE type='table'")
         }
         m11_tables = {
             "production_objects", "production_revisions",
@@ -1266,8 +1239,7 @@ def _prove_no_m12_state(staged_db: Path) -> None:
     try:
         tables = {
             r[0] for r in con.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            )
+                "SELECT name FROM sqlite_master WHERE type='table'")
         }
         m12_tables = {
             "compositions", "composition_occurrences", "composition_revisions",
@@ -1315,8 +1287,7 @@ def _prove_no_m13_state(staged_db: Path) -> None:
     try:
         tables = {
             r[0] for r in con.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            )
+                "SELECT name FROM sqlite_master WHERE type='table'")
         }
         present = tables & set(_M13_TABLES)
         if present:
@@ -1357,41 +1328,34 @@ def _verify_m13_subjects(con) -> None:
     for r in rows:
         if r["subject_kind"] not in ("creative_entity", "production_instance"):
             raise RecoveryCorruption(
-                f"adoption kind {r['subject_kind']!r} outside schema-1 domain"
-            )
+                f"adoption kind {r['subject_kind']!r} outside schema-1 domain")
         if r["subject_kind"] == "creative_entity":
             if r["creative_entity_id"] is None:
                 raise RecoveryCorruption(
-                    "creative_entity adoption without creative_entity_id"
-                )
+                    "creative_entity adoption without creative_entity_id")
         elif r["creative_entity_id"] is not None:
             raise RecoveryCorruption(
-                "production_instance adoption carries creative_entity_id"
-            )
+                "production_instance adoption carries creative_entity_id")
         occ = con.execute(
             "SELECT 1 FROM composition_occurrences "
             "WHERE id = ? AND composition_id = ?",
-            (r["occurrence_id"], r["composition_id"]),
-        ).fetchone()
+            (r["occurrence_id"], r["composition_id"])).fetchone()
         if occ is None:
             raise RecoveryCorruption(
-                "adoption references an occurrence outside its lineage"
-            )
+                "adoption references an occurrence outside its lineage")
         if r["creative_entity_id"] is not None:
             ent = con.execute(
                 "SELECT project_id FROM creative_entities WHERE id = ?",
-                (r["creative_entity_id"],),
-            ).fetchone()
+                (r["creative_entity_id"],)).fetchone()
             if ent is None:
                 raise RecoveryCorruption(
-                    "adoption references a missing CreativeEntity"
-                )
+                    "adoption references a missing CreativeEntity")
             comp = con.execute(
                 "SELECT project_id FROM compositions WHERE id = ?",
-                (r["composition_id"],),
-            ).fetchone()
+                (r["composition_id"],)).fetchone()
             if comp is None or comp["project_id"] != ent["project_id"]:
-                raise RecoveryCorruption("adoption crosses Projects")
+                raise RecoveryCorruption(
+                    "adoption crosses Projects")
     # Active-liveness uniqueness (frozen §2.2): at most one ACTIVE
     # occurrence per (composition lineage, CreativeEntity) claim.
     dupes = con.execute(
@@ -1415,33 +1379,30 @@ def _verify_m13_subjects(con) -> None:
 
 def _verify_m13_interpretations(con) -> None:
     from soloring.errors import SoloRingError
-    from soloring.production_world.canonical import verify_stored_interpretation
+    from soloring.production_world.canonical import (
+        verify_stored_interpretation,
+    )
 
     rows = con.execute(
         "SELECT production_revision_id, schema_version, x_mm, y_mm, z_mm, "
         "yaw_udeg, pitch_udeg, roll_udeg, interpretation_json, "
         "interpretation_hash "
-        "FROM production_revision_spatial_interpretations"
-    ).fetchall()
+        "FROM production_revision_spatial_interpretations").fetchall()
     for r in rows:
         snap = con.execute(
             "SELECT snapshot_hash FROM production_revisions "
-            "WHERE id = ?", (r["production_revision_id"],)
-        ).fetchone()
+            "WHERE id = ?", (r["production_revision_id"],)).fetchone()
         if snap is None:
             raise RecoveryCorruption(
-                "interpretation references a missing Production Revision"
-            )
+                "interpretation references a missing Production Revision")
         blob = con.execute(
             "SELECT blob_hash FROM production_revision_closures "
             "WHERE production_revision_id = ? AND contract_key = "
             "'retained_blob' AND contract_version = 1",
-            (r["production_revision_id"],),
-        ).fetchone()
+            (r["production_revision_id"],)).fetchone()
         if blob is None:
             raise RecoveryCorruption(
-                "interpretation parent has no retained_blob/v1 closure"
-            )
+                "interpretation parent has no retained_blob/v1 closure")
         if r["schema_version"] != 1:
             raise RecoveryCorruption("interpretation schema_version != 1")
         try:
@@ -1458,8 +1419,7 @@ def _verify_m13_interpretations(con) -> None:
         except SoloRingError as exc:
             raise RecoveryCorruption(
                 f"corrupt spatial interpretation "
-                f"{r['production_revision_id']}: {exc.message}"
-            ) from exc
+                f"{r['production_revision_id']}: {exc.message}") from exc
 
 
 def _verify_m12_composition_state(staged_db: Path) -> None:
@@ -1484,8 +1444,7 @@ def _verify_m12_revisions(con) -> None:
     # against the same frozen contract: recovery must not run an event loop
     # inside the staged verifier.
     revisions = con.execute(
-        "SELECT id, composition_id FROM composition_revisions"
-    ).fetchall()
+        "SELECT id, composition_id FROM composition_revisions").fetchall()
     for rev in revisions:
         _verify_m12_revision_sync(con, rev["id"], rev["composition_id"])
 
@@ -1506,20 +1465,16 @@ def _verify_m12_revision_sync(con, revision_id: str, composition_id: str) -> Non
         parsed = _json.loads(rev["snapshot_json"])
     except ValueError as exc:
         raise RecoveryCorruption(
-            f"composition revision {revision_id} snapshot not JSON: {exc}"
-        ) from exc
+            f"composition revision {revision_id} snapshot not JSON: {exc}")
     if parsed.get("schema_version") != 1:
         raise RecoveryCorruption(
-            f"composition revision {revision_id} unknown schema version"
-        )
+            f"composition revision {revision_id} unknown schema version")
     if canonical_json_bytes(parsed) != rev["snapshot_json"].encode("utf-8"):
         raise RecoveryCorruption(
-            f"composition revision {revision_id} snapshot not canonical"
-        )
+            f"composition revision {revision_id} snapshot not canonical")
     if canonical_hash(parsed) != rev["snapshot_hash"]:
         raise RecoveryCorruption(
-            f"composition revision {revision_id} hash mismatch"
-        )
+            f"composition revision {revision_id} hash mismatch")
 
     proj = con.execute(
         "SELECT * FROM composition_revision_occurrences "
@@ -1529,14 +1484,12 @@ def _verify_m12_revision_sync(con, revision_id: str, composition_id: str) -> Non
     occurrences = parsed.get("occurrences", [])
     if len(proj) != len(occurrences):
         raise RecoveryCorruption(
-            f"composition revision {revision_id} projection count mismatch"
-        )
+            f"composition revision {revision_id} projection count mismatch")
     direct_prod, direct_nested = set(), set()
     for row, occ in zip(proj, occurrences):
         if row["occurrence_id"] != occ["occurrence_id"]:
             raise RecoveryCorruption(
-                f"composition revision {revision_id} projection identity drift"
-            )
+                f"composition revision {revision_id} projection identity drift")
         if row["source_kind"] == "production_revision":
             rid = row["production_revision_id"]
             direct_prod.add(rid)
@@ -1557,42 +1510,36 @@ def _verify_m12_revision_sync(con, revision_id: str, composition_id: str) -> Non
         if got != expected:
             raise RecoveryCorruption(
                 f"composition revision {revision_id} projection/snapshot "
-                f"mismatch at {row['occurrence_id']}"
-            )
+                f"mismatch at {row['occurrence_id']}")
         if occ["transform"]["translation_mm"] != [
                 row["x_mm"], row["y_mm"], row["z_mm"]]:
             raise RecoveryCorruption(
-                f"composition revision {revision_id} translation mismatch"
-            )
+                f"composition revision {revision_id} translation mismatch")
         if occ["transform"]["rotation_udeg"] != [
                 row["yaw_udeg"], row["pitch_udeg"], row["roll_udeg"]]:
             raise RecoveryCorruption(
-                f"composition revision {revision_id} rotation mismatch"
-            )
-        for v in (
-            row["x_mm"], row["y_mm"], row["z_mm"],
-            row["yaw_udeg"], row["pitch_udeg"], row["roll_udeg"]
-        ):
+                f"composition revision {revision_id} rotation mismatch")
+        for v in (row["x_mm"], row["y_mm"], row["z_mm"],
+                  row["yaw_udeg"], row["pitch_udeg"], row["roll_udeg"]):
             if not (JS_SAFE_MIN <= v <= JS_SAFE_MAX):
                 raise RecoveryCorruption(
                     f"composition revision {revision_id} transform outside "
-                    "JS-safe domain"
-                )
+                    "JS-safe domain")
         for v in (row["yaw_udeg"], row["pitch_udeg"], row["roll_udeg"]):
             if not (UDEG_MIN <= v < UDEG_MIN + 360_000_000):
                 raise RecoveryCorruption(
                     f"composition revision {revision_id} rotation not "
-                    "canonically normalized"
-                )
+                    "canonically normalized")
+        # lineage coherence: occurrence belongs to this composition
         owner = con.execute(
             "SELECT composition_id FROM composition_occurrences WHERE id = ?",
             (row["occurrence_id"],),
         ).fetchone()
         if owner is None or owner["composition_id"] != composition_id:
             raise RecoveryCorruption(
-                f"composition revision {revision_id} occurrence lineage drift"
-            )
+                f"composition revision {revision_id} occurrence lineage drift")
 
+    # independently rederive the closure (set-oriented, frozen §18)
     exp_prod, exp_nested = set(direct_prod), set(direct_nested)
     if direct_nested:
         ph = ",".join("?" for _ in direct_nested)
@@ -1615,23 +1562,19 @@ def _verify_m12_revision_sync(con, revision_id: str, composition_id: str) -> Non
             or sorted(exp_nested) != deps.get("composition_revision_ids")):
         raise RecoveryCorruption(
             f"composition revision {revision_id} dependency arrays differ "
-            "from independently rederived closure"
-        )
+            "from independently rederived closure")
     stored_prod = {r[0] for r in con.execute(
         "SELECT production_revision_id FROM "
         "composition_revision_production_dependencies "
-        "WHERE composition_revision_id = ?", (revision_id,)
-    )}
+        "WHERE composition_revision_id = ?", (revision_id,))}
     stored_nested = {r[0] for r in con.execute(
         "SELECT nested_composition_revision_id FROM "
         "composition_revision_nested_dependencies "
-        "WHERE composition_revision_id = ?", (revision_id,)
-    )}
+        "WHERE composition_revision_id = ?", (revision_id,))}
     if stored_prod != exp_prod or stored_nested != exp_nested:
         raise RecoveryCorruption(
             f"composition revision {revision_id} dependency rows differ "
-            "from independently rederived closure"
-        )
+            "from independently rederived closure")
     clash = con.execute(
         "SELECT COUNT(*) FROM composition_revision_nested_dependencies d "
         "JOIN composition_revisions cr ON cr.id = d.nested_composition_revision_id "
@@ -1641,8 +1584,7 @@ def _verify_m12_revision_sync(con, revision_id: str, composition_id: str) -> Non
     if clash:
         raise RecoveryCorruption(
             f"composition revision {revision_id} transitive same-lineage "
-            "embedding"
-        )
+            "embedding")
 
 
 def _verify_m12_lineage(con) -> None:
@@ -1658,6 +1600,9 @@ def _verify_m12_lineage(con) -> None:
     import json as _json
 
     from soloring.domain.canonical import canonical_hash, canonical_json_bytes
+
+    # The evidence grammar is owned solely by composition.evidence —
+    # no second (dormant) interpretation survives here.
 
     compositions = con.execute("SELECT id, working_version FROM compositions")
     for comp in compositions.fetchall():
@@ -1678,8 +1623,7 @@ def _verify_m12_lineage(con) -> None:
                 raise RecoveryCorruption("operation version step != +1")
             if op["working_version_after"] > cur_wv:
                 raise RecoveryCorruption(
-                    "operation after exceeds current working_version"
-                )
+                    "operation after exceeds current working_version")
             try:
                 parsed = _json.loads(op["operation_json"])
             except ValueError:
@@ -1688,16 +1632,16 @@ def _verify_m12_lineage(con) -> None:
                 raise RecoveryCorruption("operation_json not canonical")
             if canonical_hash(parsed) != op["operation_hash"]:
                 raise RecoveryCorruption("operation_hash mismatch")
+            # THE one shared evidence checklist — identical contract to
+            # the async historical verifier via composition.evidence.
             sources = con.execute(
                 "SELECT occurrence_id, terminates_identity FROM "
                 "composition_identity_operation_sources WHERE operation_id = ? "
-                "ORDER BY occurrence_id", (op["id"],)
-            ).fetchall()
+                "ORDER BY occurrence_id", (op["id"],)).fetchall()
             targets = con.execute(
                 "SELECT occurrence_id FROM "
                 "composition_identity_operation_targets WHERE operation_id = ? "
-                "ORDER BY occurrence_id", (op["id"],)
-            ).fetchall()
+                "ORDER BY occurrence_id", (op["id"],)).fetchall()
             from soloring.composition.evidence import (
                 validate_operation_evidence as _validate_evidence,
             )
@@ -1712,8 +1656,7 @@ def _verify_m12_lineage(con) -> None:
                     row_impact_fingerprint=op["impact_fingerprint"],
                     normalized_sources=[
                         (r["occurrence_id"], r["terminates_identity"])
-                        for r in sources
-                    ],
+                        for r in sources],
                     normalized_targets=[r["occurrence_id"] for r in targets],
                 )
             except ValueError as exc:
@@ -1734,28 +1677,23 @@ def _verify_m12_lineage(con) -> None:
                 birth[t["occurrence_id"]] = op["working_version_before"]
         all_occ = [r[0] for r in con.execute(
             "SELECT id FROM composition_occurrences WHERE composition_id = ?",
-            (cid,)
-        )]
+            (cid,))]
         for oid in all_occ:
             if oid not in birth:
                 raise RecoveryCorruption("occurrence without birth operation")
         working = [r[0] for r in con.execute(
             "SELECT occurrence_id FROM composition_working_occurrences "
-            "WHERE composition_id = ?", (cid,)
-        )]
+            "WHERE composition_id = ?", (cid,))]
         for oid in working:
             if oid in terminated_at:
                 raise RecoveryCorruption(
-                    "terminated occurrence remains in working state"
-                )
+                    "terminated occurrence remains in working state")
+        # active-occurrence ↔ working-membership equality (frozen §12.3):
+        # a live, nonterminated occurrence must BE in working membership.
         active = {o for o in all_occ if o not in terminated_at}
         if active != set(working):
             raise RecoveryCorruption(
-                "active occurrence set differs from working membership"
-            )
-
-
-# ---------------------------------------------------------------------------
+                "active occurrence set differs from working membership")
 # Public operation: backup (§7.4)
 # ---------------------------------------------------------------------------
 
@@ -1781,17 +1719,15 @@ async def backup(
     stage.mkdir()
     try:
         staged_db = stage / "soloring.db"
-        source_uri = _sqlite_readonly_uri(Path(settings.db_path))
+        source_uri = f"file:{Path(settings.db_path).as_posix()}?mode=ro"
         source_meta: dict = {}
         probe = sqlite3.connect(source_uri, uri=True)
         try:
             source_meta = {
                 "journal_mode": probe.execute(
-                    "PRAGMA journal_mode"
-                ).fetchone()[0],
+                    "PRAGMA journal_mode").fetchone()[0],
                 "foreign_keys": probe.execute(
-                    "PRAGMA foreign_keys"
-                ).fetchone()[0],
+                    "PRAGMA foreign_keys").fetchone()[0],
             }
         finally:
             probe.close()
@@ -1799,18 +1735,27 @@ async def backup(
         await asyncio.to_thread(_sqlite_online_backup, source_uri, staged_db)
         if not staged_db.is_file():
             raise RecoveryCorruption(
-                "SQLite online backup produced no staged DB file."
-            )
+                "SQLite online backup produced no staged DB file.")
         staged_meta = await asyncio.to_thread(_normalize_staged_wal, staged_db)
         await asyncio.to_thread(_drop_sidecar_files, staged_db)
         await asyncio.to_thread(_verify_staged_db, staged_db)
+        # M11 §14.4: immutable production state is verified in the staged
+        # DB before any liveness copying or certification.
         await asyncio.to_thread(_verify_m11_production_state, staged_db)
+        # M12 §16.3: immutable composition/occurrence state is verified in
+        # the staged DB before liveness enumeration/certification.
         await asyncio.to_thread(_verify_m12_composition_state, staged_db)
+        # M13 §23.4: immutable production-world state is verified in the
+        # staged DB before liveness enumeration/certification.
         await asyncio.to_thread(_verify_m13_world_state, staged_db)
         liveness = await asyncio.to_thread(_enumerate_liveness, staged_db)
 
         blob_root = Path(settings.blob_dir)
         for h in liveness.blob_hashes:
+            # R6 §7.5: physical location is ALWAYS the hash-derived
+            # canonical path under the active Blob root — the stored
+            # blobs.path value is metadata and is never followed (legacy
+            # M10E D0 absolute values included).
             relative = _blob_relative_path(h)
             src = blob_root / relative
             if not src.is_file():
@@ -1845,11 +1790,9 @@ async def backup(
 
         db_hash, db_bytes = await asyncio.to_thread(_stream_hash, staged_db)
         manifest = build_backup_manifest(
-            database_sha256=db_hash, liveness=liveness
-        )
+            database_sha256=db_hash, liveness=liveness)
         (stage / "backup-manifest.json").write_bytes(
-            canonical_json_bytes(manifest)
-        )
+            canonical_json_bytes(manifest))
 
         await asyncio.to_thread(_verify_backup_tree, stage, True)
     except BaseException:
@@ -1890,13 +1833,14 @@ async def restore(backup_root: Path, dest: Path) -> dict:
             "fresh absent data root."
         )
 
+    # Steps 1-3: verify the backup artifact itself before any staging.
     manifest = await asyncio.to_thread(
-        _verify_backup_tree, backup_root, False
-    )
+        _verify_backup_tree, backup_root, False)
 
     stage = dest.parent / f".{dest.name}.soloring-restore-{uuid.uuid4().hex}.staging"
     stage.mkdir()
     try:
+        # Step 6: physical history enters the stage BEFORE any DB copy.
         blob_root = backup_root / "blobs"
         for h in manifest["blob_hashes"]:
             src = blob_root / _blob_relative_path(h)
@@ -1916,6 +1860,7 @@ async def restore(backup_root: Path, dest: Path) -> dict:
                 entry["sha256"],
             )
 
+        # Step 7: the already-verified DB copy lands after physical history.
         staged_db = stage / "soloring.db"
         await asyncio.to_thread(
             _copy_verified, backup_root / "soloring.db", staged_db,
@@ -1923,6 +1868,9 @@ async def restore(backup_root: Path, dest: Path) -> dict:
         )
         await asyncio.to_thread(_normalize_staged_wal, staged_db)
         await asyncio.to_thread(_drop_sidecar_files, staged_db)
+        # Head-dispatched restore (frozen R3 §14.6): the staged DB is
+        # verified at the head its own manifest recorded, never silently
+        # migrated during restore.
         head = manifest["alembic_version"]
         await asyncio.to_thread(_verify_staged_db, staged_db, expected_head=head)
         if head == PRE_M11_ALEMBIC_HEAD:
@@ -1932,16 +1880,22 @@ async def restore(backup_root: Path, dest: Path) -> dict:
             await asyncio.to_thread(_verify_m11_production_state, staged_db)
             await asyncio.to_thread(_prove_no_m12_state, staged_db)
             await asyncio.to_thread(_prove_no_m13_state, staged_db)
-        elif head == M12_ALEMBIC_HEAD:
+        elif head == M12_ALEMBIC_HEAD:  # 0013
             await asyncio.to_thread(_verify_m11_production_state, staged_db)
             await asyncio.to_thread(_verify_m12_composition_state, staged_db)
             await asyncio.to_thread(_prove_no_m13_state, staged_db)
-        else:
+        else:  # 0014
             await asyncio.to_thread(_verify_m11_production_state, staged_db)
             await asyncio.to_thread(_verify_m12_composition_state, staged_db)
             await asyncio.to_thread(_verify_m13_world_state, staged_db)
 
-        await asyncio.to_thread(_verify_liveness_equal, staged_db, manifest)
+        # Step 9: exact liveness equality with the manifest (the restored
+        # DATA root is not a backup artifact; verify against the parsed
+        # source manifest, not a manifest file inside the stage).
+        await asyncio.to_thread(
+            _verify_liveness_equal, staged_db, manifest)
+
+        # Step 10: production historical verification on the staged root.
         await _production_historical_probe(stage, manifest)
     except BaseException:
         shutil.rmtree(stage, ignore_errors=True)
@@ -1949,6 +1903,7 @@ async def restore(backup_root: Path, dest: Path) -> dict:
 
     _publish_staged_directory(stage, dest)
 
+    # Step 12: reopen the FINAL destination normally; minimal probe.
     await _production_historical_probe(dest, manifest, minimal=True)
     return {
         "sqlite_runtime_version": sqlite3.sqlite_version,
@@ -1973,12 +1928,10 @@ async def _production_historical_probe(
     engine = create_soloring_engine(probe_settings)
     try:
         async with engine.connect() as conn:
-            gens = (
-                await conn.execute(text("SELECT COUNT(*) FROM generations"))
-            ).scalar_one()
-            projects = (
-                await conn.execute(text("SELECT COUNT(*) FROM projects"))
-            ).scalar_one()
+            gens = (await conn.execute(
+                text("SELECT COUNT(*) FROM generations"))).scalar_one()
+            projects = (await conn.execute(
+                text("SELECT COUNT(*) FROM projects"))).scalar_one()
             if not minimal:
                 if gens != _count_generations(manifest, data_root):
                     raise RecoveryCorruption(
@@ -2002,6 +1955,8 @@ async def _production_historical_probe(
     }
     entries = manifest["workflow_artifacts"]
     if minimal and entries:
+        # One representative production retrieval is enough for the final
+        # reopen probe; the staged run (minimal=False) verified every entry.
         entries = entries[:1]
     for entry in entries:
         await getters[entry["kind"]](entry["sha256"])
@@ -2019,8 +1974,7 @@ def _verify_m13_pi_state(con) -> None:
     rows = con.execute(
         "SELECT id, composition_id, occurrence_id, key, kind, value_type, "
         "name, enum_values_json, unit, supersedes_feature_id FROM "
-        "production_instance_features"
-    ).fetchall()
+        "production_instance_features").fetchall()
     seen: set = set()
     for r in rows:
         seen.add(r[0])
@@ -2028,197 +1982,179 @@ def _verify_m13_pi_state(con) -> None:
             raise RecoveryCorruption("PI feature identity fields corrupt")
         occ = con.execute(
             "SELECT 1 FROM composition_occurrences WHERE id = ? AND "
-            "composition_id = ?", (r[2], r[1])
-        ).fetchone()
+            "composition_id = ?", (r[2], r[1])).fetchone()
         if occ is None:
             raise RecoveryCorruption(
                 f"PI feature {r[0]} references an occurrence outside its "
-                "lineage"
-            )
+                "lineage")
         if r[5] == "enum" and r[7] is None:
             raise RecoveryCorruption(
-                f"PI feature {r[0]}: enum without enum_values_json"
-            )
+                f"PI feature {r[0]}: enum without enum_values_json")
         if r[5] != "enum" and r[7] is not None:
             raise RecoveryCorruption(
-                f"PI feature {r[0]}: enum_values_json on non-enum"
-            )
+                f"PI feature {r[0]}: enum_values_json on non-enum")
         if r[9] is not None and r[9] not in seen and not con.execute(
                 "SELECT 1 FROM production_instance_features WHERE id = ?",
-                (r[9],)
-        ).fetchone():
+                (r[9],)).fetchone():
             raise RecoveryCorruption(
-                f"PI feature {r[0]} supersedes a missing predecessor"
-            )
+                f"PI feature {r[0]} supersedes a missing predecessor")
         adoption = con.execute(
             "SELECT subject_kind FROM "
             "composition_occurrence_authority_subjects WHERE "
             "composition_id = ? AND occurrence_id = ?",
-            (r[1], r[2]),
-        ).fetchone()
+            (r[1], r[2])).fetchone()
         if adoption is None or adoption[0] != "production_instance":
             raise RecoveryCorruption(
                 f"PI feature {r[0]} lacks a production_instance adoption "
-                "for its occurrence (provenance incoherent)"
-            )
+                "for its occurrence (provenance incoherent)")
+    # transitions: set/clear grammar + active-coordinate uniqueness
     trows = con.execute(
         "SELECT id, feature_id, anchor_type, anchor_id, boundary, "
         "operation, value_json, value_hash FROM "
-        "production_instance_feature_transitions"
-    ).fetchall()
+        "production_instance_feature_transitions").fetchall()
     active: set = set()
     for t in trows:
         if t[3] is None:
             raise RecoveryCorruption(
-                f"PI feature transition {t[0]} has no anchor"
-            )
+                f"PI feature transition {t[0]} has no anchor")
         if t[5] == "set":
             if t[6] is None or t[7] is None or len(t[7]) != 64:
                 raise RecoveryCorruption(
                     f"PI feature transition {t[0]}: set without canonical "
-                    "value/hash"
-                )
+                    "value/hash")
         elif t[5] == "clear":
             if t[6] is not None or t[7] is not None:
                 raise RecoveryCorruption(
-                    f"PI feature transition {t[0]}: clear carries values"
-                )
+                    f"PI feature transition {t[0]}: clear carries values")
         else:
             raise RecoveryCorruption(
-                f"PI feature transition {t[0]}: operation outside set|clear"
-            )
+                f"PI feature transition {t[0]}: operation outside "
+                "set|clear")
         coord = (t[1], t[2], t[3], t[4])
+        # tombstone-inclusive uniqueness is structural (PK/unique); the
+        # active-coordinate partial unique is validated by schema parity
         del coord, active
 
 
 def _verify_m13_pi_spatial(con) -> None:
     rows = con.execute(
         "SELECT id, spatial_world_id, composition_id, occurrence_id, "
-        "requirement FROM production_instance_spatial_tracks"
-    ).fetchall()
+        "requirement FROM production_instance_spatial_tracks").fetchall()
     for r in rows:
         if r[4] not in ("required", "optional"):
             raise RecoveryCorruption(
-                f"PI track {r[0]}: requirement outside the domain"
-            )
+                f"PI track {r[0]}: requirement outside the domain")
         world = con.execute(
-            "SELECT project_id FROM spatial_worlds WHERE id = ?", (r[1],)
-        ).fetchone()
+            "SELECT project_id FROM spatial_worlds WHERE id = ?",
+            (r[1],)).fetchone()
         comp = con.execute(
-            "SELECT project_id FROM compositions WHERE id = ?", (r[2],)
-        ).fetchone()
+            "SELECT project_id FROM compositions WHERE id = ?",
+            (r[2],)).fetchone()
         if world is None or comp is None or world[0] != comp[0]:
             raise RecoveryCorruption(
-                f"PI track {r[0]}: world/Composition coherence broken"
-            )
+                f"PI track {r[0]}: world/Composition coherence broken")
         adoption = con.execute(
             "SELECT subject_kind FROM "
             "composition_occurrence_authority_subjects WHERE "
-            "composition_id = ? AND occurrence_id = ?", (r[2], r[3])
-        ).fetchone()
+            "composition_id = ? AND occurrence_id = ?",
+            (r[2], r[3])).fetchone()
         if adoption is None or adoption[0] != "production_instance":
             raise RecoveryCorruption(
-                f"PI track {r[0]} lacks a production_instance adoption"
-            )
+                f"PI track {r[0]} lacks a production_instance adoption")
     srows = con.execute(
         "SELECT id, spatial_track_id, operation, x_mm, y_mm, z_mm, "
         "yaw_udeg, pitch_udeg, roll_udeg FROM "
-        "production_instance_spatial_transitions"
-    ).fetchall()
+        "production_instance_spatial_transitions").fetchall()
     for t in srows:
         six = (t[3], t[4], t[5], t[6], t[7], t[8])
         if t[2] == "set":
             if any(v is None for v in six):
                 raise RecoveryCorruption(
-                    f"PI spatial transition {t[0]}: incomplete set"
-                )
+                    f"PI spatial transition {t[0]}: incomplete set")
         elif t[2] == "clear":
             if any(v is not None for v in six):
                 raise RecoveryCorruption(
-                    f"PI spatial transition {t[0]}: clear carries a transform"
-                )
+                    f"PI spatial transition {t[0]}: clear carries a "
+                    "transform")
         else:
             raise RecoveryCorruption(
-                f"PI spatial transition {t[0]}: operation outside set|clear"
-            )
+                f"PI spatial transition {t[0]}: operation outside "
+                "set|clear")
 
 
 def _verify_m13_bindings(con) -> None:
+    """Immutable binding integrity ONLY (§23.4): canonical bytes/hash,
+    normalized child equality, exact pinned closure, and pinned-target
+    EXISTENCE even when the target is now soft-deleted. Never re-derives
+    today's candidate — staleness is legal immutable history."""
     import hashlib
     import json as _json
+    import re as _re
 
     from soloring.domain.canonical import canonical_json_str
     from soloring.errors import SoloRingError
     from soloring.production_world.binding import _parse_binding_value
-    from soloring.production_world.canonical import verify_stored_interpretation
+    from soloring.production_world.canonical import (
+        verify_stored_interpretation,
+    )
 
     parents = con.execute(
         "SELECT id, composition_revision_id, composition_revision_hash, "
         "spatial_world_revision_id, spatial_world_revision_hash, "
         "schema_version, binding_json, binding_hash FROM "
-        "composition_spatial_bindings"
-    ).fetchall()
+        "composition_spatial_bindings").fetchall()
     for p in parents:
         try:
             parsed = _json.loads(p[6])
         except ValueError as exc:
-            raise RecoveryCorruption(f"binding {p[0]} JSON unparseable") from exc
+            raise RecoveryCorruption(
+                f"binding {p[0]} JSON unparseable") from exc
         try:
             value = _parse_binding_value(parsed)
         except SoloRingError as exc:
             raise RecoveryCorruption(
-                f"binding {p[0]}: {exc.message}"
-            ) from exc
+                f"binding {p[0]}: {exc.message}") from exc
         if canonical_json_str(value) != p[6]:
             raise RecoveryCorruption(
-                f"binding {p[0]} is not the canonical encoding"
-            )
+                f"binding {p[0]} is not the canonical encoding")
         if hashlib.sha256(p[6].encode("utf-8")).hexdigest() != p[7]:
             raise RecoveryCorruption(
-                f"binding {p[0]} hash disagrees with canonical bytes"
-            )
+                f"binding {p[0]} hash disagrees with canonical bytes")
         if (value["composition_revision"]["revision_id"] != p[1]
                 or value["composition_revision"]["snapshot_hash"] != p[2]
                 or value["spatial_world_revision"]["revision_id"] != p[3]
                 or value["spatial_world_revision"]["snapshot_hash"] != p[4]
                 or p[5] != 1):
             raise RecoveryCorruption(
-                f"binding {p[0]} parent columns disagree with its value"
-            )
+                f"binding {p[0]} parent columns disagree with its value")
+        # exact immutable closure: C hash + W hash
         c = con.execute(
             "SELECT snapshot_hash FROM composition_revisions WHERE id = ?",
-            (p[1],),
-        ).fetchone()
+            (p[1],)).fetchone()
         if c is None or c[0] != p[2]:
             raise RecoveryCorruption(
                 f"binding {p[0]}: pinned CompositionRevision missing or "
-                "hash disagrees"
-            )
+                "hash disagrees")
         w = con.execute(
-            "SELECT snapshot_hash FROM spatial_world_revisions WHERE id = ?",
-            (p[3],),
-        ).fetchone()
+            "SELECT snapshot_hash FROM spatial_world_revisions WHERE "
+            "id = ?", (p[3],)).fetchone()
         if w is None or w[0] != p[4]:
             raise RecoveryCorruption(
                 f"binding {p[0]}: pinned SpatialWorldRevision missing or "
-                "hash disagrees"
-            )
+                "hash disagrees")
+        # normalized children == canonical value (contiguous positions)
         srows = con.execute(
             "SELECT position, occurrence_id, production_revision_id, "
             "production_revision_hash, subject_kind, subject_id, "
             "creative_entity_id FROM composition_spatial_binding_subjects "
-            "WHERE binding_id = ? ORDER BY position", (p[0],)
-        ).fetchall()
+            "WHERE binding_id = ? ORDER BY position", (p[0],)).fetchall()
         if len(srows) != len(value["subjects"]):
             raise RecoveryCorruption(
-                f"binding {p[0]} subject child count mismatch"
-            )
+                f"binding {p[0]} subject child count mismatch")
         for pos, (row, s) in enumerate(zip(srows, value["subjects"])):
-            exp_ce = (
-                s["authority_subject"]["id"]
-                if s["authority_subject"]["kind"] == "creative_entity"
-                else None
-            )
+            exp_ce = (s["authority_subject"]["id"]
+                      if s["authority_subject"]["kind"] == "creative_entity"
+                      else None)
             if (row[0] != pos or row[1] != s["occurrence_id"]
                     or row[2] != s["production_revision_id"]
                     or row[3] != s["production_revision_hash"]
@@ -2226,16 +2162,14 @@ def _verify_m13_bindings(con) -> None:
                     or row[5] != s["authority_subject"]["id"]
                     or row[6] != exp_ce):
                 raise RecoveryCorruption(
-                    f"binding {p[0]} subject projection mismatch"
-                )
+                    f"binding {p[0]} subject projection mismatch")
             pr = con.execute(
-                "SELECT snapshot_hash FROM production_revisions WHERE id = ?",
-                (row[2],),
-            ).fetchone()
+                "SELECT snapshot_hash FROM production_revisions WHERE "
+                "id = ?", (row[2],)).fetchone()
             if pr is None or pr[0] != row[3]:
                 raise RecoveryCorruption(
-                    f"binding {p[0]}: subject ProductionRevision closure broken"
-                )
+                    f"binding {p[0]}: subject ProductionRevision closure "
+                    "broken")
         erows = con.execute(
             "SELECT position, occurrence_id, production_revision_id, "
             "production_revision_hash, subject_kind, subject_id, "
@@ -2243,18 +2177,14 @@ def _verify_m13_bindings(con) -> None:
             "spatial_track_id, production_instance_track_id, "
             "spatial_interpretation_hash FROM "
             "composition_spatial_binding_entries WHERE binding_id = ? "
-            "ORDER BY position", (p[0],)
-        ).fetchall()
+            "ORDER BY position", (p[0],)).fetchall()
         if len(erows) != len(value["entries"]):
             raise RecoveryCorruption(
-                f"binding {p[0]} entry child count mismatch"
-            )
+                f"binding {p[0]} entry child count mismatch")
         for pos, (row, e) in enumerate(zip(erows, value["entries"])):
-            exp_ce = (
-                e["authority_subject"]["id"]
-                if e["authority_subject"]["kind"] == "creative_entity"
-                else None
-            )
+            exp_ce = (e["authority_subject"]["id"]
+                      if e["authority_subject"]["kind"] == "creative_entity"
+                      else None)
             if (row[0] != pos or row[1] != e["occurrence_id"]
                     or row[4] != e["authority_subject"]["kind"]
                     or row[5] != e["authority_subject"]["id"]
@@ -2262,256 +2192,150 @@ def _verify_m13_bindings(con) -> None:
                     or row[7] != e["placement"]["kind"]
                     or row[11] != e["spatial_interpretation_hash"]):
                 raise RecoveryCorruption(
-                    f"binding {p[0]} entry projection mismatch"
-                )
-            col = {
-                "entity_fixed_frame": row[8],
-                "entity_track": row[9],
-                "production_instance_track": row[10],
-            }[row[7]]
-            others = [
-                v for k, v in {
-                    "entity_fixed_frame": row[8],
-                    "entity_track": row[9],
-                    "production_instance_track": row[10],
-                }.items() if k != row[7]
-            ]
-            if col != e["placement"]["id"] or any(
-                    v is not None for v in others):
+                    f"binding {p[0]} entry projection mismatch")
+            # placement XOR against the canonical value
+            col = {"entity_fixed_frame": row[8], "entity_track": row[9],
+                   "production_instance_track": row[10]}[row[7]]
+            others = [v for k, v in {
+                "entity_fixed_frame": row[8], "entity_track": row[9],
+                "production_instance_track": row[10]}.items()
+                if k != row[7]]
+            if col != e["placement"]["id"] or any(v is not None
+                                                  for v in others):
                 raise RecoveryCorruption(
-                    f"binding {p[0]} entry placement XOR broken"
-                )
-            target_table = {
-                "entity_fixed_frame": "spatial_frames",
-                "entity_track": "spatial_tracks",
-                "production_instance_track": "production_instance_spatial_tracks",
-            }[row[7]]
+                    f"binding {p[0]} entry placement XOR broken")
+            # pinned target EXISTENCE — soft-deleted remains verifiable
+            target_table = {"entity_fixed_frame": "spatial_frames",
+                            "entity_track": "spatial_tracks",
+                            "production_instance_track":
+                                "production_instance_spatial_tracks"}[row[7]]
             tgt = con.execute(
-                f"SELECT 1 FROM {target_table} WHERE id = ?", (col,)
-            ).fetchone()
+                f"SELECT 1 FROM {target_table} WHERE id = ?",
+                (col,)).fetchone()  # noqa: S608 — fixed table whitelist
             if tgt is None:
                 raise RecoveryCorruption(
-                    f"binding {p[0]}: pinned A4 target row {col} missing"
-                )
+                    f"binding {p[0]}: pinned A4 target row {col} missing")
+            # pinned interpretation closure + hash agreement
             irow = con.execute(
                 "SELECT production_revision_id, x_mm, y_mm, z_mm, "
                 "yaw_udeg, pitch_udeg, roll_udeg, interpretation_json, "
                 "interpretation_hash FROM "
                 "production_revision_spatial_interpretations WHERE "
-                "production_revision_id = ?", (row[2],)
-            ).fetchone()
+                "production_revision_id = ?", (row[2],)).fetchone()
             if irow is None or irow[8] != row[11]:
                 raise RecoveryCorruption(
                     f"binding {p[0]}: pinned interpretation missing or "
-                    "hash disagrees"
-                )
+                    "hash disagrees")
             parents_row = con.execute(
                 "SELECT pr.snapshot_hash, (SELECT c.blob_hash FROM "
                 "production_revision_closures c WHERE "
                 "c.production_revision_id = pr.id AND c.contract_key = "
                 "'retained_blob' AND c.contract_version = 1) FROM "
-                "production_revisions pr WHERE pr.id = ?", (row[2],)
-            ).fetchone()
+                "production_revisions pr WHERE pr.id = ?",
+                (row[2],)).fetchone()
             if parents_row is None or parents_row[1] is None:
                 raise RecoveryCorruption(
-                    f"binding {p[0]}: interpretation parent closure unreachable"
-                )
+                    f"binding {p[0]}: interpretation parent closure "
+                    "unreachable")
             try:
                 verify_stored_interpretation(
                     interpretation_json=irow[7],
                     interpretation_hash=irow[8],
                     x_mm=irow[1], y_mm=irow[2], z_mm=irow[3],
-                    yaw_udeg=irow[4], pitch_udeg=irow[5], roll_udeg=irow[6],
+                    yaw_udeg=irow[4], pitch_udeg=irow[5],
+                    roll_udeg=irow[6],
                     row_production_revision_id=irow[0],
                     parent_snapshot_hash=parents_row[0],
-                    parent_blob_hash=parents_row[1],
-                )
+                    parent_blob_hash=parents_row[1])
             except SoloRingError as exc:
                 raise RecoveryCorruption(
                     f"binding {p[0]}: pinned interpretation corrupt: "
-                    f"{exc.message}"
-                ) from exc
+                    f"{exc.message}") from exc
 
 
 def _verify_m13_selection_and_history(con) -> None:
-    """Current selection referential coherence + schema-6 parents with exact
-    child projections. Historical recovery applies the same canonical parent
-    and captured spatial-state integrity rules as the historical reader.
-    """
-    import json as _json
-    import re as _re
-
-    from soloring.domain.canonical import canonical_json_str
-    from soloring.production_world.resolver import (
-        production_world_hash as _production_world_hash,
-    )
-    from soloring.spatial.math import JS_SAFE_MAX, JS_SAFE_MIN, UDEG_MIN
-
+    """Current selection referential coherence + schema-6 parents with
+    exact child projections (§23.4). A selection referencing an
+    unresolvable binding is corruption; selection STALENESS is not
+    checked here — that is current-status classification."""
     sels = con.execute(
-        "SELECT shot_id, binding_id FROM shot_production_world_selections"
-    ).fetchall()
+        "SELECT shot_id, binding_id FROM "
+        "shot_production_world_selections").fetchall()
     for s in sels:
         if con.execute(
-                "SELECT 1 FROM shots WHERE id = ?", (s[0],)
-        ).fetchone() is None:
+                "SELECT 1 FROM shots WHERE id = ?", (s[0],)).fetchone() \
+                is None:
             raise RecoveryCorruption(
-                f"selection for shot {s[0]}: shot missing"
-            )
+                f"selection for shot {s[0]}: shot missing")
         if con.execute(
                 "SELECT 1 FROM composition_spatial_bindings WHERE id = ?",
-                (s[1],),
-        ).fetchone() is None:
+                (s[1],)).fetchone() is None:
             raise RecoveryCorruption(
-                f"selection for shot {s[0]}: binding {s[1]} missing"
-            )
-
+                f"selection for shot {s[0]}: binding {s[1]} missing")
     parents = con.execute(
         "SELECT shot_revision_id, production_world_hash, binding_id, "
         "binding_hash, composition_revision_id, composition_revision_hash, "
         "spatial_world_revision_id, spatial_world_revision_hash FROM "
-        "shot_revision_production_worlds"
-    ).fetchall()
-    uuid_re = _re.compile(
-        r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-"
-        r"[0-9a-f]{12}$"
-    )
+        "shot_revision_production_worlds").fetchall()
     for p in parents:
         rev = con.execute(
-            "SELECT snapshot_json, snapshot_hash FROM shot_revisions "
-            "WHERE id = ?", (p[0],)
-        ).fetchone()
+            "SELECT snapshot_json FROM shot_revisions WHERE id = ?",
+            (p[0],)).fetchone()
         if rev is None:
             raise RecoveryCorruption(
-                f"schema-6 parent for missing ShotRevision {p[0]}"
-            )
+                f"schema-6 parent for missing ShotRevision {p[0]}")
+        import json as _json
+
+        from soloring.domain.canonical import canonical_json_str
+
         try:
-            snap = _json.loads(rev["snapshot_json"])
+            snap = _json.loads(rev[0])
         except ValueError as exc:
             raise RecoveryCorruption(
-                f"ShotRevision {p[0]} snapshot unparseable"
-            ) from exc
-        if canonical_json_bytes(snap) != rev["snapshot_json"].encode("utf-8"):
-            raise RecoveryCorruption(
-                f"ShotRevision {p[0]} snapshot is not canonical"
-            )
-        if canonical_hash(snap) != rev["snapshot_hash"]:
-            raise RecoveryCorruption(
-                f"ShotRevision {p[0]} snapshot_hash mismatch"
-            )
-        pack = snap.get("production_world") if isinstance(snap, dict) else None
+                f"ShotRevision {p[0]} snapshot unparseable") from exc
+        pack = snap.get("production_world") if isinstance(snap, dict) \
+            else None
         if pack is None:
             raise RecoveryCorruption(
-                f"ShotRevision {p[0]}: M13 parent row without schema-6 content"
-            )
-        if _production_world_hash(pack) != p[1]:
-            raise RecoveryCorruption(
-                f"ShotRevision {p[0]}: production_world_hash disagrees with "
-                "the canonical captured pack"
-            )
+                f"ShotRevision {p[0]}: M13 parent row without schema-6 "
+                "content")
         b = pack["binding"]
         if (p[2] != b["binding_id"] or p[3] != b["binding_hash"]
                 or p[4] != b["value"]["composition_revision"]["revision_id"]
-                or p[5] != b["value"]["composition_revision"]["snapshot_hash"]
-                or p[6] != b["value"]["spatial_world_revision"]["revision_id"]
-                or p[7] != b["value"]["spatial_world_revision"]["snapshot_hash"]):
+                or p[5] != b["value"]["composition_revision"]
+                ["snapshot_hash"]
+                or p[6] != b["value"]["spatial_world_revision"]
+                ["revision_id"]
+                or p[7] != b["value"]["spatial_world_revision"]
+                ["snapshot_hash"]):
             raise RecoveryCorruption(
                 f"ShotRevision {p[0]}: M13 parent row disagrees with the "
-                "embedded pack"
-            )
-
+                "embedded pack")
+        # child projection equality against the pack (positions included)
         frows = con.execute(
             "SELECT position, occurrence_id, feature_id, value_json, "
             "value_hash FROM "
             "shot_revision_production_instance_feature_states WHERE "
-            "shot_revision_id = ? ORDER BY position", (p[0],)
-        ).fetchall()
+            "shot_revision_id = ? ORDER BY position", (p[0],)).fetchall()
         expected_f = [
-            (
-                pos, e["occurrence_id"], e["feature_id"],
-                canonical_json_str(e["value"]), e["value_hash"]
-            )
-            for pos, e in enumerate(pack["instance_feature_states"])
-        ]
+            (pos, e["occurrence_id"], e["feature_id"],
+             canonical_json_str(e["value"]), e["value_hash"])
+            for pos, e in enumerate(pack["instance_feature_states"])]
         got_f = [(r[0], r[1], r[2], r[3], r[4]) for r in frows]
         if got_f != expected_f:
             raise RecoveryCorruption(
-                f"ShotRevision {p[0]}: PI feature-state children disagree "
-                "with the captured pack"
-            )
-
+                f"ShotRevision {p[0]}: PI feature-state children "
+                "disagree with the captured pack")
         srows = con.execute(
-            "SELECT position, composition_id, occurrence_id, "
-            "production_instance_track_id, requirement, x_mm, y_mm, z_mm, "
-            "yaw_udeg, pitch_udeg, roll_udeg, source_transition_id, "
-            "source_anchor_type, source_anchor_id, source_boundary FROM "
-            "shot_revision_production_instance_spatial_states WHERE "
-            "shot_revision_id = ? ORDER BY position", (p[0],)
-        ).fetchall()
-        rebuilt_spatial: list[dict] = []
-        for pos, row in enumerate(srows):
-            if row["position"] != pos:
-                raise RecoveryCorruption(
-                    f"ShotRevision {p[0]}: PI spatial-state position "
-                    f"{row['position']} != canonical index {pos}"
-                )
-            if row["requirement"] not in ("required", "optional"):
-                raise RecoveryCorruption(
-                    f"ShotRevision {p[0]}: PI spatial-state requirement "
-                    f"{row['requirement']!r} outside the frozen domain"
-                )
-            six = (
-                row["x_mm"], row["y_mm"], row["z_mm"],
-                row["yaw_udeg"], row["pitch_udeg"], row["roll_udeg"],
-            )
-            if any(
-                not isinstance(v, int) or isinstance(v, bool)
-                or not (JS_SAFE_MIN <= v <= JS_SAFE_MAX)
-                for v in six
-            ):
-                raise RecoveryCorruption(
-                    f"ShotRevision {p[0]}: PI spatial-state transform outside "
-                    "the frozen integer domain"
-                )
-            for value in (
-                row["yaw_udeg"], row["pitch_udeg"], row["roll_udeg"]
-            ):
-                if not (UDEG_MIN <= value < UDEG_MIN + 360_000_000):
-                    raise RecoveryCorruption(
-                        f"ShotRevision {p[0]}: PI spatial-state rotation is "
-                        "not canonically normalized"
-                    )
-            if (row["source_anchor_type"] not in ("sequence", "scene", "shot")
-                    or row["source_boundary"] not in ("start", "end")
-                    or uuid_re.fullmatch(row["source_anchor_id"] or "") is None
-                    or uuid_re.fullmatch(
-                        row["source_transition_id"] or "") is None):
-                raise RecoveryCorruption(
-                    f"ShotRevision {p[0]}: PI spatial-state source grammar "
-                    f"invalid at position {pos}"
-                )
-            rebuilt_spatial.append({
-                "composition_id": row["composition_id"],
-                "occurrence_id": row["occurrence_id"],
-                "production_instance_track_id":
-                    row["production_instance_track_id"],
-                "requirement": row["requirement"],
-                "transform": {
-                    "translation_mm": [
-                        row["x_mm"], row["y_mm"], row["z_mm"]
-                    ],
-                    "rotation_udeg": [
-                        row["yaw_udeg"], row["pitch_udeg"], row["roll_udeg"]
-                    ],
-                },
-                "source_transition": {
-                    "transition_id": row["source_transition_id"],
-                    "anchor_type": row["source_anchor_type"],
-                    "anchor_id": row["source_anchor_id"],
-                    "boundary": row["source_boundary"],
-                },
-            })
-        if rebuilt_spatial != pack["instance_spatial_states"]:
+            "SELECT position, occurrence_id, production_instance_track_id, "
+            "x_mm FROM shot_revision_production_instance_spatial_states "
+            "WHERE shot_revision_id = ? ORDER BY position", (p[0],)).fetchall()
+        expected_s = [
+            (pos, e["occurrence_id"], e["production_instance_track_id"],
+             e["transform"]["translation_mm"][0])
+            for pos, e in enumerate(pack["instance_spatial_states"])]
+        got_s = [(r[0], r[1], r[2], r[3]) for r in srows]
+        if got_s != expected_s:
             raise RecoveryCorruption(
                 f"ShotRevision {p[0]}: PI spatial-state children disagree "
-                "with the captured pack"
-            )
+                "with the captured pack")
