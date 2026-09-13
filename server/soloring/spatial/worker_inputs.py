@@ -10,6 +10,7 @@ published M5 CapturedInput seam (§2.4).
 """
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from typing import Any
 
@@ -101,11 +102,11 @@ async def execute_schema3_derived_inputs(
     recording the executor-local reference for the manifest's exact
     node/field translation.
 
-    ``client`` is the worker's ClientUploader (upload(source_path=…,
-    filename=…, subfolder=…)); the bytes uploaded are read from the
-    verified physical Blob path. A retained D0 Blob that parses as
-    concatenated PNG frames is uploaded frame-per-file (the certified
-    consumption shape); any other content is uploaded whole."""
+    The physical Blob is read once after the historical verification step,
+    that exact buffer is re-hashed against the retained Blob identity, and
+    only that verified buffer is handed to the uploader. A retained D0 Blob
+    that parses as concatenated PNG frames is uploaded frame-per-file (the
+    certified consumption shape); any other content is uploaded whole."""
     from soloring.executors.comfy.input_materializer import (
         attempt_namespace,
         validate_returned_reference,
@@ -126,6 +127,17 @@ async def execute_schema3_derived_inputs(
         from pathlib import Path as _Path
 
         data = _Path(v.local_path).read_bytes()
+        # Post-verification transport fence: load_verified_derived_inputs()
+        # proves the path before returning, but a concurrent replacement
+        # between that proof and transport must never cause unverified bytes
+        # to reach the executor. Verify the exact in-memory buffer and upload
+        # only from that buffer; never reopen the path after this point.
+        if hashlib.sha256(data).hexdigest() != v.blob_hash:
+            raise _fail(
+                ec.DERIVED_SPATIAL_BLOB_CORRUPT,
+                f"Physical derived Blob bytes changed before transport for "
+                f"{v.input_key}.",
+            )
         frames = _split_png_frames(data)
         if frames and len(frames) > 1:
             refs = []
@@ -139,9 +151,8 @@ async def execute_schema3_derived_inputs(
         else:
             ext = ".png" if frames else ".bin"
             filename = f"{v.input_key}_{v.blob_hash[:16]}{ext}"
-            name, sub = await client.upload(
-                source_path=_Path(v.local_path), filename=filename,
-                subfolder=namespace)
+            name, sub = await client.upload_bytes(
+                data=data, filename=filename, subfolder=namespace)
             validate_returned_reference(name, sub, namespace)
             v.execution_reference = comfy_input_reference(name, sub)
     return verified
