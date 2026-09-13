@@ -1,0 +1,73 @@
+{
+  "frozen_plan_sha256": "b781f8157156babd9dc73e0397071708dac398e51a6658a91071da4dc9442c83",
+  "consumer_kind": "composition_working_occurrence/v1",
+  "evaluator": {
+    "id": "soloring.production_revision_compatibility",
+    "version": 1
+  },
+  "translator": {
+    "id": "soloring.compatibility.realization_local_frame_bridge",
+    "version": 1
+  },
+  "overall_verdicts": [
+    "COMPATIBLE_AS_IS",
+    "COMPATIBLE_VIA_DETERMINISTIC_TRANSLATION",
+    "REQUIRES_REVIEW",
+    "INCOMPATIBLE"
+  ],
+  "verdict_precedence": [
+    "INCOMPATIBLE",
+    "REQUIRES_REVIEW",
+    "COMPATIBLE_VIA_DETERMINISTIC_TRANSLATION",
+    "COMPATIBLE_AS_IS"
+  ],
+  "dimension_statuses": [
+    "SATISFIED",
+    "TRANSLATION_REQUIRED",
+    "REVIEW_REQUIRED",
+    "BLOCKED",
+    "NOT_APPLICABLE"
+  ],
+  "placement_resolver_outcomes": [
+    "CLEAN_A6",
+    "UNIQUE_A4",
+    "UNRESOLVED"
+  ],
+  "placement_contract_owners": [
+    "A6_COMPOSITION",
+    "A4_SPATIAL"
+  ],
+  "error_codes": [
+    "PRODUCTION_REVISION_UPDATE_REQUIRES_COMPATIBILITY",
+    "PRODUCTION_COMPATIBILITY_CONFLICT",
+    "PRODUCTION_UPDATE_BLOCKED",
+    "PRODUCTION_TRANSLATION_UNAVAILABLE"
+  ],
+  "conflict_reasons": [
+    "stale_working_version",
+    "stale_use_contract",
+    "source_changed",
+    "occurrence_inactive",
+    "assessment_corrupt",
+    "target_changed_impossible",
+    "tracking_policy_conflict",
+    "placement_consumer_ambiguous"
+  ],
+  "scope_statuses": [
+    "NO_CURRENT_USES"
+  ],
+  "tracking_modes": [
+    "PINNED",
+    "TRACK_COMPATIBLE"
+  ],
+  "storage": {
+    "migration": "0016_m15_revision_compatibility",
+    "tables": [
+      "production_compatibility_assessments",
+      "production_compatibility_uses",
+      "composition_occurrence_revision_tracking",
+      "production_update_operations",
+      "production_update_items"
+    ]
+  }
+}

@@ -335,3 +335,40 @@ async def revision_detail(
 ) -> RevisionDetail:
     return RevisionDetail(
         **await load_composition_revision_detail(session, revision_id))
+
+
+# --- M15B tracking policy (frozen R6 S16.1) ---------------------------------
+
+
+@router.get(
+    "/compositions/{composition_id}/occurrences/{occurrence_id}"
+    "/revision-tracking",
+)
+async def read_revision_tracking(
+    composition_id: str,
+    occurrence_id: str,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    from soloring.compatibility import service as compat
+
+    return await compat.read_tracking(
+        session, composition_id=composition_id,
+        occurrence_id=occurrence_id)
+
+
+@router.put(
+    "/compositions/{composition_id}/occurrences/{occurrence_id}"
+    "/revision-tracking",
+)
+async def put_revision_tracking(
+    composition_id: str,
+    occurrence_id: str,
+    body: dict,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    from soloring.compatibility import service as compat
+
+    return await compat.put_tracking(
+        session, composition_id=composition_id,
+        occurrence_id=occurrence_id, mode=body.get("mode"),
+        expected_policy_version=body.get("expected_policy_version"))

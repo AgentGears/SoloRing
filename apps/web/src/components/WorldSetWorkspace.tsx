@@ -1,5 +1,7 @@
 "use client";
 
+import M15TrackingBadge from "@/components/M15TrackingBadge";
+
 /**
  * World/Set workspace (frozen M12 R3 §15): the minimum honest surface.
  * Direct occurrences only; nested internals require switching context.
@@ -713,3 +715,67 @@ function diffOccurrences(
 }
 
 
+
+
+// M15 (frozen R6 §20.2): per-occurrence tracking + compatibility
+// projection — appended export so the existing workspace surface is
+// untouched.
+export function M15OccurrenceTracking({
+  compositionId,
+  occurrenceId,
+}: {
+  compositionId: string;
+  occurrenceId: string;
+}) {
+  const [state, setState] = useState<{
+    mode: "PINNED" | "TRACK_COMPATIBLE";
+    policy_version: number;
+  } | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    fetch(
+      `/api/compositions/${compositionId}/occurrences/${occurrenceId}` +
+        "/revision-tracking",
+    )
+      .then((r) => (r.ok ? r.json() : { mode: "PINNED", policy_version: 0 }))
+      .then((body) => {
+        if (!cancelled)
+          setState({ mode: body.mode, policy_version: body.policy_version });
+      })
+      .catch(() => {
+        if (!cancelled) setState({ mode: "PINNED", policy_version: 0 });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [compositionId, occurrenceId]);
+  if (!state) return null;
+  return (
+    <M15TrackingBadge
+      mode={state.mode}
+      policyVersion={state.policy_version}
+      busy={busy}
+      onChange={(mode, expected) => {
+        setBusy(true);
+        fetch(
+          `/api/compositions/${compositionId}/occurrences/${occurrenceId}` +
+            "/revision-tracking",
+          {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              mode,
+              expected_policy_version: expected,
+            }),
+          },
+        )
+          .then((r) => (r.ok ? r.json() : Promise.reject(r)))
+          .then((body) =>
+            setState({ mode: body.mode, policy_version: body.policy_version }),
+          )
+          .finally(() => setBusy(false));
+      }}
+    />
+  );
+}

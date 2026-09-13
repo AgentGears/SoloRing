@@ -154,6 +154,67 @@ ALLOWLIST = (
     "tests/test_m12_recovery.py",
     "tests/test_m13_recovery.py",
     "scripts/m13_validate_boundary.py",
+    # M15 implementation slices (frozen R4 @ 7410a012, authorized
+    # 2026-09-12): the authorized M15 proof scaffold extends this
+    # allowlist so the hygiene boundary stays GREEN across the M15
+    # closure, exactly as the M14 slice extended it before. M15-0 adds
+    # only the scaffold surface; product-source slices append their
+    # reviewed paths when they land. M15-owned files are skipped by the
+    # vocabulary scan below (see M15_OWNED_PREFIXES).
+    "docs/SoloRing-M15-Proof-Map.md",
+    "scripts/m15_validate_proof_map.py",
+    "tests/fixtures/m15/",
+    "tests/test_m15_baseline.py",
+    # M15A product surface (frozen R4 §26/§28, authorized 2026-09-12):
+    # the compatibility evidence foundation.
+    "server/soloring/compatibility/",
+    "server/soloring/composition/service.py",
+    "server/soloring/composition/impacts.py",
+    # R5 §26.1 classifier-refactor exception (frozen R5, authorized
+    # 2026-09-12): shared pure classifier + wiring-only binding.py
+    "server/soloring/production_world/placement_consumer.py",
+    "server/soloring/production_world/binding.py",
+    "server/alembic/versions/0016_m15_revision_compatibility.py",
+    "server/soloring/api/production.py",
+    "server/soloring/api/schemas/production.py",
+    "tests/m15_seed.py",
+    "tests/test_m15_migration.py",
+    "tests/test_m15_canonical.py",
+    "tests/test_m15_evaluator.py",
+    "tests/test_m15_translation.py",
+    "tests/test_m15_placement_seam_probe.py",
+    "tests/test_m15a_smoke.py",
+    "tests/test_m15_placement_shared_classifier.py",
+    # M15B surface (frozen R6 §28, authorized 2026-09-12)
+    "server/soloring/compatibility/impact.py",
+    "server/soloring/api/compositions.py",
+    "tests/test_m15_impact.py",
+    "tests/test_m15_tracking.py",
+    "tests/test_m15_scale.py",
+    # M15C succession (frozen R6 §15/§27)
+    "tests/test_m15_apply.py",
+    "tests/test_m15_races.py",
+    "tests/test_m15_history.py",
+    "tests/test_m15_scope.py",
+    "tests/test_m12_identity.py",
+    "tests/test_m12_working.py",
+    "tests/test_m12_history.py",
+    "tests/test_m12_publication.py",
+    "tests/test_m13_subjects.py",
+    # M15D surface (frozen R6 §28, authorized 2026-09-12)
+    "tests/test_m15_recovery.py",
+    "tests/test_m15_api.py",
+    # M15D frontend surface (frozen R6 §28, authorized 2026-09-12)
+    "apps/web/src/components/M15UpdateSummary.tsx",
+    "apps/web/src/components/M15TrackingBadge.tsx",
+    "apps/web/src/components/M15HistoryMessage.tsx",
+    "apps/web/src/components/M15CompatibilitySection.tsx",
+    "apps/web/src/__tests__/m15-update-summary.test.tsx",
+    "apps/web/src/__tests__/m15-tracking.test.tsx",
+    "apps/web/src/__tests__/m15-history-message.test.tsx",
+    "apps/web/src/components/ProductionLibrary.tsx",
+    "apps/web/src/components/WorldSetWorkspace.tsx",
+    "apps/web/src/lib/api.client.ts",
 )
 
 M14_OWNED_PREFIXES = (
@@ -184,6 +245,25 @@ M14_OWNED_PREFIXES = (
 
 def m14_owned(path: str) -> bool:
     return path.startswith(M14_OWNED_PREFIXES)
+
+# M15 successor surface (frozen R4 @ 7410a012): M15 characterizes and
+# fences predecessor seams, so M15-owned files may legitimately reference
+# M14 vocabulary (e.g. predecessor scope/pin assertions).
+M15_OWNED_PREFIXES = (
+    "docs/SoloRing-M15-",
+    "scripts/m15_validate_",
+    "tests/fixtures/m15/",
+    "tests/test_m15",
+    "tests/m15_seed.py",
+    "server/soloring/compatibility/",
+    "server/soloring/production_world/placement_consumer.py",
+    "server/soloring/production_world/binding.py",
+    "server/alembic/versions/0016_m15_revision_compatibility.py",
+)
+
+
+def m15_owned(path: str) -> bool:
+    return path.startswith(M15_OWNED_PREFIXES)
 
 
 M14_PATTERNS = [
@@ -231,11 +311,15 @@ def main() -> int:
     # migration. Anything else (0016+, or a different 0015) still
     # rejects; this is NOT a general future-migration allowance.
     admitted_0015 = "0015_m14_world_observation_execution.py"
+    # M15A succession (frozen R4 §11, authorized 2026-09-12): exactly
+    # ONE further migration is admitted — the frozen M15 0016.
+    admitted_0016 = "0016_m15_revision_compatibility.py"
     mig_beyond = [p.name for p in versions.glob("*.py")
-                  if p.stem >= "0015" and p.name != admitted_0015]
+                  if p.stem >= "0015" and p.name not in (
+                      admitted_0015, admitted_0016)]
     if mig_beyond:
-        errors.append(f"migration at/beyond 0015 beyond the frozen M14 "
-                      f"migration exists: {mig_beyond}")
+        errors.append(f"migration at/beyond 0015 beyond the frozen M14/"
+                      f"M15 migrations exists: {mig_beyond}")
 
     for f in changed:
         p = REPO / f
@@ -243,8 +327,8 @@ def main() -> int:
                                           "next_security_validate_"
                                           "boundary.py")):
             continue  # boundary validators' own scan patterns name the vocabulary
-        if m14_owned(f):
-            continue  # authorized M14 surface legitimately uses M14 vocabulary
+        if m14_owned(f) or m15_owned(f):
+            continue  # authorized M14/M15 surface legitimately uses M14 vocabulary
         src = p.read_text(encoding="utf-8", errors="replace")
         for pattern, what in M14_PATTERNS:
             if re.search(pattern, src, re.I):
@@ -260,7 +344,15 @@ def main() -> int:
         if not p.is_file() or not f.endswith((".py",)):
             continue
         src = p.read_text(encoding="utf-8", errors="replace")
+        admitted_m15_tables = {
+            "production_compatibility_assessments",
+            "production_compatibility_uses",
+            "composition_occurrence_revision_tracking",
+            "production_update_operations",
+            "production_update_items"}
         for m in re.finditer(r'CREATE TABLE\s+"?(\w+)"?', src, re.I):
+            if f.endswith("0016_m15_revision_compatibility.py") and                     m.group(1) in admitted_m15_tables:
+                continue  # the frozen M15 §11 tables
             errors.append(f"{f}: new table {m.group(1)} in migration "
                           "source")
 

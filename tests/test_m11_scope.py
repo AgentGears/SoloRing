@@ -95,7 +95,11 @@ def test_no_generalized_representation_registry_table(tmp_path, monkeypatch):
         con.close()
     # M13 R3 §4 adds the narrow frozen companions (spatial interpretation
     # + Production Instance state/staging) — explicitly not RP-02.
+    # M15A adds the frozen compatibility-evidence tables (R4 §11) —
+    # explicitly not RP-02.
     assert prod_tables == [
+        "production_compatibility_assessments",
+        "production_compatibility_uses",
         "production_instance_feature_transitions",
         "production_instance_features",
         "production_instance_spatial_tracks",
@@ -105,6 +109,8 @@ def test_no_generalized_representation_registry_table(tmp_path, monkeypatch):
         "production_revision_source_assets",
         "production_revision_spatial_interpretations",
         "production_revisions",
+        "production_update_items",
+        "production_update_operations",
     ]
 
 

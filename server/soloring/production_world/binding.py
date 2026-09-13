@@ -326,7 +326,6 @@ async def derive_candidate(conn, *, c: dict, w: dict) -> tuple[dict, list]:
             pi_targets[r.occurrence_id].append(
                 {"kind": "production_instance_track", "id": r.id})
 
-    blocked_occurrences: set[str] = set()
     targets_by_occurrence: dict[str, list[dict]] = {}
     for s in subjects:
         occ = s["occurrence_id"]
@@ -336,20 +335,13 @@ async def derive_candidate(conn, *, c: dict, w: dict) -> tuple[dict, list]:
             targets = pi_targets[occ]
         targets_by_occurrence[occ] = targets
 
-    for s in sorted(subjects, key=lambda s: s["occurrence_id"]):
-        occ = s["occurrence_id"]
-        targets = targets_by_occurrence[occ]
-        if len(targets) > 1:
-            add("BINDING_SPATIAL_TARGET_CONFLICT", occurrence_id=occ,
-                targets=targets)
-            blocked_occurrences.add(occ)
-
     # per-authority-bound requirements for the unambiguous 1-target subset
+    # (R5 §6.5.1 wiring: the placement decision itself lives in the
+    # shared pure classifier; this block only loads revision facts)
     entries: list[dict] = []
     needed_prs = sorted({by_occurrence[occ].production_revision_id
                          for occ in targets_by_occurrence
-                         if occ not in blocked_occurrences
-                         and len(targets_by_occurrence[occ]) == 1})
+                         if len(targets_by_occurrence[occ]) == 1})
     pr_hashes: dict[str, str] = {}
     pr_blobs: dict[str, str] = {}
     if needed_prs:
@@ -405,39 +397,51 @@ async def derive_candidate(conn, *, c: dict, w: dict) -> tuple[dict, list]:
             )
             interp_map[row.production_revision_id] = (
                 row.interpretation_hash)
+    from soloring.production_world.placement_consumer import (
+        classify_placement_consumer_from_facts,
+    )
+
     for s in sorted(subjects, key=lambda s: s["occurrence_id"]):
         occ = s["occurrence_id"]
-        if occ in blocked_occurrences:
-            continue
-        targets = targets_by_occurrence[occ]
-        if len(targets) != 1:
-            continue  # 0 candidates → composition-owned, no entry
         crow = by_occurrence[occ]
-        if not _entry_is_identity(crow):
-            add("BINDING_COMPOSITION_TRANSFORM_CONFLICT", occurrence_id=occ)
-            blocked_occurrences.add(occ)
-            continue
         prid = crow.production_revision_id
-        if prid not in pr_hashes or pr_hashes[prid] is None:
-            add("BINDING_SUBJECT_INVALID", occurrence_id=occ,
-                reason="production_revision_not_closed")
-            blocked_occurrences.add(occ)
-            continue
-        interp = interp_map.get(prid)
-        if interp is None:
-            add("BINDING_SPATIAL_INTERPRETATION_REQUIRED",
-                occurrence_id=occ, production_revision_id=prid)
-            blocked_occurrences.add(occ)
-            continue
-        target = targets[0]
-        entries.append({
+        facts = {
             "occurrence_id": occ,
-            "production_revision_id": prid,
-            "production_revision_hash": pr_hashes[prid],
-            "authority_subject": dict(s["authority_subject"]),
-            "placement": {"kind": target["kind"], "id": target["id"]},
-            "spatial_interpretation_hash": interp_map[prid],
-        })
+            "subject": {"kind": s["authority_subject"]["kind"],
+                        "id": s["authority_subject"]["id"],
+                        "valid": True},
+            "world_contexts": [{
+                "world_id": w["world_id"],
+                "project_id": w["project_id"],
+                "approved_revision": {
+                    "id": w["verified"]["id"],
+                    "snapshot_hash": w["verified"]["snapshot_hash"]},
+                "targets": targets_by_occurrence[occ],
+            }],
+            "transform_is_identity": _entry_is_identity(crow),
+            "revision": {
+                "id": prid,
+                "project_id": c["project_id"],
+                "closed": prid in pr_hashes,
+                "interpretation_hash": interp_map.get(prid),
+            },
+        }
+        result = classify_placement_consumer_from_facts(facts)
+        if result["outcome"] == "UNRESOLVED":
+            add(result["reason"], **result["detail"])
+            continue
+        if result["outcome"] == "UNIQUE_A4":
+            contract = result["placement_contract"]
+            entries.append({
+                "occurrence_id": occ,
+                "production_revision_id": prid,
+                "production_revision_hash": pr_hashes[prid],
+                "authority_subject": dict(s["authority_subject"]),
+                "placement": {"kind": contract["target_kind"],
+                              "id": contract["target_id"]},
+                "spatial_interpretation_hash":
+                    result["entry_facts"]["spatial_interpretation_hash"],
+            })
 
     issues.sort(key=lambda i: _ISSUE_ORDER[i["code"]])
     return binding_value(

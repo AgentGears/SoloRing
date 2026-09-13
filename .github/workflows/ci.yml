@@ -17,7 +17,7 @@ jobs:
   backend:
     name: Backend
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 45
 
     steps:
       # Full history: the M11 BOUNDARY:05 proof diffs against the M10F
@@ -64,6 +64,8 @@ jobs:
         run: python scripts/m14_validate_boundary.py
       - name: M14 source fit
         run: python scripts/m14_validate_source_fit.py
+      - name: M15 proof map
+        run: python scripts/m15_validate_proof_map.py
       - name: No repo-root generated residue
         run: python -c "from pathlib import Path; assert not Path('m10f-scale-pkgs').exists(), 'repo-root residue present'"
 

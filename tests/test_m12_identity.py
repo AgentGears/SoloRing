@@ -17,6 +17,7 @@ from soloring.composition.service import (
     patch_working_occurrence,
 )
 from soloring.domain.ids import new_uuid
+from soloring.errors import SoloRingError
 
 NOW = "2026-01-01T00:00:00.000Z"
 SCOPE = "composition_working_state"
@@ -151,10 +152,19 @@ async def test_same_production_object_revision_update_preserves_occurrence_id(
     rids = await _seed_production(factory, pid)
     cid = await _comp(factory, pid)
     occ = await _mint(factory, cid, _spec(rids[0]), 0)
-    out = await patch_working_occurrence(
-        factory(), cid, occ, scope=SCOPE, expected_working_version=1,
-        source={"kind": "production_revision", "revision_id": rids[1]})
-    assert out["occurrence_id"] == occ
+    # M15C succession (frozen R6 §27): the identity invariant is now
+    # proven by M15-APPLY:06; the ordinary direct-swap mechanism is
+    # replaced by the typed compatibility refusal.
+    with pytest.raises(SoloRingError) as ei:
+        await patch_working_occurrence(
+            factory(), cid, occ, scope=SCOPE, expected_working_version=1,
+            source={"kind": "production_revision", "revision_id": rids[1]})
+    assert ei.value.code == (
+        "PRODUCTION_REVISION_UPDATE_REQUIRES_COMPATIBILITY")
+    assert ei.value.details["required_action"] == (
+        "compatibility_assessment")
+    assert ei.value.details["current_revision_id"] == rids[0]
+    assert ei.value.details["requested_revision_id"] == rids[1]
 
 
 async def test_same_nested_composition_revision_update_preserves_occurrence_id(

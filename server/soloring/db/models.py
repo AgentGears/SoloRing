@@ -135,6 +135,13 @@ from soloring.observation.models import (  # noqa: E402,F401
     DerivedObservationArtifact,
     GenerationDerivedObservationInput,
 )
+from soloring.compatibility.models import (  # noqa: E402,F401
+    ProductionCompatibilityAssessment,
+    ProductionCompatibilityUse,
+    CompositionOccurrenceRevisionTracking,
+    ProductionUpdateOperation,
+    ProductionUpdateItem,
+)
 
 __all__ = [
     "WorkerLease",
@@ -210,4 +217,9 @@ __all__ = [
     "ShotRevisionProductionWorld",
     "ShotRevisionProductionInstanceFeatureState",
     "ShotRevisionProductionInstanceSpatialState",
+    "ProductionCompatibilityAssessment",
+    "ProductionCompatibilityUse",
+    "CompositionOccurrenceRevisionTracking",
+    "ProductionUpdateOperation",
+    "ProductionUpdateItem",
 ]

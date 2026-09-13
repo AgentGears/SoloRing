@@ -37,7 +37,9 @@ from soloring.domain.canonical import canonical_json_bytes, canonical_hash
 from soloring.settings import Settings
 from soloring.workflows.artifact_store import WorkflowArtifactStore
 
-EXPECTED_ALEMBIC_HEAD = "0015_m14_world_observation_execution"
+# M15A succession (frozen R4 §23/§26, authorized 2026-09-12): the
+# recovery head advances with the frozen 0016 migration.
+EXPECTED_ALEMBIC_HEAD = "0016_m15_revision_compatibility"
 BACKUP_MANIFEST_SCHEMA_VERSION = 1
 
 # M13 (frozen R3 §23): restore is head-dispatched across five heads. M14
@@ -55,6 +57,9 @@ SUPPORTED_RESTORE_ALEMBIC_HEADS = frozenset({
     M12_ALEMBIC_HEAD,
     M13_ALEMBIC_HEAD,
     M14_ALEMBIC_HEAD,
+    # M15 head (frozen R4 §11.6/§23, authorized 2026-09-12): restores
+    # at 0016 with the exact published M14 Blob-FK inventory.
+    "0016_m15_revision_compatibility",
 })
 
 ARTIFACT_KINDS = (
@@ -112,7 +117,9 @@ def _blob_fk_policy_for_head(head: str) -> frozenset:
     if head in (M11_ALEMBIC_HEAD, M12_ALEMBIC_HEAD, M13_ALEMBIC_HEAD):
         # M12/M13 add no Blob FK; 0012-0014 share the exact seven paths.
         return M11_BLOB_FK_COLUMNS
-    if head == M14_ALEMBIC_HEAD:
+    if head in (M14_ALEMBIC_HEAD, "0016_m15_revision_compatibility"):
+        # M15 adds no Blob FK (frozen R4 §11.6): head 0016 keeps the
+        # exact published M14 inventory.
         return M14_BLOB_FK_COLUMNS
     raise RecoveryCorruption(f"unsupported recovery head {head!r}.")
 

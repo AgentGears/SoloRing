@@ -127,15 +127,22 @@ def check_base03() -> list[str]:
     migrations = sorted(
         n for n in head_names
         if n[0].isdigit() and not n.startswith("__"))
-    # Frozen M14B-2 (R2 §23): from this slice on the head is exactly the
-    # M14 migration; the pre-B2 "no 0015" posture is superseded.
-    if not migrations or migrations[-1] != f"{MIGRATION_0015}.py":
+    # Frozen M14B-2 (R2 §23): from that slice on the head is exactly the
+    # M14 migration. M15A succession (frozen R4 §11, authorized
+    # 2026-09-12): exactly ONE further migration is admitted — the frozen
+    # M15 0016. Anything else (0017+, or a different 0016) still rejects.
+    admitted = {
+        "0015_m14_world_observation_execution.py",
+        "0016_m15_revision_compatibility.py",
+    }
+    if not migrations or migrations[-1] not in admitted:
         errors.append(
-            "current migration head is not exactly "
-            f"{MIGRATION_0015}: {migrations[-1:]}")
-    beyond = [m for m in migrations if m > f"{MIGRATION_0015}.py"]
+            "current migration head is not an admitted frozen head: "
+            f"{migrations[-1:]}")
+    beyond = [m for m in migrations
+              if m > "0016_m15_revision_compatibility.py"]
     if beyond:
-        errors.append(f"migrations beyond 0015 exist: {beyond}")
+        errors.append(f"migrations beyond 0016 exist: {beyond}")
     return errors
 
 

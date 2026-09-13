@@ -64,6 +64,16 @@ FK_CONSUMERS: dict[tuple[str, str], str] = {
     ("shot_revision_production_instance_feature_states", "composition_id"): "historical/non-blocking",
     ("shot_revision_production_instance_spatial_states", "occurrence_id"): "historical/non-blocking",
     ("shot_revision_production_instance_spatial_states", "composition_id"): "historical/non-blocking",
+    # M15 successor consumers (frozen R4 §11, authorized 2026-09-12):
+    # immutable compatibility evidence + current tracking policy + the
+    # applied-update audit — none blocks occurrence identity operations;
+    # historical evidence is retained per R4 §10/§22.
+    ("production_compatibility_uses", "occurrence_id"): "compatibility/non-blocking",
+    ("production_compatibility_uses", "composition_id"): "compatibility/non-blocking",
+    ("composition_occurrence_revision_tracking", "occurrence_id"): "tracking/non-blocking",
+    ("composition_occurrence_revision_tracking", "composition_id"): "tracking/non-blocking",
+    ("production_update_items", "occurrence_id"): "update-audit/non-blocking",
+    ("production_update_items", "composition_id"): "update-audit/non-blocking",
 }
 
 # Explicit non-FK durable-consumer registry (frozen §2.5; activated by

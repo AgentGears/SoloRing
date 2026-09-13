@@ -86,6 +86,44 @@ ALLOWED_PATTERNS = [
     # CI validator wiring + byte-exactness attributes for pinned fixtures
     r"^\.github/workflows/ci\.yml$",
     r"^\.gitattributes$",
+    # M15 implementation slices (frozen R4 @ 7410a012, authorized
+    # 2026-09-12): the authorized M15 proof scaffold and tests extend
+    # this allowlist so the M14 boundary stays GREEN across the M15
+    # closure — the same succession mechanism this validator carved
+    # for its own predecessors above (frozen M15 R4 §27). M15-0 adds
+    # only the scaffold surface; product-source slices append their
+    # reviewed paths when they land.
+    r"^docs/SoloRing-M15-[^/]+\.md$",
+    r"^scripts/m15_validate_[a-z0-9_]+\.py$",
+    r"^tests/fixtures/m15/[^/]+$",
+    r"^tests/test_m15[a-z0-9_]*\.py$",
+    r"^tests/m15_seed\.py$",
+    # M15B surface (frozen R6 §28, authorized 2026-09-12)
+    r"^tests/test_m15_(impact|tracking|scale)\.py$",
+    # M15A product surface (frozen R4 §26/§28, authorized 2026-09-12):
+    # the compatibility evidence foundation + its narrow API seams
+    r"^server/soloring/compatibility/",
+    # R5 §26.1 classifier-refactor exception: the shared pure
+    # placement-consumer classifier + wiring-only binding.py
+    r"^server/soloring/production_world/placement_consumer\.py$",
+    r"^server/soloring/production_world/binding\.py$",
+    # FK-consumer registry succession (frozen R4 §11 M15 tables join the
+    # exhaustive M12 occurrence-FK inventory)
+    r"^server/soloring/composition/impacts\.py$",
+    r"^server/alembic/versions/0016_m15_revision_compatibility\.py$",
+    r"^server/soloring/api/production\.py$",
+    r"^server/soloring/api/compositions\.py$",
+    # M15C succession (frozen R6 §15/§27, authorized 2026-09-12):
+    # the PATCH typed refusal + the M12 direct-swap proof/expectation
+    r"^server/soloring/composition/service\.py$",
+    r"^tests/test_m12_identity\.py$",
+    r"^tests/test_m12_working\.py$",
+    r"^tests/test_m12_history\.py$",
+    r"^tests/test_m12_publication\.py$",
+    r"^tests/test_m13_subjects\.py$",
+    # M15D surface (frozen R6 §28, authorized 2026-09-12)
+    r"^tests/test_m15_(recovery|api)\.py$",
+    r"^server/soloring/api/schemas/production\.py$",
 ]
 
 FORBIDDEN_PATTERNS = [

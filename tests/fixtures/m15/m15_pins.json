@@ -1,0 +1,29 @@
+{
+  "frozen_plan": {
+    "file": "SoloRing-M15-Safe-Reusable-Revision-Evolution-Implementation-Plan-R6-frozen.md",
+    "sha256": "b781f8157156babd9dc73e0397071708dac398e51a6658a91071da4dc9442c83",
+    "bytes": 121269,
+    "lines": 3012,
+    "proof_cells": 127,
+    "stop_conditions": 47
+  },
+  "implementation_predecessor": {
+    "commit": "89298e793c651e9e8b9164912c76e3595867a60a",
+    "tree": "3c4fec0bdb11732f0c77c22acc65d3ba882df393"
+  },
+  "m14_identity": {
+    "commit": "89298e793c651e9e8b9164912c76e3595867a60a",
+    "tree": "3c4fec0bdb11732f0c77c22acc65d3ba882df393",
+    "tag": "M14",
+    "tag_object": "ff4c6107876ddd991ec626b3605deb143ec7daf9"
+  },
+  "migration_predecessor": "0015_m14_world_observation_execution",
+  "normative_documents": {
+    "SoloRing-Architecture-Pattern-Register-v2.3.md": "57900204f9d336985e13268a5f21de372f815feec9b194bd56bf2408c62001a6",
+    "SoloRing-Product-and-Production-Architecture-v1.4.md": "a001fa5359d8a294f1139ef8c5de38112a57880bbd3fe3e73a832ae10147bfff",
+    "SoloRing-Capability-and-Ownership-Map-v1.4.md": "e5cf24b569bdfbe66fd573bae9e3ee4f2b23bdb3c9ca25212efb6184aa52a22d",
+    "SoloRing-Gap-and-Dependency-Graph-v1.4.md": "35be1f24526a0ad939a18b87b4c771be0a51454bc91d0a3d091e7ea9f64ccca3",
+    "SoloRing-Implementation-Roadmap-v1.2.md": "7bf65e3587b2ef2abbfa24dc733ce67d6ad42dabbaaa99257bd12caad44ed701",
+    "SoloRing-Full-Sequence-Product-Pressure-Test-v1-Rerun-v1.4.md": "937e8765e31ae0ce692ebf32e3d41f9dc6d5e3ecbaed466417505d15ddcca7a0"
+  }
+}
