@@ -195,7 +195,17 @@ def test_m15_source_scope_excludes_execution_source() -> None:
     changed = [p for p in
                _git("diff", "--name-only", M14_COMMIT, "HEAD").splitlines()
                if p.strip()]
-    violations = [p for p in changed if p.startswith(PROHIBITED_PREFIXES)]
+    # Post-M15 review remediation changes exactly one path beneath the frozen
+    # M15 execution-source prefixes: the M10 Comfy translator correction.
+    # Keep that later corrective ownership explicit and exact; this does not
+    # authorize any execution-source expansion by M15 itself.
+    post_m15_owned = {
+        "server/soloring/executors/comfy/translate.py",
+    }
+    violations = [
+        p for p in changed
+        if p.startswith(PROHIBITED_PREFIXES) and p not in post_m15_owned
+    ]
     assert not violations, (
         f"execution-source paths changed under M15: {violations}")
     # frozen R5 §26.1 source-scope rule: under production_world/, only
