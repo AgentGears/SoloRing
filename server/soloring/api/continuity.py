@@ -420,7 +420,7 @@ async def _revision_continuity(
         schema_version = snapshot.get("schema_version")
         if not isinstance(schema_version, int) or isinstance(
                 schema_version, bool) or schema_version not in (
-                1, 2, 3, 4, 5):
+                1, 2, 3, 4, 5, 6):
             raise internal_invariant(
                 f"ShotRevision {revision_id} carries illegal snapshot "
                 f"schema_version {schema_version!r}.")
