@@ -195,6 +195,7 @@ ALLOWLIST = (
     "server/soloring/spatial/worker_inputs.py",
     "server/tests/test_post_m15_recovery_hardening.py",
     "tests/test_post_m15_worker_transport.py",
+    "tests/test_m10f_adversarial_worker.py",
 )
 
 # These exact backend paths are successor review-remediation, not changes to
