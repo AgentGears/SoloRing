@@ -762,23 +762,39 @@ def project_schema3_spatial_control_subset(
                         and str(value[0]) == target):
                     inputs[field] = list(predecessor)
         loader = entry["loader"]
-        loader_referenced = any(
-            isinstance(node, dict)
-            and any(
+        # Remove the stage first, then classify every remaining loader
+        # reference. A loader may be shared by multiple certified spatial
+        # stages; such a loader remains executable authority while any
+        # surviving spatial target still references it and is removed only
+        # when its spatial reference count reaches zero. References from
+        # non-spatial nodes remain an unsafe ownership ambiguity and fail.
+        view.pop(target, None)
+        removed.add(target)
+        loader_referrers: list[str] = []
+        for node_id, node in view.items():
+            if node_id == loader or not isinstance(node, dict):
+                continue
+            inputs = node.get("inputs")
+            if not isinstance(inputs, dict):
+                continue
+            if any(
                 isinstance(value, list) and len(value) == 2
                 and str(value[0]) == loader
-                for value in (node.get("inputs") or {}).values()
-            )
-            for node_id, node in view.items()
-            if node_id not in (target, loader)
+                for value in inputs.values()
+            ):
+                loader_referrers.append(node_id)
+        external_referrers = sorted(
+            node_id for node_id in loader_referrers if node_id not in targets
         )
-        if loader_referenced:
+        if external_referrers:
             raise _lower_bad(
                 f"ControlNet loader {loader!r} is referenced outside the "
-                "spatial chain; cannot project safely.")
-        view.pop(target, None)
+                f"spatial chain by {external_referrers}; cannot project "
+                "safely.")
+        if loader_referrers:
+            continue
         view.pop(loader, None)
-        removed.update({target, loader})
+        removed.add(loader)
 
     # Postconditions are proof obligations, not cleanup: no dangling links,
     # no unresolved inactive __INPUT__ placeholders, every active target
