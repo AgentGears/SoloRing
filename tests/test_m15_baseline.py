@@ -197,11 +197,16 @@ def test_m15_source_scope_excludes_execution_source() -> None:
                if p.strip()]
     # Post-M15 review remediation changes exactly one path beneath the frozen
     # M15 execution-source prefixes: the M10 Comfy translator correction.
-    # Keep that later corrective ownership explicit and exact; this does not
-    # authorize any execution-source expansion by M15 itself.
+    # The exception is byte-pinned so later edits cannot inherit permanent
+    # successor ownership merely by reusing the same pathname.
     post_m15_owned = {
-        "server/soloring/executors/comfy/translate.py",
+        "server/soloring/executors/comfy/translate.py":
+            "9d0af0782a372c57cfbb389d8accd6f8c3675ac8",
     }
+    for path, expected_blob in post_m15_owned.items():
+        assert _git("rev-parse", f"HEAD:{path}") == expected_blob, (
+            f"post-M15 successor bytes changed without M15 boundary review: {path}"
+        )
     violations = [
         p for p in changed
         if p.startswith(PROHIBITED_PREFIXES) and p not in post_m15_owned
