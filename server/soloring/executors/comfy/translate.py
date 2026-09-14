@@ -200,8 +200,12 @@ def build_comfy_prompt(
     else:
         manifest_doc = manifest
 
+    # --- inputs: bind by LOGICAL identity (input_key, position) ------------
     by_slot: dict[tuple[str, int], MaterializedComfyInput] = {}
     declared_keys: set[str] = set()
+    # Closed-set ownership: ordinary inputs plus every later prompt/parameter/
+    # seed write reserve exact node/field targets before schema-3 derived
+    # controls bind. No logical source may silently overwrite another.
     bound_targets: set[tuple[str, str]] = set()
     for m in materialized:
         slot = (m.input_key, m.position)
@@ -213,12 +217,12 @@ def build_comfy_prompt(
 
     for key, decl in manifest_doc.inputs.items():
         if key in spatial_keys:
-            continue
+            continue  # derived spatial input: bound below from uploads only
         if (
             getattr(decl, "source_role", None) is None
             and not getattr(decl, "is_realization_input", False)
         ):
-            continue
+            continue  # prompt/source-less input: handled explicitly below
         declared_keys.add(key)
         what = f"input {key!r}"
         node_inputs = _node_inputs(graph, decl.node, what)
@@ -296,10 +300,12 @@ def build_comfy_prompt(
             graph, bound_targets, node=seed_decl.node, field=seed_decl.field,
             what="seed")
 
+    # --- schema-3 derived controls: exact manifest-v3 node/field ----------
     if schema3_derived is not None:
         _bind_schema3_derived(
             graph, manifest, schema3_derived, workflow_spec, bound_targets)
 
+    # --- prompt / parameters / seed: write only after ownership closes ----
     if prompt_decl is not None:
         node_inputs = _node_inputs(graph, prompt_decl.node, "prompt")
         _bind(node_inputs, prompt_decl.field,
@@ -316,6 +322,7 @@ def build_comfy_prompt(
         _bind(node_inputs, seed_decl.field, captured_seed,
               seed_decl.node, "seed")
 
+    # --- outputs: nodes must exist; captured contract stays untouched -----
     for name, decl in manifest_doc.outputs.items():
         if not isinstance(decl.node, str) or not decl.node:
             raise TranslationFailed(f"output {name!r}: no node binding")
@@ -324,6 +331,7 @@ def build_comfy_prompt(
                 f"output {name!r}: template has no node {decl.node!r}"
             )
 
+    # --- marker: exact namespace, conflict-rejected -----------------------
     marker = submission_marker(generation_id, attempt_id)
     conflicting = template.get("extra_data")
     if isinstance(conflicting, dict) and "soloring" in conflicting:
@@ -344,7 +352,15 @@ def _bind_schema3_derived(
     bound_targets: set[tuple[str, str]],
 ) -> None:
     """Bind each verified uploaded schema-3 derived reference to the exact
-    node/field certified by the captured manifest v3 (M10E §17.4)."""
+    node/field certified by the captured manifest v3 (M10E §17.4).
+
+    Fails closed on workflow-spec expectation vs transport disagreement
+    (missing/extra/duplicate/mismatched role/position/input_key), missing
+    manifest binding, unsupported binding format, absent upload reference,
+    missing template node/field, or two logical sources targeting one
+    node/field incompatibly. Dispatch keys on the verified derived
+    collection + ``spatial_bindings`` — never the inherited
+    ``source.kind == "shot_reference"`` string."""
     spec_entries = {
         e["input_key"]: e
         for e in (
@@ -411,12 +427,23 @@ def _bind_schema3_derived(
 def _bind_schema3_control_stream(
     graph: dict, key: str, verified, node: str, field: str, what: str,
 ) -> None:
+    """Frozen ``soloring.spatial.v1`` consumption semantics (M10E §5.2).
+
+    The target node/field is an IMAGE-TENSOR input, so uploaded control
+    frames enter through deterministic ``LoadImage`` nodes batched into a
+    frame video, matching the certified §114 executor shape. Expansion IDs
+    are namespaced ``{input_key}::load::{i}`` / ``{input_key}::batch::{i}``;
+    no heuristic discovery of existing nodes occurs and the manifest's exact
+    node/field receives the chain-head LINK."""
     refs = tuple(verified.frame_references or ())
     if not refs and verified.execution_reference:
         refs = (verified.execution_reference,)
     if not refs:
         raise TranslationFailed(
             f"{what} has no uploaded executor reference")
+    # R4 §2.6: check the COMPLETE generated-id set against the captured
+    # template BEFORE any graph mutation — load::0..N-1 and batch::1..N-1
+    # (batch::0 is never generated).
     generated = [f"{key}::load::{i}" for i in range(len(refs))]
     generated += [f"{key}::batch::{i}" for i in range(1, len(refs))]
     clash = [nid for nid in generated if nid in graph]
