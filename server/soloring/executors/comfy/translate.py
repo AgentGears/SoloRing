@@ -168,6 +168,7 @@ def build_comfy_prompt(
                 "document")
         from soloring.spatial.package3 import (
             project_schema3_spatial_control_subset,
+            validate_manifest_v3_template_bindings,
         )
         from soloring.workflows.manifest import parse_manifest_v2
 
@@ -186,6 +187,11 @@ def build_comfy_prompt(
                 "captured spatial realization has duplicate derived "
                 "input_key values")
         try:
+            # Validate the retained manifest against the retained template
+            # before subset projection. This preserves the frozen exact-
+            # binding diagnostic (missing node/field) even when that binding
+            # belongs to a stage that would otherwise be projected away.
+            validate_manifest_v3_template_bindings(manifest, template)
             graph = project_schema3_spatial_control_subset(
                 manifest, graph, active_spatial_keys)
         except SoloRingError as exc:
