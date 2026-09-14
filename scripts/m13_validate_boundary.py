@@ -69,6 +69,15 @@ M14_OWNED_PREFIXES = (
     "server/soloring/worker/execution.py",
 )
 
+# Post-M15 review remediation is a successor correction, not M13 scope.
+# The M13 boundary compares its historical baseline all the way to HEAD, so
+# an exact-path successor carve-out is required for the reviewed translator
+# hardening. Keep this list exact: broad executor prefixes would weaken the
+# frozen M13 proof rather than merely classify later-owned source correctly.
+SUCCESSOR_OWNED_RUNTIME_PATHS = frozenset({
+    "server/soloring/executors/comfy/translate.py",
+})
+
 
 def main() -> int:
     errors: list[str] = []
@@ -85,10 +94,11 @@ def main() -> int:
                         f"{f.relative_to(REPO)}: {what} vocabulary present")
     # 2. M13 must not touch execution/materialization/runtime modules
     for changed in git_changed_files():
-        if re.search(
+        if (re.search(
                 r"soloring/(executors|worker|realization|generation"
-                r"|workflows)/", changed) and not changed.startswith(
-                    M14_OWNED_PREFIXES):
+                r"|workflows)/", changed)
+                and not changed.startswith(M14_OWNED_PREFIXES)
+                and changed not in SUCCESSOR_OWNED_RUNTIME_PATHS):
             errors.append(
                 f"M13 modified execution/runtime module: {changed}")
     if errors:
