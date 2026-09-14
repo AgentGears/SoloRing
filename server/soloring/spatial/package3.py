@@ -76,6 +76,10 @@ def parse_profile_v2(raw: Any) -> dict:
     if doc["schema_version"] != PROFILE_SCHEMA_VERSION_2:
         raise _bad("RealizationProfile schema_version must be 2 for spatial.")
 
+    # Inherited M9 profile-1 semantics are validated by the frozen M9 parser
+    # itself (strict unknown-field rejection, selector semantics, channel
+    # bijection, min<=max). Delegate, never reimplement: validate a schema-1
+    # view and retain the v2 wrapper only for the additive spatial document.
     from soloring.realization.profile import (
         ProfileError as _M9ProfileError,
         parse_profile as _parse_m9_profile,
@@ -147,6 +151,9 @@ def _validate_runtime_requirements(reqs_raw: Any) -> None:
                        "descriptive requirement cannot pass as a runtime pin.")
         _require_str(proof["value"], f"runtime_requirements.{key}.proof.value")
         if proof["mode"] == "template_node_field":
+            # `expected` is the exact canonical JSON-domain value the captured
+            # template must carry at node/field; field presence alone proves
+            # nothing about runtime closure.
             if "expected" not in proof:
                 raise _bad(f"runtime_requirements.{key}.proof.expected is "
                            "required for template_node_field proofs.")
@@ -158,11 +165,17 @@ def validate_schema3_fingerprint_template(fingerprint_v3: dict,
                                           template: dict) -> None:
     """Full hard-component closure for the schema-3 execution package.
 
-    The frozen fingerprint keeps exactly four artifact identities. When one
-    pinned artifact is loaded by multiple executable loader nodes, every
-    executable consumer must load the same declared name; one representative
-    node is not sufficient evidence for the graph that actually runs.
-    """
+    R3 §6/§18 / E-012 freezes exactly four immutable model-artifact
+    identities (wan_base, depth_controlnet, umt5_text_encoder, wan_vae).
+    Every fingerprint binding must resolve to an exact captured template
+    node/field whose executed value equals the fingerprint's declared name.
+    Presence of the pinned file elsewhere is insufficient.
+
+    The post-M15 review correction preserves that exact-four grammar while
+    closing a second executable dimension: when one pinned artifact is loaded
+    by multiple executable loader nodes, every reached loader must carry the
+    same class/field/declared-name identity. One representative loader cannot
+    certify a graph that actually consumes additional loaders."""
     rr = (fingerprint_v3 or {}).get("m10_spatial_runtime") or {}
     artifacts = rr.get("artifacts")
     if not isinstance(artifacts, list) or len(artifacts) != 4:
@@ -271,7 +284,13 @@ def validate_schema3_fingerprint_template(fingerprint_v3: dict,
 
 def check_runtime_closure(profile_spatial: dict, *, fingerprint: dict | None,
                           template: dict) -> list[str]:
-    """Return the list of UNPROVEN runtime requirements (empty == closed)."""
+    """Return UNPROVEN runtime requirements; empty means closure is proven.
+
+    ``fingerprint_component`` is proven only by an exact captured component
+    identity. ``template_node_field`` is proven only when the captured
+    template carries the exact declared node, field, AND expected canonical
+    JSON-domain value. Descriptive text or mere field presence is never proof.
+    """
     unproven: list[str] = []
     for key, req in profile_spatial["runtime_requirements"].items():
         proof = req["proof"]
@@ -290,6 +309,9 @@ def _closed_by_fingerprint(req: dict, proof: dict,
     if not fingerprint:
         return False
     name = req["name"]
+    # Production schema-3 fingerprints carry closure facts in the frozen
+    # m10_spatial_runtime extension; the bare runtime_requirements form stays
+    # accepted for historical/test documents that carry it directly.
     rr = (fingerprint.get("runtime_requirements")
           or fingerprint.get("m10_spatial_runtime") or {})
     if rr.get("custom_nodes", {}).get(name) == proof["value"]:
@@ -304,6 +326,7 @@ def _closed_by_fingerprint(req: dict, proof: dict,
 
 
 def _closed_by_template(node_field: str, expected: object, template: dict) -> bool:
+    """Exact node/field/VALUE proof under strict JSON-domain equality."""
     try:
         node_id, field = node_field.split("/", 1)
     except ValueError:
@@ -318,6 +341,7 @@ def _closed_by_template(node_field: str, expected: object, template: dict) -> bo
 
 
 def _json_domain_equal(a: object, b: object) -> bool:
+    """Type-exact structural JSON equality; bool/int/float never coerce."""
     if type(a) is not type(b):
         return False
     if isinstance(a, dict):
@@ -330,6 +354,12 @@ def _json_domain_equal(a: object, b: object) -> bool:
 
 
 def _validate_json_domain(value: object, what: str) -> None:
+    """Validate the frozen closure-value JSON domain through one serializer.
+
+    Rejects NaN/Infinity and non-JSON Python values, non-string keys, floats
+    (this contract permits int/str/bool/null/structure only), and integers
+    outside the JavaScript-safe domain.
+    """
     from soloring.domain.canonical import canonical_json_bytes
 
     try:
@@ -379,6 +409,9 @@ def parse_manifest_v3(raw: Any) -> dict:
     if doc["schema_version"] != MANIFEST_SCHEMA_VERSION_3:
         raise _bad("manifest schema_version must be 3.")
 
+    # Inherited manifest-2 semantics are validated by the frozen M9 parser
+    # (strict input/parameter/output grammar and no dual source form).
+    # Delegate, never reimplement: only spatial_bindings are additive here.
     from soloring.workflows.manifest import (
         WorkflowError as _M9WorkflowError,
         parse_manifest_v2 as _parse_m9_manifest_v2,
@@ -428,6 +461,8 @@ def parse_manifest_v3(raw: Any) -> dict:
     if roles_seen[ROLE_ENTITY_DEPTH] > 2:
         raise _bad("At most two spatial.entity_depth bindings are supported "
                    f"(capacity {INITIAL_MAX_CONTROL_STREAMS}).")
+    # Every explicit spatial binding is also a declared manifest input; no
+    # hidden graph-only source may enter the execution contract.
     manifest_inputs = doc.get("inputs") or {}
     for key in bindings_raw:
         if key not in manifest_inputs:
@@ -436,11 +471,18 @@ def parse_manifest_v3(raw: Any) -> dict:
 
 
 def manifest_binding_map(manifest_v3: dict) -> dict[str, dict]:
+    """Return explicit input_key -> role/node/field/format bindings only."""
     return dict(manifest_v3["spatial_bindings"])
 
 
 def validate_manifest_v3_template_bindings(manifest_v3: dict,
                                            template: dict) -> None:
+    """Structural exactness for schema 3 (M10E §8.4).
+
+    Every spatial binding and inherited input/parameter/output resolves
+    against the captured template graph at its exact declared node/field.
+    There is no heuristic substitute search.
+    """
     def _node_inputs(node_id: object, what: str) -> dict:
         if not isinstance(node_id, str) or not node_id:
             raise _bad(f"{what}: manifest declares no node binding")
@@ -491,6 +533,11 @@ def validate_manifest_v3_template_bindings(manifest_v3: dict,
 
 def resolve_derived_binding(manifest_v3: dict, artifact_role: str,
                              position: int) -> tuple[str, str, str]:
+    """Resolve one role/position to the exact manifest input_key/node/field.
+
+    World depth occupies position 0; entity streams occupy positions 1..2 in
+    canonical manifest-binding key order. No graph heuristic participates.
+    """
     bindings = manifest_v3["spatial_bindings"]
     by_role: dict[str, list[str]] = {ROLE_WORLD_DEPTH: [], ROLE_ENTITY_DEPTH: []}
     for key in sorted(bindings):
@@ -504,6 +551,10 @@ def resolve_derived_binding(manifest_v3: dict, artifact_role: str,
     b = bindings[key]
     return key, b["node"], b["field"]
 
+
+# --------------------------------------------------------------------------
+# Package descriptor schema 3
+# --------------------------------------------------------------------------
 
 DESCRIPTOR3_FIELDS = {
     "schema_version", "workflow_id", "workflow_version", "manifest_hash",
@@ -530,7 +581,18 @@ def parse_descriptor_v3(raw: Any) -> dict:
     return doc
 
 
+# --------------------------------------------------------------------------
+# M10F PD-1B — canonical lower-logical execution view (R6 §10.2.1)
+# --------------------------------------------------------------------------
+
 class LowerLogicalExecutionView:
+    """One canonical interpretation of a retained schema-3 package as a
+    logical WorkflowSpec v1 or v2.
+
+    This is an in-memory execution view only: projected bytes/hashes are never
+    persisted and durable identity remains the original captured schema-3
+    package hashes.
+    """
     __slots__ = ("logical_schema_version", "manifest", "template",
                  "workflow_template", "retained_manifest_v3")
 
@@ -549,6 +611,12 @@ def _lower_bad(message: str) -> SoloRingError:
 
 
 def _project_lower_manifest(manifest_v3: dict, logical_schema_version: int):
+    """R6 §10.2.1.1 manifest projection.
+
+    Inherited parameters/outputs are retained exactly, never synthesized; an
+    empty inherited outputs map is non-representable for the lower path and
+    fails closed at the public projection gate.
+    """
     from soloring.workflows.manifest import (
         parse_manifest,
         parse_manifest_v2,
@@ -567,6 +635,8 @@ def _project_lower_manifest(manifest_v3: dict, logical_schema_version: int):
         doc["schema_version"] = "2"
         return parse_manifest_v2(doc)
 
+    # Logical v1 is a true schema-1 manifest view, not a schema-2 document
+    # relabeled after validation.
     doc = {k: v for k, v in manifest_v3.items() if k != "spatial_bindings"}
     inputs_v1: dict = {}
     for key, decl in inherited_inputs.items():
@@ -589,6 +659,7 @@ def _project_lower_manifest(manifest_v3: dict, logical_schema_version: int):
             decl_v1["source_role"] = role
             inputs_v1[key] = decl_v1
         elif kind == "realization_channel":
+            # Realization channels have no schema-1 representation.
             continue
         else:
             raise _lower_bad(
@@ -604,12 +675,11 @@ def project_schema3_spatial_control_subset(
     retained_template: dict,
     active_input_keys,
 ) -> dict:
-    """Project the captured schema-3 ControlNet chain to exactly the active
-    derived input keys.
+    """Project the captured schema-3 ControlNet chain to exactly active keys.
 
-    The graph itself supplies the predecessor and loader links; no fixed node
-    IDs or graph search heuristics are introduced. Inactive control stages are
-    removed downstream-to-upstream and every reference to the removed stage is
+    The graph itself supplies predecessor and loader links; no fixed node IDs
+    or heuristic graph search are introduced. Inactive control stages are
+    removed downstream-to-upstream and every reference to a removed stage is
     rewired to its captured model predecessor. Active stages remain intact for
     the translator to bind at their exact manifest node/field.
     """
@@ -658,6 +728,9 @@ def project_schema3_spatial_control_subset(
             "loader": str(controlnet_link[0]),
         }
 
+    # Dependency order is derived only from captured model links. `order` is
+    # upstream-first; physical removal runs in reverse so rewiring always
+    # points through still-present predecessors.
     remaining = set(targets)
     order: list[str] = []
     while remaining:
@@ -707,6 +780,9 @@ def project_schema3_spatial_control_subset(
         view.pop(loader, None)
         removed.update({target, loader})
 
+    # Postconditions are proof obligations, not cleanup: no dangling links,
+    # no unresolved inactive __INPUT__ placeholders, every active target
+    # survives, and every inactive target is absent.
     active_targets = {
         (str(binding["node"]), binding["field"])
         for key, binding in bindings.items() if key in active
@@ -746,6 +822,12 @@ def project_schema3_spatial_control_subset(
 
 def _project_lower_template(manifest_v3: dict, retained_template: dict,
                             projected_manifest) -> dict:
+    """R6 §10.2.1.2 execution-only template projection.
+
+    All spatial control stages are removed for the lower-logical path using
+    the same deterministic projection helper, then the frozen M8/M9 binding
+    validator proves the projected manifest against the resulting graph.
+    """
     from soloring.executors.comfy.bindings import (
         validate_manifest_template_bindings,
         validate_manifest_template_bindings_v2,
@@ -767,6 +849,11 @@ def project_lower_logical_execution_view(
     original_template_hash: str,
     logical_schema_version: int,
 ) -> LowerLogicalExecutionView:
+    """The one canonical lower-logical execution view (R6 §10.2.1.5).
+
+    Creation, worker submission, and terminal output resolution consume this
+    helper; no second downgrade interpretation is permitted.
+    """
     if logical_schema_version not in (1, 2):
         raise _lower_bad(
             f"logical_schema_version must be 1 or 2, got "
@@ -805,6 +892,9 @@ def project_lower_logical_execution_view(
         retained_manifest_v3=validated,
     )
 
+    # Frozen postconditions: the lower template's output contract equals the
+    # projected manifest's exactly, and the certified prompt declaration (if
+    # present) survives at the same captured node/field.
     manifest_output_names = set(projected_manifest.outputs)
     template_output_names = {o.name for o in workflow_template.outputs}
     if manifest_output_names != template_output_names:
