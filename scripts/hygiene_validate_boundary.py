@@ -1,9 +1,9 @@
 """Post-M13 hygiene boundary validator (frozen R2 §6).
 
 Diffs the working tree against exact M13 (384a46d...) and rejects:
-  * any migration at or beyond 0015;
-  * any new authority table (ORM or migration);
-  * M14 observation/workflow/executor semantics in changed files;
+  * any migration at or beyond the explicitly admitted successor heads;
+  * any new authority table outside an admitted milestone migration;
+  * M14 observation/workflow/executor semantics outside reviewed successor surfaces;
   * changed files outside the reviewed hygiene allowlist.
 
 Exit codes: 0 clean; 1 violation.
@@ -19,7 +19,8 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 BASE = "384a46d3a5c68d7d81784befc338aa8621b93fbd"
 
-# The reviewed hygiene change surface (frozen R2 §3-§8)
+# The reviewed hygiene change surface (frozen R2 §3-§8) plus explicitly
+# authorized successor milestone surfaces.
 ALLOWLIST = (
     "tests/conftest.py",
     "tests/test_m13_races.py",
@@ -102,9 +103,7 @@ ALLOWLIST = (
     "scripts/hygiene_validate_boundary.py",
     "scripts/hygiene_validate_npm_audit.py",
     ".github/workflows/ci.yml",
-    # Post-M13 Next-security successor slice (frozen R2 @ 4c3d1846):
-    # the reviewed security remediation extends this allowlist so the
-    # hygiene boundary stays GREEN across the successor closure.
+    # Post-M13 Next-security successor slice (frozen R2 @ 4c3d1846).
     "apps/web/src/app/projects/[id]/production/page.tsx",
     "apps/web/src/app/projects/[id]/world/page.tsx",
     "apps/web/next-env.d.ts",
@@ -115,15 +114,8 @@ ALLOWLIST = (
     "scripts/next_security_validate_boundary.py",
     "scripts/next_security_smoke.py",
     "tests/test_post_m13_next_security.py",
-    # post-merge R8 determinism correction (CI run 34362011109):
-    # test-scoped park budget in the APR-032/033 race proof only
     "tests/test_m7d_relations.py",
-    # M14 implementation slices (frozen R2 @ 68f910f5, authorized
-    # 2026-09-10): the authorized M14 surface extends this allowlist so
-    # the hygiene boundary stays GREEN across the M14 closure, exactly
-    # as the security remediation extended it before. M14 vocabulary is
-    # legitimate inside the M14-owned surface (see M14_OWNED_PREFIXES)
-    # and is skipped by the vocabulary scan below.
+    # M14 implementation slices.
     ".gitattributes",
     "docs/SoloRing-M14-Proof-Map.md",
     "docs/SoloRing-M14-R2-Freeze-Erratum-E1.md",
@@ -154,24 +146,14 @@ ALLOWLIST = (
     "tests/test_m12_recovery.py",
     "tests/test_m13_recovery.py",
     "scripts/m13_validate_boundary.py",
-    # M15 implementation slices (frozen R4 @ 7410a012, authorized
-    # 2026-09-12): the authorized M15 proof scaffold extends this
-    # allowlist so the hygiene boundary stays GREEN across the M15
-    # closure, exactly as the M14 slice extended it before. M15-0 adds
-    # only the scaffold surface; product-source slices append their
-    # reviewed paths when they land. M15-owned files are skipped by the
-    # vocabulary scan below (see M15_OWNED_PREFIXES).
+    # M15 implementation slices.
     "docs/SoloRing-M15-Proof-Map.md",
     "scripts/m15_validate_proof_map.py",
     "tests/fixtures/m15/",
     "tests/test_m15_baseline.py",
-    # M15A product surface (frozen R4 §26/§28, authorized 2026-09-12):
-    # the compatibility evidence foundation.
     "server/soloring/compatibility/",
     "server/soloring/composition/service.py",
     "server/soloring/composition/impacts.py",
-    # R5 §26.1 classifier-refactor exception (frozen R5, authorized
-    # 2026-09-12): shared pure classifier + wiring-only binding.py
     "server/soloring/production_world/placement_consumer.py",
     "server/soloring/production_world/binding.py",
     "server/alembic/versions/0016_m15_revision_compatibility.py",
@@ -185,13 +167,11 @@ ALLOWLIST = (
     "tests/test_m15_placement_seam_probe.py",
     "tests/test_m15a_smoke.py",
     "tests/test_m15_placement_shared_classifier.py",
-    # M15B surface (frozen R6 §28, authorized 2026-09-12)
     "server/soloring/compatibility/impact.py",
     "server/soloring/api/compositions.py",
     "tests/test_m15_impact.py",
     "tests/test_m15_tracking.py",
     "tests/test_m15_scale.py",
-    # M15C succession (frozen R6 §15/§27)
     "tests/test_m15_apply.py",
     "tests/test_m15_races.py",
     "tests/test_m15_history.py",
@@ -201,10 +181,8 @@ ALLOWLIST = (
     "tests/test_m12_history.py",
     "tests/test_m12_publication.py",
     "tests/test_m13_subjects.py",
-    # M15D surface (frozen R6 §28, authorized 2026-09-12)
     "tests/test_m15_recovery.py",
     "tests/test_m15_api.py",
-    # M15D frontend surface (frozen R6 §28, authorized 2026-09-12)
     "apps/web/src/components/M15UpdateSummary.tsx",
     "apps/web/src/components/M15TrackingBadge.tsx",
     "apps/web/src/components/M15HistoryMessage.tsx",
@@ -215,16 +193,21 @@ ALLOWLIST = (
     "apps/web/src/components/ProductionLibrary.tsx",
     "apps/web/src/components/WorldSetWorkspace.tsx",
     "apps/web/src/lib/api.client.ts",
-    # Post-M15 review remediation: exact reviewed successor surface only.
-    # These paths were not part of the frozen hygiene slice; they are
-    # admitted here so the historical boundary can classify later reviewed
-    # corrections without turning into a permanent false-positive gate.
+    # Post-M15 reviewed successor repairs.
     "server/soloring/executors/comfy/translate.py",
     "server/soloring/spatial/package3.py",
     "server/soloring/spatial/worker_inputs.py",
     "server/tests/test_post_m15_recovery_hardening.py",
     "tests/test_post_m15_worker_transport.py",
     "tests/test_m10f_adversarial_worker.py",
+    # M16-P0 predecessor repair surface (frozen M16 R6 PRE:01-06,
+    # implementation authorized 2026-09-14). No 0017 migration is admitted
+    # by this P0 extension.
+    "server/soloring/api/continuity.py",
+    "server/soloring/recovery/__init__.py",
+    "server/soloring/recovery/semantic_successors.py",
+    "server/soloring/recovery/successor_semantics.py",
+    "tests/test_m16_p0_repairs.py",
 )
 
 M14_OWNED_PREFIXES = (
@@ -256,9 +239,7 @@ M14_OWNED_PREFIXES = (
 def m14_owned(path: str) -> bool:
     return path.startswith(M14_OWNED_PREFIXES)
 
-# M15 successor surface (frozen R4 @ 7410a012): M15 characterizes and
-# fences predecessor seams, so M15-owned files may legitimately reference
-# M14 vocabulary (e.g. predecessor scope/pin assertions).
+
 M15_OWNED_PREFIXES = (
     "docs/SoloRing-M15-",
     "scripts/m15_validate_",
@@ -274,6 +255,19 @@ M15_OWNED_PREFIXES = (
 
 def m15_owned(path: str) -> bool:
     return path.startswith(M15_OWNED_PREFIXES)
+
+
+M16_P0_OWNED_PREFIXES = (
+    "server/soloring/api/continuity.py",
+    "server/soloring/recovery/__init__.py",
+    "server/soloring/recovery/semantic_successors.py",
+    "server/soloring/recovery/successor_semantics.py",
+    "tests/test_m16_p0_repairs.py",
+)
+
+
+def m16_p0_owned(path: str) -> bool:
+    return path.startswith(M16_P0_OWNED_PREFIXES)
 
 
 M14_PATTERNS = [
@@ -295,8 +289,7 @@ def git(*args: str) -> str:
 
 def path_allowed(path: str, allowlist) -> bool:
     """Directory entries (trailing '/') match by prefix; every other
-    entry requires EXACT equality — an exact-file entry must never
-    authorize near-prefix siblings like `x.py.bak`."""
+    entry requires EXACT equality."""
     for entry in allowlist:
         if entry.endswith("/"):
             if path.startswith(entry):
@@ -316,13 +309,7 @@ def main() -> int:
             errors.append(f"changed file outside the hygiene allowlist: {f}")
 
     versions = REPO / "server" / "alembic" / "versions"
-    # M14B-2 succession (frozen R2 §23, authorized 2026-09-10): exactly
-    # ONE migration at/beyond 0015 is admitted — the frozen M14
-    # migration. Anything else (0016+, or a different 0015) still
-    # rejects; this is NOT a general future-migration allowance.
     admitted_0015 = "0015_m14_world_observation_execution.py"
-    # M15A succession (frozen R4 §11, authorized 2026-09-12): exactly
-    # ONE further migration is admitted — the frozen M15 0016.
     admitted_0016 = "0016_m15_revision_compatibility.py"
     mig_beyond = [p.name for p in versions.glob("*.py")
                   if p.stem >= "0015" and p.name not in (
@@ -336,22 +323,20 @@ def main() -> int:
         if not p.is_file() or f.endswith(("hygiene_validate_boundary.py",
                                           "next_security_validate_"
                                           "boundary.py")):
-            continue  # boundary validators' own scan patterns name the vocabulary
-        if m14_owned(f) or m15_owned(f):
-            continue  # authorized M14/M15 surface legitimately uses M14 vocabulary
+            continue
+        if m14_owned(f) or m15_owned(f) or m16_p0_owned(f):
+            continue
         src = p.read_text(encoding="utf-8", errors="replace")
         for pattern, what in M14_PATTERNS:
             if re.search(pattern, src, re.I):
                 errors.append(f"{f}: {what} vocabulary present")
 
-    # new authority tables: CREATE TABLE in changed MIGRATION-path files
-    # only — test fixtures legitimately build scratch schema objects
-    # (e.g. the alembic_version stamp) and are not migration source
+    # new authority tables: CREATE TABLE in changed migration-path files only.
     for f in changed:
         if not f.startswith("server/alembic/versions/"):
             continue
         p = REPO / f
-        if not p.is_file() or not f.endswith((".py",)):
+        if not p.is_file() or not f.endswith(".py"):
             continue
         src = p.read_text(encoding="utf-8", errors="replace")
         admitted_m15_tables = {
@@ -359,20 +344,25 @@ def main() -> int:
             "production_compatibility_uses",
             "composition_occurrence_revision_tracking",
             "production_update_operations",
-            "production_update_items"}
-        for m in re.finditer(r'CREATE TABLE\s+"?(\w+)"?', src, re.I):
-            if f.endswith("0016_m15_revision_compatibility.py") and \
-                    m.group(1) in admitted_m15_tables:
-                continue  # the frozen M15 §11 tables
-            errors.append(f"{f}: new table {m.group(1)} in migration "
-                          "source")
+            "production_update_items",
+        }
+        for match in re.finditer(r'CREATE TABLE\s+"?(\w+)"?', src, re.I):
+            if (f.endswith("0016_m15_revision_compatibility.py")
+                    and match.group(1) in admitted_m15_tables):
+                continue
+            errors.append(
+                f"{f}: new table {match.group(1)} in migration source"
+            )
 
     if errors:
-        for e in errors:
-            print(f"HYGIENE-BOUNDARY INVALID: {e}", file=sys.stderr)
+        for error in errors:
+            print(f"HYGIENE-BOUNDARY INVALID: {error}", file=sys.stderr)
         return 1
-    print("Hygiene boundary clean: allowlist-scoped diff, only the frozen "
-          "M14 0015 migration, no unauthorized M14 semantics.")
+    print(
+        "Hygiene boundary clean: reviewed successor diff only; M14 0015 and "
+        "M15 0016 are the latest admitted migrations; M16-P0 introduces no "
+        "new authority migration."
+    )
     return 0
 
 
