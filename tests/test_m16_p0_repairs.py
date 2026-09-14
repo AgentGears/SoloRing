@@ -358,3 +358,62 @@ async def test_pre_06(monkeypatch: pytest.MonkeyPatch) -> None:
     assert out["feature_states"] == []
     assert out["relations"] == []
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_m15_exact_retry_preserves_committed_translator_projection(client) -> None:
+    """M16-P0: an exact M15 retry returns the committed translator pins."""
+    from sqlalchemy import text
+
+    from soloring.compatibility.service import apply_assessment, create_assessment
+    from tests.m15_seed import seed_a4_use
+
+    base = await seed_a4_use(
+        client, tag=b"m16-p0-retry",
+        source_translation=(0, 0, 0),
+        target_translation=(10, 0, 0),
+    )
+    engine = client._transport.app.state.engine
+
+    class _Session:
+        bind = engine
+
+    result = await create_assessment(
+        _Session(),
+        from_revision_id=base["production_revision_id"],
+        to_revision_id=base["r2"],
+    )
+    use = result["uses"][0]
+    assert use["translator_output_hash"] is not None
+    async with engine.connect() as conn:
+        version = (await conn.execute(text(
+            "SELECT working_version FROM compositions WHERE id = :c"),
+            {"c": use["composition_id"]},
+        )).scalar_one()
+    selection = {
+        "composition_id": use["composition_id"],
+        "occurrence_id": use["occurrence_id"],
+        "expected_working_version": version,
+        "expected_use_contract_hash": use["use_contract_hash"],
+        "review_accept": True,
+    }
+    first = await apply_assessment(
+        _Session(), assessment_id=result["assessment_id"],
+        selected_uses=[selection],
+    )
+    assert first["idempotent"] is False
+    assert first["translator_pins"]
+
+    async with engine.connect() as conn:
+        after_version = (await conn.execute(text(
+            "SELECT working_version FROM compositions WHERE id = :c"),
+            {"c": use["composition_id"]},
+        )).scalar_one()
+    retry = await apply_assessment(
+        _Session(), assessment_id=result["assessment_id"],
+        selected_uses=[dict(selection, expected_working_version=after_version)],
+    )
+    assert retry["idempotent"] is True
+    assert retry["operation_id"] == first["operation_id"]
+    assert retry["operation_hash"] == first["operation_hash"]
+    assert retry["translator_pins"] == first["translator_pins"]
