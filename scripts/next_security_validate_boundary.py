@@ -188,7 +188,29 @@ ALLOWLIST = (
     "apps/web/src/components/ProductionLibrary.tsx",
     "apps/web/src/components/WorldSetWorkspace.tsx",
     "apps/web/src/lib/api.client.ts",
+    # Post-M15 review remediation: exact reviewed successor surface only.
+    "apps/web/src/components/ProductionWorldPanel.tsx",
+    "server/soloring/executors/comfy/translate.py",
+    "server/soloring/spatial/package3.py",
+    "server/soloring/spatial/worker_inputs.py",
+    "server/tests/test_post_m15_recovery_hardening.py",
+    "tests/test_post_m15_worker_transport.py",
 )
+
+# These exact backend paths are successor review-remediation, not changes to
+# the frozen Next-security slice. Exact-path classification preserves the
+# blanket backend fence for every other non-M14/non-M15 path.
+POST_M15_REMEDIATION_BACKEND_PATHS = frozenset({
+    "server/soloring/executors/comfy/translate.py",
+    "server/soloring/spatial/package3.py",
+    "server/soloring/spatial/worker_inputs.py",
+    "server/tests/test_post_m15_recovery_hardening.py",
+})
+
+
+def post_m15_remediation_backend(path: str) -> bool:
+    return path in POST_M15_REMEDIATION_BACKEND_PATHS
+
 
 M15_OWNED_PREFIXES = (
     "docs/SoloRing-M15-",
@@ -335,7 +357,8 @@ def main(repo: Path = REPO) -> int:
                               repo=repo).splitlines() if f.strip()]
     for f in changed:
         if f.startswith("server/") and not (
-                m14_owned(f) or m15_owned(f)):
+                m14_owned(f) or m15_owned(f)
+                or post_m15_remediation_backend(f)):
             errors.append(f"backend change outside the security slice: {f}")
         if (f.startswith("server/alembic/")
                 and f not in (
