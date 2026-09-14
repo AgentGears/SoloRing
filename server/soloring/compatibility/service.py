@@ -175,10 +175,38 @@ async def revision_updates(session, *, production_object_id: str) -> dict:
             conn, production_object_id=production_object_id)
 
 
+async def _restore_idempotent_translator_projection(
+        session: AsyncSession, result: dict) -> dict:
+    """M16-P0 predecessor repair for the published M15 retry projection.
+
+    M15's idempotent branch reconstructs its response from operation_json,
+    whose compact audit root intentionally retains only translator_output_hash.
+    The immutable normalized production_update_items rows retain the complete
+    translator identity. Exact retries must therefore project translator pins
+    from those committed rows rather than fabricating translator_id=None.
+    """
+    if not result.get("idempotent"):
+        return result
+    async with session.bind.connect() as conn:
+        rows = (await conn.execute(text(
+            "SELECT composition_id, occurrence_id, translator_id, "
+            "translator_output_hash FROM production_update_items "
+            "WHERE operation_id = :op ORDER BY position"),
+            {"op": result["operation_id"]})).fetchall()
+    result["translator_pins"] = [{
+        "composition_id": row.composition_id,
+        "occurrence_id": row.occurrence_id,
+        "translator_id": row.translator_id,
+        "translator_output_hash": row.translator_output_hash,
+    } for row in rows if row.translator_id is not None]
+    return result
+
+
 async def apply_assessment(session, *, assessment_id: str,
                            selected_uses: list) -> dict:
     from soloring.compatibility.apply import apply_revision_update
 
-    return await apply_revision_update(
+    result = await apply_revision_update(
         session, assessment_id=assessment_id,
         selected_uses=selected_uses)
+    return await _restore_idempotent_translator_projection(session, result)
