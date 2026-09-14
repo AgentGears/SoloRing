@@ -144,6 +144,14 @@ def test_no_execution_source_delta_in_m11_owned_diff():
         "server/soloring/api/generations.py",
         "server/soloring/api/realization.py",
     )
+    # Post-M15 review remediation: two exact execution-source paths carry
+    # authorized later corrections to historical M10 transport/translation
+    # behavior. They are not M11-owned changes and must not weaken this gate
+    # into a general executor exception.
+    post_m15_owned = {
+        "server/soloring/executors/comfy/translate.py",
+        "server/soloring/spatial/worker_inputs.py",
+    }
     offenders = sorted(
         p for p in changed
         if any(m in p.lower() for m in forbidden_markers)
@@ -152,6 +160,7 @@ def test_no_execution_source_delta_in_m11_owned_diff():
         # claim under test is that no executor/live-render SOURCE changed
         and not p.startswith(("tests/", "scripts/", ".github/"))
         and not p.startswith(m14_owned)
+        and p not in post_m15_owned
     )
     assert offenders == [], f"execution source touched by M11: {offenders}"
 
