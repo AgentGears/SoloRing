@@ -4,6 +4,12 @@ from importlib import import_module
 
 _backup_module = import_module("soloring.recovery.backup")
 
+# M15 advanced the recovery head but the predecessor file kept the value as
+# an inline literal.  M16-P0 gives that already-published head an explicit
+# name so semantic head dispatch cannot confuse 0015 (M14) with 0016 (M15).
+if not hasattr(_backup_module, "M15_ALEMBIC_HEAD"):
+    _backup_module.M15_ALEMBIC_HEAD = "0016_m15_revision_compatibility"
+
 from soloring.recovery.semantic_successors import install_successor_semantics
 
 # M16-P0 predecessor repair: M14/M15 added durable historical semantics after
