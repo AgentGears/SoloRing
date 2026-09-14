@@ -10,7 +10,7 @@ _backup_module = import_module("soloring.recovery.backup")
 if not hasattr(_backup_module, "M15_ALEMBIC_HEAD"):
     _backup_module.M15_ALEMBIC_HEAD = "0016_m15_revision_compatibility"
 
-from soloring.recovery.successor_semantics import install_successor_semantics
+from soloring.recovery.m16_p0_semantics import install_successor_semantics
 
 # M16-P0 predecessor repair: M14/M15 added durable historical semantics after
 # the original M10F recovery engine.  Extend the existing staged-liveness seam
