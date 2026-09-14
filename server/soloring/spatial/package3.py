@@ -76,11 +76,10 @@ def parse_profile_v2(raw: Any) -> dict:
     if doc["schema_version"] != PROFILE_SCHEMA_VERSION_2:
         raise _bad("RealizationProfile schema_version must be 2 for spatial.")
 
-    # Inherited M9 profile-1 portion is validated by the FROZEN M9 parser
+    # Inherited M9 profile-1 semantics are validated by the frozen M9 parser
     # itself (strict unknown-field rejection, selector semantics, channel
-    # bijection, min<=max): delegate, never reimplement (blocker 5). The
-    # legacy parser pins schema_version==1, so validate the inherited
-    # fields through a schema-1 view and keep the v2 wrapper.
+    # bijection, min<=max). Delegate, never reimplement: validate a schema-1
+    # view and retain the v2 wrapper only for the additive spatial document.
     from soloring.realization.profile import (
         ProfileError as _M9ProfileError,
         parse_profile as _parse_m9_profile,
@@ -152,9 +151,9 @@ def _validate_runtime_requirements(reqs_raw: Any) -> None:
                        "descriptive requirement cannot pass as a runtime pin.")
         _require_str(proof["value"], f"runtime_requirements.{key}.proof.value")
         if proof["mode"] == "template_node_field":
-            # expected = the exact canonical JSON-domain value the captured
-            # template must carry at node/field; presence alone proves
-            # nothing (closure review blocker 1).
+            # `expected` is the exact canonical JSON-domain value the captured
+            # template must carry at node/field; field presence alone proves
+            # nothing about runtime closure.
             if "expected" not in proof:
                 raise _bad(f"runtime_requirements.{key}.proof.expected is "
                            "required for template_node_field proofs.")
@@ -164,21 +163,19 @@ def _validate_runtime_requirements(reqs_raw: Any) -> None:
 
 def validate_schema3_fingerprint_template(fingerprint_v3: dict,
                                           template: dict) -> None:
-    """Full hard-component closure for the schema-3 ExecutionModelFinger-
-    print against the CAPTURED package documents (R3 §6/§18, E-012):
+    """Full hard-component closure for the schema-3 execution package.
 
-    1. the m10_spatial_runtime artifact set must carry exactly the four
-       frozen model artifacts (wan_base, depth_controlnet,
-       umt5_text_encoder, wan_vae) — removing UMT5 or the VAE leaves an
-       unclosable requirement and fails package validation;
-    2. every fingerprint artifact binding (node, field, declared_name)
-       must cross-check against the CAPTURED TEMPLATE: the template node
-       must exist, the field must exist, and the template's value at that
-       node/field must EQUAL the declared_name — a captured template that
-       instructs the executor to load a different, unpinned file is a
-       binding-invalid package even when the legitimate pinned file still
-       exists on disk.
-    """
+    R3 §6/§18 / E-012 freezes exactly four immutable model-artifact
+    identities (wan_base, depth_controlnet, umt5_text_encoder, wan_vae).
+    Every fingerprint binding must resolve to an exact captured template
+    node/field whose executed value equals the fingerprint's declared name.
+    Presence of the pinned file elsewhere is insufficient.
+
+    The post-M15 review correction preserves that exact-four grammar while
+    closing a second executable dimension: when one pinned artifact is loaded
+    by multiple executable loader nodes, every reached loader must carry the
+    same class/field/declared-name identity. One representative loader cannot
+    certify a graph that actually consumes additional loaders."""
     rr = (fingerprint_v3 or {}).get("m10_spatial_runtime") or {}
     artifacts = rr.get("artifacts")
     if not isinstance(artifacts, list) or len(artifacts) != 4:
@@ -219,6 +216,7 @@ def validate_schema3_fingerprint_template(fingerprint_v3: dict,
             f"missing={missing}, extra={extra}, duplicated={dupes}")
     if not isinstance(template, dict) or not template:
         raise _bad("captured workflow template is empty or malformed")
+    by_key = {a["artifact_key"]: a for a in artifacts}
     for a in artifacts:
         node, field = a.get("node"), a.get("field")
         declared = a.get("declared_name")
@@ -242,18 +240,56 @@ def validate_schema3_fingerprint_template(fingerprint_v3: dict,
                 f"{node}/{field} but the fingerprint pins {declared!r} — "
                 "the template does not execute the pinned artifact")
 
+    # Historical-review remediation: depth_controlnet is one immutable model
+    # identity but the certified template may load it through several loader
+    # nodes. Follow the executable WanVideoControlnet.controlnet links and
+    # require every reached loader to have the same class/field/name as the
+    # fingerprint-pinned representative loader. This preserves the frozen
+    # exact-four artifact grammar while closing every executable consumer.
+    depth = by_key["depth_controlnet"]
+    primary = template.get(depth["node"])
+    primary_class = primary.get("class_type") if isinstance(primary, dict) \
+        else None
+    if not isinstance(primary_class, str) or not primary_class:
+        raise _bad("depth_controlnet fingerprint loader has no class_type")
+    for control_id, control in template.items():
+        if not isinstance(control, dict) or control.get("class_type") != \
+                "WanVideoControlnet":
+            continue
+        link = (control.get("inputs") or {}).get("controlnet")
+        if not isinstance(link, list) or len(link) != 2:
+            raise _bad(
+                f"WanVideoControlnet node {control_id!r} has no exact "
+                "controlnet loader link")
+        loader_id = str(link[0])
+        loader = template.get(loader_id)
+        if not isinstance(loader, dict) or loader.get("class_type") != \
+                primary_class:
+            raise _bad(
+                f"WanVideoControlnet node {control_id!r} reaches loader "
+                f"{loader_id!r} outside the pinned depth_controlnet loader "
+                "class")
+        loader_inputs = loader.get("inputs")
+        if not isinstance(loader_inputs, dict) or depth["field"] not in \
+                loader_inputs:
+            raise _bad(
+                f"depth_controlnet loader {loader_id!r} lacks pinned field "
+                f"{depth['field']!r}")
+        if loader_inputs[depth["field"]] != depth["declared_name"]:
+            raise _bad(
+                f"depth_controlnet loader {loader_id!r} executes "
+                f"{loader_inputs[depth['field']]!r}, not the fingerprint-"
+                f"pinned {depth['declared_name']!r}")
+
 
 def check_runtime_closure(profile_spatial: dict, *, fingerprint: dict | None,
                           template: dict) -> list[str]:
-    """Return the list of UNPROVEN runtime requirements (empty == closed).
+    """Return UNPROVEN runtime requirements; empty means closure is proven.
 
-    A requirement is proven when either:
-      * proof.mode == fingerprint_component and the captured
-        ExecutionModelFingerprint contains that exact component identity; or
-      * proof.mode == template_node_field with value 'node/field' and the
-        captured template carries that exact node id, input field, AND the
-        expected canonical value under strict JSON-domain equality — field
-        presence alone proves nothing (closure review blocker 1).
+    ``fingerprint_component`` is proven only by an exact captured component
+    identity. ``template_node_field`` is proven only when the captured
+    template carries the exact declared node, field, AND expected canonical
+    JSON-domain value. Descriptive text or mere field presence is never proof.
     """
     unproven: list[str] = []
     for key, req in profile_spatial["runtime_requirements"].items():
@@ -273,10 +309,9 @@ def _closed_by_fingerprint(req: dict, proof: dict,
     if not fingerprint:
         return False
     name = req["name"]
-    # A captured schema-3 fingerprint artifact carries its closure facts in
-    # the frozen "m10_spatial_runtime" extension document (production
-    # fingerprint shape); the bare root "runtime_requirements" form remains
-    # accepted for documents that carry it directly (M10A test fixtures).
+    # Production schema-3 fingerprints carry closure facts in the frozen
+    # m10_spatial_runtime extension; the bare runtime_requirements form stays
+    # accepted for historical/test documents that carry it directly.
     rr = (fingerprint.get("runtime_requirements")
           or fingerprint.get("m10_spatial_runtime") or {})
     if rr.get("custom_nodes", {}).get(name) == proof["value"]:
@@ -291,9 +326,7 @@ def _closed_by_fingerprint(req: dict, proof: dict,
 
 
 def _closed_by_template(node_field: str, expected: object, template: dict) -> bool:
-    """Exact node/field/VALUE proof: the captured template must carry the
-    expected canonical value at the declared node/field under strict
-    JSON-domain equality (int is never coerced to float, etc.)."""
+    """Exact node/field/VALUE proof under strict JSON-domain equality."""
     try:
         node_id, field = node_field.split("/", 1)
     except ValueError:
@@ -308,8 +341,7 @@ def _closed_by_template(node_field: str, expected: object, template: dict) -> bo
 
 
 def _json_domain_equal(a: object, b: object) -> bool:
-    """Type-exact structural equality in the JSON domain: bool never
-    equals int, int never equals float, composites match recursively."""
+    """Type-exact structural JSON equality; bool/int/float never coerce."""
     if type(a) is not type(b):
         return False
     if isinstance(a, dict):
@@ -322,11 +354,12 @@ def _json_domain_equal(a: object, b: object) -> bool:
 
 
 def _validate_json_domain(value: object, what: str) -> None:
-    """Strict JSON-domain validation for dict-callers, anchored on the ONE
-    canonical serializer: rejects NaN/Infinity and non-finite floats,
-    tuples and any non-JSON Python object, non-string keys, floats
-    entirely (runtime expected-values are int/str/bool/null/structure
-    only in this contract), and integers outside the JS-safe domain."""
+    """Validate the frozen closure-value JSON domain through one serializer.
+
+    Rejects NaN/Infinity and non-JSON Python values, non-string keys, floats
+    (this contract permits int/str/bool/null/structure only), and integers
+    outside the JavaScript-safe domain.
+    """
     from soloring.domain.canonical import canonical_json_bytes
 
     try:
@@ -376,9 +409,9 @@ def parse_manifest_v3(raw: Any) -> dict:
     if doc["schema_version"] != MANIFEST_SCHEMA_VERSION_3:
         raise _bad("manifest schema_version must be 3.")
 
-    # Inherited manifest-2 portion is validated by the FROZEN M9 schema-2
-    # parser (strict inputs/parameters/outputs, no dual source form):
-    # delegate, never reimplement (blocker 5).
+    # Inherited manifest-2 semantics are validated by the frozen M9 parser
+    # (strict input/parameter/output grammar and no dual source form).
+    # Delegate, never reimplement: only spatial_bindings are additive here.
     from soloring.workflows.manifest import (
         WorkflowError as _M9WorkflowError,
         parse_manifest_v2 as _parse_m9_manifest_v2,
@@ -396,6 +429,7 @@ def parse_manifest_v3(raw: Any) -> dict:
         raise _bad("A schema-3 manifest must declare spatial bindings.")
     keys_seen: set[str] = set()
     roles_seen: dict[str, int] = {ROLE_WORLD_DEPTH: 0, ROLE_ENTITY_DEPTH: 0}
+    targets_seen: set[tuple[str, str]] = set()
     for key, binding in bindings_raw.items():
         _require_str(key, "spatial_bindings key")
         if key in keys_seen:
@@ -411,8 +445,14 @@ def parse_manifest_v3(raw: Any) -> dict:
             raise _bad(f"spatial_bindings.{key}.artifact_role must be one of "
                        f"{list(STREAM_ROLES)}.")
         roles_seen[role] += 1
-        _require_str(binding["node"], f"spatial_bindings.{key}.node")
-        _require_str(binding["field"], f"spatial_bindings.{key}.field")
+        node = _require_str(binding["node"], f"spatial_bindings.{key}.node")
+        field = _require_str(binding["field"], f"spatial_bindings.{key}.field")
+        target = (node, field)
+        if target in targets_seen:
+            raise _bad(
+                f"spatial binding {key!r} duplicates node/field "
+                f"{node}/{field}.")
+        targets_seen.add(target)
         if binding["format"] != "soloring.spatial.v1":
             raise _bad(f"spatial_bindings.{key}.format must be "
                        "'soloring.spatial.v1'.")
@@ -421,7 +461,8 @@ def parse_manifest_v3(raw: Any) -> dict:
     if roles_seen[ROLE_ENTITY_DEPTH] > 2:
         raise _bad("At most two spatial.entity_depth bindings are supported "
                    f"(capacity {INITIAL_MAX_CONTROL_STREAMS}).")
-    # manifest input keys must exist for every binding
+    # Every explicit spatial binding is also a declared manifest input; no
+    # hidden graph-only source may enter the execution contract.
     manifest_inputs = doc.get("inputs") or {}
     for key in bindings_raw:
         if key not in manifest_inputs:
@@ -430,17 +471,18 @@ def parse_manifest_v3(raw: Any) -> dict:
 
 
 def manifest_binding_map(manifest_v3: dict) -> dict[str, dict]:
-    """input_key -> {artifact_role, node, field, format} (explicit only)."""
+    """Return explicit input_key -> role/node/field/format bindings only."""
     return dict(manifest_v3["spatial_bindings"])
 
 
 def validate_manifest_v3_template_bindings(manifest_v3: dict,
                                            template: dict) -> None:
-    """Structural exactness for schema 3 (M10E §8.4): every declared
-    binding — spatial_bindings, inherited inputs, parameters, outputs —
-    resolves against the captured template graph with no heuristic
-    substitute search. Raises Package3Invalid (SPATIAL_REALIZATION_BINDING_
-    INVALID) on any missing node/field."""
+    """Structural exactness for schema 3 (M10E §8.4).
+
+    Every spatial binding and inherited input/parameter/output resolves
+    against the captured template graph at its exact declared node/field.
+    There is no heuristic substitute search.
+    """
     def _node_inputs(node_id: object, what: str) -> dict:
         if not isinstance(node_id, str) or not node_id:
             raise _bad(f"{what}: manifest declares no node binding")
@@ -491,11 +533,10 @@ def validate_manifest_v3_template_bindings(manifest_v3: dict,
 
 def resolve_derived_binding(manifest_v3: dict, artifact_role: str,
                              position: int) -> tuple[str, str, str]:
-    """Resolve one (role, position) to the exact manifest input_key/node/field.
+    """Resolve one role/position to the exact manifest input_key/node/field.
 
-    Position ordering: world stream at 0; entity streams 1..2 in canonical
-    manifest-binding insertion order (the manifest author pins the mapping;
-    no heuristic discovery).
+    World depth occupies position 0; entity streams occupy positions 1..2 in
+    canonical manifest-binding key order. No graph heuristic participates.
     """
     bindings = manifest_v3["spatial_bindings"]
     by_role: dict[str, list[str]] = {ROLE_WORLD_DEPTH: [], ROLE_ENTITY_DEPTH: []}
@@ -544,13 +585,14 @@ def parse_descriptor_v3(raw: Any) -> dict:
 # M10F PD-1B — canonical lower-logical execution view (R6 §10.2.1)
 # --------------------------------------------------------------------------
 
-
 class LowerLogicalExecutionView:
-    """One canonical interpretation of a RETAINED schema-3 package as a
-    logical WorkflowSpec v1 or v2 (R6 §10.2.1). In-memory only: no
-    projected bytes/hash is persisted and no new package schema exists —
-    durable identity remains the ORIGINAL captured schema-3 hashes."""
+    """One canonical interpretation of a retained schema-3 package as a
+    logical WorkflowSpec v1 or v2.
 
+    This is an in-memory execution view only: projected bytes/hashes are never
+    persisted and durable identity remains the original captured schema-3
+    package hashes.
+    """
     __slots__ = ("logical_schema_version", "manifest", "template",
                  "workflow_template", "retained_manifest_v3")
 
@@ -569,9 +611,12 @@ def _lower_bad(message: str) -> SoloRingError:
 
 
 def _project_lower_manifest(manifest_v3: dict, logical_schema_version: int):
-    """§10.2.1.1 manifest projection. Inherited parameters/outputs are
-    retained exactly — never synthesized; an empty inherited outputs map
-    is non-representable for the lower path and fails closed."""
+    """R6 §10.2.1.1 manifest projection.
+
+    Inherited parameters/outputs are retained exactly, never synthesized; an
+    empty inherited outputs map is non-representable for the lower path and
+    fails closed at the public projection gate.
+    """
     from soloring.workflows.manifest import (
         parse_manifest,
         parse_manifest_v2,
@@ -590,7 +635,8 @@ def _project_lower_manifest(manifest_v3: dict, logical_schema_version: int):
         doc["schema_version"] = "2"
         return parse_manifest_v2(doc)
 
-    # logical v1: a TRUE schema-1 manifest view
+    # Logical v1 is a true schema-1 manifest view, not a schema-2 document
+    # relabeled after validation.
     doc = {k: v for k, v in manifest_v3.items() if k != "spatial_bindings"}
     inputs_v1: dict = {}
     for key, decl in inherited_inputs.items():
@@ -599,7 +645,7 @@ def _project_lower_manifest(manifest_v3: dict, logical_schema_version: int):
         source = decl.get("source")
         decl_v1 = {k: v for k, v in decl.items() if k != "source"}
         if source is None:
-            inputs_v1[key] = decl_v1  # source-less prompt/ordinary input
+            inputs_v1[key] = decl_v1
             continue
         if not isinstance(source, dict):
             raise _lower_bad(
@@ -613,7 +659,8 @@ def _project_lower_manifest(manifest_v3: dict, logical_schema_version: int):
             decl_v1["source_role"] = role
             inputs_v1[key] = decl_v1
         elif kind == "realization_channel":
-            continue  # realization channels are not representable in v1
+            # Realization channels have no schema-1 representation.
+            continue
         else:
             raise _lower_bad(
                 f"manifest input {key!r} source kind {kind!r} cannot be "
@@ -623,68 +670,86 @@ def _project_lower_manifest(manifest_v3: dict, logical_schema_version: int):
     return parse_manifest(doc)
 
 
-def _project_lower_template(manifest_v3: dict, retained_template: dict,
-                            projected_manifest) -> dict:
-    """§10.2.1.2 execution-only template projection (R6 pseudo-algorithm):
-    deterministically remove the spatial ControlNet chain from a deep
-    copy of the RETAINED template, rewiring each removed target to its
-    captured model predecessor in reverse topological order."""
+def project_schema3_spatial_control_subset(
+    manifest_v3: dict,
+    retained_template: dict,
+    active_input_keys,
+) -> dict:
+    """Project the captured schema-3 ControlNet chain to exactly active keys.
+
+    The graph itself supplies predecessor and loader links; no fixed node IDs
+    or heuristic graph search are introduced. Inactive control stages are
+    removed downstream-to-upstream and every reference to a removed stage is
+    rewired to its captured model predecessor. Active stages remain intact for
+    the translator to bind at their exact manifest node/field.
+    """
     import copy
 
-    from soloring.executors.comfy.bindings import (
-        validate_manifest_template_bindings,
-        validate_manifest_template_bindings_v2,
-    )
-
+    validated = parse_manifest_v3(manifest_v3)
     view = copy.deepcopy(retained_template)
-    bindings = manifest_v3["spatial_bindings"]
+    bindings = validated["spatial_bindings"]
+    active = set(active_input_keys)
+    unknown = sorted(active - set(bindings))
+    if unknown:
+        raise _lower_bad(
+            f"active schema-3 derived inputs have no captured spatial "
+            f"binding: {unknown}")
 
     targets: dict[str, dict] = {}
     for key, binding in bindings.items():
-        node_id = binding["node"]
+        node_id = str(binding["node"])
+        if node_id in targets:
+            raise _lower_bad(
+                f"multiple spatial bindings target control node {node_id!r}.")
         node = view.get(node_id)
         if not isinstance(node, dict) or node.get("class_type") != \
                 "WanVideoControlnet":
             raise _lower_bad(
                 f"spatial binding {key!r} target node {node_id!r} is not "
                 "the certified WanVideoControlnet shape.")
-        model_link = node.get("inputs", {}).get("model")
+        inputs = node.get("inputs")
+        if not isinstance(inputs, dict):
+            raise _lower_bad(
+                f"spatial target {node_id!r} has no inputs object.")
+        model_link = inputs.get("model")
         if not isinstance(model_link, list) or len(model_link) != 2:
             raise _lower_bad(
                 f"spatial target {node_id!r} lacks a captured model "
                 "predecessor link.")
-        controlnet_link = node.get("inputs", {}).get("controlnet")
+        controlnet_link = inputs.get("controlnet")
         if not isinstance(controlnet_link, list) or len(controlnet_link) != 2:
             raise _lower_bad(
                 f"spatial target {node_id!r} lacks its controlnet loader "
                 "link.")
-        targets[str(node_id)] = {
-            "model": model_link,
+        targets[node_id] = {
+            "key": key,
+            "field": binding["field"],
+            "model": list(model_link),
             "loader": str(controlnet_link[0]),
         }
 
-    # dependency order among targets via captured model links; reject
-    # cycles, then remove downstream-to-upstream
+    # Dependency order is derived only from captured model links. `order` is
+    # upstream-first; physical removal runs in reverse so rewiring always
+    # points through still-present predecessors.
     remaining = set(targets)
     order: list[str] = []
     while remaining:
         progressed = False
-        for t in sorted(remaining):
-            predecessor = str(targets[t]["model"][0])
+        for target in sorted(remaining):
+            predecessor = str(targets[target]["model"][0])
             if predecessor not in remaining:
-                order.append(t)
-                remaining.discard(t)
+                order.append(target)
+                remaining.discard(target)
                 progressed = True
         if not progressed:
             raise _lower_bad(
                 "Spatial ControlNet model chain is cyclic; cannot project.")
 
     removed: set[str] = set()
-    # `order` is upstream-first (a target is emitted once its model
-    # predecessor is resolved); removal runs downstream-to-upstream so
-    # each rewiring target still exists when its links move up the chain.
-    for t in reversed(order):
-        entry = targets[t]
+    for target in reversed(order):
+        entry = targets[target]
+        if entry["key"] in active:
+            continue
         predecessor = entry["model"]
         for node in view.values():
             if not isinstance(node, dict):
@@ -694,28 +759,52 @@ def _project_lower_template(manifest_v3: dict, retained_template: dict,
                 continue
             for field, value in list(inputs.items()):
                 if (isinstance(value, list) and len(value) == 2
-                        and str(value[0]) == t):
+                        and str(value[0]) == target):
                     inputs[field] = list(predecessor)
         loader = entry["loader"]
-        loader_referenced = any(
-            isinstance(node, dict)
-            and any(
+        # Remove the stage first, then classify every remaining loader
+        # reference. A loader may be shared by multiple certified spatial
+        # stages; such a loader remains executable authority while any
+        # surviving spatial target still references it and is removed only
+        # when its spatial reference count reaches zero. References from
+        # non-spatial nodes remain an unsafe ownership ambiguity and fail.
+        view.pop(target, None)
+        removed.add(target)
+        loader_referrers: list[str] = []
+        for node_id, node in view.items():
+            if node_id == loader or not isinstance(node, dict):
+                continue
+            inputs = node.get("inputs")
+            if not isinstance(inputs, dict):
+                continue
+            if any(
                 isinstance(value, list) and len(value) == 2
                 and str(value[0]) == loader
-                for value in (node.get("inputs") or {}).values()
-            )
-            for key, node in view.items() if key not in (t, loader)
+                for value in inputs.values()
+            ):
+                loader_referrers.append(node_id)
+        external_referrers = sorted(
+            node_id for node_id in loader_referrers if node_id not in targets
         )
-        if loader_referenced:
+        if external_referrers:
             raise _lower_bad(
                 f"ControlNet loader {loader!r} is referenced outside the "
-                "spatial chain; cannot project safely.")
-        view.pop(t, None)
+                f"spatial chain by {external_referrers}; cannot project "
+                "safely.")
+        if loader_referrers:
+            continue
         view.pop(loader, None)
-        removed.update({t, loader})
+        removed.add(loader)
 
-    # post-conditions: no dangling links, no spatial placeholders, no
-    # surviving spatial nodes from the bindings
+    # Postconditions are proof obligations, not cleanup: no dangling links,
+    # no unresolved inactive __INPUT__ placeholders, every active target
+    # survives, and every inactive target is absent. The active placeholder is
+    # an intentional pre-translation sentinel and therefore is classified
+    # before ordinary graph-link validation; it is not a node reference.
+    active_targets = {
+        (str(binding["node"]), binding["field"])
+        for key, binding in bindings.items() if key in active
+    }
     for node_id, node in view.items():
         if not isinstance(node, dict):
             continue
@@ -723,6 +812,12 @@ def _project_lower_template(manifest_v3: dict, retained_template: dict,
         if not isinstance(inputs, dict):
             continue
         for field, value in inputs.items():
+            if value == ["__INPUT__", 0]:
+                if (node_id, field) not in active_targets:
+                    raise _lower_bad(
+                        f"projected node {node_id!r} field {field!r} retains "
+                        "an unresolved inactive spatial control placeholder.")
+                continue
             if isinstance(value, list) and len(value) == 2:
                 if str(value[0]) in removed:
                     raise _lower_bad(
@@ -732,16 +827,33 @@ def _project_lower_template(manifest_v3: dict, retained_template: dict,
                     raise _lower_bad(
                         f"projected node {node_id!r} field {field!r} links "
                         f"unknown node {value[0]!r}.")
-            if value == ["__INPUT__", 0]:
-                raise _lower_bad(
-                    f"projected node {node_id!r} field {field!r} retains an "
-                    "unresolved spatial control placeholder.")
-    for node_id in (str(b["node"]) for b in bindings.values()):
-        if node_id in view:
-            raise _lower_bad(
-                f"spatial target {node_id!r} survived the projection.")
 
-    # structural-only binding validation against the projected graph
+    for key, binding in bindings.items():
+        node_id = str(binding["node"])
+        if key in active and node_id not in view:
+            raise _lower_bad(
+                f"active spatial target {node_id!r} was removed.")
+        if key not in active and node_id in view:
+            raise _lower_bad(
+                f"inactive spatial target {node_id!r} survived projection.")
+    return view
+
+
+def _project_lower_template(manifest_v3: dict, retained_template: dict,
+                            projected_manifest) -> dict:
+    """R6 §10.2.1.2 execution-only template projection.
+
+    All spatial control stages are removed for the lower-logical path using
+    the same deterministic projection helper, then the frozen M8/M9 binding
+    validator proves the projected manifest against the resulting graph.
+    """
+    from soloring.executors.comfy.bindings import (
+        validate_manifest_template_bindings,
+        validate_manifest_template_bindings_v2,
+    )
+
+    view = project_schema3_spatial_control_subset(
+        manifest_v3, retained_template, active_input_keys=())
     if projected_manifest.__class__.__name__ == "ManifestDocumentV2":
         validate_manifest_template_bindings_v2(projected_manifest, view)
     else:
@@ -756,10 +868,11 @@ def project_lower_logical_execution_view(
     original_template_hash: str,
     logical_schema_version: int,
 ) -> LowerLogicalExecutionView:
-    """The ONE canonical lower-logical execution view (R6 §10.2.1.5):
-    retained manifest schema 3 interpreted as logical WorkflowSpec 1/2.
-    Creation, worker submission, and terminal output resolution all
-    consume this helper; no second downgrade path may exist."""
+    """The one canonical lower-logical execution view (R6 §10.2.1.5).
+
+    Creation, worker submission, and terminal output resolution consume this
+    helper; no second downgrade interpretation is permitted.
+    """
     if logical_schema_version not in (1, 2):
         raise _lower_bad(
             f"logical_schema_version must be 1 or 2, got "
@@ -798,9 +911,9 @@ def project_lower_logical_execution_view(
         retained_manifest_v3=validated,
     )
 
-    # §10.2.1.2 step 8: the frozen lower template's output contract equals
-    # the projected manifest's, and the certified prompt declaration (when
-    # present) still targets its captured node/field.
+    # Frozen postconditions: the lower template's output contract equals the
+    # projected manifest's exactly, and the certified prompt declaration (if
+    # present) survives at the same captured node/field.
     manifest_output_names = set(projected_manifest.outputs)
     template_output_names = {o.name for o in workflow_template.outputs}
     if manifest_output_names != template_output_names:
@@ -826,4 +939,5 @@ __all__ = [
     "validate_manifest_v3_template_bindings",
     "validate_schema3_fingerprint_template", "check_runtime_closure",
     "LowerLogicalExecutionView", "project_lower_logical_execution_view",
+    "project_schema3_spatial_control_subset",
 ]

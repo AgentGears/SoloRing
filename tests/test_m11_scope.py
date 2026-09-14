@@ -39,6 +39,13 @@ def _table_cols(root: Path, table: str) -> list[str]:
         con.close()
 
 
+def _head_blob(path: str) -> str:
+    return subprocess.run(
+        ["git", "rev-parse", f"HEAD:{path}"], cwd=BASE_DIR,
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+
+
 def test_asset_kind_constraint_unchanged(tmp_path, monkeypatch):
     """M11-BOUNDARY:01 — M11 does not widen Asset semantics."""
     _upgrade(tmp_path, monkeypatch, "head")
@@ -144,6 +151,18 @@ def test_no_execution_source_delta_in_m11_owned_diff():
         "server/soloring/api/generations.py",
         "server/soloring/api/realization.py",
     )
+    # Post-M15 review remediation is byte-pinned, not path-authorized: any
+    # later semantic edit to either source must update this reviewed pin.
+    post_m15_owned = {
+        "server/soloring/executors/comfy/translate.py":
+            "9d0af0782a372c57cfbb389d8accd6f8c3675ac8",
+        "server/soloring/spatial/worker_inputs.py":
+            "c9d260e6ffcf325af42a79297a84c95fe9f3c77d",
+    }
+    for path, expected_blob in post_m15_owned.items():
+        assert _head_blob(path) == expected_blob, (
+            f"post-M15 successor bytes changed without M11 boundary review: {path}"
+        )
     offenders = sorted(
         p for p in changed
         if any(m in p.lower() for m in forbidden_markers)
@@ -152,6 +171,7 @@ def test_no_execution_source_delta_in_m11_owned_diff():
         # claim under test is that no executor/live-render SOURCE changed
         and not p.startswith(("tests/", "scripts/", ".github/"))
         and not p.startswith(m14_owned)
+        and p not in post_m15_owned
     )
     assert offenders == [], f"execution source touched by M11: {offenders}"
 

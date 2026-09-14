@@ -29,6 +29,13 @@ def _upgrade(tmp_path, monkeypatch, target="head"):
     command.upgrade(_cfg(), target)
 
 
+def _head_blob(path: str) -> str:
+    return subprocess.run(
+        ["git", "rev-parse", f"HEAD:{path}"], cwd=BASE_DIR,
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+
+
 def _m12_source() -> str:
     files = [
         BASE_DIR / "server/soloring/composition/canonical.py",
@@ -109,6 +116,19 @@ def test_m12_has_no_generation_executor_or_render_source_delta():
         "server/soloring/api/generations.py",
         "server/soloring/api/realization.py",
     )
+    # Post-M15 review remediation is byte-pinned, not path-authorized. A
+    # future edit to either execution source must deliberately advance these
+    # reviewed blob identities instead of inheriting a permanent exemption.
+    post_m15_owned = {
+        "server/soloring/executors/comfy/translate.py":
+            "9d0af0782a372c57cfbb389d8accd6f8c3675ac8",
+        "server/soloring/spatial/worker_inputs.py":
+            "c9d260e6ffcf325af42a79297a84c95fe9f3c77d",
+    }
+    for path, expected_blob in post_m15_owned.items():
+        assert _head_blob(path) == expected_blob, (
+            f"post-M15 successor bytes changed without M12 boundary review: {path}"
+        )
     offenders = sorted(
         p for p in changed
         if any(m in p.lower() for m in forbidden)
@@ -116,6 +136,7 @@ def test_m12_has_no_generation_executor_or_render_source_delta():
         # spatial/math.py is the pinned value-grammar reuse seam, not a write
         and p != "server/soloring/spatial/math.py"
         and not p.startswith(m14_owned)
+        and p not in post_m15_owned
     )
     assert offenders == [], offenders
 

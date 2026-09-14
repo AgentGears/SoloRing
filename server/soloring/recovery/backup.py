@@ -236,6 +236,11 @@ def _copy_verified(src: Path, dst: Path, expected_hash: str) -> int:
 # ---------------------------------------------------------------------------
 
 
+def _sqlite_readonly_uri(path: Path) -> str:
+    """Return a URI-safe absolute SQLite filename in read-only mode."""
+    return f"{Path(path).resolve().as_uri()}?mode=ro"
+
+
 def _sqlite_online_backup(source_uri: str, dest_db: Path) -> None:
     source = sqlite3.connect(source_uri, uri=True)
     try:
@@ -1719,7 +1724,7 @@ async def backup(
     stage.mkdir()
     try:
         staged_db = stage / "soloring.db"
-        source_uri = f"file:{Path(settings.db_path).as_posix()}?mode=ro"
+        source_uri = _sqlite_readonly_uri(Path(settings.db_path))
         source_meta: dict = {}
         probe = sqlite3.connect(source_uri, uri=True)
         try:
@@ -2279,7 +2284,7 @@ def _verify_m13_selection_and_history(con) -> None:
         "shot_revision_production_worlds").fetchall()
     for p in parents:
         rev = con.execute(
-            "SELECT snapshot_json FROM shot_revisions WHERE id = ?",
+            "SELECT snapshot_json, snapshot_hash FROM shot_revisions WHERE id = ?",
             (p[0],)).fetchone()
         if rev is None:
             raise RecoveryCorruption(
@@ -2287,18 +2292,28 @@ def _verify_m13_selection_and_history(con) -> None:
         import json as _json
 
         from soloring.domain.canonical import canonical_json_str
+        from soloring.production_world.resolver import production_world_hash
 
         try:
             snap = _json.loads(rev[0])
         except ValueError as exc:
             raise RecoveryCorruption(
                 f"ShotRevision {p[0]} snapshot unparseable") from exc
+        if canonical_json_str(snap) != rev[0]:
+            raise RecoveryCorruption(
+                f"ShotRevision {p[0]} snapshot_json is not canonical")
+        if canonical_hash(snap) != rev[1]:
+            raise RecoveryCorruption(
+                f"ShotRevision {p[0]} snapshot_hash mismatch")
         pack = snap.get("production_world") if isinstance(snap, dict) \
             else None
         if pack is None:
             raise RecoveryCorruption(
                 f"ShotRevision {p[0]}: M13 parent row without schema-6 "
                 "content")
+        if production_world_hash(pack) != p[1]:
+            raise RecoveryCorruption(
+                f"ShotRevision {p[0]}: production_world_hash mismatch")
         b = pack["binding"]
         if (p[2] != b["binding_id"] or p[3] != b["binding_hash"]
                 or p[4] != b["value"]["composition_revision"]["revision_id"]
@@ -2327,14 +2342,29 @@ def _verify_m13_selection_and_history(con) -> None:
                 f"ShotRevision {p[0]}: PI feature-state children "
                 "disagree with the captured pack")
         srows = con.execute(
-            "SELECT position, occurrence_id, production_instance_track_id, "
-            "x_mm FROM shot_revision_production_instance_spatial_states "
-            "WHERE shot_revision_id = ? ORDER BY position", (p[0],)).fetchall()
+            "SELECT position, composition_id, occurrence_id, "
+            "production_instance_track_id, requirement, x_mm, y_mm, z_mm, "
+            "yaw_udeg, pitch_udeg, roll_udeg, source_transition_id, "
+            "source_anchor_type, source_anchor_id, source_boundary FROM "
+            "shot_revision_production_instance_spatial_states WHERE "
+            "shot_revision_id = ? ORDER BY position", (p[0],)).fetchall()
         expected_s = [
-            (pos, e["occurrence_id"], e["production_instance_track_id"],
-             e["transform"]["translation_mm"][0])
+            (pos, e["composition_id"], e["occurrence_id"],
+             e["production_instance_track_id"], e["requirement"],
+             e["transform"]["translation_mm"][0],
+             e["transform"]["translation_mm"][1],
+             e["transform"]["translation_mm"][2],
+             e["transform"]["rotation_udeg"][0],
+             e["transform"]["rotation_udeg"][1],
+             e["transform"]["rotation_udeg"][2],
+             e["source_transition"]["transition_id"],
+             e["source_transition"]["anchor_type"],
+             e["source_transition"]["anchor_id"],
+             e["source_transition"]["boundary"])
             for pos, e in enumerate(pack["instance_spatial_states"])]
-        got_s = [(r[0], r[1], r[2], r[3]) for r in srows]
+        got_s = [
+            (r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8],
+             r[9], r[10], r[11], r[12], r[13], r[14]) for r in srows]
         if got_s != expected_s:
             raise RecoveryCorruption(
                 f"ShotRevision {p[0]}: PI spatial-state children disagree "

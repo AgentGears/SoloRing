@@ -215,6 +215,16 @@ ALLOWLIST = (
     "apps/web/src/components/ProductionLibrary.tsx",
     "apps/web/src/components/WorldSetWorkspace.tsx",
     "apps/web/src/lib/api.client.ts",
+    # Post-M15 review remediation: exact reviewed successor surface only.
+    # These paths were not part of the frozen hygiene slice; they are
+    # admitted here so the historical boundary can classify later reviewed
+    # corrections without turning into a permanent false-positive gate.
+    "server/soloring/executors/comfy/translate.py",
+    "server/soloring/spatial/package3.py",
+    "server/soloring/spatial/worker_inputs.py",
+    "server/tests/test_post_m15_recovery_hardening.py",
+    "tests/test_post_m15_worker_transport.py",
+    "tests/test_m10f_adversarial_worker.py",
 )
 
 M14_OWNED_PREFIXES = (
@@ -351,7 +361,8 @@ def main() -> int:
             "production_update_operations",
             "production_update_items"}
         for m in re.finditer(r'CREATE TABLE\s+"?(\w+)"?', src, re.I):
-            if f.endswith("0016_m15_revision_compatibility.py") and                     m.group(1) in admitted_m15_tables:
+            if f.endswith("0016_m15_revision_compatibility.py") and \
+                    m.group(1) in admitted_m15_tables:
                 continue  # the frozen M15 §11 tables
             errors.append(f"{f}: new table {m.group(1)} in migration "
                           "source")

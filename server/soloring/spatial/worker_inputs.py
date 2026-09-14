@@ -10,7 +10,10 @@ published M5 CapturedInput seam (§2.4).
 """
 from __future__ import annotations
 
+import hashlib
+import tempfile
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy import text
@@ -101,11 +104,13 @@ async def execute_schema3_derived_inputs(
     recording the executor-local reference for the manifest's exact
     node/field translation.
 
-    ``client`` is the worker's ClientUploader (upload(source_path=…,
-    filename=…, subfolder=…)); the bytes uploaded are read from the
-    verified physical Blob path. A retained D0 Blob that parses as
-    concatenated PNG frames is uploaded frame-per-file (the certified
-    consumption shape); any other content is uploaded whole."""
+    The physical Blob is read once after the historical verification step,
+    that exact buffer is re-hashed against the retained Blob identity, and
+    transport can no longer reopen the authoritative Blob path. Multi-frame
+    D0 content is uploaded frame-per-file from the verified buffer. For the
+    predecessor whole-file ``upload(source_path=...)`` seam, a private
+    execution-local temporary file is written from that exact verified buffer
+    and is the only path exposed to the uploader."""
     from soloring.executors.comfy.input_materializer import (
         attempt_namespace,
         validate_returned_reference,
@@ -123,9 +128,19 @@ async def execute_schema3_derived_inputs(
         # reference: a hostile/incorrect upload response cannot escape
         # the requested attempt namespace.
         namespace = attempt_namespace(generation_id, attempt_id)
-        from pathlib import Path as _Path
 
-        data = _Path(v.local_path).read_bytes()
+        data = Path(v.local_path).read_bytes()
+        # Post-verification transport fence: load_verified_derived_inputs()
+        # proves the path before returning, but a concurrent replacement
+        # between that proof and transport must never cause unverified bytes
+        # to reach the executor. Verify the exact in-memory buffer, then never
+        # reopen the authoritative Blob path after this point.
+        if hashlib.sha256(data).hexdigest() != v.blob_hash:
+            raise _fail(
+                ec.DERIVED_SPATIAL_BLOB_CORRUPT,
+                f"Physical derived Blob bytes changed before transport for "
+                f"{v.input_key}.",
+            )
         frames = _split_png_frames(data)
         if frames and len(frames) > 1:
             refs = []
@@ -139,9 +154,17 @@ async def execute_schema3_derived_inputs(
         else:
             ext = ".png" if frames else ".bin"
             filename = f"{v.input_key}_{v.blob_hash[:16]}{ext}"
-            name, sub = await client.upload(
-                source_path=_Path(v.local_path), filename=filename,
-                subfolder=namespace)
+            # Preserve the published M5 ClientUploader seam. The uploader is
+            # deliberately given a new private path containing the verified
+            # buffer, never the historical BlobStore path that was subject to
+            # the verify→transport replacement race.
+            with tempfile.TemporaryDirectory(
+                    prefix="soloring-derived-transport-") as temp_dir:
+                transport_path = Path(temp_dir) / filename
+                transport_path.write_bytes(data)
+                name, sub = await client.upload(
+                    source_path=transport_path, filename=filename,
+                    subfolder=namespace)
             validate_returned_reference(name, sub, namespace)
             v.execution_reference = comfy_input_reference(name, sub)
     return verified

@@ -35,7 +35,7 @@ export function AuthoritySubjectRow({
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    if (nested) return;  // nested occurrences are outside schema 1
+    if (nested) return;
     try {
       const s = await getAuthoritySubject(compositionId, occurrenceId);
       setSubject({ subject_kind: s.subject_kind, subject_id: s.subject_id });
@@ -333,7 +333,11 @@ export function ShotProductionWorldCard({ shotId }: { shotId: string }) {
     }
   }
 
-  if (status === null) return <p>loading production world…</p>;
+  if (status === null) {
+    return error
+      ? <div role="alert">{error}</div>
+      : <p>loading production world…</p>;
+  }
   const state = !status.selected
     ? "absent"
     : status.ready ? "ready"

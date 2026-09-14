@@ -124,6 +124,15 @@ ALLOWED_PATTERNS = [
     # M15D surface (frozen R6 §28, authorized 2026-09-12)
     r"^tests/test_m15_(recovery|api)\.py$",
     r"^server/soloring/api/schemas/production\.py$",
+    # Post-M15 review remediation. These are exact successor-owned paths,
+    # not a widened implementation class: one M10 translator correction,
+    # its focused transport proof, the focused recovery-history suite, and
+    # one predecessor continuity proof advanced to the corrected active-
+    # control semantics.
+    r"^server/soloring/executors/comfy/translate\.py$",
+    r"^tests/test_post_m15_worker_transport\.py$",
+    r"^server/tests/test_post_m15_recovery_hardening\.py$",
+    r"^tests/test_m10f_adversarial_worker\.py$",
 ]
 
 FORBIDDEN_PATTERNS = [
