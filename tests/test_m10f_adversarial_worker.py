@@ -225,7 +225,8 @@ async def test_class19_worker_continues_from_retained_bytes_after_package_replac
     boundary immediately before the real (synchronous) translator is
     invoked, and while parked the mutable installed package directory is
     replaced. Translation continues from the ALREADY-RETAINED historical
-    manifest/template bytes and produces the same prompt identity."""
+    manifest/template bytes and produces the corrected active-subset prompt
+    identity without consulting the replacement package."""
     import soloring.executors.comfy.translate as translate_mod
 
     made = await _v3_generation(factory, engine, settings, tmp_path)
@@ -295,9 +296,12 @@ async def test_class19_worker_continues_from_retained_bytes_after_package_replac
     shutil.rmtree(made["pkg"], ignore_errors=True)
 
     payload = await _asyncio.wait_for(task, 30)
-    # same historical prompt identity: the spatial ControlNet chain and
-    # node 60 wiring still derive from the RETAINED template bytes
-    assert payload.prompt["60"]["inputs"]["model"] == ["121", 0]
+    # The generation captured only world_depth + entity_depth_1 (staged=1).
+    # The unused third ControlNet stage is deterministically projected out,
+    # so node 60 is rewired to the last active retained stage, node 111.
+    assert payload.prompt["60"]["inputs"]["model"] == ["111", 0]
+    assert "121" not in payload.prompt
+    assert "120" not in payload.prompt
     assert payload.prompt["101"]["inputs"]["control_images"] == \
         ["world_depth::load::0", 0]  # bound from the retained manifest
     assert payload.prompt["world_depth::load::0"]["inputs"]["image"] == \
