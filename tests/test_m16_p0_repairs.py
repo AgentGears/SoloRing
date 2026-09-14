@@ -12,8 +12,8 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from soloring.domain.canonical import canonical_hash, canonical_json_str
 
-# Import the recovery MODULE, not the package-level public ``backup`` callable.
-# Importing the package installs the M16-P0 successor semantic extension first.
+# Importing the submodule executes the recovery package initializer first,
+# which installs the M16-P0 successor semantic extension on this module.
 recovery = importlib.import_module("soloring.recovery.backup")
 
 
@@ -63,6 +63,13 @@ def test_pre_02(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_pre_03(tmp_path: Path) -> None:
     """Corrupt M14 canonical/hash evidence fails recovery semantics."""
+    from soloring.observation.materializer import (
+        ARTIFACT_ROLE,
+        MATERIALIZER_ID,
+        MATERIALIZER_VERSION,
+        PARAMETERS,
+    )
+
     db = tmp_path / "m14-corrupt.db"
     con = sqlite3.connect(db)
     con.executescript(
@@ -70,42 +77,35 @@ def test_pre_03(tmp_path: Path) -> None:
         CREATE TABLE projects (id TEXT PRIMARY KEY);
         CREATE TABLE blobs (hash TEXT PRIMARY KEY, size_bytes INTEGER);
         CREATE TABLE derived_observation_artifacts (
-            id TEXT PRIMARY KEY,
-            project_id TEXT NOT NULL,
-            observation_spec_hash TEXT NOT NULL,
-            artifact_role TEXT NOT NULL,
-            materializer_id TEXT NOT NULL,
-            materializer_version INTEGER NOT NULL,
+            id TEXT PRIMARY KEY, project_id TEXT NOT NULL,
+            observation_spec_hash TEXT NOT NULL, artifact_role TEXT NOT NULL,
+            materializer_id TEXT NOT NULL, materializer_version INTEGER NOT NULL,
             materializer_contract_hash TEXT NOT NULL,
-            parameters_json TEXT NOT NULL,
-            parameters_hash TEXT NOT NULL,
-            provenance_json TEXT NOT NULL,
-            provenance_hash TEXT NOT NULL,
+            parameters_json TEXT NOT NULL, parameters_hash TEXT NOT NULL,
+            provenance_json TEXT NOT NULL, provenance_hash TEXT NOT NULL,
             blob_hash TEXT NOT NULL
         );
-        CREATE TABLE generations (id TEXT PRIMARY KEY);
+        CREATE TABLE generations (
+            id TEXT PRIMARY KEY, workflow_spec_json TEXT, workflow_spec_hash TEXT
+        );
         CREATE TABLE generation_derived_observation_inputs (
-            generation_id TEXT,
-            input_key TEXT,
-            position INTEGER,
-            artifact_role TEXT,
-            derived_observation_artifact_id TEXT,
+            generation_id TEXT, input_key TEXT, position INTEGER,
+            artifact_role TEXT, derived_observation_artifact_id TEXT,
             blob_hash TEXT
         );
         """
     )
     project_id = str(uuid.uuid4())
     artifact_id = str(uuid.uuid4())
-    params = {"schema_version": 1}
     con.execute("INSERT INTO projects VALUES (?)", (project_id,))
     con.execute("INSERT INTO blobs VALUES (?, 1)", ("b" * 64,))
     con.execute(
         "INSERT INTO derived_observation_artifacts VALUES "
         "(?,?,?,?,?,?,?,?,?,?,?,?)",
         (
-            artifact_id, project_id, "a" * 64,
-            "observation.world_depth", "ignored-before-corrupt-hash", 1,
-            "c" * 64, canonical_json_str(params), "s" * 64,
+            artifact_id, project_id, "a" * 64, ARTIFACT_ROLE,
+            MATERIALIZER_ID, MATERIALIZER_VERSION, "c" * 64,
+            canonical_json_str(PARAMETERS), "0" * 64,
             canonical_json_str({}), canonical_hash({}), "b" * 64,
         ),
     )
@@ -160,8 +160,7 @@ def test_pre_04(tmp_path: Path) -> None:
             translator_output_hash TEXT
         );
         CREATE TABLE composition_occurrence_revision_tracking (
-            composition_id TEXT, occurrence_id TEXT, mode TEXT,
-            policy_version INTEGER
+            composition_id TEXT, occurrence_id TEXT, mode TEXT, policy_version INTEGER
         );
         CREATE TABLE production_update_operations (
             id TEXT, project_id TEXT, assessment_id TEXT,
@@ -169,15 +168,13 @@ def test_pre_04(tmp_path: Path) -> None:
             operation_json TEXT, operation_hash TEXT, created_at TEXT
         );
         CREATE TABLE production_update_items (
-            operation_id TEXT, assessment_id TEXT,
-            assessment_use_position INTEGER, position INTEGER,
-            composition_id TEXT, occurrence_id TEXT,
+            operation_id TEXT, assessment_id TEXT, assessment_use_position INTEGER,
+            position INTEGER, composition_id TEXT, occurrence_id TEXT,
             from_revision_id TEXT, to_revision_id TEXT, verdict TEXT,
-            review_accepted INTEGER, translator_id TEXT,
-            translator_version INTEGER, translator_parameters_hash TEXT,
-            translator_output_hash TEXT, working_version_before INTEGER,
-            working_version_after INTEGER, before_spec_hash TEXT,
-            after_spec_hash TEXT
+            review_accepted INTEGER, translator_id TEXT, translator_version INTEGER,
+            translator_parameters_hash TEXT, translator_output_hash TEXT,
+            working_version_before INTEGER, working_version_after INTEGER,
+            before_spec_hash TEXT, after_spec_hash TEXT
         );
         """
     )
@@ -326,7 +323,7 @@ async def test_pre_05(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.mark.asyncio
 async def test_pre_06(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Schema-1 legacy historical behavior remains byte/meaning compatible."""
+    """Schema-1 legacy historical behavior remains unchanged."""
     from soloring.api import continuity as continuity_api
 
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
