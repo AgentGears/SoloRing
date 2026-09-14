@@ -109,6 +109,13 @@ def test_m12_has_no_generation_executor_or_render_source_delta():
         "server/soloring/api/generations.py",
         "server/soloring/api/realization.py",
     )
+    # Post-M15 review remediation: these are exact later corrective paths for
+    # historical M10 transport/translation semantics, not M12 execution
+    # expansion. Keep the exception closed instead of admitting a prefix.
+    post_m15_owned = {
+        "server/soloring/executors/comfy/translate.py",
+        "server/soloring/spatial/worker_inputs.py",
+    }
     offenders = sorted(
         p for p in changed
         if any(m in p.lower() for m in forbidden)
@@ -116,6 +123,7 @@ def test_m12_has_no_generation_executor_or_render_source_delta():
         # spatial/math.py is the pinned value-grammar reuse seam, not a write
         and p != "server/soloring/spatial/math.py"
         and not p.startswith(m14_owned)
+        and p not in post_m15_owned
     )
     assert offenders == [], offenders
 
