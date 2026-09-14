@@ -113,3 +113,42 @@ async def test_whole_file_transport_preserves_upload_seam_and_verified_buffer(
     assert uploader.data == original
     assert hashlib.sha256(uploader.data).hexdigest() == verified.blob_hash
     assert result[0].execution_reference is not None
+
+
+def test_projection_retains_shared_loader_until_last_spatial_consumer_removed():
+    """A certified ControlNet loader may be shared by multiple stages.
+
+    Removing one inactive stage must retain the loader while an active stage
+    still consumes it; projecting the last consumer away must then remove the
+    now-unreferenced loader. This closes the final-head Codex shared-loader
+    review case without admitting non-spatial ownership of the loader.
+    """
+    from soloring.spatial import production_package as prod
+    from soloring.spatial.package3 import (
+        project_schema3_spatial_control_subset,
+        validate_schema3_fingerprint_template,
+    )
+
+    manifest = prod.production_manifest_v3()
+    template = prod.production_template()
+    template["121"]["inputs"]["controlnet"] = ["110", 0]
+    template.pop("120")
+
+    # Positive control: this shared-loader graph is valid under the captured
+    # fingerprint contract before projection.
+    validate_schema3_fingerprint_template(
+        prod.production_fingerprint_document(), template)
+
+    partial = project_schema3_spatial_control_subset(
+        manifest, template, ("world_depth", "entity_depth_1"))
+    assert "121" not in partial
+    assert "110" in partial
+    assert partial["111"]["inputs"]["controlnet"] == ["110", 0]
+    assert partial["60"]["inputs"]["model"] == ["111", 0]
+
+    final = project_schema3_spatial_control_subset(
+        manifest, template, ("world_depth",))
+    assert "111" not in final
+    assert "121" not in final
+    assert "110" not in final
+    assert final["60"]["inputs"]["model"] == ["101", 0]
