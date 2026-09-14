@@ -782,7 +782,9 @@ def project_schema3_spatial_control_subset(
 
     # Postconditions are proof obligations, not cleanup: no dangling links,
     # no unresolved inactive __INPUT__ placeholders, every active target
-    # survives, and every inactive target is absent.
+    # survives, and every inactive target is absent. The active placeholder is
+    # an intentional pre-translation sentinel and therefore is classified
+    # before ordinary graph-link validation; it is not a node reference.
     active_targets = {
         (str(binding["node"]), binding["field"])
         for key, binding in bindings.items() if key in active
@@ -794,6 +796,12 @@ def project_schema3_spatial_control_subset(
         if not isinstance(inputs, dict):
             continue
         for field, value in inputs.items():
+            if value == ["__INPUT__", 0]:
+                if (node_id, field) not in active_targets:
+                    raise _lower_bad(
+                        f"projected node {node_id!r} field {field!r} retains "
+                        "an unresolved inactive spatial control placeholder.")
+                continue
             if isinstance(value, list) and len(value) == 2:
                 if str(value[0]) in removed:
                     raise _lower_bad(
@@ -803,11 +811,6 @@ def project_schema3_spatial_control_subset(
                     raise _lower_bad(
                         f"projected node {node_id!r} field {field!r} links "
                         f"unknown node {value[0]!r}.")
-            if value == ["__INPUT__", 0] and (node_id, field) not in \
-                    active_targets:
-                raise _lower_bad(
-                    f"projected node {node_id!r} field {field!r} retains an "
-                    "unresolved inactive spatial control placeholder.")
 
     for key, binding in bindings.items():
         node_id = str(binding["node"])
