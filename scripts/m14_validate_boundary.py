@@ -84,6 +84,12 @@ ALLOWED_PATTERNS = [
     r"^server/soloring/api/main\.py$",
     r"^server/soloring/domain/shots\.py$",
     r"^tests/test_m16_(migration|grammar|duration|events|identity)\.py$",
+    # M16-A recovery-boundary correction (review follow-up on 0a213a5):
+    # 0017 stays fail-closed until M16-C, so the M10F backup/restore
+    # template and scale-metrics fixture construct the legitimate
+    # certified 0016 posture.
+    r"^tests/test_m10f_backup_restore\.py$",
+    r"^tests/test_m10f_scale\.py$",
 ]
 
 FORBIDDEN_PATTERNS = [

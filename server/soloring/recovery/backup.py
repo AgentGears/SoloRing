@@ -38,9 +38,12 @@ from soloring.settings import Settings
 from soloring.workflows.artifact_store import WorkflowArtifactStore
 
 # M15A succession (frozen R4 §23/§26, authorized 2026-09-12): the
-# recovery head advances with the frozen 0017 migration (M16 R6 §16.2):
-# 0017 adds the five M16 tables and no Blob FK.
-EXPECTED_ALEMBIC_HEAD = "0017_m16_intra_shot_consequences"
+# Recovery stays at the published 0016 head (frozen R6 §16/§21): an
+# advertised head must be verified to its own authority depth, and the
+# M16 event/proposal/review verifier is the M16-C recovery slice. 0017
+# remains fail-closed — live backup refuses a 0017 DB and restore refuses
+# a 0017 manifest — until M16-C admits it.
+EXPECTED_ALEMBIC_HEAD = "0016_m15_revision_compatibility"
 BACKUP_MANIFEST_SCHEMA_VERSION = 1
 
 # M13 (frozen R3 §23): restore is head-dispatched across five heads. M14
@@ -61,12 +64,10 @@ SUPPORTED_RESTORE_ALEMBIC_HEADS = frozenset({
     M13_ALEMBIC_HEAD,
     M14_ALEMBIC_HEAD,
     # M15 head (frozen R4 §11.6/§23, authorized 2026-09-12): restores
-    # at 0016 with the exact published M14 Blob-FK inventory.
+    # at 0016 with the exact published M14 Blob-FK inventory. This is the
+    # certified recovery head until the M16-C recovery slice installs the
+    # M16 verifier and admits 0017 (frozen R6 §16/§21).
     M15_ALEMBIC_HEAD,
-    # M16 head (frozen R6 §16.2): restores at 0017 verify through the
-    # M15 successor semantics; M16's own recovery verification lands
-    # with the M16-C recovery slice.
-    M16_ALEMBIC_HEAD,
 })
 
 ARTIFACT_KINDS = (
@@ -125,9 +126,9 @@ def _blob_fk_policy_for_head(head: str) -> frozenset:
         # M12/M13 add no Blob FK; 0012-0014 share the exact seven paths.
         return M11_BLOB_FK_COLUMNS
     if head in (M14_ALEMBIC_HEAD, M15_ALEMBIC_HEAD, M16_ALEMBIC_HEAD):
-        # M15 added no Blob FK (frozen R4 §11.6) and M16 adds no Blob FK
-        # (frozen R6 §16.2): heads 0015-0017 share the exact published
-        # M14 inventory.
+        # Structural register only for 0017 (frozen R6 §16.2: no M16 Blob
+        # FK, exact 8 paths): recovery admission itself stays fail-closed
+        # until M16-C. 0015-0016 share the exact published M14 inventory.
         return M14_BLOB_FK_COLUMNS
     raise RecoveryCorruption(f"unsupported recovery head {head!r}.")
 
