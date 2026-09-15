@@ -123,7 +123,6 @@ async def _create_returning(session: AsyncSession, params: dict, project_id: str
         try:
             row = await _execute_shot_insert(session, params)
             if row is None:
-                # WHERE EXISTS false -> project missing/deleted.
                 raise not_found(
                     ErrorCode.PROJECT_NOT_FOUND, f"Project {project_id} not found."
                 )
@@ -132,8 +131,6 @@ async def _create_returning(session: AsyncSession, params: dict, project_id: str
         except IntegrityError as exc:
             await session.rollback()
             if not _is_shot_number_uniqueness_error(exc):
-                # Unrelated integrity failure: not a numbering collision, and a
-                # raw DB exception must never cross the boundary (plan §10.1).
                 raise internal_invariant(
                     "Unexpected integrity error during Shot creation."
                 )
@@ -142,7 +139,6 @@ async def _create_returning(session: AsyncSession, params: dict, project_id: str
                     "Shot number allocation failed after retry."
                 )
             continue
-    # unreachable
     raise internal_invariant("Shot number allocation exhausted retries.")
 
 
@@ -177,8 +173,6 @@ async def _create_fenced(engine: AsyncEngine, params: dict, project_id: str) -> 
             await conn.execute(text(_INSERT_PLAIN), {**params, "shot_number": next_num})
             await conn.exec_driver_sql("COMMIT")
         except IntegrityError:
-            # Fenced path cannot collide (atomic MAX+INSERT under one lock);
-            # any integrity failure here is an invariant violation, never raw.
             with contextlib.suppress(Exception):
                 await conn.exec_driver_sql("ROLLBACK")
             raise internal_invariant(
@@ -204,7 +198,6 @@ async def get_shot(session: AsyncSession, shot_id: str) -> Shot:
 
 
 async def list_shots(session: AsyncSession, project_id: str) -> list[Shot]:
-    # Verify the parent project is active first.
     from soloring.domain.projects import _get_active
 
     await _get_active(session, project_id)
@@ -250,7 +243,6 @@ async def snapshot_references(session: AsyncSession, shot_id: str) -> list[Refer
     return await _reference_refs(session, shot_id)
 
 
-# Columns of the shot-detail read unit; mapping keys match ShotRead fields.
 _DETAIL_COLUMNS = (
     Shot.id,
     Shot.project_id,
@@ -307,16 +299,10 @@ async def read_shot_detail(engine: AsyncEngine, shot_id: str, *, settings=None):
         resolve_effective_feature_state,
         resolve_effective_relation_state,
     )
-    # M7C §10.3 structural singularity: the effective states resolved in
-    # THIS read unit flow into the SAME builder capture would use — the
-    # working hash is the hash of the exact value capture would persist.
 
     if not is_uuid(shot_id):
         raise not_found(ErrorCode.SHOT_NOT_FOUND, f"Shot {shot_id} not found.")
     async with engine.connect() as conn:
-        # Explicit driver BEGIN establishes the WAL read snapshot; the TERMINAL
-        # commit/rollback go through SQLAlchemy so its transaction bookkeeping
-        # stays in sync with the driver (conn.in_transaction() is accurate).
         await conn.exec_driver_sql("BEGIN")
         try:
             shot = (
@@ -331,20 +317,12 @@ async def read_shot_detail(engine: AsyncEngine, shot_id: str, *, settings=None):
                     ErrorCode.SHOT_NOT_FOUND, f"Shot {shot_id} not found."
                 )
             refs = await _reference_refs(conn, shot_id)
-            # Dependencies resolve BEFORE the canon comparison so the hash
-            # handed to canon is the SAME effective snapshot identity the
-            # working hash exposes (M6C re-gate: one builder, one value).
             resolved = await resolve_working_dependencies(conn, shot_id)
             outcome = await resolve_effective_feature_state(conn, shot_id)
             relation_outcome = await resolve_effective_relation_state(
                 conn, shot_id
             )
             readiness = readiness_projection(outcome, relation_outcome)
-            # M8 §52: visual resolution only after semantic readiness, on
-            # the same pinned snapshot (one coherent unit). When M7 is not
-            # ready the composed result projects blocked (§52.1) — M7
-            # blockers surface through visual_continuity_issues and the
-            # visual flag is false; NULL-as-ready is never fabricated.
             from soloring.visual.readiness import resolve_visual_readiness
 
             visual_result = await resolve_visual_readiness(
@@ -354,10 +332,6 @@ async def read_shot_detail(engine: AsyncEngine, shot_id: str, *, settings=None):
                 resolved, outcome.states,
                 blob_store=_visual_blob_store(settings),
             )
-            # M10D §41: M10 inspection completes on this same coherent
-            # unit once M7 is coherent, even when M8 is blocked (sibling
-            # layers). When M7 is unresolved the resolver is not invoked
-            # and the spatial projection is honestly not-ready.
             spatial_outcome = None
             if readiness["continuity_state_ready"]:
                 from soloring.spatial.resolver import (
@@ -371,13 +345,6 @@ async def read_shot_detail(engine: AsyncEngine, shot_id: str, *, settings=None):
             if readiness["continuity_state_ready"] and (
                 spatial_outcome is None or spatial_outcome.ready
             ):
-                # M13 R3 §14/§18: the working hash covers the selected
-                # production world through the SAME resolver capture uses,
-                # on this same pinned snapshot. An M13-blocked shot (stale
-                # binding, missing dependency, agreement mismatch) has no
-                # authoritative working snapshot: the hash NULLs exactly
-                # like an unresolved required M10 state — never a
-                # lower-schema fallback (§12 mirror of M10D §43).
                 production_world_pack = None
                 if spatial_outcome is not None and spatial_outcome.ready:
                     from soloring.production_world.resolver import (
@@ -399,9 +366,6 @@ async def read_shot_detail(engine: AsyncEngine, shot_id: str, *, settings=None):
                             shot, refs, differs, resolved, effective_hash,
                             readiness, visual_result, spatial_outcome,
                         )
-                # The working hash covers M10 authority; an unresolved
-                # required M10 state NULLs the hash WITHOUT falling back
-                # to lower-schema current bytes (M10D §43).
                 effective_hash = effective_working_snapshot_hash(
                     shot, refs, resolved, outcome.states,
                     relation_outcome.relation_states,
@@ -414,10 +378,6 @@ async def read_shot_detail(engine: AsyncEngine, shot_id: str, *, settings=None):
                     conn, shot, refs, effective_hash
                 )
             else:
-                # No authoritative working snapshot exists (M7B §7 /
-                # M10D §43): the hash and the canon comparison are both
-                # NULL — never a fabricated hash, never a misleading
-                # "matches".
                 effective_hash = None
                 differs = None
             await conn.commit()
@@ -434,8 +394,19 @@ async def read_shot_detail(engine: AsyncEngine, shot_id: str, *, settings=None):
 async def patch_shot(
     session: AsyncSession, shot_id: str, data: ShotPatch
 ) -> Shot:
-    shot = await _load_active(session, shot_id)
     provided = data.model_fields_set
+    if "duration_ms" in provided:
+        # M16 R6: duration and event-set legality share one BEGIN IMMEDIATE
+        # writer fence. This is the one ordinary Shot PATCH path, so no
+        # duration mutation can race an intra-Shot event writer.
+        from soloring.continuity.intra_shot_service import (
+            patch_shot_with_duration_fence,
+        )
+
+        await patch_shot_with_duration_fence(session, shot_id, data)
+        return await _load_active(session, shot_id)
+
+    shot = await _load_active(session, shot_id)
     if "subject" in provided:
         subject = normalize_required_text(data.subject)
         if not subject:
@@ -448,8 +419,6 @@ async def patch_shot(
     ):
         if field in provided:
             setattr(shot, field, normalize_optional_creative(getattr(data, field)))
-    if "duration_ms" in provided:
-        shot.duration_ms = data.duration_ms
     shot.updated_at = await db_now(session)
     await session.commit()
     await session.refresh(shot)
@@ -483,7 +452,7 @@ async def delete_shot(session: AsyncSession, shot_id: str) -> None:
                     ErrorCode.SHOT_NOT_FOUND, f"Shot {shot_id} not found."
                 )
             if row.deleted_at is not None:
-                await conn.exec_driver_sql("COMMIT")  # idempotent 204
+                await conn.exec_driver_sql("COMMIT")
                 return
             anchored = (
                 await conn.execute(
