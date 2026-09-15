@@ -84,9 +84,11 @@ def test_grammar_08():
         target_value("feature", TARGET["id"])
     from soloring.continuity.intra_shot_models import ShotIntraShotEvent
 
+    # the repo metadata naming convention prefixes explicit check names
+    # with the table name; the migration owns the bare frozen name.
     check = next(
         c for c in ShotIntraShotEvent.__table__.constraints
-        if getattr(c, "name", None) == "ck_sise_target_xor"
+        if (getattr(c, "name", None) or "").endswith("ck_sise_target_xor")
     )
     sql = str(check.sqltext)
     assert "entity_feature_id IS NOT NULL" in sql

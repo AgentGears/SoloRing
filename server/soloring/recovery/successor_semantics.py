@@ -341,9 +341,13 @@ def install_successor_semantics(recovery: ModuleType) -> None:
     def _enumerate_with_successor_semantics(staged_db: Path,
                                             expected_columns=None):
         head = recovery._staged_db_head(staged_db)
-        if head in (recovery.M14_ALEMBIC_HEAD, recovery.M15_ALEMBIC_HEAD):
+        # M16-A admits 0017 with the deepest published successor layer:
+        # restores at 0017 verify M14 + M15 semantics. M16's own
+        # recovery verification is the frozen M16-C recovery slice.
+        if head in (recovery.M14_ALEMBIC_HEAD, recovery.M15_ALEMBIC_HEAD,
+                    recovery.M16_ALEMBIC_HEAD):
             recovery._verify_m14_observation_state(staged_db)
-        if head == recovery.M15_ALEMBIC_HEAD:
+        if head in (recovery.M15_ALEMBIC_HEAD, recovery.M16_ALEMBIC_HEAD):
             recovery._verify_m15_compatibility_state(staged_db)
         return original_enumerate(staged_db, expected_columns)
 

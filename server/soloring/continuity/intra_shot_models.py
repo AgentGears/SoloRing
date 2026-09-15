@@ -21,7 +21,6 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 
 from soloring.db.base import Base
-from soloring.db.timeutil import DB_NOW_SQL
 
 _UUID = String(36)
 _TARGET_KINDS = "('entity_feature','entity_relation','production_instance_feature')"
@@ -83,8 +82,7 @@ class ShotIntraShotEventProposal(Base):
     analyzer_parameters_hash: Mapped[str | None] = mapped_column(Text)
     proposal_json: Mapped[str] = mapped_column(Text, nullable=False)
     proposal_hash: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text(DB_NOW_SQL))
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
 
 
 class ShotIntraShotEvent(Base):
@@ -144,10 +142,8 @@ class ShotIntraShotEvent(Base):
     source_proposal_id: Mapped[str | None] = mapped_column(_UUID)
     event_json: Mapped[str] = mapped_column(Text, nullable=False)
     event_hash: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[str] = mapped_column(Text, nullable=False,
-                                            server_default=text(DB_NOW_SQL))
-    updated_at: Mapped[str] = mapped_column(Text, nullable=False,
-                                            server_default=text(DB_NOW_SQL))
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[str] = mapped_column(Text, nullable=False)
     deleted_at: Mapped[str | None] = mapped_column(Text)
 
 
@@ -321,5 +317,4 @@ class PersistentConsequenceReview(Base):
     production_instance_feature_transition_id: Mapped[str | None] = mapped_column(_UUID)
     operation_json: Mapped[str] = mapped_column(Text, nullable=False)
     operation_hash: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[str] = mapped_column(Text, nullable=False,
-                                            server_default=text(DB_NOW_SQL))
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)

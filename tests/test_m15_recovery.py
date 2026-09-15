@@ -43,7 +43,7 @@ async def _assess_and_apply(client, base):
     return result
 
 
-async def _stamp_alembic(client, head="0016_m15_revision_compatibility"):
+async def _stamp_alembic(client, head="0017_m16_intra_shot_consequences"):
     """The conftest engine builds schema via create_all (no
     alembic_version); the backup machinery requires the table."""
     engine = client._transport.app.state.engine
@@ -92,7 +92,9 @@ async def test_0016_backup_restore_preserves_m15_rows_and_hashes(
         client, tmp_path):
     """M15-REC:01 — head-0016 backup → restore preserves exact
     assessment children, tracking policy, and update operation/items
-    with canonical hashes revalidating; alembic head stays 0016."""
+    with canonical hashes revalidating; alembic head stays 0016. The
+    0016 posture is constructed from the current-head live backup by
+    the REC:02 BACKUP-TREE conversion precedent."""
     from soloring.compatibility.canonical import verify_stored_assessment
     from soloring.recovery.backup import backup, restore
     from soloring.settings import Settings
@@ -125,7 +127,39 @@ async def test_0016_backup_restore_preserves_m15_rows_and_hashes(
     await backup(settings, backup_root)
     manifest = json.loads((backup_root / "backup-manifest.json")
                           .read_text(encoding="utf-8"))
-    assert manifest["alembic_version"] == "0016_m15_revision_compatibility"
+    assert manifest["alembic_version"] == "0017_m16_intra_shot_consequences"
+
+    # The live backup certifies the current head. REC:01 is an M15
+    # proof pinned to the 0016 posture, so convert the BACKUP TREE
+    # alone to 0016: the five M16 tables are empty here, so dropping
+    # them removes no authored row (the REC:02 conversion precedent).
+    import hashlib
+    import sqlite3
+
+    from soloring.domain.canonical import canonical_json_bytes
+
+    db_file = backup_root / "soloring.db"
+    con = sqlite3.connect(str(db_file))
+    try:
+        con.execute("PRAGMA foreign_keys=OFF")
+        for table in ("persistent_consequence_reviews",
+                      "shot_intra_shot_events",
+                      "shot_revision_intra_shot_events",
+                      "shot_revision_intra_shot_specs",
+                      "shot_intra_shot_event_proposals"):
+            con.execute(f"DROP TABLE {table}")
+        con.execute(
+            "UPDATE alembic_version SET version_num = "
+            "'0016_m15_revision_compatibility'")
+        con.commit()
+    finally:
+        con.close()
+    manifest["alembic_version"] = "0016_m15_revision_compatibility"
+    manifest["database_sha256"] = hashlib.sha256(
+        db_file.read_bytes()).hexdigest()
+    (backup_root / "backup-manifest.json").write_bytes(
+        canonical_json_bytes(manifest))
+
     dest = tmp_path / "restored"
     await restore(backup_root, dest)
 
@@ -160,9 +194,10 @@ async def test_0015_backup_restores_without_inventing_m15_state(client,
                                                                  tmp_path):
     """M15-REC:02 — a historical head-0015 backup restores with exact
     predecessor semantics and invents no M15 state. The historical posture
-    is constructed from a semantically valid real 0016 backup, then the
-    BACKUP TREE alone is converted to 0015 by dropping the five empty M15
-    tables, stamping 0015, and re-hashing the manifest database identity."""
+    is constructed from a semantically valid real current-head (0017)
+    backup, then the BACKUP TREE alone is converted to 0015 by dropping
+    the five empty M16 tables and the five empty M15 tables, stamping
+    0015, and re-hashing the manifest database identity."""
     import hashlib
     import sqlite3
 
@@ -175,7 +210,8 @@ async def test_0015_backup_restores_without_inventing_m15_state(client,
     await _link_r2_provenance(client, base)
     await _stamp_alembic(client)
 
-    # First produce a genuinely valid head-0016 backup. M16-P0 semantic
+    # First produce a genuinely valid current-head (0017) backup. M16-P0
+    # semantic
     # succession now (correctly) treats a live 0016 database that is missing
     # all five M15 tables as corruption, so the old test-only shortcut of
     # dropping them before backup is no longer a valid construction.
@@ -189,7 +225,12 @@ async def test_0015_backup_restores_without_inventing_m15_state(client,
     con = sqlite3.connect(str(db_file))
     try:
         con.execute("PRAGMA foreign_keys=OFF")
-        for table in ("production_update_items",
+        for table in ("persistent_consequence_reviews",
+                      "shot_intra_shot_events",
+                      "shot_revision_intra_shot_events",
+                      "shot_revision_intra_shot_specs",
+                      "shot_intra_shot_event_proposals",
+                      "production_update_items",
                       "production_update_operations",
                       "production_compatibility_uses",
                       "production_compatibility_assessments",

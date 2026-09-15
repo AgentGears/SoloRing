@@ -192,7 +192,7 @@ def template(tmp_path_factory):
     data_dir.mkdir()
     settings = Settings(data_dir=data_dir)
     seeded = _seed_m11_state(data_dir, settings)
-    _stamp_head(data_dir, "0016_m15_revision_compatibility")
+    _stamp_head(data_dir, "0017_m16_intra_shot_consequences")
     backup_root = base / "backup"
     evidence = asyncio.run(rb.backup(settings, backup_root))
     return {"data_dir": data_dir, "settings": settings, "seed": seeded,
@@ -220,11 +220,11 @@ def test_current_backup_expected_head_is_0012(template):
 
     M12 repin: the current head advanced to 0013; M11's production state
     remains verified at every certified head."""
-    assert rb.EXPECTED_ALEMBIC_HEAD == "0016_m15_revision_compatibility"
+    assert rb.EXPECTED_ALEMBIC_HEAD == "0017_m16_intra_shot_consequences"
     manifest = json.loads(
         (template["backup_root"] / "backup-manifest.json").read_text()
     )
-    assert manifest["alembic_version"] == "0016_m15_revision_compatibility"
+    assert manifest["alembic_version"] == "0017_m16_intra_shot_consequences"
 
 
 def test_recovery_blob_fk_inventory_is_six_for_0011_and_seven_for_0012():
@@ -502,9 +502,9 @@ async def test_backup_manifest_v1_field_grammar_is_unchanged_for_0011_and_0012(
     # The strict parser accepts both supported heads and rejects new fields.
     raw0012 = (env["backup"] / "backup-manifest.json").read_bytes()
     doc = rb.parse_backup_manifest_v1(raw0012)
-    # Head repin through the eras (now 0016 via M15A); the parser's
+    # Head repin through the eras (now 0017 via M16-A); the parser's
     # supported-head set still includes both M11 heads.
-    assert doc["alembic_version"] == "0016_m15_revision_compatibility"
+    assert doc["alembic_version"] == "0017_m16_intra_shot_consequences"
     bad = dict(doc)
     bad["m11_diagnostics"] = []
     from soloring.domain.canonical import canonical_json_bytes
