@@ -171,22 +171,33 @@ ALLOWLIST = (
     "server/tests/test_post_m15_recovery_hardening.py",
     "tests/test_post_m15_worker_transport.py",
     "tests/test_m10f_adversarial_worker.py",
-    # M16-P0 predecessor repairs only. No M16 migration is admitted here.
+    # M16-P0 predecessor repairs.
     "server/soloring/api/continuity.py",
     "server/soloring/recovery/__init__.py",
     "server/soloring/recovery/semantic_successors.py",
     "server/soloring/recovery/successor_semantics.py",
     "tests/test_m16_p0_repairs.py",
+    # M16-A exact authority surface.
+    "server/alembic/versions/0017_m16_intra_shot_consequences.py",
+    "server/soloring/continuity/intra_shot_models.py",
+    "server/soloring/continuity/intra_shot_canonical.py",
+    "server/soloring/continuity/intra_shot_service.py",
+    "server/soloring/api/schemas/intra_shot.py",
+    "server/soloring/api/intra_shot.py",
+    "server/soloring/api/main.py",
+    "server/soloring/domain/shots.py",
+    "tests/test_m16_migration.py",
+    "tests/test_m16_grammar.py",
+    "tests/test_m16_duration.py",
+    "tests/test_m16_events.py",
+    "tests/test_m16_identity.py",
 )
 
-# Exact backend successor-remediation surface. This remains an exact set so
-# every unrelated backend mutation is still rejected.
 POST_M15_REMEDIATION_BACKEND_PATHS = frozenset({
     "server/soloring/executors/comfy/translate.py",
     "server/soloring/spatial/package3.py",
     "server/soloring/spatial/worker_inputs.py",
     "server/tests/test_post_m15_recovery_hardening.py",
-    # M16-P0 PRE:01-06 predecessor repairs.
     "server/soloring/api/continuity.py",
     "server/soloring/recovery/__init__.py",
     "server/soloring/recovery/semantic_successors.py",
@@ -196,6 +207,24 @@ POST_M15_REMEDIATION_BACKEND_PATHS = frozenset({
 
 def post_m15_remediation_backend(path: str) -> bool:
     return path in POST_M15_REMEDIATION_BACKEND_PATHS
+
+
+M16_A_BACKEND_PATHS = frozenset({
+    "server/alembic/versions/0017_m16_intra_shot_consequences.py",
+    "server/soloring/continuity/intra_shot_models.py",
+    "server/soloring/continuity/intra_shot_canonical.py",
+    "server/soloring/continuity/intra_shot_service.py",
+    "server/soloring/api/schemas/intra_shot.py",
+    "server/soloring/api/intra_shot.py",
+    "server/soloring/api/main.py",
+    "server/soloring/domain/shots.py",
+    "server/soloring/db/models.py",
+    "server/soloring/errors.py",
+})
+
+
+def m16_a_backend(path: str) -> bool:
+    return path in M16_A_BACKEND_PATHS
 
 
 M15_OWNED_PREFIXES = (
@@ -349,12 +378,14 @@ def main(repo: Path = REPO) -> int:
             m14_owned(f)
             or m15_owned(f)
             or post_m15_remediation_backend(f)
+            or m16_a_backend(f)
         ):
             errors.append(f"backend change outside the security slice: {f}")
         if (f.startswith("server/alembic/")
                 and f not in (
                     "server/alembic/versions/0015_m14_world_observation_execution.py",
                     "server/alembic/versions/0016_m15_revision_compatibility.py",
+                    "server/alembic/versions/0017_m16_intra_shot_consequences.py",
                 )):
             errors.append(f"alembic change outside the security slice: {f}")
         if not path_allowed(f, allowlist):
@@ -365,14 +396,16 @@ def main(repo: Path = REPO) -> int:
     versions = repo / "server" / "alembic" / "versions"
     admitted_0015 = "0015_m14_world_observation_execution.py"
     admitted_0016 = "0016_m15_revision_compatibility.py"
+    admitted_0017 = "0017_m16_intra_shot_consequences.py"
     mig_beyond = [
         p.name for p in versions.glob("*.py")
-        if p.stem >= "0015" and p.name not in (admitted_0015, admitted_0016)
+        if p.stem >= "0015" and p.name not in (
+            admitted_0015, admitted_0016, admitted_0017)
     ]
     if mig_beyond:
         errors.append(
-            "migration at/beyond 0015 beyond the frozen M14/M15 migrations "
-            f"exists: {mig_beyond}"
+            "migration at/beyond 0015 beyond the frozen M14/M15/M16-A "
+            f"migrations exists: {mig_beyond}"
         )
 
     pkg = json.loads(
@@ -393,7 +426,7 @@ def main(repo: Path = REPO) -> int:
             "hygiene_validate_boundary.py",
         )):
             continue
-        if m14_owned(f) or post_m15_remediation_backend(f):
+        if m14_owned(f) or post_m15_remediation_backend(f) or m16_a_backend(f):
             continue
         src = p.read_text(encoding="utf-8", errors="replace")
         for pattern, what in M14_PATTERNS:
@@ -407,11 +440,10 @@ def main(repo: Path = REPO) -> int:
     print(
         f"Next-security boundary clean (mode={mode}, base={base[:12]}…): "
         f"{'security-slice' if mode == 'predecessor' else 'post-M13 union'} "
-        "allowlist scoped; M14 0015 and M15 0016 remain the latest admitted "
-        "migrations; Next major exactly 15; reviewed M16-P0 predecessor "
-        "repairs do not widen the security authority surface"
+        "allowlist scoped; M14 0015, M15 0016, and exact M16-A 0017 are "
+        "the latest admitted migrations; Next major exactly 15"
         + ("; checked-in predecessor evidence exact."
-           if mode == "published" else "")
+           if mode == "published" else ".")
     )
     return 0
 
