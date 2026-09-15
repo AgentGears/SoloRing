@@ -136,7 +136,7 @@ def test_populated_0001_to_0002_preserves_m0_and_creates_schema(
         assert str(con.execute("PRAGMA journal_mode").fetchone()[0]).lower() == "wal"
 
         assert con.execute("SELECT version_num FROM alembic_version").fetchone()[0] == (
-            "0016_m15_revision_compatibility"
+            "0017_m16_intra_shot_consequences"
         )
     finally:
         con.close()

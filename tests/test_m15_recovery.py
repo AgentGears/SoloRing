@@ -43,7 +43,6 @@ async def _assess_and_apply(client, base):
     return result
 
 
-
 async def _stamp_alembic(client, head="0016_m15_revision_compatibility"):
     """The conftest engine builds schema via create_all (no
     alembic_version); the backup machinery requires the table."""
@@ -58,7 +57,6 @@ async def _stamp_alembic(client, head="0016_m15_revision_compatibility"):
             "INSERT INTO alembic_version (version_num) VALUES (:h)"),
             {"h": head})
         await conn.commit()
-
 
 
 async def _link_r2_provenance(client, base):
@@ -161,12 +159,12 @@ async def test_0016_backup_restore_preserves_m15_rows_and_hashes(
 async def test_0015_backup_restores_without_inventing_m15_state(client,
                                                                  tmp_path):
     """M15-REC:02 — a historical head-0015 backup restores with exact
-    predecessor semantics and invents no M15 state. Backup at the live
-    head refuses 0015 (only the current head is backupable); the
-    historical posture is constructed by rebuilding the manifest from a
-    real 0016 backup after dropping the five M15 tables and stamping
-    0015 — the same hand-built-historical-manifest pattern the M13
-    recovery proofs use."""
+    predecessor semantics and invents no M15 state. The historical posture
+    is constructed from a semantically valid real 0016 backup, then the
+    BACKUP TREE alone is converted to 0015 by dropping the five empty M16
+    tables and the five empty M15 tables (each proven empty before the
+    drop), stamping 0015, and re-hashing the manifest database identity."""
+    import hashlib
     import sqlite3
 
     from soloring.domain.canonical import canonical_json_bytes
@@ -174,48 +172,46 @@ async def test_0015_backup_restores_without_inventing_m15_state(client,
     from soloring.settings import Settings
 
     base = await seed_a4_use(client, tag=b"rec02")
-    engine = client._transport.app.state.engine
     settings = client._transport.app.state.settings
     await _link_r2_provenance(client, base)
+    await _stamp_alembic(client)
 
-    async with engine.connect() as conn:
-        await conn.exec_driver_sql("PRAGMA wal_checkpoint(TRUNCATE)")
-    await engine.dispose()
-    con = sqlite3.connect(str(settings.db_path))
+    # First produce a genuinely valid head-0016 backup. M16-P0 semantic
+    # succession now (correctly) treats a live 0016 database that is missing
+    # all five M15 tables as corruption, so the old test-only shortcut of
+    # dropping them before backup is no longer a valid construction.
+    backup_root = tmp_path / "backup-0015"
+    await backup(settings, backup_root)
+
+    # Convert the backup copy — never the live database — into the historical
+    # 0015 posture. The M16 and M15 tables are empty in this test, so
+    # dropping them removes no authored decision and exactly models the
+    # predecessor schema.
+    db_file = backup_root / "soloring.db"
+    con = sqlite3.connect(str(db_file))
     try:
         con.execute("PRAGMA foreign_keys=OFF")
-        con.execute(
-            "CREATE TABLE IF NOT EXISTS alembic_version "
-            "(version_num VARCHAR(32) NOT NULL PRIMARY KEY)")
-        con.execute(
-            "INSERT OR REPLACE INTO alembic_version (version_num) "
-            "VALUES ('0016_m15_revision_compatibility')")
-        for table in ("production_update_items",
+        for table in ("persistent_consequence_reviews",
+                      "shot_intra_shot_events",
+                      "shot_revision_intra_shot_events",
+                      "shot_revision_intra_shot_specs",
+                      "shot_intra_shot_event_proposals",
+                      "production_update_items",
                       "production_update_operations",
                       "production_compatibility_uses",
                       "production_compatibility_assessments",
                       "composition_occurrence_revision_tracking"):
+            n = con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            assert n == 0, (
+                f"{table} has {n} rows — not a lawful 0015 posture")
             con.execute(f"DROP TABLE {table}")
+        con.execute(
+            "UPDATE alembic_version SET version_num = "
+            "'0015_m14_world_observation_execution'")
         con.commit()
     finally:
         con.close()
 
-    # take the backup while the (now M15-table-free) tree is stamped
-    # 0016 — the only head the live backup path accepts — then convert
-    # the BACKUP TREE itself into the historical 0015 posture: stamp
-    # its DB's alembic_version to 0015 and rewrite the manifest with
-    # the re-hashed database identity
-    import hashlib
-
-    backup_root = tmp_path / "backup-0015"
-    await backup(settings, backup_root)
-    db_file = backup_root / "soloring.db"
-    con = sqlite3.connect(str(db_file))
-    con.execute(
-        "UPDATE alembic_version SET version_num = "
-        "'0015_m14_world_observation_execution'")
-    con.commit()
-    con.close()
     manifest_path = backup_root / "backup-manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest["alembic_version"] = "0015_m14_world_observation_execution"
@@ -255,7 +251,6 @@ async def test_corrupt_restored_assessment_fails_integrity(client, tmp_path):
 
     base = await seed_a4_use(client, tag=b"rec03")
     result = await _assess_and_apply(client, base)
-    engine = client._transport.app.state.engine
     settings = client._transport.app.state.settings
 
     await _link_r2_provenance(client, base)

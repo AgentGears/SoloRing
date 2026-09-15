@@ -68,6 +68,13 @@ from soloring.continuity.models import (  # noqa: E402,F401
     ShotRevisionRelationState,
     VehicleRevisionSpec,
 )
+from soloring.continuity.intra_shot_models import (  # noqa: E402,F401
+    PersistentConsequenceReview,
+    ShotIntraShotEvent,
+    ShotIntraShotEventProposal,
+    ShotRevisionIntraShotEvent,
+    ShotRevisionIntraShotSpec,
+)
 from soloring.narrative.models import Scene, Sequence  # noqa: E402,F401
 from soloring.composition.models import (  # noqa: E402,F401
     Composition,
@@ -173,6 +180,11 @@ __all__ = [
     "ContinuityRelationTransition",
     "ShotRevisionFeatureState",
     "ShotRevisionRelationState",
+    "ShotIntraShotEventProposal",
+    "ShotIntraShotEvent",
+    "ShotRevisionIntraShotSpec",
+    "ShotRevisionIntraShotEvent",
+    "PersistentConsequenceReview",
     "SpatialWorld",
     "SpatialWorldState",
     "SpatialFrame",

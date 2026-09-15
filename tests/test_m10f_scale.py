@@ -460,8 +460,21 @@ async def test_scale_metrics_recorded_without_thresholds(tmp_path):
         metrics["sqlite_runtime_version"] = _sq.sqlite_version
         metrics["source_journal_mode"] = con.execute(
             "PRAGMA journal_mode").fetchone()[0]
-        # ORM-created schema; stamp the head the production deployment
-        # would carry (same fixture posture as the recovery template)
+        # ORM-created schema; same fixture posture as the recovery
+        # template: recovery is fail-closed at 0017 until the M16-C
+        # recovery slice (frozen R6 §16/§21), so drop the provably empty
+        # M16 tables and stamp the legitimate certified 0016 head.
+        for table in ("persistent_consequence_reviews",
+                      "shot_intra_shot_events",
+                      "shot_revision_intra_shot_events",
+                      "shot_revision_intra_shot_specs",
+                      "shot_intra_shot_event_proposals"):
+            n = con.execute(
+                f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            assert n == 0, (
+                f"{table} has {n} rows — not a lawful 0016 posture")
+            con.execute(f"DROP TABLE {table}")
+        con.commit()
         from alembic import command
         from alembic.config import Config
         import soloring.settings as settings_mod
@@ -474,7 +487,7 @@ async def test_scale_metrics_recorded_without_thresholds(tmp_path):
             cfg.set_main_option(
                 "script_location",
                 str(settings_mod.BASE_DIR / "server" / "alembic"))
-            command.stamp(cfg, "head")
+            command.stamp(cfg, "0016_m15_revision_compatibility")
         finally:
             settings_mod._settings = saved
     finally:
