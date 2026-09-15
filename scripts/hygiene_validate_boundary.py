@@ -200,14 +200,27 @@ ALLOWLIST = (
     "server/tests/test_post_m15_recovery_hardening.py",
     "tests/test_post_m15_worker_transport.py",
     "tests/test_m10f_adversarial_worker.py",
-    # M16-P0 predecessor repair surface (frozen M16 R6 PRE:01-06,
-    # implementation authorized 2026-09-14). No 0017 migration is admitted
-    # by this P0 extension.
+    # M16-P0 predecessor repair surface (frozen M16 R6 PRE:01-06).
     "server/soloring/api/continuity.py",
     "server/soloring/recovery/__init__.py",
     "server/soloring/recovery/semantic_successors.py",
     "server/soloring/recovery/successor_semantics.py",
     "tests/test_m16_p0_repairs.py",
+    # M16-A migration + event-authoring foundation. Exact only: no M16-B+
+    # resolver/capture/review/UI surface is admitted by this slice.
+    "server/alembic/versions/0017_m16_intra_shot_consequences.py",
+    "server/soloring/continuity/intra_shot_models.py",
+    "server/soloring/continuity/intra_shot_canonical.py",
+    "server/soloring/continuity/intra_shot_service.py",
+    "server/soloring/api/schemas/intra_shot.py",
+    "server/soloring/api/intra_shot.py",
+    "server/soloring/api/main.py",
+    "server/soloring/domain/shots.py",
+    "tests/test_m16_migration.py",
+    "tests/test_m16_grammar.py",
+    "tests/test_m16_duration.py",
+    "tests/test_m16_events.py",
+    "tests/test_m16_identity.py",
 )
 
 M14_OWNED_PREFIXES = (
@@ -257,17 +270,30 @@ def m15_owned(path: str) -> bool:
     return path.startswith(M15_OWNED_PREFIXES)
 
 
-M16_P0_OWNED_PREFIXES = (
+M16_OWNED_PREFIXES = (
     "server/soloring/api/continuity.py",
     "server/soloring/recovery/__init__.py",
     "server/soloring/recovery/semantic_successors.py",
     "server/soloring/recovery/successor_semantics.py",
     "tests/test_m16_p0_repairs.py",
+    "server/alembic/versions/0017_m16_intra_shot_consequences.py",
+    "server/soloring/continuity/intra_shot_models.py",
+    "server/soloring/continuity/intra_shot_canonical.py",
+    "server/soloring/continuity/intra_shot_service.py",
+    "server/soloring/api/schemas/intra_shot.py",
+    "server/soloring/api/intra_shot.py",
+    "server/soloring/api/main.py",
+    "server/soloring/domain/shots.py",
+    "tests/test_m16_migration.py",
+    "tests/test_m16_grammar.py",
+    "tests/test_m16_duration.py",
+    "tests/test_m16_events.py",
+    "tests/test_m16_identity.py",
 )
 
 
-def m16_p0_owned(path: str) -> bool:
-    return path.startswith(M16_P0_OWNED_PREFIXES)
+def m16_owned(path: str) -> bool:
+    return path.startswith(M16_OWNED_PREFIXES)
 
 
 M14_PATTERNS = [
@@ -311,12 +337,13 @@ def main() -> int:
     versions = REPO / "server" / "alembic" / "versions"
     admitted_0015 = "0015_m14_world_observation_execution.py"
     admitted_0016 = "0016_m15_revision_compatibility.py"
+    admitted_0017 = "0017_m16_intra_shot_consequences.py"
     mig_beyond = [p.name for p in versions.glob("*.py")
                   if p.stem >= "0015" and p.name not in (
-                      admitted_0015, admitted_0016)]
+                      admitted_0015, admitted_0016, admitted_0017)]
     if mig_beyond:
-        errors.append(f"migration at/beyond 0015 beyond the frozen M14/"
-                      f"M15 migrations exists: {mig_beyond}")
+        errors.append(f"migration at/beyond 0015 beyond the frozen M14/M15/"
+                      f"M16-A migrations exists: {mig_beyond}")
 
     for f in changed:
         p = REPO / f
@@ -324,14 +351,29 @@ def main() -> int:
                                           "next_security_validate_"
                                           "boundary.py")):
             continue
-        if m14_owned(f) or m15_owned(f) or m16_p0_owned(f):
+        if m14_owned(f) or m15_owned(f) or m16_owned(f):
             continue
         src = p.read_text(encoding="utf-8", errors="replace")
         for pattern, what in M14_PATTERNS:
             if re.search(pattern, src, re.I):
                 errors.append(f"{f}: {what} vocabulary present")
 
-    # new authority tables: CREATE TABLE in changed migration-path files only.
+    # New authority tables are admitted only in their reviewed milestone
+    # migration. The M16-A table set is exact and closed.
+    admitted_m15_tables = {
+        "production_compatibility_assessments",
+        "production_compatibility_uses",
+        "composition_occurrence_revision_tracking",
+        "production_update_operations",
+        "production_update_items",
+    }
+    admitted_m16_tables = {
+        "shot_intra_shot_event_proposals",
+        "shot_intra_shot_events",
+        "shot_revision_intra_shot_specs",
+        "shot_revision_intra_shot_events",
+        "persistent_consequence_reviews",
+    }
     for f in changed:
         if not f.startswith("server/alembic/versions/"):
             continue
@@ -339,19 +381,24 @@ def main() -> int:
         if not p.is_file() or not f.endswith(".py"):
             continue
         src = p.read_text(encoding="utf-8", errors="replace")
-        admitted_m15_tables = {
-            "production_compatibility_assessments",
-            "production_compatibility_uses",
-            "composition_occurrence_revision_tracking",
-            "production_update_operations",
-            "production_update_items",
-        }
-        for match in re.finditer(r'CREATE TABLE\s+"?(\w+)"?', src, re.I):
-            if (f.endswith("0016_m15_revision_compatibility.py")
-                    and match.group(1) in admitted_m15_tables):
+        names = set(re.findall(r'CREATE TABLE\s+"?(\w+)"?', src, re.I))
+        names.update(re.findall(r'op\.create_table\(\s*["\'](\w+)["\']', src))
+        for name in names:
+            if f.endswith("0015_m14_world_observation_execution.py"):
+                # 0015 was already frozen/published before this validator grew
+                # Alembic op.create_table awareness; preserve that predecessor.
                 continue
+            if (f.endswith("0016_m15_revision_compatibility.py")
+                    and name in admitted_m15_tables):
+                continue
+            if (f.endswith("0017_m16_intra_shot_consequences.py")
+                    and name in admitted_m16_tables):
+                continue
+            errors.append(f"{f}: new table {name} in migration source")
+        if f.endswith("0017_m16_intra_shot_consequences.py") and names != admitted_m16_tables:
             errors.append(
-                f"{f}: new table {match.group(1)} in migration source"
+                "0017 M16-A authority table set mismatch: "
+                f"got {sorted(names)}, expected {sorted(admitted_m16_tables)}"
             )
 
     if errors:
@@ -359,9 +406,8 @@ def main() -> int:
             print(f"HYGIENE-BOUNDARY INVALID: {error}", file=sys.stderr)
         return 1
     print(
-        "Hygiene boundary clean: reviewed successor diff only; M14 0015 and "
-        "M15 0016 are the latest admitted migrations; M16-P0 introduces no "
-        "new authority migration."
+        "Hygiene boundary clean: reviewed successor diff only; M14 0015, "
+        "M15 0016, and exact M16-A 0017 are the latest admitted migrations."
     )
     return 0
 
