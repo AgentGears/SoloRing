@@ -72,11 +72,18 @@ ALLOWED_PATTERNS = [
     r"^tests/test_post_m15_worker_transport\.py$",
     r"^server/tests/test_post_m15_recovery_hardening\.py$",
     r"^tests/test_m10f_adversarial_worker\.py$",
-    # M16-P0 predecessor-repair surface only. Recovery modules already fall
-    # under the existing recovery class; these are the two additional exact
-    # seams required by PRE:05-06 and their proof suite.
+    # M16-P0 predecessor repairs.
     r"^server/soloring/api/continuity\.py$",
     r"^tests/test_m16_p0_repairs\.py$",
+    # M16-A migration + event-authoring foundation. This list is deliberately
+    # exact: it does not admit resolver/capture/review/UI successor slices.
+    r"^server/alembic/versions/0017_m16_intra_shot_consequences\.py$",
+    r"^server/soloring/continuity/intra_shot_(models|canonical|service)\.py$",
+    r"^server/soloring/api/schemas/intra_shot\.py$",
+    r"^server/soloring/api/intra_shot\.py$",
+    r"^server/soloring/api/main\.py$",
+    r"^server/soloring/domain/shots\.py$",
+    r"^tests/test_m16_(migration|grammar|duration|events|identity)\.py$",
 ]
 
 FORBIDDEN_PATTERNS = [
