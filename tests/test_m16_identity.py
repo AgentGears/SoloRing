@@ -5,7 +5,13 @@ from __future__ import annotations
 from sqlalchemy import text
 
 from soloring.api.schemas.shots import ShotCreate
-from soloring.continuity.intra_shot_canonical import event_storage, proposal_storage
+from soloring.continuity.intra_shot_canonical import (
+    entity_feature_target_identity,
+    entity_relation_target_identity,
+    event_storage,
+    production_instance_feature_target_identity,
+    proposal_storage,
+)
 from soloring.domain import shots as shot_svc
 from soloring.domain.canonical import canonical_hash
 
@@ -131,3 +137,88 @@ async def test_identity_03(client, factory):
             "WHERE id=:e"), {"e": created["id"]})).one()
     assert tuple(row) == ("authored", None)
     assert proposal_doc["schema_version"] == 1
+
+
+def test_identity_04():
+    """Captured entity-feature identity freezes owner/key/kind/type/unit."""
+    source = {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "entity_id": "22222222-2222-4222-8222-222222222222",
+        "key": "forehead_cut",
+        "kind": "injury",
+        "value_type": "enum",
+        "unit": None,
+    }
+    captured = entity_feature_target_identity(source)
+    assert captured == {
+        "kind": "entity_feature",
+        "feature_id": source["id"],
+        "entity_id": source["entity_id"],
+        "feature_key": "forehead_cut",
+        "feature_kind": "injury",
+        "value_type": "enum",
+        "unit": None,
+    }
+    source.update(key="renamed", kind="other", value_type="text", unit="mm")
+    assert captured["feature_key"] == "forehead_cut"
+    assert captured["feature_kind"] == "injury"
+    assert captured["value_type"] == "enum"
+    assert captured["unit"] is None
+
+
+def test_identity_05():
+    """Captured relation identity freezes directional endpoints and predicate."""
+    source = {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "subject_entity_id": "22222222-2222-4222-8222-222222222222",
+        "predicate_id": "33333333-3333-4333-8333-333333333333",
+        "predicate_key": "holding",
+        "object_entity_id": "44444444-4444-4444-8444-444444444444",
+    }
+    captured = entity_relation_target_identity(source)
+    assert captured == {
+        "kind": "entity_relation",
+        "relation_id": source["id"],
+        "subject_entity_id": source["subject_entity_id"],
+        "predicate_id": source["predicate_id"],
+        "predicate_key": "holding",
+        "object_entity_id": source["object_entity_id"],
+    }
+    source["subject_entity_id"], source["object_entity_id"] = (
+        source["object_entity_id"], source["subject_entity_id"])
+    source["predicate_key"] = "held_by"
+    assert captured["subject_entity_id"] == "22222222-2222-4222-8222-222222222222"
+    assert captured["object_entity_id"] == "44444444-4444-4444-8444-444444444444"
+    assert captured["predicate_key"] == "holding"
+
+
+def test_identity_06():
+    """Captured PI identity freezes composition/occurrence/subject/value schema."""
+    source = {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "composition_id": "22222222-2222-4222-8222-222222222222",
+        "occurrence_id": "33333333-3333-4333-8333-333333333333",
+        "authority_subject_kind": "production_instance",
+        "key": "damage",
+        "kind": "damage",
+        "value_type": "enum",
+        "unit": None,
+    }
+    captured = production_instance_feature_target_identity(source)
+    assert captured == {
+        "kind": "production_instance_feature",
+        "feature_id": source["id"],
+        "composition_id": source["composition_id"],
+        "occurrence_id": source["occurrence_id"],
+        "authority_subject_kind": "production_instance",
+        "feature_key": "damage",
+        "feature_kind": "damage",
+        "value_type": "enum",
+        "unit": None,
+    }
+    source.update(key="renamed", kind="other", value_type="text", unit="mm")
+    assert captured["authority_subject_kind"] == "production_instance"
+    assert captured["feature_key"] == "damage"
+    assert captured["feature_kind"] == "damage"
+    assert captured["value_type"] == "enum"
+    assert captured["unit"] is None
