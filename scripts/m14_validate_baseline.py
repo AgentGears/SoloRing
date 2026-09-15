@@ -8,7 +8,7 @@ frozen plan authorizes:
   * base02 — the immutable M13 annotated tag still points at the frozen
     tag object / commit / tree and has not moved;
   * base03 — the migration predecessor is exactly 0014 at the predecessor
-    commit and no 0015 migration exists yet (M14-0 scope guard).
+    commit and current successor migration heads are admitted by exact name.
 
 Exit codes: 0 clean; 1 violation; 2 usage error.
 """
@@ -84,8 +84,6 @@ def check_base02() -> list[str]:
             ["git", "-C", str(REPO), "rev-parse", "--verify",
              "--quiet", "refs/tags/M13"],
             capture_output=True).returncode != 0:
-        # actions/checkout does not fetch tags by default; pull the exact
-        # immutable tag once rather than weakening the check.
         subprocess.run(
             ["git", "-C", str(REPO), "fetch", "--quiet", "origin",
              "refs/tags/M13:refs/tags/M13"],
@@ -127,22 +125,25 @@ def check_base03() -> list[str]:
     migrations = sorted(
         n for n in head_names
         if n[0].isdigit() and not n.startswith("__"))
-    # Frozen M14B-2 (R2 §23): from that slice on the head is exactly the
-    # M14 migration. M15A succession (frozen R4 §11, authorized
-    # 2026-09-12): exactly ONE further migration is admitted — the frozen
-    # M15 0016. Anything else (0017+, or a different 0016) still rejects.
+    # M14 0015 and M15 0016 are published predecessor successors. M16-A
+    # authorizes exactly one further migration. Keep this set exact so a
+    # second 0017 or any 0018+ migration remains a baseline violation.
     admitted = {
         "0015_m14_world_observation_execution.py",
         "0016_m15_revision_compatibility.py",
+        "0017_m16_intra_shot_consequences.py",
     }
     if not migrations or migrations[-1] not in admitted:
         errors.append(
             "current migration head is not an admitted frozen head: "
             f"{migrations[-1:]}")
     beyond = [m for m in migrations
-              if m > "0016_m15_revision_compatibility.py"]
+              if m > "0017_m16_intra_shot_consequences.py"]
     if beyond:
-        errors.append(f"migrations beyond 0016 exist: {beyond}")
+        errors.append(f"migrations beyond exact M16-A 0017 exist: {beyond}")
+    m16_named = [m for m in migrations if m.startswith("0017_")]
+    if m16_named and m16_named != ["0017_m16_intra_shot_consequences.py"]:
+        errors.append(f"unexpected 0017 migration identity: {m16_named}")
     return errors
 
 
@@ -167,7 +168,8 @@ def main() -> int:
             print(f"M14-BASELINE INVALID: {e}", file=sys.stderr)
         return 1
     print(f"M14 baseline clean ({', '.join(selected)}): predecessor "
-          "20429b3/0a755efe, M13 tag immutable, migration head 0015.")
+          "20429b3/0a755efe, M13 tag immutable, exact successor migration "
+          "identity admitted through M16-A 0017.")
     return 0
 
 
