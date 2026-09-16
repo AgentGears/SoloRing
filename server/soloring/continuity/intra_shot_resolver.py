@@ -23,13 +23,13 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
 from soloring.continuity.intra_shot_canonical import (
+    MAX_ACTIVE_EVENTS_PER_SHOT,
     event_set_hash,
     event_storage,
     state_storage,
 )
 from soloring.continuity.intra_shot_service import (
     _draft_from_row,
-    _load_active_rows,
     _load_shot,
     _params,
 )
@@ -60,6 +60,37 @@ def _code_rank(code: str) -> int:
         if code == getattr(member, "value", member):
             return i
     return len(_ISSUE_ORDER)
+
+
+async def _load_active_rows_bounded(conn: AsyncConnection, shot_id: str):
+    """Bounded active-event load: at most one row over the frozen
+    structural ceiling, so corrupt storage can never force unbounded
+    materialization through the read path."""
+    return (await conn.execute(text(
+        "SELECT id, shot_id, time_ms, ordinal, target_kind, "
+        "entity_feature_id, entity_relation_id, "
+        "production_instance_feature_id, before_state_json, "
+        "before_state_hash, after_state_json, after_state_hash, "
+        "persistence_mode, source_kind, source_proposal_id, "
+        "event_json, event_hash, created_at, updated_at FROM "
+        "shot_intra_shot_events WHERE shot_id = :s AND deleted_at IS NULL "
+        "ORDER BY time_ms, ordinal "
+        "LIMIT :cap"), {"s": shot_id,
+                        "cap": MAX_ACTIVE_EVENTS_PER_SHOT + 1})).fetchall()
+
+
+def _stored_public(d: dict) -> dict:
+    """An unresolved-target active event keeps its STORED canonical
+    identity (id, canonical event bytes/hash, provenance) in the
+    authoritative events list; the resolver refuses to fold, terminalize,
+    or hash an unresolved target — it never hides the row."""
+    return {
+        "id": d["id"],
+        **d["stored_event_doc"],
+        "event_hash": d["stored"].event_hash,
+        "source_kind": d["source_kind"],
+        "source_proposal_id": d["source_proposal_id"],
+    }
 
 
 def _event_free(duration_ms) -> dict:
@@ -129,11 +160,27 @@ async def resolve_intra_shot(conn: AsyncConnection, shot, *,
     None when no Production-World plane is selected — Production Instance
     targets then fail closed as TARGET_INVALID.
     """
-    rows = await _load_active_rows(conn, shot.id)
+    rows = await _load_active_rows_bounded(conn, shot.id)
     if not rows:
         return _event_free(shot.duration_ms)
 
     issues: list[dict] = []
+    if len(rows) > MAX_ACTIVE_EVENTS_PER_SHOT:
+        # structural validity ceiling (frozen R6 §5.4): overflow storage
+        # is fail-closed — never folded, never hashed, never ready.
+        return {
+            "intra_shot_ready": False,
+            "intra_shot_issues": [_issue(
+                ErrorCode.INTRA_SHOT_EVENT_LIMIT_EXCEEDED,
+                "active intra-Shot events exceed the structural ceiling",
+                active_event_count=len(rows),
+                limit=MAX_ACTIVE_EVENTS_PER_SHOT)],
+            "duration_ms": shot.duration_ms,
+            "events": [_stored_public(_draft_from_row(r)) for r in rows],
+            "terminal_targets": [],
+            "handoffs": [],
+            "event_set_hash": None,
+        }
     duration = shot.duration_ms
     duration_ok = type(duration) is int and duration > 0
     if not duration_ok:
@@ -302,12 +349,14 @@ async def resolve_intra_shot(conn: AsyncConnection, shot, *,
     # Canonical rebuild of every stored event; disagreement between the
     # stored canonical columns and the rebuilt values is corruption.
     normalized = []
+    unresolved: list[dict] = []
     structural = False
     for d in drafts:
         key = (d["target_kind"], d["target_id"])
         meta = metadata.get(key)
         if meta is None:
             structural = True
+            unresolved.append(d)
             continue
         try:
             before, before_json, before_hash = state_storage(
@@ -327,6 +376,7 @@ async def resolve_intra_shot(conn: AsyncConnection, shot, *,
                 target_id=d["target_id"], event_id=d.get("id"),
                 reason="state_not_canonical_under_live_schema"))
             structural = True
+            unresolved.append(d)
             continue
         stored = d.get("stored")
         if stored is not None and not (
@@ -502,11 +552,15 @@ async def resolve_intra_shot(conn: AsyncConnection, shot, *,
 
     from soloring.continuity.intra_shot_service import _public_event
 
+    public_events = [_public_event(d) for d in normalized]
+    public_events.extend(_stored_public(d) for d in unresolved)
+    public_events.sort(key=lambda e: (e["time_ms"], e["ordinal"]))
+
     return {
         "intra_shot_ready": not issues,
         "intra_shot_issues": issues,
         "duration_ms": duration,
-        "events": [_public_event(d) for d in normalized],
+        "events": public_events,
         "terminal_targets": terminal_targets,
         "handoffs": handoffs,
         "event_set_hash": set_hash,
@@ -525,7 +579,7 @@ async def resolve_intra_shot_read(session: AsyncSession, shot_id: str) -> dict:
         await conn.exec_driver_sql("BEGIN")
         try:
             shot = await _load_shot(conn, shot_id)
-            rows = await _load_active_rows(conn, shot_id)
+            rows = await _load_active_rows_bounded(conn, shot_id)
             pi_present = any(
                 r.target_kind == "production_instance_feature"
                 for r in rows)

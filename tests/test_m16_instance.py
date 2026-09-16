@@ -88,6 +88,17 @@ async def test_instance_03(client):
     assert proj2["intra_shot_ready"] is False
     codes = [i["code"] for i in proj2["intra_shot_issues"]]
     assert "INTRA_SHOT_TARGET_INVALID" in codes
+    # the authoritative event stays visible with its stored canonical
+    # identity even though its target no longer resolves
+    assert [e["id"] for e in proj2["events"]] == [r.json()["id"]]
+    assert proj2["events"][0]["event_hash"] == r.json()["event_hash"]
+    assert proj2["event_set_hash"] is None
+    assert proj2["terminal_targets"] == []
+    # an M16 blocker makes the authoritative working hash unavailable
+    detail = (await client.get(f"/shots/{b['shot']}")).json()
+    assert detail["intra_shot_ready"] is False
+    assert detail["working_snapshot_hash"] is None
+    assert detail["working_state_differs_from_approved"] is None
 
 
 async def test_instance_06(client):

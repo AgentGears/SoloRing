@@ -391,11 +391,13 @@ async def read_shot_detail(engine: AsyncEngine, shot_id: str, *, settings=None):
                 feature_outcome=outcome,
                 relation_outcome=relation_outcome,
                 production_world_outcome=m13_outcome)
-            if intra["events"]:
-                # M16-B fail-closed seam: an event-bearing working
-                # snapshot requires the canonical schema-7 intra_shot
-                # block (M16-C); no interim representation is invented,
-                # so the working hash stays unavailable.
+            if not intra["intra_shot_ready"] or intra["events"]:
+                # M16-B fail-closed seam: an M16 blocker or any
+                # event-bearing Shot keeps the authoritative working
+                # hash unavailable — the canonical event-bearing
+                # snapshot requires the M16-C schema-7 intra_shot
+                # block; no interim representation is invented, and an
+                # unresolved current target/context is a blocker.
                 effective_hash = None
                 differs = None
             await conn.commit()

@@ -33,7 +33,7 @@ async def _feature_meta(engine, fid):
 
 
 async def _insert_events(engine, shot_id, fid, meta, count, *,
-                         start_time=1):
+                         start_time=1, id_base=0):
     """Bulk-insert minimal legal canonical events via one executemany."""
     rows = []
     prev = None
@@ -50,7 +50,8 @@ async def _insert_events(engine, shot_id, fid, meta, count, *,
             target={"kind": "entity_feature", "id": fid},
             before=before, after=after, persistence_mode="transient")
         rows.append({
-            "id": f"00000000-0000-4000-8000-{n:012d}", "shot": shot_id,
+            "id": f"00000000-0000-4000-8000-{id_base + n:012d}",
+            "shot": shot_id,
             "t": t, "o": 0, "tk": "entity_feature", "ef": fid,
             "er": None, "pf": None, "bj": bj, "bh": bh, "aj": aj,
             "ah": ah, "pm": "transient", "ej": ej, "eh": eh})
@@ -211,3 +212,31 @@ def test_scale_fixture_canonical_columns_only():
                 "00000000-0000-4000-8000-000000000000"},
         before=before, after=after, persistence_mode="transient")
     assert bh != ah and eh is not None and len(eh) == 64
+
+
+async def test_scale_resolver_overflow_fails_closed(client, factory):
+    """A >10,000-active-event database (only reachable through corrupt
+    direct storage) is detected, never folded or hashed as valid."""
+    base = await seed_feature_world(client, factory, duration=30_000)
+    sid, fid = base["shot_id"], base["feature_id"]
+    engine = client._transport.app.state.engine
+    meta = await _feature_meta(engine, fid)
+    await _insert_events(engine, sid, fid, meta, 10_000)
+    # one more active row beyond the ceiling, directly (the writer
+    # refuses this state; storage-level corruption must fail closed)
+    await _insert_events(engine, sid, fid, meta, 1, start_time=29_999,
+                      id_base=10_000)
+
+    proj = await get_intra(client, sid)
+    assert proj["intra_shot_ready"] is False
+    codes = [i["code"] for i in proj["intra_shot_issues"]]
+    assert codes == ["INTRA_SHOT_EVENT_LIMIT_EXCEEDED"]
+    assert proj["event_set_hash"] is None
+    assert proj["terminal_targets"] == []
+    assert proj["handoffs"] == []
+    assert len(proj["events"]) == 100  # bounded, paged stored identities
+
+    detail = (await client.get(f"/shots/{sid}")).json()
+    assert detail["intra_shot_ready"] is False
+    assert detail["working_snapshot_hash"] is None
+    assert detail["working_state_differs_from_approved"] is None
