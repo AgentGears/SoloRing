@@ -100,6 +100,22 @@ async def test_instance_03(client):
     assert detail["working_snapshot_hash"] is None
     assert detail["working_state_differs_from_approved"] is None
 
+    # storage self-consistency precedes target-context resolution: a
+    # tampered duplicated stored field on an unresolved-target event is
+    # typed internal corruption, never fabricated output.
+    from sqlalchemy import text as _text
+
+    engine = client._transport.app.state.engine
+    async with engine.begin() as conn:
+        await conn.execute(_text(
+            "UPDATE shot_intra_shot_events SET event_json = :j "
+            "WHERE id = :e"),
+            {"j": '{"schema_version":1,"tampered":true}',
+             "e": r.json()["id"]})
+    tampered = await client.get(f"/shots/{b['shot']}/intra-shot")
+    assert tampered.status_code == 500, tampered.text
+    assert "INTERNAL_INVARIANT_VIOLATION" in tampered.text
+
 
 async def test_instance_06(client):
     """No CreativeEntity fallback: a creative_entity-authority occurrence

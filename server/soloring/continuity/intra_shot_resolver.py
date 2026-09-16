@@ -34,7 +34,8 @@ from soloring.continuity.intra_shot_service import (
     _params,
 )
 from soloring.continuity.values import canonicalize_value
-from soloring.errors import ErrorCode
+from soloring.domain.canonical import canonical_hash, canonical_json_str
+from soloring.errors import ErrorCode, internal_invariant
 
 _ISSUE_ORDER = (
     ErrorCode.INTRA_SHOT_DURATION_REQUIRED,
@@ -77,6 +78,46 @@ async def _load_active_rows_bounded(conn: AsyncConnection, shot_id: str):
         "ORDER BY time_ms, ordinal "
         "LIMIT :cap"), {"s": shot_id,
                         "cap": MAX_ACTIVE_EVENTS_PER_SHOT + 1})).fetchall()
+
+
+def _verify_stored_consistency(d: dict) -> None:
+    """R6 §5.2 step 4: every duplicated stored event/state field is
+    rebuilt and verified against its canonical JSON/hash BEFORE any
+    current target-context validation. This is storage self-consistency
+    only — it never consults the live schema, so an event whose target
+    is no longer a valid current dependency/Production World member can
+    still be proven internally consistent (and stay visible) while
+    folding/hash/terminalization fail closed. Disagreement is internal
+    corruption: typed invariant, never fabricated output."""
+    stored = d["stored"]
+    before, after = d["before"], d["after"]
+
+    if canonical_json_str(before) != stored.before_state_json or             canonical_hash(before) != stored.before_state_hash:
+        raise internal_invariant(
+            f"stored intra-Shot event {stored.id} before-state columns "
+            "disagree with canonical JSON/hash")
+    if canonical_json_str(after) != stored.after_state_json or             canonical_hash(after) != stored.after_state_hash:
+        raise internal_invariant(
+            f"stored intra-Shot event {stored.id} after-state columns "
+            "disagree with canonical JSON/hash")
+
+    event = {
+        "schema_version": 1,
+        "time_ms": stored.time_ms,
+        "ordinal": stored.ordinal,
+        "target": {"kind": d["target_kind"], "id": d["target_id"]},
+        "before": before,
+        "after": after,
+        "persistence_mode": stored.persistence_mode,
+    }
+    if canonical_json_str(event) != stored.event_json or             canonical_hash(event) != stored.event_hash:
+        raise internal_invariant(
+            f"stored intra-Shot event {stored.id} disagrees with "
+            "canonical columns/hash")
+    if d["stored_event_doc"] != event:
+        raise internal_invariant(
+            f"stored intra-Shot event {stored.id} canonical event JSON "
+            "disagrees with the reconstructed semantic event")
 
 
 def _stored_public(d: dict) -> dict:
@@ -165,18 +206,23 @@ async def resolve_intra_shot(conn: AsyncConnection, shot, *,
         return _event_free(shot.duration_ms)
 
     issues: list[dict] = []
+    drafts_all = [_draft_from_row(r) for r in rows]
+    for d in drafts_all:
+        _verify_stored_consistency(d)
     if len(rows) > MAX_ACTIVE_EVENTS_PER_SHOT:
         # structural validity ceiling (frozen R6 §5.4): overflow storage
-        # is fail-closed — never folded, never hashed, never ready.
+        # is fail-closed — never folded, never hashed, never ready. The
+        # bounded load observes at most ceiling+1 rows; the count below
+        # is the observed lower bound, not the exact active total.
         return {
             "intra_shot_ready": False,
             "intra_shot_issues": [_issue(
                 ErrorCode.INTRA_SHOT_EVENT_LIMIT_EXCEEDED,
                 "active intra-Shot events exceed the structural ceiling",
-                active_event_count=len(rows),
+                observed_active_event_count=len(rows),
                 limit=MAX_ACTIVE_EVENTS_PER_SHOT)],
             "duration_ms": shot.duration_ms,
-            "events": [_stored_public(_draft_from_row(r)) for r in rows],
+            "events": [_stored_public(d) for d in drafts_all],
             "terminal_targets": [],
             "handoffs": [],
             "event_set_hash": None,
@@ -189,7 +235,7 @@ async def resolve_intra_shot(conn: AsyncConnection, shot, *,
             "positive Shot duration is required while intra-Shot "
             "events exist", shot_id=shot.id))
 
-    drafts = [_draft_from_row(r) for r in rows]
+    drafts = drafts_all
 
     seen: set[tuple[int, int]] = set()
     for d in drafts:

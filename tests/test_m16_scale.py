@@ -231,6 +231,9 @@ async def test_scale_resolver_overflow_fails_closed(client, factory):
     assert proj["intra_shot_ready"] is False
     codes = [i["code"] for i in proj["intra_shot_issues"]]
     assert codes == ["INTRA_SHOT_EVENT_LIMIT_EXCEEDED"]
+    assert proj["intra_shot_issues"][0]["details"][
+        "observed_active_event_count"] == 10_001
+    assert proj["intra_shot_issues"][0]["details"]["limit"] == 10_000
     assert proj["event_set_hash"] is None
     assert proj["terminal_targets"] == []
     assert proj["handoffs"] == []
