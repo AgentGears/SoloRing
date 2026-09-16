@@ -81,6 +81,7 @@ ALLOWED_PATTERNS = [
     r"^server/soloring/continuity/intra_shot_(models|canonical|service|"
     r"resolver)\.py$",
     r"^server/soloring/api/schemas/shots\.py$",
+    r"^server/soloring/api/shots\.py$",
     r"^server/soloring/api/schemas/intra_shot\.py$",
     r"^server/soloring/api/intra_shot\.py$",
     r"^server/soloring/api/main\.py$",
