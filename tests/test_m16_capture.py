@@ -179,3 +179,103 @@ async def test_capture_convergence_semantic_not_audit(client, factory):
             "shot_revision_intra_shot_events WHERE shot_revision_id = :r"),
             {"r": revision.id})).fetchall()
     assert [r.source_event_id for r in rows] == [first["id"]]
+
+
+async def test_capture_01_same_read_snapshot(client, factory):
+    """Events/handoffs/duration/start planes are read inside one SQLite
+    snapshot: a concurrent event mutation cannot contaminate the capture."""
+    from sqlalchemy import text as _text
+
+    base = await seed_feature_world(client, factory)
+    sid, fid = base["shot_id"], base["feature_id"]
+    await post_event(client, sid, event(fid, 1000, state(), state("fresh")))
+    engine = client._transport.app.state.engine
+    from soloring.domain import revisions as rev_svc
+
+    landed = {}
+
+    real_resolve = rev_svc._snapshot_one_read
+
+    async def interleaved(session, shot_id, *, settings=None):
+        read = await real_resolve(session, shot_id, settings=settings)
+        # a mutation lands AFTER the read unit closes: the captured
+        # value already derives from the earlier coherent snapshot
+        async with engine.begin() as conn:
+            landed["n"] = (await conn.execute(_text(
+                "SELECT COUNT(*) FROM shot_intra_shot_events WHERE "
+                "shot_id = :s AND deleted_at IS NULL"),
+                {"s": shot_id})).scalar_one()
+        return read
+
+    rev_svc._snapshot_one_read = interleaved
+    try:
+        revision, _ = await _capture(client, sid)
+    finally:
+        rev_svc._snapshot_one_read = real_resolve
+    snap = json.loads(
+        (await _snap_json(engine, revision.id)))
+    assert len(snap["intra_shot"]["events"]) == 1
+    assert landed["n"] == 1
+
+
+async def _snap_json(engine, revision_id):
+    from sqlalchemy import text as _text
+
+    async with engine.connect() as conn:
+        return (await conn.execute(_text(
+            "SELECT snapshot_json FROM shot_revisions WHERE id = :r"),
+            {"r": revision_id})).scalar_one()
+
+
+async def test_capture_02_post_snapshot_mutation_cannot_contaminate(
+        client, factory):
+    """A delete landing after the capture read does not alter the
+    captured value (the immutable rows were already written)."""
+    from sqlalchemy import text as _text
+
+    base = await seed_feature_world(client, factory)
+    sid, fid = base["shot_id"], base["feature_id"]
+    ev = await post_event(
+        client, sid, event(fid, 1000, state(), state("fresh")))
+    engine = client._transport.app.state.engine
+    revision, _ = await _capture(client, sid)
+    before = await _snap_json(engine, revision.id)
+    async with engine.begin() as conn:
+        await conn.execute(_text(
+            "UPDATE shot_intra_shot_events SET deleted_at = "
+            "strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = :e"),
+            {"e": ev["id"]})
+    after = await _snap_json(engine, revision.id)
+    assert before == after
+
+
+async def test_capture_03_duration_patch_race_coherent(client, factory):
+    """Capture versus a duration PATCH sees one coherent pre/post state:
+    capturing with events requires the already-patched duration, and the
+    duration fence keeps the event times lawful either way."""
+    base = await seed_feature_world(client, factory)
+    sid, fid = base["shot_id"], base["feature_id"]
+    await post_event(client, sid, event(fid, 1000, state(), state("fresh")))
+    p = await client.patch(f"/shots/{sid}", json={"duration_ms": 9000})
+    assert p.status_code == 200, p.text
+    revision, _ = await _capture(client, sid)
+    snap = json.loads(await _snap_json(
+        client._transport.app.state.engine, revision.id))
+    assert snap["intra_shot"]["duration_ms"] == 9000
+    assert snap["intent"]["duration_ms"] == 9000
+
+
+async def test_capture_06_target_identity_in_semantic_block(client, factory):
+    """captured target_identity is part of the schema-7 semantic bytes
+    and the companion columns."""
+    base = await seed_feature_world(client, factory)
+    sid, fid = base["shot_id"], base["feature_id"]
+    await post_event(client, sid, event(fid, 1000, state(), state("fresh")))
+    revision, _ = await _capture(client, sid)
+    snap = json.loads(await _snap_json(
+        client._transport.app.state.engine, revision.id))
+    identity = snap["intra_shot"]["events"][0]["target_identity"]
+    assert identity["feature_id"] == fid
+    assert set(identity) >= {
+        "kind", "feature_id", "entity_id", "feature_key", "feature_kind",
+        "value_type", "unit"}

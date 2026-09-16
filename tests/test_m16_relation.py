@@ -70,3 +70,37 @@ async def test_relation_03(client, factory):
     assert proj["terminal_targets"][0]["terminal_state"] == _rel(False)
     assert [(e["time_ms"], e["ordinal"]) for e in proj["events"]] == [
         (1000, 0), (2000, 0)]
+
+
+async def test_relation_05_soft_delete_does_not_alter_history(client, factory):
+    """RELATION:05 — later soft-delete/edit of the current relation
+    never changes the captured historical meaning."""
+    import json as _json
+
+    from sqlalchemy import text as _text
+
+    from tests.test_m16_capture import _capture, _snap_json
+
+    base = await seed_relation_world(client, factory)
+    sid, rid = base["shot_id"], base["relation_id"]
+    from tests.m16_seed_b import post_event
+
+    await post_event(
+        client, sid,
+        event(rid, 1000, _rel(False), _rel(True), kind="entity_relation"))
+    revision, _ = await _capture(client, sid)
+    engine = client._transport.app.state.engine
+    before = _json.loads(await _snap_json(engine, revision.id))
+
+    async with engine.begin() as conn:
+        await conn.execute(_text(
+            "UPDATE continuity_relations SET deleted_at = "
+            "strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = :r"),
+            {"r": rid})
+    after = _json.loads(await _snap_json(engine, revision.id))
+    assert before == after
+    identity = after["intra_shot"]["events"][0]["target_identity"]
+    assert identity["relation_id"] == rid
+    assert identity["predicate_key"] == "carries"
+    r = await client.get(f"/shot-revisions/{revision.id}/continuity")
+    assert r.status_code == 200, r.text

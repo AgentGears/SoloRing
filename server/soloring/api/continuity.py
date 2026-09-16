@@ -86,6 +86,44 @@ async def put_semantic_dependencies(
     return {"assigned": len(payload.dependencies)}
 
 
+async def _intra_shot_provenance(session, revision_id: str):
+    """First-publication audit provenance for schema-7 history (frozen
+    R6 §15.4): per-event source event/proposal ids and captured
+    transition provenance. Audit only — never semantic."""
+    rows = (await session.execute(text(
+        "SELECT position, source_event_id, source_proposal_id, "
+        "entity_feature_transition_id, entity_relation_transition_id, "
+        "production_instance_feature_transition_id, "
+        "captured_handoff_json FROM "
+        "shot_revision_intra_shot_events WHERE shot_revision_id = :r "
+        "ORDER BY position"), {"r": revision_id})).fetchall()
+    if not rows:
+        return None
+    import json as _json
+
+    return {
+        "events": [
+            {
+                "position": row.position,
+                "source_event_id": row.source_event_id,
+                "source_proposal_id": row.source_proposal_id,
+                "transition_provenance": {
+                    "entity_feature_transition_id":
+                        row.entity_feature_transition_id,
+                    "entity_relation_transition_id":
+                        row.entity_relation_transition_id,
+                    "production_instance_feature_transition_id":
+                        row.production_instance_feature_transition_id,
+                },
+                "handoff_semantics": (
+                    _json.loads(row.captured_handoff_json)
+                    if row.captured_handoff_json is not None else None),
+            }
+            for row in rows
+        ],
+    }
+
+
 @router.get(
     "/shots/{shot_id}/semantic-dependencies",
     response_model=list[SemanticDependencyWithEntity],
@@ -665,6 +703,9 @@ async def _revision_continuity(
         "visual": visual_provenance,
         "spatial": spatial_provenance,
         "intra_shot": intra_block,
+        "intra_shot_provenance": (
+            await _intra_shot_provenance(session, rev["id"])
+            if schema_version == 7 else None),
     }
 
 

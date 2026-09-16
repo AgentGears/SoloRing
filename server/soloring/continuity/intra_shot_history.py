@@ -69,7 +69,8 @@ def _start_states_from(features, relations, world):
 
 
 def _verify_handoff(handoff: dict, terminal_state: dict,
-                    revision_id: str, position) -> None:
+                    revision_id: str, position, *, target: dict,
+                    shot_id: str) -> None:
     anchor = handoff.get("anchor")
     if (not isinstance(anchor, dict)
             or anchor.get("anchor_type") != "shot"
@@ -78,6 +79,19 @@ def _verify_handoff(handoff: dict, terminal_state: dict,
         raise internal_invariant(
             f"ShotRevision {revision_id} intra_shot child {position} "
             "handoff anchor is not an exact Shot/end anchor")
+    if anchor["anchor_id"] != shot_id:
+        raise internal_invariant(
+            f"ShotRevision {revision_id} intra_shot child {position} "
+            "handoff anchors a foreign Shot")
+    expected_domain = target["kind"]
+    if handoff.get("domain") != expected_domain:
+        raise internal_invariant(
+            f"ShotRevision {revision_id} intra_shot child {position} "
+            "handoff domain does not equal the event target kind")
+    if handoff.get("target") != target:
+        raise internal_invariant(
+            f"ShotRevision {revision_id} intra_shot child {position} "
+            "handoff target does not equal the event target")
     if handoff.get("domain") == "entity_relation":
         expected = ("active" if terminal_state["active"] else "inactive")
         if handoff.get("state") != expected:
@@ -100,7 +114,8 @@ def _verify_handoff(handoff: dict, terminal_state: dict,
 
 
 def _verify_core(parent, children, starts, world, revision_id: str,
-                 snapshot: dict | None) -> dict | None:
+                 snapshot: dict | None,
+                 revision_shot_id: str | None = None) -> dict | None:
     """parent: mapping rows (schema_version, duration_ms, spec_json,
     spec_hash); children: mapping rows over _CHILD_COLUMNS; starts/world:
     captured predecessor planes. Pure — performs no connection access."""
@@ -124,6 +139,15 @@ def _verify_core(parent, children, starts, world, revision_id: str,
             raise internal_invariant(
                 f"ShotRevision {revision_id} intra_shot child positions "
                 "are not contiguous from zero in canonical order")
+    coords = [(row["time_ms"], row["ordinal"]) for row in children]
+    if coords != sorted(coords):
+        raise internal_invariant(
+            f"ShotRevision {revision_id} intra_shot children are not in "
+            "canonical (time_ms, ordinal) order")
+    if len(set(coords)) != len(coords):
+        raise internal_invariant(
+            f"ShotRevision {revision_id} intra_shot children share a "
+            "(time_ms, ordinal) coordinate")
 
     folded = dict(starts)
     per_target: dict[tuple[str, str], list] = {}
@@ -223,10 +247,14 @@ def _verify_core(parent, children, starts, world, revision_id: str,
                     f"{row['position']} carries a nonterminal "
                     "require_handoff marker")
         if terminal["persistence_mode"] == "require_handoff":
+            terminal_identity = json.loads(
+                terminal["captured_target_identity_json"])
             _verify_handoff(
                 json.loads(terminal["captured_handoff_json"]),
                 json.loads(terminal["captured_after_state_json"]),
-                revision_id, terminal["position"])
+                revision_id, terminal["position"],
+                target=_target_from_identity(terminal_identity),
+                shot_id=str(revision_shot_id))
 
     block = {
         "schema_version": 1,
@@ -256,6 +284,10 @@ def _verify_core(parent, children, starts, world, revision_id: str,
 async def verify_intra_shot_history(conn, revision_id: str,
                                     snapshot: dict | None = None) -> dict:
     """Async entry (the historical inspector's AsyncSession connection)."""
+    shot_id_row = (await conn.execute(text(
+        "SELECT shot_id FROM shot_revisions WHERE id = :r"),
+        {"r": revision_id})).first()
+    revision_shot_id = shot_id_row[0] if shot_id_row else None
     parent = (await conn.execute(text(
         "SELECT schema_version, duration_ms, spec_json, spec_hash FROM "
         "shot_revision_intra_shot_specs WHERE shot_revision_id = :r"),
@@ -275,12 +307,16 @@ async def verify_intra_shot_history(conn, revision_id: str,
     world = (snapshot or {}).get("production_world")
     starts, world = _start_states_from(features, relations, world)
     return _verify_core(parent, children, starts, world, revision_id,
-                        snapshot)
+                        snapshot, revision_shot_id=revision_shot_id)
 
 
 def verify_intra_shot_history_sync(conn, revision_id: str,
                                    snapshot: dict | None = None) -> dict:
     """Sync entry (the recovery verifier's plain sqlite3 connection)."""
+    shot_id_row = conn.execute(
+        "SELECT shot_id FROM shot_revisions WHERE id = ?",
+        (revision_id,)).fetchall()
+    revision_shot_id = shot_id_row[0][0] if shot_id_row else None
     parent = [dict(zip(
         ("schema_version", "duration_ms", "spec_json", "spec_hash"), row))
         for row in conn.execute(
@@ -302,7 +338,7 @@ def verify_intra_shot_history_sync(conn, revision_id: str,
     world = (snapshot or {}).get("production_world")
     starts, world = _start_states_from(features, relations, world)
     return _verify_core(parent, children, starts, world, revision_id,
-                        snapshot)
+                        snapshot, revision_shot_id=revision_shot_id)
 
 
 def verify_working_event_row(row) -> None:

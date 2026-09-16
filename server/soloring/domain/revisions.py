@@ -200,13 +200,36 @@ async def _intra_shot_parent_exists(conn, revision_id: str) -> bool:
 
 
 async def _verify_intra_shot_companions(
-        conn, revision_id: str, children) -> None:
+        conn, revision_id: str, children,
+        intra_shot_pack) -> None:
     """Semantic convergence verification (frozen R6 §14.4): the stored
-    companion children must match the would-be capture on every captured
-    semantic field. ``source_event_id``/``source_proposal_id`` and
-    transition UUIDs are first-publication audit provenance — they are
-    deliberately NOT compared. Missing/extra/mismatched rows are
-    corruption, never repaired."""
+    companion PARENT (schema/duration/spec bytes+hash) and children must
+    match the would-be capture on every captured semantic field.
+    ``source_event_id``/``source_proposal_id`` and transition UUIDs are
+    first-publication audit provenance — they are deliberately NOT
+    compared. Missing/extra/mismatched rows are corruption, never
+    repaired."""
+    from soloring.continuity.intra_shot_capture import (
+        intra_shot_spec_bytes,
+    )
+
+    stored_parent = (await conn.execute(text(
+        "SELECT schema_version, duration_ms, spec_json, spec_hash FROM "
+        "shot_revision_intra_shot_specs WHERE shot_revision_id = :r"),
+        {"r": revision_id})).fetchall()
+    spec_json, spec_hash = intra_shot_spec_bytes(intra_shot_pack)
+    if len(stored_parent) != 1:
+        raise internal_invariant(
+            f"ShotRevision {revision_id} convergence requires exactly "
+            "one intra_shot companion parent")
+    sp = stored_parent[0]
+    if (sp.schema_version != 1
+            or sp.duration_ms != intra_shot_pack["duration_ms"]
+            or sp.spec_json != spec_json
+            or sp.spec_hash != spec_hash):
+        raise internal_invariant(
+            f"ShotRevision {revision_id} intra_shot companion parent "
+            "disagrees with the converged capture")
     from soloring.continuity.intra_shot_capture import (
         expected_child_signature,
         semantic_child_signature,
@@ -463,7 +486,8 @@ async def _persist_revision_fenced(
                     )
                     if intra_shot_pack is not None:
                         await _verify_intra_shot_companions(
-                            conn, existing[0], intra_shot_children)
+                            conn, existing[0], intra_shot_children,
+                            intra_shot_pack)
                     elif await _intra_shot_parent_exists(
                             conn, existing[0]):
                         raise internal_invariant(

@@ -565,11 +565,15 @@ async def create_generation_request(
         from soloring.workflows.artifact_store import WorkflowArtifactStore
 
         # §11.1 Stage 0 (r1-gate B1): RAW BYTE capture only — coherent
-        # descriptor-bound buffers placed content-addressed. Semantic
-        # package validation runs AFTER the M7/M8 predecessor gates
-        # below, per the frozen ordering.
+        # descriptor-bound buffers captured in memory. Semantic package
+        # validation runs AFTER the M7/M8 predecessor gates below, per
+        # the frozen ordering. M16-C (frozen R6 §15.2): the DURABLE
+        # content-addressed placement waits until the captured
+        # ShotRevision proves executable — a schema-7 refusal must
+        # precede any workflow-package publication, so a refused
+        # request leaves the artifact store untouched.
         release = await capture_current_release(settings)
-        await WorkflowArtifactStore(settings).place_release(release)
+        _artifact_store = WorkflowArtifactStore(settings)
         package = None
         template = None
     else:
@@ -623,6 +627,10 @@ async def create_generation_request(
             "that no published workflow can realize",
             status_code=409,
             details={"shot_revision_id": revision.id})
+    if release is not None:
+        # the captured revision proved executable: NOW the release bytes
+        # take their durable content-addressed place
+        await _artifact_store.place_release(release)
     spatial_pack = (
         snapshot.get("spatial_continuity")
         if snapshot_schema in (5, 6) else None

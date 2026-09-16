@@ -108,3 +108,35 @@ async def test_exec_05_exact_rerun_stays_pinned(client, factory):
             "SELECT snapshot_json FROM shot_revisions WHERE id = :r"),
             {"r": rr.shot_revision_id})).scalar_one())
     assert new_snap["schema_version"] < 7
+
+
+async def test_exec_02_03_refusal_precedes_artifact_publication(client,
+                                                                 factory):
+    """EXEC:02/03 — the schema-7 refusal precedes workflow-package
+    publication: a refused comfy request leaves an initially empty
+    artifact store empty (no manifest/template/package/queue writes)."""
+    from soloring.workflows.manifest import WORKFLOW_DIR as V1_DIR
+
+    base = await seed_feature_world(client, factory)
+    sid, fid = base["shot_id"], base["feature_id"]
+    await post_event(client, sid, event(fid, 1000, state(), state("fresh")))
+    await _capture(client, sid)
+    settings = client._transport.app.state.settings
+    store_root = settings.data_dir / "workflow-artifacts"
+    assert not store_root.exists() or not any(store_root.rglob("*.json")), (
+        "artifact store not initially empty")
+
+    saved_executor = settings.executor
+    saved_pkg = settings.workflow_package_dir
+    settings.executor = "comfy"
+    settings.workflow_package_dir = V1_DIR
+    try:
+        r = await client.post(f"/shots/{sid}/generations")
+    finally:
+        settings.executor = saved_executor
+        settings.workflow_package_dir = saved_pkg
+    assert r.status_code == 409, r.text
+    assert "INTRA_SHOT_REALIZATION_UNSUPPORTED" in r.text
+    placed = list(store_root.rglob("*.json")) if store_root.exists() else []
+    assert placed == [], (
+        f"refused schema-7 request published workflow artifacts: {placed}")

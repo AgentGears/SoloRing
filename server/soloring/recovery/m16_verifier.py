@@ -1,0 +1,302 @@
+"""Full M16-depth recovery verification for head 0017 (frozen R6 §16.2).
+
+Read-only: no proposal/review product operation is performed — only the
+canonical/source/basis integrity of whatever rows exist. Every failure
+RAISES RecoveryCorruption (no bare calls). History is enumerated from
+the OUTER schema-7 snapshots, so a revision missing all companions is
+corruption, not an escape.
+"""
+
+from __future__ import annotations
+
+import json
+import sqlite3
+from pathlib import Path
+
+from soloring.continuity.intra_shot_canonical import (
+    MAX_PROPOSAL_CANONICAL_BYTES,
+    proposal_value,
+)
+from soloring.continuity.intra_shot_history import (
+    verify_intra_shot_history_sync,
+    verify_working_event_row,
+)
+from soloring.domain.canonical import canonical_hash, canonical_json_str
+
+_HEX = frozenset("0123456789abcdef")
+
+
+def _corrupt(message: str):
+    from soloring.recovery.backup import RecoveryCorruption
+
+    raise RecoveryCorruption(message)
+
+
+def _is_hash(value: object) -> bool:
+    return (isinstance(value, str) and len(value) == 64
+            and set(value) <= _HEX)
+
+
+def _pair(raw: str, digest: str, what: str):
+    try:
+        value = json.loads(raw)
+    except (ValueError, TypeError) as exc:
+        _corrupt(f"{what} is not valid JSON: {exc}")
+    if canonical_json_str(value) != raw:
+        _corrupt(f"{what} is not canonical JSON")
+    if not _is_hash(digest) or canonical_hash(value) != digest:
+        _corrupt(f"{what} hash mismatch")
+    return value
+
+
+def _verify_proposal_source(row, rows) -> None:
+    (pid, shot_id, source_kind, source_rev_id, source_rev_hash,
+     source_gen_id, source_take_id, proposer_kind, analyzer_id,
+     analyzer_version, analyzer_params_hash, proposal_json,
+     proposal_hash) = row
+    doc = _pair(proposal_json, proposal_hash, f"proposal {pid}")
+
+    # exact Proposal Grammar v1 (candidate shape + suggestion vocabulary)
+    try:
+        rebuilt = proposal_value(
+            candidate_event=doc["candidate_event"],
+            persistence_suggestion=doc["persistence_suggestion"])
+    except Exception as exc:  # noqa: BLE001 — typed failure below
+        _corrupt(f"proposal {pid} violates Proposal Grammar v1: {exc}")
+    if canonical_json_str(rebuilt) != proposal_json:
+        _corrupt(f"proposal {pid} is not the canonical grammar value")
+
+    rev = rows(
+        "SELECT snapshot_hash FROM shot_revisions WHERE id = ?",
+        (source_rev_id,))
+    if not rev:
+        _corrupt(f"proposal {pid} pins missing source ShotRevision")
+    if rev[0][0] != source_rev_hash:
+        _corrupt(f"proposal {pid} source revision hash mismatch")
+    snap = json.loads(rows(
+        "SELECT snapshot_json FROM shot_revisions WHERE id = ?",
+        (source_rev_id,))[0][0])
+    if snap.get("intent", {}).get("duration_ms") is not None:
+        duration = snap["intent"]["duration_ms"]
+        t = doc["candidate_event"]["time_ms"]
+        if not 1 <= t < duration:
+            _corrupt(
+                f"proposal {pid} time is not interior to the captured "
+                "source duration")
+
+    if source_kind == "generation":
+        if source_gen_id is None or source_take_id is not None:
+            _corrupt(f"proposal {pid} generation source shape invalid")
+        gen = rows(
+            "SELECT shot_id, shot_revision_id FROM generations "
+            "WHERE id = ?", (source_gen_id,))
+        if not gen:
+            _corrupt(f"proposal {pid} pins missing Generation")
+        if gen[0][0] != shot_id or gen[0][1] != source_rev_id:
+            _corrupt(
+                f"proposal {pid} Generation/Shot/ShotRevision lineage "
+                "mismatch")
+    elif source_kind == "take":
+        if source_gen_id is None or source_take_id is None:
+            _corrupt(f"proposal {pid} take source shape invalid")
+        take = rows(
+            "SELECT g.shot_id, g.shot_revision_id FROM takes t "
+            "JOIN generations g ON g.id = t.generation_id "
+            "WHERE t.id = ?", (source_take_id,))
+        if not take:
+            _corrupt(f"proposal {pid} pins missing Take")
+        if take[0][0] != shot_id or take[0][1] != source_rev_id:
+            _corrupt(
+                f"proposal {pid} Take/Generation/Shot/ShotRevision "
+                "lineage mismatch")
+    elif source_kind == "imported":
+        if source_gen_id is not None or source_take_id is not None:
+            _corrupt(f"proposal {pid} imported source shape invalid")
+    else:
+        _corrupt(f"proposal {pid} unknown source kind {source_kind!r}")
+
+    if proposer_kind == "human":
+        if (analyzer_id is not None or analyzer_version is not None
+                or analyzer_params_hash is not None):
+            _corrupt(f"proposal {pid} human proposer carries analyzer data")
+    elif proposer_kind == "analyzer":
+        if (not isinstance(analyzer_id, str) or not analyzer_id
+                or not isinstance(analyzer_version, str)
+                or not analyzer_version
+                or not _is_hash(analyzer_params_hash)):
+            _corrupt(
+                f"proposal {pid} analyzer proposer lacks exact "
+                "id/version/parameter hash")
+    else:
+        _corrupt(f"proposal {pid} unknown proposer kind {proposer_kind!r}")
+
+
+def _verify_review(row, rows) -> None:
+    (rid, shot_id, source_kind, source_event_id, source_proposal_id,
+     source_hash, decision, review_basis_hash, result_event_id,
+     ef_transition, er_transition, pf_transition, operation_json,
+     operation_hash) = row
+    doc = _pair(operation_json, operation_hash, f"review {rid}")
+
+    if source_kind == "event":
+        if source_proposal_id is not None or source_event_id is None:
+            _corrupt(f"review {rid} event source shape invalid")
+        ev = rows(
+            "SELECT event_hash FROM shot_intra_shot_events WHERE id = ?",
+            (source_event_id,))
+        if not ev or ev[0][0] != source_hash:
+            _corrupt(f"review {rid} source event hash mismatch")
+        if decision not in ("adopt_persistence", "decline_persistence"):
+            _corrupt(f"review {rid} illegal event decision {decision!r}")
+    elif source_kind == "proposal":
+        if source_event_id is not None or source_proposal_id is None:
+            _corrupt(f"review {rid} proposal source shape invalid")
+        pr = rows(
+            "SELECT proposal_hash FROM "
+            "shot_intra_shot_event_proposals WHERE id = ?",
+            (source_proposal_id,))
+        if not pr or pr[0][0] != source_hash:
+            _corrupt(f"review {rid} source proposal hash mismatch")
+        if decision not in ("adopt_event_only", "adopt_persistence",
+                            "ignore"):
+            _corrupt(f"review {rid} illegal proposal decision {decision!r}")
+    else:
+        _corrupt(f"review {rid} unknown source kind {source_kind!r}")
+
+    # exact review-basis grammar: the recorded basis must be the
+    # canonical hash of the operation document it summarizes
+    if "review_basis_hash" not in doc:
+        _corrupt(f"review {rid} operation lacks review_basis_hash")
+    if doc["review_basis_hash"] != review_basis_hash:
+        _corrupt(f"review {rid} recorded basis disagrees with operation")
+
+    # result references
+    creates_authority = decision in ("adopt_event_only",
+                                     "adopt_persistence")
+    if creates_authority:
+        if not _is_hash(result_event_id) and not _result_event_exists(
+                rows, result_event_id):
+            _corrupt(f"review {rid} result event missing")
+        if decision == "adopt_persistence":
+            populated = [t for t in (ef_transition, er_transition,
+                                     pf_transition) if t is not None]
+            if len(populated) != 1:
+                _corrupt(
+                    f"review {rid} adopt_persistence requires exactly one "
+                    "owning-domain transition id")
+            table = {ef_transition: "continuity_feature_transitions",
+                     er_transition:
+                         "continuity_relation_transitions",
+                     pf_transition:
+                         "production_instance_feature_transitions"}
+            for tid in populated:
+                if not rows(
+                        f"SELECT 1 FROM {table[tid]} WHERE id = ?",
+                        (tid,)):
+                    _corrupt(f"review {rid} result transition missing")
+    else:
+        if (result_event_id is not None or ef_transition is not None
+                or er_transition is not None or pf_transition is not None):
+            _corrupt(
+                f"review {rid} non-authority decision carries results")
+
+
+def _result_event_exists(rows, event_id) -> bool:
+    if not isinstance(event_id, str):
+        return False
+    return bool(rows(
+        "SELECT 1 FROM shot_intra_shot_events WHERE id = ?", (event_id,)))
+
+
+def verify_m16_intra_shot_state(staged_db: Path) -> None:
+    con = sqlite3.connect(str(staged_db))
+    try:
+        def rows(query, params=()):
+            return con.execute(query, params).fetchall()
+
+        for row in rows(
+                "SELECT id, shot_id, time_ms, ordinal, target_kind, "
+                "entity_feature_id, entity_relation_id, "
+                "production_instance_feature_id, before_state_json, "
+                "before_state_hash, after_state_json, after_state_hash, "
+                "persistence_mode, source_kind, source_proposal_id, "
+                "event_json, event_hash FROM shot_intra_shot_events "
+                "WHERE deleted_at IS NULL"):
+            verify_working_event_row(_Row(row, WORKING_EVENT_COLUMNS))
+            if row[13] == "proposal_adoption":
+                if row[14] is None:
+                    _corrupt(
+                        f"working event {row[0]} claims proposal_adoption "
+                        "without a source proposal")
+                pr = rows(
+                    "SELECT proposal_hash FROM "
+                    "shot_intra_shot_event_proposals WHERE id = ?",
+                    (row[14],))
+                if not pr:
+                    _corrupt(
+                        f"working event {row[0]} pins missing proposal "
+                        f"{row[14]}")
+
+        # History is enumerated from the OUTER schema-7 snapshots: a
+        # schema-7 revision without companions is corruption, and a
+        # companion parent without schema 7 is corruption.
+        for rev_id, snapshot_json in rows(
+                "SELECT id, snapshot_json FROM shot_revisions"):
+            snap = json.loads(snapshot_json)
+            if snap.get("schema_version") == 7:
+                verify_intra_shot_history_sync(
+                    con, rev_id, snapshot=snap)
+        for (rev_id,) in rows(
+                "SELECT DISTINCT shot_revision_id FROM "
+                "shot_revision_intra_shot_events"):
+            snap = rows(
+                "SELECT snapshot_json FROM shot_revisions WHERE id = ?",
+                (rev_id,))
+            if not snap:
+                _corrupt(
+                    f"intra_shot companions reference missing "
+                    f"ShotRevision {rev_id}")
+            if json.loads(snap[0][0]).get("schema_version") != 7:
+                _corrupt(
+                    f"ShotRevision {rev_id} carries companions without "
+                    "outer schema 7")
+
+        for row in rows(
+                "SELECT id, shot_id, source_kind, "
+                "source_shot_revision_id, source_shot_revision_hash, "
+                "source_generation_id, source_take_id, proposer_kind, "
+                "analyzer_id, analyzer_version, analyzer_parameters_hash, "
+                "proposal_json, proposal_hash FROM "
+                "shot_intra_shot_event_proposals"):
+            _verify_proposal_source(row, rows)
+
+        for row in rows(
+                "SELECT id, shot_id, source_kind, source_event_id, "
+                "source_proposal_id, source_hash, decision, "
+                "review_basis_hash, result_event_id, "
+                "entity_feature_transition_id, "
+                "entity_relation_transition_id, "
+                "production_instance_feature_transition_id, "
+                "operation_json, operation_hash FROM "
+                "persistent_consequence_reviews"):
+            _verify_review(row, rows)
+    finally:
+        con.close()
+
+
+WORKING_EVENT_COLUMNS = (
+    "id", "shot_id", "time_ms", "ordinal", "target_kind",
+    "entity_feature_id", "entity_relation_id",
+    "production_instance_feature_id", "before_state_json",
+    "before_state_hash", "after_state_json", "after_state_hash",
+    "persistence_mode", "source_kind", "source_proposal_id",
+    "event_json", "event_hash",
+)
+
+
+class _Row:
+    def __init__(self, values, columns):
+        self._map = dict(zip(columns, values))
+
+    def __getattr__(self, name):
+        return self._map[name]

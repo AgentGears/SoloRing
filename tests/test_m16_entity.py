@@ -102,3 +102,38 @@ async def test_entity_05(client, factory):
     # the first Shot's terminal state is its own current authority only
     first = await get_intra(client, sid)
     assert first["terminal_targets"][0]["terminal_state"] == state("fresh")
+
+
+async def test_entity_03_captured_type_unit_is_historical(client, factory):
+    """ENTITY:03 — the captured feature type/unit is historical: a
+    current schema edit never alters the captured target identity."""
+    import json
+
+    from sqlalchemy import text as _text
+
+    from tests.test_m16_capture import _capture, _snap_json
+
+    base = await seed_feature_world(client, factory)
+    sid, fid = base["shot_id"], base["feature_id"]
+    await post_event(client, sid, event(fid, 1000, state(), state("fresh")))
+    revision, _ = await _capture(client, sid)
+    engine = client._transport.app.state.engine
+    snap = json.loads(await _snap_json(engine, revision.id))
+    identity = snap["intra_shot"]["events"][0]["target_identity"]
+    assert identity["value_type"] == "enum"
+    assert identity["unit"] is None
+
+    # current definition moves; the captured identity does not
+    async with engine.begin() as conn:
+        await conn.execute(_text(
+            "UPDATE continuity_features SET value_type = 'integer', "
+            "unit = 'mm', enum_values_json = NULL WHERE id = :f"),
+            {"f": fid})
+    snap2 = json.loads(await _snap_json(engine, revision.id))
+    identity2 = snap2["intra_shot"]["events"][0]["target_identity"]
+    assert identity2 == identity
+
+    # and the historical read still verifies against the frozen fields
+    r = await client.get(f"/shot-revisions/{revision.id}/continuity")
+    assert r.status_code == 200, r.text
+    assert r.json()["intra_shot"]["events"][0]["target_identity"] == identity
