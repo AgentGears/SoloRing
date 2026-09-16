@@ -36,12 +36,8 @@ async def _valid_proposal_review_world(client, factory):
     membership, basis roots, and committed result evidence)."""
     base = await seed_feature_world(client, factory)
     sid, fid = base["shot_id"], base["feature_id"]
-    # a transient pre-proposal event (no persistent marker on the target
-    # yet — the ADOPTED event created below carries require_handoff)
-    await post_event(
-        client, sid, event(fid, 1000, state(), state("healing")))
-    await put_transition(
-        client, fid, sid, operation="set", value="healing")
+    # NO working events or transitions: the ONLY event is the adopted
+    # candidate itself, created below — matching §12.3 exactly
     revision, _ = await _capture(client, sid)
     await _stamp_alembic(client)
     engine = client._transport.app.state.engine
@@ -91,25 +87,25 @@ async def _valid_proposal_review_world(client, factory):
             {"pid": pid2, "s": sid, "r": revision.id,
              "h": revision.snapshot_hash, "pj": pj2, "ph": ph2})
 
-    # the review creates a NEW persistent result event (time 2000,
-    # terminal for its target)
+    # §12.3: adopt_persistence creates the CANDIDATE itself as a
+    # require_handoff event (1500ms, absent -> fresh) plus the exact A2
+    # handoff (set fresh)
     res = await post_event(
         client, sid,
-        event(fid, 2000, state("healing"), state("fresh"),
+        event(fid, 1500, state(), state("fresh"),
               persistence="require_handoff"))
     assert res is not None
+    await put_transition(
+        client, fid, sid, operation="set", value="fresh")
     result_event_id = res["id"]
     async with engine.connect() as conn:
         transition = (await conn.execute(text(
-            "SELECT id, value_hash FROM "
-            "continuity_feature_transitions WHERE "
+            "SELECT id FROM continuity_feature_transitions WHERE "
             "feature_id = :f AND anchor_id = :s AND boundary = 'end' "
             "AND deleted_at IS NULL"),
             {"f": fid, "s": sid})).one()
-    # the committed transition semantic hash: the canonical hash of the
-    # §4.8 semantic handoff value (set + terminal state)
-    import hashlib as _hl
-
+    # the committed transition semantic hash: the canonical §4.8 handoff
+    # of the ADOPTED candidate's terminal state (set fresh)
     from soloring.domain.canonical import canonical_hash as _ch2
 
     semantic_handoff = {
@@ -118,9 +114,7 @@ async def _valid_proposal_review_world(client, factory):
         "anchor": {"anchor_type": "shot", "anchor_id": sid,
                    "boundary": "end"},
         "operation": "set",
-        # the ACTUAL transition row's committed value (healing, not the
-        # result event's terminal fresh)
-        "state": state("healing"),
+        "state": state("fresh"),
     }
     transition_semantic_hash = _ch2(semantic_handoff)
     batch_reviews = [{

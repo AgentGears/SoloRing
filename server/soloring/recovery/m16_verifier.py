@@ -324,7 +324,42 @@ def _verify_review(row, rows) -> None:
                     "row's result event")
             if not _is_hash(result.get("event_hash")):
                 _corrupt(f"review {rid} result event hash missing")
+            # §12.3: the adopted result event IS the reviewed proposal
+            # candidate — derive the expected authoritative event from
+            # the IMMUTABLE proposal_json + the decision and require
+            # the recorded result-event hash to equal it. The result
+            # event is provenance-anchored below; its current row
+            # never becomes the historical semantic source.
+            pr_json = rows(
+                "SELECT proposal_json FROM "
+                "shot_intra_shot_event_proposals WHERE id = ?",
+                (source_proposal_id,))[0][0]
+            import json as _json
+
+            candidate = _json.loads(pr_json)["candidate_event"]
+            persistence = ("require_handoff"
+                           if decision == "adopt_persistence"
+                           else "transient")
+            expected_event = {
+                "schema_version": 1,
+                "time_ms": candidate["time_ms"],
+                "ordinal": candidate["ordinal"],
+                "target": candidate["target"],
+                "before": candidate["before"],
+                "after": candidate["after"],
+                "persistence_mode": persistence,
+            }
+            from soloring.domain.canonical import canonical_hash as _h
+
+            if result.get("event_hash") != _h(expected_event):
+                _corrupt(
+                    f"review {rid} recorded result event is not the "
+                    "reviewed proposal candidate under the frozen "
+                    "decision semantics")
             if decision == "adopt_persistence":
+                # §12.3: adopt_persistence = candidate event + the
+                # EXACT A2 handoff derived from that same event's
+                # target and terminal after state
                 tr = result.get("transition")
                 if not isinstance(tr, dict) or not _is_hash(
                         tr.get("semantic_hash")):
@@ -340,6 +375,30 @@ def _verify_review(row, rows) -> None:
                     _corrupt(
                         f"review {rid} result transition kind "
                         "disagrees with the row's transition columns")
+                from soloring.continuity.intra_shot_canonical import (
+                    feature_handoff_value,
+                    relation_handoff_value,
+                )
+
+                target = candidate["target"]
+                terminal = candidate["after"]
+                if target["kind"] == "entity_relation":
+                    semantic = relation_handoff_value(
+                        relation_id=target["id"], shot_id=shot_id,
+                        state=("active" if terminal["active"]
+                               else "inactive"))
+                else:
+                    semantic = feature_handoff_value(
+                        domain=target["kind"], target_kind=target["kind"],
+                        target_id=target["id"], shot_id=shot_id,
+                        operation=("set" if terminal.get("present")
+                                   else "clear"),
+                        state=terminal)
+                if tr.get("semantic_hash") != _h(semantic):
+                    _corrupt(
+                        f"review {rid} recorded transition semantic "
+                        "hash is not the exact A2 handoff of the "
+                        "adopted candidate's terminal state")
     else:
         _corrupt(f"review {rid} unknown source kind {source_kind!r}")
 
@@ -360,19 +419,14 @@ def _verify_review(row, rows) -> None:
     if not _result_event_exists(rows, result_event_id):
         _corrupt(f"review {rid} result event missing")
     res = rows(
-        "SELECT shot_id, event_hash FROM shot_intra_shot_events "
+        "SELECT shot_id FROM shot_intra_shot_events "
         "WHERE id = ?", (result_event_id,))[0]
     if res[0] != shot_id:
         _corrupt(f"review {rid} result event belongs to another Shot")
-    # cross-check the committed result hash against the referenced
-    # event row — recovery certifies AGREEMENT of the recorded evidence
-    # with the referenced row (a later edit is a conflict to surface,
-    # never silently certified)
-    recorded = doc.get("result", {}).get("event_hash")
-    if res[1] != recorded:
-        _corrupt(
-            f"review {rid} recorded result event hash disagrees with "
-            "the referenced event row")
+    # §16.2: current rows are FK/provenance anchors only — existence,
+    # Shot ownership, domain and Shot/end coordinate. An ordinary later
+    # PATCH/transition edit must NOT make a valid backup unrestorable;
+    # historical semantics come from the immutable operation record.
     if decision in ("adopt_event_only", "decline_persistence"):
         if (ef_transition is not None or er_transition is not None
                 or pf_transition is not None):
@@ -412,44 +466,10 @@ def _verify_review(row, rows) -> None:
         _corrupt(
             f"review {rid} result transition is not this Shot's "
             "Shot/end owning-domain handoff")
-    # cross-check the committed transition semantic hash: recompute the
-    # canonical §4.8 semantic handoff from the transition row's own
-    # domain columns and compare with the recorded evidence
-    recorded_tr = doc.get("result", {}).get("transition", {})
-    if kind == "entity_relation":
-        tr_cols = rows(
-            "SELECT relation_id, state FROM "
-            "continuity_relation_transitions WHERE id = ?", (tid,))[0]
-        from soloring.continuity.intra_shot_canonical import (
-            relation_handoff_value,
-        )
-
-        semantic = relation_handoff_value(
-            relation_id=tr_cols[0], shot_id=shot_id, state=tr_cols[1])
-    else:
-        tr_cols = rows(
-            f"SELECT feature_id, operation, value_json FROM {table} "
-            "WHERE id = ?", (tid,))[0]
-        from soloring.continuity.intra_shot_canonical import (
-            feature_handoff_value,
-        )
-
-        st = ({"present": False} if tr_cols[1] == "clear" else {
-            "present": True,
-            "value": _json_loads_str(tr_cols[2]),
-            "value_hash": None})
-        if tr_cols[1] == "set":
-            vh = rows(
-                f"SELECT value_hash FROM {table} WHERE id = ?",
-                (tid,))[0][0]
-            st["value_hash"] = vh
-        semantic = feature_handoff_value(
-            domain=kind, target_kind=kind, target_id=tr_cols[0],
-            shot_id=shot_id, operation=tr_cols[1], state=st)
-    if canonical_hash(semantic) != recorded_tr.get("semantic_hash"):
-        _corrupt(
-            f"review {rid} recorded transition semantic hash disagrees "
-            "with the referenced transition row")
+    # §16.2: the transition row is a provenance anchor — its CURRENT
+    # value is never the historical semantic source (the recorded
+    # semantic hash was already verified against the immutable derived
+    # handoff above).
 
 
 def _json_loads_str(raw):
