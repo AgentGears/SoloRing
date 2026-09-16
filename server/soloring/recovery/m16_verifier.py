@@ -100,12 +100,18 @@ def _verify_proposal_source(row, rows) -> None:
         if source_gen_id is None or source_take_id is None:
             _corrupt(f"proposal {pid} take source shape invalid")
         take = rows(
-            "SELECT g.shot_id, g.shot_revision_id FROM takes t "
-            "JOIN generations g ON g.id = t.generation_id "
+            "SELECT t.generation_id, g.shot_id, g.shot_revision_id "
+            "FROM takes t JOIN generations g ON g.id = t.generation_id "
             "WHERE t.id = ?", (source_take_id,))
         if not take:
             _corrupt(f"proposal {pid} pins missing Take")
-        if take[0][0] != shot_id or take[0][1] != source_rev_id:
+        # Take→Generation identity equality: the pinned generation id
+        # must BE the Take's own generation
+        if take[0][0] != source_gen_id:
+            _corrupt(
+                f"proposal {pid} pinned generation is not the Take's "
+                "own generation")
+        if take[0][1] != shot_id or take[0][2] != source_rev_id:
             _corrupt(
                 f"proposal {pid} Take/Generation/Shot/ShotRevision "
                 "lineage mismatch")
@@ -132,6 +138,11 @@ def _verify_proposal_source(row, rows) -> None:
 
 
 def _verify_review(row, rows) -> None:
+    from soloring.continuity.intra_shot_canonical import (
+        event_review_basis_hash as event_basis,
+        proposal_review_basis_hash as proposal_basis,
+    )
+
     (rid, shot_id, source_kind, source_event_id, source_proposal_id,
      source_hash, decision, review_basis_hash, result_event_id,
      ef_transition, er_transition, pf_transition, operation_json,
@@ -142,63 +153,110 @@ def _verify_review(row, rows) -> None:
         if source_proposal_id is not None or source_event_id is None:
             _corrupt(f"review {rid} event source shape invalid")
         ev = rows(
-            "SELECT event_hash FROM shot_intra_shot_events WHERE id = ?",
-            (source_event_id,))
-        if not ev or ev[0][0] != source_hash:
+            "SELECT shot_id, event_hash FROM shot_intra_shot_events "
+            "WHERE id = ?", (source_event_id,))
+        if not ev or ev[0][1] != source_hash:
             _corrupt(f"review {rid} source event hash mismatch")
+        if ev[0][0] != shot_id:
+            _corrupt(f"review {rid} source event belongs to another Shot")
         if decision not in ("adopt_persistence", "decline_persistence"):
             _corrupt(f"review {rid} illegal event decision {decision!r}")
+        # exact frozen event review-basis root (R6 §7.5.1), recomputed
+        # from the reviewed event's stored coordinates — never the
+        # operation's self-assertion
+        recomputed = event_basis(
+            source_event_id=source_event_id, source_hash=source_hash,
+            decision=decision,
+            expected_working_snapshot_hash=doc.get(
+                "expected_working_snapshot_hash", ""),
+            expected_event_set_hash=doc.get("expected_event_set_hash", ""),
+            expected_handoff=doc.get("expected_handoff"))
+        if recomputed != review_basis_hash:
+            _corrupt(
+                f"review {rid} recorded basis is not the frozen event "
+                "review-basis root")
     elif source_kind == "proposal":
         if source_event_id is not None or source_proposal_id is None:
             _corrupt(f"review {rid} proposal source shape invalid")
         pr = rows(
-            "SELECT proposal_hash FROM "
+            "SELECT shot_id, proposal_hash FROM "
             "shot_intra_shot_event_proposals WHERE id = ?",
             (source_proposal_id,))
-        if not pr or pr[0][0] != source_hash:
+        if not pr or pr[0][1] != source_hash:
             _corrupt(f"review {rid} source proposal hash mismatch")
+        if pr[0][0] != shot_id:
+            _corrupt(
+                f"review {rid} source proposal belongs to another Shot")
         if decision not in ("adopt_event_only", "adopt_persistence",
                             "ignore"):
             _corrupt(f"review {rid} illegal proposal decision {decision!r}")
+        # exact frozen proposal review-basis root (R6 §7.5.2): the sole
+        # normative construction — canonical hash of
+        # {batch_basis_hash, proposal_id, proposal_hash, decision}
+        batch_basis = doc.get("batch_basis_hash")
+        if not _is_hash(batch_basis):
+            _corrupt(f"review {rid} operation lacks a batch basis hash")
+        recomputed = proposal_basis(
+            batch_basis_hash=batch_basis,
+            proposal_id=source_proposal_id,
+            proposal_hash=source_hash, decision=decision)
+        if recomputed != review_basis_hash:
+            _corrupt(
+                f"review {rid} recorded basis is not the frozen proposal "
+                "review-basis root")
     else:
         _corrupt(f"review {rid} unknown source kind {source_kind!r}")
 
-    # exact review-basis grammar: the recorded basis must be the
-    # canonical hash of the operation document it summarizes
     if "review_basis_hash" not in doc:
         _corrupt(f"review {rid} operation lacks review_basis_hash")
     if doc["review_basis_hash"] != review_basis_hash:
         _corrupt(f"review {rid} recorded basis disagrees with operation")
 
-    # result references
-    creates_authority = decision in ("adopt_event_only",
-                                     "adopt_persistence")
-    if creates_authority:
-        if not _is_hash(result_event_id) and not _result_event_exists(
-                rows, result_event_id):
-            _corrupt(f"review {rid} result event missing")
-        if decision == "adopt_persistence":
-            populated = [t for t in (ef_transition, er_transition,
-                                     pf_transition) if t is not None]
-            if len(populated) != 1:
-                _corrupt(
-                    f"review {rid} adopt_persistence requires exactly one "
-                    "owning-domain transition id")
-            table = {ef_transition: "continuity_feature_transitions",
-                     er_transition:
-                         "continuity_relation_transitions",
-                     pf_transition:
-                         "production_instance_feature_transitions"}
-            for tid in populated:
-                if not rows(
-                        f"SELECT 1 FROM {table[tid]} WHERE id = ?",
-                        (tid,)):
-                    _corrupt(f"review {rid} result transition missing")
-    else:
+    # result references — the frozen migration shape (ck_pcr_result_shape):
+    # ignore carries nothing; adopt_event_only and decline_persistence
+    # carry a result EVENT and no transition; adopt_persistence carries a
+    # result event and EXACTLY ONE owning-domain transition whose own
+    # Shot/end anchor must agree with the review's Shot.
+    if decision == "ignore":
         if (result_event_id is not None or ef_transition is not None
                 or er_transition is not None or pf_transition is not None):
+            _corrupt(f"review {rid} ignore carries results")
+        return
+    if not _result_event_exists(rows, result_event_id):
+        _corrupt(f"review {rid} result event missing")
+    res = rows(
+        "SELECT shot_id FROM shot_intra_shot_events WHERE id = ?",
+        (result_event_id,))[0]
+    if res[0] != shot_id:
+        _corrupt(f"review {rid} result event belongs to another Shot")
+    if decision in ("adopt_event_only", "decline_persistence"):
+        if (ef_transition is not None or er_transition is not None
+                or pf_transition is not None):
             _corrupt(
-                f"review {rid} non-authority decision carries results")
+                f"review {rid} {decision} must not carry transitions")
+        return
+    populated = [(kind, tid) for kind, tid in (
+        ("entity_feature", ef_transition),
+        ("entity_relation", er_transition),
+        ("production_instance_feature", pf_transition)) if tid is not None]
+    if len(populated) != 1:
+        _corrupt(
+            f"review {rid} adopt_persistence requires exactly one "
+            "owning-domain transition id")
+    kind, tid = populated[0]
+    table = {"entity_feature": "continuity_feature_transitions",
+             "entity_relation": "continuity_relation_transitions",
+             "production_instance_feature":
+                 "production_instance_feature_transitions"}
+    tr = rows(
+        f"SELECT anchor_type, anchor_id, boundary FROM {table[kind]} "
+        "WHERE id = ?", (tid,))
+    if not tr:
+        _corrupt(f"review {rid} result transition missing")
+    if (tr[0][0] != "shot" or tr[0][1] != shot_id or tr[0][2] != "end"):
+        _corrupt(
+            f"review {rid} result transition is not this Shot's "
+            "Shot/end owning-domain handoff")
 
 
 def _result_event_exists(rows, event_id) -> bool:

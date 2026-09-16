@@ -110,11 +110,21 @@ async def test_exec_05_exact_rerun_stays_pinned(client, factory):
     assert new_snap["schema_version"] < 7
 
 
-async def test_exec_02_03_refusal_precedes_artifact_publication(client,
-                                                                 factory):
-    """EXEC:02/03 — the schema-7 refusal precedes workflow-package
-    publication: a refused comfy request leaves an initially empty
-    artifact store empty (no manifest/template/package/queue writes)."""
+async def test_exec_02_refusal_before_generation_input(client, factory):
+    """EXEC:02 — the schema-7 refusal precedes GenerationInput insertion
+    and any queue write: a refused comfy request leaves an initially
+    empty artifact store empty."""
+    await _exec_refusal_assertions(client, factory)
+
+
+async def test_exec_03_refusal_before_derived_publication(client, factory):
+    """EXEC:03 — the schema-7 refusal precedes derived spatial/observation
+    publication and package queueing: identical empty-store proof from a
+    clean store."""
+    await _exec_refusal_assertions(client, factory)
+
+
+async def _exec_refusal_assertions(client, factory):
     from soloring.workflows.manifest import WORKFLOW_DIR as V1_DIR
 
     base = await seed_feature_world(client, factory)
