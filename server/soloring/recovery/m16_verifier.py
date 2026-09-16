@@ -153,12 +153,26 @@ def _verify_review(row, rows) -> None:
         if source_proposal_id is not None or source_event_id is None:
             _corrupt(f"review {rid} event source shape invalid")
         ev = rows(
-            "SELECT shot_id, event_hash FROM shot_intra_shot_events "
-            "WHERE id = ?", (source_event_id,))
-        if not ev or ev[0][1] != source_hash:
-            _corrupt(f"review {rid} source event hash mismatch")
+            "SELECT shot_id, event_hash, persistence_mode FROM "
+            "shot_intra_shot_events WHERE id = ?", (source_event_id,))
+        if not ev:
+            _corrupt(f"review {rid} source event missing")
         if ev[0][0] != shot_id:
             _corrupt(f"review {rid} source event belongs to another Shot")
+        if ev[0][1] != source_hash:
+            # frozen R6 §12.2: decline_persistence PATCHES the SAME
+            # event UUID from require_handoff to transient, so the
+            # current row hash is legitimately NEW while the review
+            # retains the reviewed source hash. Any other decision, or
+            # a decline whose current row is not the patched transient
+            # result, is corruption.
+            if (decision != "decline_persistence"
+                    or result_event_id != source_event_id
+                    or ev[0][2] != "transient"):
+                _corrupt(
+                    f"review {rid} source event hash mismatch")
+        if decision not in ("adopt_persistence", "decline_persistence"):
+            _corrupt(f"review {rid} illegal event decision {decision!r}")
         if decision not in ("adopt_persistence", "decline_persistence"):
             _corrupt(f"review {rid} illegal event decision {decision!r}")
         # exact frozen event review-basis root (R6 §7.5.1), recomputed
@@ -266,24 +280,40 @@ def _verify_review(row, rows) -> None:
             f"review {rid} adopt_persistence requires exactly one "
             "owning-domain transition id")
     kind, tid = populated[0]
-    table, column = {
-        "entity_feature": ("continuity_feature_transitions",
-                           "feature_id"),
-        "entity_relation": ("continuity_relation_transitions",
-                            "relation_id"),
-        "production_instance_feature":
-            ("production_instance_feature_transitions", "feature_id"),
-    }[kind]
-    tr = rows(
-        f"SELECT anchor_type, anchor_id, boundary, {column}, operation, "
-        f"state, value_json, value_hash FROM {table[kind]} "
-        "WHERE id = ?", (tid,))
-    if not tr:
-        _corrupt(f"review {rid} result transition missing")
-    if (tr[0][0] != "shot" or tr[0][1] != shot_id or tr[0][2] != "end"):
-        _corrupt(
-            f"review {rid} result transition is not this Shot's "
-            "Shot/end owning-domain handoff")
+    # three domain-specific result verifiers: feature/PI transitions
+    # carry operation/value_json/value_hash; relation transitions carry
+    # state — there is no common column shape
+    if kind == "entity_relation":
+        tr = rows(
+            "SELECT anchor_type, anchor_id, boundary, relation_id, "
+            "state FROM continuity_relation_transitions WHERE id = ?",
+            (tid,))
+        if not tr:
+            _corrupt(f"review {rid} result transition missing")
+        if (tr[0][0] != "shot" or tr[0][1] != shot_id
+                or tr[0][2] != "end"):
+            _corrupt(
+                f"review {rid} result transition is not this Shot's "
+                "Shot/end owning-domain handoff")
+        tr_target, tr_value_ok = tr[0][3], None  # value checked below
+    else:
+        table = {
+            "entity_feature": "continuity_feature_transitions",
+            "production_instance_feature":
+                "production_instance_feature_transitions",
+        }[kind]
+        tr = rows(
+            f"SELECT anchor_type, anchor_id, boundary, feature_id, "
+            f"operation, value_hash, value_json FROM {table} "
+            "WHERE id = ?", (tid,))
+        if not tr:
+            _corrupt(f"review {rid} result transition missing")
+        if (tr[0][0] != "shot" or tr[0][1] != shot_id
+                or tr[0][2] != "end"):
+            _corrupt(
+                f"review {rid} result transition is not this Shot's "
+                "Shot/end owning-domain handoff")
+        tr_target = tr[0][3]
 
     # the transition's TARGET and SEMANTIC VALUE must equal the result
     # event's target and terminal state — a same-Shot/end transition for
@@ -296,7 +326,7 @@ def _verify_review(row, rows) -> None:
         (result_event_id,))[0]
     res_kind = res_ev[0]
     res_target = res_ev[1] or res_ev[2] or res_ev[3]
-    if res_kind != kind or tr[0][3] != res_target:
+    if res_kind != kind or tr_target != res_target:
         _corrupt(
             f"review {rid} result transition targets a different "
             "target than the result event")
@@ -309,12 +339,12 @@ def _verify_review(row, rows) -> None:
     terminal = _json.loads(res_ev[5])
     if kind == "entity_relation":
         expected = ("active" if terminal["active"] else "inactive")
-        if tr[0][5] != expected:
+        if tr[0][4] != expected:
             _corrupt(
                 f"review {rid} result transition state does not equal "
                 "the result event terminal state")
     elif terminal.get("present"):
-        if tr[0][4] != "set" or tr[0][7] != terminal.get("value_hash"):
+        if tr[0][4] != "set" or tr[0][5] != terminal.get("value_hash"):
             _corrupt(
                 f"review {rid} result transition value does not equal "
                 "the result event terminal state")

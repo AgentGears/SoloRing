@@ -120,6 +120,35 @@ def _verify_state_grammar(kind, state, value_type,
             "with the captured-type canonical value")
 
 
+_IDENTITY_KEYSETS = {
+    "entity_feature": {
+        "kind", "feature_id", "entity_id", "feature_key", "feature_kind",
+        "value_type", "unit"},
+    "entity_relation": {
+        "kind", "relation_id", "subject_entity_id", "predicate_id",
+        "predicate_key", "object_entity_id"},
+    "production_instance_feature": {
+        "kind", "feature_id", "composition_id", "occurrence_id",
+        "authority_subject_kind", "feature_key", "feature_kind",
+        "value_type", "unit"},
+}
+
+
+def _verify_identity_grammar(identity, kind, revision_id, position):
+    """The exact frozen §4.7 captured target-identity key set — extra
+    or missing fields are corruption, not display variance."""
+    expected = _IDENTITY_KEYSETS[kind]
+    if set(identity) != expected:
+        raise internal_invariant(
+            f"ShotRevision {revision_id} intra_shot child {position} "
+            f"{kind} target identity key set is not the frozen §4.7 "
+            f"grammar (got {sorted(set(identity))})")
+    if identity["kind"] != kind:
+        raise internal_invariant(
+            f"ShotRevision {revision_id} intra_shot child {position} "
+            "identity kind disagrees with the row target kind")
+
+
 def _bind_identity_to_planes(identity, kind, features, relations, world,
                              revision_id, position):
     """§8.4 identity binding: the frozen captured identity must EXACTLY
@@ -166,27 +195,37 @@ def _bind_identity_to_planes(identity, kind, features, relations, world,
         # absent-at-start relations are legal (inactive Shot/start)
         return
     # production_instance_feature: the FULL captured identity must match
-    # the same-revision world plane — composition, occurrence, subject
-    # kind, key/kind/value_type/unit — not merely the feature id
+    # the same-revision world plane — authority subject kind, key/kind/
+    # value_type/unit (the pack carries the frozen schema fields), plus
+    # composition/occurrence when the plane records them
+    if identity.get("authority_subject_kind") != "production_instance":
+        raise internal_invariant(
+            f"ShotRevision {revision_id} intra_shot child {position} "
+            "PI identity authority_subject_kind is not "
+            "production_instance")
     for state in (world or {}).get("instance_feature_states", ()):
         if state["feature_id"] != target_id:
             continue
-        if (identity.get("composition_id") is not None
-                and state.get("composition_id") is not None
-                and identity["composition_id"] != state["composition_id"]):
-            raise internal_invariant(
-                f"ShotRevision {revision_id} intra_shot child {position} "
-                "PI composition disagrees with the captured world plane")
-        if (identity.get("occurrence_id") is not None
-                and state.get("occurrence_id") is not None
-                and identity["occurrence_id"] != state["occurrence_id"]):
-            raise internal_invariant(
-                f"ShotRevision {revision_id} intra_shot child {position} "
-                "PI occurrence disagrees with the captured world plane")
+        for plane_key, identity_key in (
+                ("composition_id", "composition_id"),
+                ("occurrence_id", "occurrence_id"),
+                ("feature_key", "feature_key"),
+                ("feature_kind", "feature_kind"),
+                ("value_type", "value_type"),
+                ("unit", "unit"),
+                ("subject_kind", "authority_subject_kind")):
+            if (plane_key in state and identity_key in identity
+                    and state[plane_key] is not None
+                    and identity[identity_key] is not None
+                    and state[plane_key] != identity[identity_key]):
+                raise internal_invariant(
+                    f"ShotRevision {revision_id} intra_shot child "
+                    f"{position} PI identity {identity_key} disagrees "
+                    f"with the captured world plane")
         return
-    # the plane may legitimately not list an absent-at-start feature;
-    # the frozen schema fields still stand as captured grammar — the
-    # pack lists only present states, so absence is lawful
+    # the plane lists only PRESENT states; an absent-at-start feature
+    # legitimately has no plane row — the §4.7 key-set grammar above
+    # still fully constrains the identity
     return
 
 
@@ -360,7 +399,9 @@ def _verify_core(parent, children, starts, world, revision_id: str,
                 f"{row['position']} lacks the captured schema-6 "
                 "production-world plane")
 
-        # §8.4 identity binding
+        # §4.7 identity grammar + §8.4 identity binding
+        _verify_identity_grammar(
+            identity, row["target_kind"], revision_id, row["position"])
         _bind_identity_to_planes(
             identity, row["target_kind"], features, relations, world,
             revision_id, row["position"])

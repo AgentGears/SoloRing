@@ -183,74 +183,99 @@ async def test_capture_convergence_semantic(client, factory):
 
 async def test_capture_01(client, factory):
     """CAPTURE:01 — events/handoffs/duration/start planes are read inside
-    ONE SQLite snapshot while a concurrent writer races the capture:
-    the captured intra_shot block is never a hybrid of two moments."""
+    ONE SQLite snapshot: capture is held at a deterministic seam right
+    after its read unit; a mutation lands and is asserted; release
+    persists EXACTLY the pre-mutation value."""
     import asyncio
-
-    base = await seed_feature_world(client, factory)
-    sid, fid = base["shot_id"], base["feature_id"]
-    await post_event(client, sid, event(fid, 1000, state(), state("fresh")))
-
-    async def writer():
-        for n in range(5):
-            r = await client.post(
-                f"/shots/{sid}/intra-shot/events",
-                json=event(fid, 2000 + n, state("fresh"), state("healing")))
-            if r.status_code == 201:
-                await client.delete(
-                    f"/intra-shot/events/{r.json()['id']}")
-            await asyncio.sleep(0.005)
-
-    async def capturer():
-        for _ in range(5):
-            revision, _ = await _capture(client, sid)
-            snap = json.loads(revision.snapshot_json)
-            events = snap["intra_shot"]["events"]
-            coords = [(e["time_ms"], e["ordinal"]) for e in events]
-            assert coords == sorted(coords)
-            await asyncio.sleep(0.005)
-
-    await asyncio.gather(writer(), capturer())
-
-
-async def test_capture_02(
-        client, factory):
-    """CAPTURE:02 — a mutation racing the capture WRITE phase cannot
-    contaminate the persisted value: the companion rows and the snapshot
-    bytes are written atomically from the already-captured read."""
-    import asyncio
-
-    from sqlalchemy import text as _text
 
     base = await seed_feature_world(client, factory)
     sid, fid = base["shot_id"], base["feature_id"]
     await post_event(client, sid, event(fid, 1000, state(), state("fresh")))
     engine = client._transport.app.state.engine
 
-    async def racer():
-        # post-read EVENT mutation racing the capture write window: the
-        # toggled event appears or not as a WHOLE row, never a hybrid
-        for n in range(6):
-            r = await client.post(
-                f"/shots/{sid}/intra-shot/events",
-                json=event(fid, 3000 + n, state("fresh"),
-                           state("healing")))
-            if r.status_code == 201:
-                await client.delete(
-                    f"/intra-shot/events/{r.json()['id']}")
-            await asyncio.sleep(0.003)
+    from soloring.domain import revisions as rev_svc
 
-    async def capture_task():
-        revision, _ = await _capture(client, sid)
-        return revision
+    real_read = rev_svc._snapshot_one_read
+    gate = asyncio.Event()
+    inside_read = asyncio.Event()
 
-    results = await asyncio.gather(racer(), capture_task())
-    revision = results[1]
-    before = await _snap_json(engine, revision.id)
-    # the captured value is immutable afterwards regardless of racers
-    await asyncio.sleep(0.05)
-    after = await _snap_json(engine, revision.id)
-    assert before == after
+    async def held_read(session, shot_id, *, settings=None):
+        read = await real_read(session, shot_id, settings=settings)
+        inside_read.set()
+        await gate.wait()
+        return read
+
+    rev_svc._snapshot_one_read = held_read
+    capture_task = asyncio.ensure_future(_capture(client, sid))
+    await inside_read.wait()
+
+    # the mutation lands AFTER the read unit closed and BEFORE the
+    # write phase — it must NOT contaminate the capture
+    r = await client.post(
+        f"/shots/{sid}/intra-shot/events",
+        json=event(fid, 2000, state("fresh"), state("healing")))
+    assert r.status_code == 201, r.text
+    gate.set()
+    revision = (await capture_task)[0]
+    snap = json.loads(revision.snapshot_json)
+    events = snap["intra_shot"]["events"]
+    assert [(e["time_ms"], e["ordinal"]) for e in events] == [(1000, 0)]
+    assert events[0]["after"] == state("fresh")
+    rev_svc._snapshot_one_read = real_read
+
+
+async def test_capture_02(client, factory):
+    """CAPTURE:02 — a post-read event mutation cannot contaminate the
+    captured value: with capture held after its read unit, a handoff
+    mutation lands and is asserted; the persisted result equals exactly
+    the pre-mutation captured state."""
+    import asyncio
+
+    base = await seed_feature_world(client, factory)
+    sid, fid = base["shot_id"], base["feature_id"]
+    await post_event(
+        client, sid,
+        event(fid, 1000, state(), state("fresh"),
+              persistence="require_handoff"))
+    await put_transition(client, fid, sid, operation="set", value="fresh")
+    engine = client._transport.app.state.engine
+
+    from soloring.domain import revisions as rev_svc
+
+    real_read = rev_svc._snapshot_one_read
+    gate = asyncio.Event()
+    inside_read = asyncio.Event()
+
+    async def held_read(session, shot_id, *, settings=None):
+        read = await real_read(session, shot_id, settings=settings)
+        inside_read.set()
+        await gate.wait()
+        return read
+
+    rev_svc._snapshot_one_read = held_read
+    capture_task = asyncio.ensure_future(_capture(client, sid))
+    await inside_read.wait()
+
+    # post-read HANDOFF mutation: the transition's value moves while
+    # the capture is between its read unit and write phase
+    from sqlalchemy import text as _text
+
+    async with engine.begin() as conn:
+        await conn.execute(_text(
+            "UPDATE continuity_feature_transitions SET value_json = "
+            ":vj, value_hash = :vh WHERE feature_id = :f "
+            "AND anchor_id = :s"),
+            {"vj": '"healing"',
+             "vh": __import__("hashlib").sha256(
+                 b'"healing"').hexdigest(), "f": fid, "s": sid})
+    gate.set()
+    revision = (await capture_task)[0]
+    snap = json.loads(revision.snapshot_json)
+    packed = snap["intra_shot"]["events"][0]
+    # the captured handoff is the PRE-mutation exact value
+    assert packed["handoff"]["state"] == state("fresh")
+    assert packed["after"] == state("fresh")
+    rev_svc._snapshot_one_read = real_read
 
 
 async def test_capture_03(client, factory):

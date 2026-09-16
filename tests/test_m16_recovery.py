@@ -256,6 +256,13 @@ async def test_recovery_04(client, factory, tmp_path):
         expected_working_snapshot_hash=revision.snapshot_hash,
         expected_event_set_hash=revision.snapshot_hash,
         expected_handoff=None)
+    # frozen R6 §12.2 decline semantics: the SAME event UUID is PATCHed
+    # from require_handoff to transient — the current row hash becomes
+    # new while the review retains the reviewed source hash
+    d = await client.patch(
+        f"/intra-shot/events/{ev[0]}", json={"persistence_mode":
+                                             "transient"})
+    assert d.status_code == 200, d.text
     op = {
         "schema_version": 1,
         "source": {"kind": "event", "id": ev[0], "hash": ev[1]},
