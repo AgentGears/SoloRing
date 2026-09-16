@@ -242,6 +242,17 @@ def _verify_review(row, rows) -> None:
                 _corrupt(
                     f"review {rid} expected_handoff key set is not "
                     "the frozen §7.5.1 grammar")
+            # exact NESTED key sets — §7.5.1 is the Exact review-basis
+            # grammar; extra fields anywhere are corruption
+            if not isinstance(eh.get("target"), dict) or                     set(eh["target"]) != {"kind", "id"}:
+                _corrupt(
+                    f"review {rid} expected_handoff target key set is "
+                    "not the frozen §7.5.1 grammar")
+            if not isinstance(eh.get("anchor"), dict) or                     set(eh["anchor"]) != {
+                        "anchor_type", "anchor_id", "boundary"}:
+                _corrupt(
+                    f"review {rid} expected_handoff anchor key set is "
+                    "not the frozen §7.5.1 grammar")
             eh_target = eh.get("target")
             if (not isinstance(eh_target, dict)
                     or eh_target.get("kind") != event_target["kind"]

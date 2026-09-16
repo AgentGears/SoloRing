@@ -267,3 +267,47 @@ async def test_recovery_foreign_expected_handoff_target_fails(
             or "target" in str(exc).lower(), str(exc)
     else:
         raise AssertionError("foreign expected_handoff target restored")
+
+
+async def test_recovery_nested_handoff_extra_field_fails(
+        client, factory, tmp_path):
+    """A coherently re-hashed basis whose expected_handoff.target
+    carries an EXTRA field fails the exact nested §7.5.1 grammar."""
+    from soloring.recovery.backup import restore
+
+    world = await _valid_direct_adopt_review(client, factory)
+    backup_root = await _backup(client, tmp_path, "nf")
+    con = sqlite3.connect(str(backup_root / "soloring.db"))
+    op = _json.loads(con.execute(
+        "SELECT operation_json FROM "
+        "persistent_consequence_reviews WHERE id = ?",
+        (world["review_id"],)).fetchone()[0])
+    eh = dict(op["expected_handoff"])
+    eh["target"] = {"kind": "entity_feature",
+                    "id": eh["target"]["id"], "extra": 1}
+    op["expected_handoff"] = eh
+    basis = event_review_basis_hash(
+        source_event_id=world["ev"]["id"],
+        source_hash=world["ev"]["event_hash"],
+        decision="adopt_persistence",
+        expected_working_snapshot_hash=op[
+            "expected_working_snapshot_hash"],
+        expected_event_set_hash=op["expected_event_set_hash"],
+        expected_handoff=eh)
+    op["review_basis_hash"] = basis
+    con.execute(
+        "UPDATE persistent_consequence_reviews SET "
+        "review_basis_hash = :bh, operation_json = :oj, "
+        "operation_hash = :oh WHERE id = :rid",
+        {"bh": basis, "oj": _cjs(op), "oh": _ch(op),
+         "rid": world["review_id"]})
+    con.commit()
+    con.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    con.close()
+    _rehash_manifest(backup_root)
+    try:
+        await restore(backup_root, tmp_path / "ref-nf")
+    except Exception as exc:
+        assert "key set" in str(exc).lower()             or "grammar" in str(exc).lower(), str(exc)
+    else:
+        raise AssertionError("nested extra field restored")
