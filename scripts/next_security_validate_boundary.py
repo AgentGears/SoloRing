@@ -216,6 +216,7 @@ ALLOWLIST = (
     "tests/test_m16_recovery.py",
     "tests/test_m16_recovery_proposals.py",
     "tests/test_m16_recovery_coherence.py",
+    "tests/test_m16_recovery_domains.py",
     "tests/m16_seed_b.py",
     "tests/test_m3a_happy_path.py",
     "tests/test_working_state_comparison.py",

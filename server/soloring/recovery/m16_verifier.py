@@ -234,6 +234,30 @@ def _verify_review(row, rows) -> None:
                 _corrupt(
                     f"review {rid} committed transition semantic hash "
                     "disagrees with the basis expected_handoff")
+            # exact §7.5.1 expected_handoff grammar/coordinates at
+            # recovery time — pure shape, no current semantic lookup:
+            # frozen key set, target == the reviewed event's own
+            # target, and the exact {shot, review.shot_id, end} anchor
+            if set(eh) != {"target", "anchor", "semantic_hash"}:
+                _corrupt(
+                    f"review {rid} expected_handoff key set is not "
+                    "the frozen §7.5.1 grammar")
+            eh_target = eh.get("target")
+            if (not isinstance(eh_target, dict)
+                    or eh_target.get("kind") != event_target["kind"]
+                    or eh_target.get("id") != event_target["id"]):
+                _corrupt(
+                    f"review {rid} expected_handoff target is not the "
+                    "reviewed event's own target")
+            eh_anchor = eh.get("anchor")
+            if (not isinstance(eh_anchor, dict)
+                    or eh_anchor.get("anchor_type") != "shot"
+                    or eh_anchor.get("anchor_id") != shot_id
+                    or eh_anchor.get("boundary") != "end"):
+                _corrupt(
+                    f"review {rid} expected_handoff anchor is not "
+                    "this Shot's Shot/end boundary")
+
         # direct reviews operate on the reviewed event itself: the
         # result event IS the source event
         if result_event_id != source_event_id:
@@ -539,8 +563,9 @@ def _verify_review(row, rows) -> None:
         _corrupt(
             f"review {rid} result transition is not this Shot's "
             "Shot/end owning-domain handoff")
-    # bind the transition's stable target FK to the immutable target
-    # coordinate (no current semantic values)
+    # bind the transition's stable target DOMAIN and FK to the
+    # immutable target coordinate (no current semantic values) — UUID
+    # uniqueness is not cross-table, so both must match
     if kind == "entity_relation":
         tr_target_id = rows(
             "SELECT relation_id FROM "
@@ -549,10 +574,11 @@ def _verify_review(row, rows) -> None:
         tr_target_id = rows(
             f"SELECT feature_id FROM {table} WHERE id = ?",
             (tid,))[0][0]
-    if tr_target_id != expected_target["id"]:
+    if kind != expected_target["kind"] \
+            or tr_target_id != expected_target["id"]:
         _corrupt(
             f"review {rid} result transition targets a different "
-            "target than the reviewed authority")
+            "target domain/id than the reviewed authority")
     # §16.2: the transition row is a provenance anchor — its CURRENT
     # value is never the historical semantic source (the recorded
     # semantic hash was already verified against the immutable derived
