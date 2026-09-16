@@ -185,6 +185,8 @@ ALLOWLIST = (
     "server/soloring/continuity/intra_shot_resolver.py",
     "server/soloring/continuity/intra_shot_capture.py",
     "server/soloring/continuity/intra_shot_history.py",
+    "server/soloring/continuity/snapshots.py",
+    "server/soloring/domain/revisions.py",
     "server/soloring/api/schemas/intra_shot.py",
     "server/soloring/api/intra_shot.py",
     "server/soloring/api/main.py",
@@ -244,6 +246,8 @@ M16_A_BACKEND_PATHS = frozenset({
     "server/soloring/continuity/intra_shot_resolver.py",
     "server/soloring/continuity/intra_shot_capture.py",
     "server/soloring/continuity/intra_shot_history.py",
+    "server/soloring/continuity/snapshots.py",
+    "server/soloring/domain/revisions.py",
     # M16-B Shot-detail readiness integration seam (reviewed successor).
     "server/soloring/api/schemas/shots.py",
     "server/soloring/api/shots.py",

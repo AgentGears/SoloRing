@@ -80,6 +80,9 @@ ALLOWED_PATTERNS = [
     r"^server/alembic/versions/0017_m16_intra_shot_consequences\.py$",
     r"^server/soloring/continuity/intra_shot_(models|canonical|service|"
     r"resolver|capture|history)\.py$",
+    r"^server/soloring/continuity/(snapshots|intra_shot_history|"
+    r"intra_shot_capture)\.py$",
+    r"^server/soloring/domain/revisions\.py$",
     r"^server/soloring/api/schemas/shots\.py$",
     r"^server/soloring/api/shots\.py$",
     r"^server/soloring/api/schemas/intra_shot\.py$",
