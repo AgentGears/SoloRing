@@ -34,6 +34,7 @@ REVIEWED_SUCCESSOR_PATHS = frozenset({
     "server/soloring/recovery/__init__.py",
     "server/soloring/recovery/semantic_successors.py",
     "server/soloring/recovery/successor_semantics.py",
+    "server/soloring/recovery/m16_verifier.py",
     # M16-A exact authority/lifecycle slice + the reviewed M16-B
     # resolver/Shot-detail readiness integration seam.
     "server/soloring/continuity/intra_shot_models.py",
@@ -48,6 +49,7 @@ REVIEWED_SUCCESSOR_PATHS = frozenset({
     "server/soloring/api/continuity.py",
     "server/soloring/recovery/backup.py",
     "server/soloring/recovery/successor_semantics.py",
+    "server/soloring/recovery/m16_verifier.py",
     "server/soloring/api/schemas/shots.py",
     "server/soloring/api/shots.py",
     "server/soloring/api/schemas/intra_shot.py",
