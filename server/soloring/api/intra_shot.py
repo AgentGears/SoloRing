@@ -10,10 +10,39 @@ from soloring.api.schemas.intra_shot import (
     IntraShotEventCreate,
     IntraShotEventPatch,
     IntraShotEventRead,
+    IntraShotRead,
 )
-from soloring.continuity import intra_shot_service
+from soloring.continuity import intra_shot_resolver, intra_shot_service
 
 router = APIRouter(tags=["intra-shot"])
+
+
+@router.get(
+    "/shots/{shot_id}/intra-shot",
+    response_model=IntraShotRead,
+)
+async def read_intra_shot(
+    shot_id: str,
+    limit: int = 100,
+    cursor: int = 0,
+    session: AsyncSession = Depends(get_session),
+) -> IntraShotRead:
+    if type(cursor) is not int or cursor < 0:
+        from soloring.errors import validation_error
+
+        raise validation_error("cursor must be a nonnegative integer")
+    if type(limit) is not int or not 1 <= limit <= 500:
+        from soloring.errors import validation_error
+
+        raise validation_error("limit must be between 1 and 500")
+    projection = await intra_shot_resolver.resolve_intra_shot_read(
+        session, shot_id)
+    events = projection["events"][cursor:cursor + limit + 1]
+    more = len(events) > limit
+    projection["events"] = events[:limit]
+    projection["next_cursor"] = cursor + limit if more else None
+    return IntraShotRead(**{
+        **projection, "shot_id": shot_id})
 
 
 @router.post(

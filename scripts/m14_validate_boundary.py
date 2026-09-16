@@ -78,12 +78,18 @@ ALLOWED_PATTERNS = [
     # M16-A migration + event-authoring foundation. This list is deliberately
     # exact: it does not admit resolver/capture/review/UI successor slices.
     r"^server/alembic/versions/0017_m16_intra_shot_consequences\.py$",
-    r"^server/soloring/continuity/intra_shot_(models|canonical|service)\.py$",
+    r"^server/soloring/continuity/intra_shot_(models|canonical|service|"
+    r"resolver)\.py$",
+    r"^server/soloring/api/schemas/shots\.py$",
     r"^server/soloring/api/schemas/intra_shot\.py$",
     r"^server/soloring/api/intra_shot\.py$",
     r"^server/soloring/api/main\.py$",
     r"^server/soloring/domain/shots\.py$",
-    r"^tests/test_m16_(migration|grammar|duration|events|identity)\.py$",
+    r"^tests/test_m16_(migration|grammar|duration|events|identity|"
+    r"start_state|fold|handoff|readiness|entity|relation|instance|scale)\.py$",
+    r"^tests/m16_seed_b\.py$",
+    r"^tests/test_m3a_happy_path\.py$",
+    r"^tests/test_working_state_comparison\.py$",
     # M16-A recovery-boundary correction (review follow-up on 0a213a5):
     # 0017 stays fail-closed until M16-C, so the M10F backup/restore
     # template and scale-metrics fixture construct the legitimate

@@ -342,36 +342,6 @@ def _public_event(d: dict) -> dict:
     }
 
 
-async def list_current(session: AsyncSession, shot_id: str, *, cursor: int = 0,
-                       limit: int = 100) -> dict:
-    if type(cursor) is not int or cursor < 0:
-        raise validation_error("cursor must be a nonnegative integer")
-    limit = max(1, min(500, limit))
-    async with session.bind.connect() as conn:
-        await conn.exec_driver_sql("BEGIN")
-        try:
-            shot = await _load_shot(conn, shot_id)
-            rows = await _load_active_rows(conn, shot_id)
-            result = await validate_prospective_event_set(
-                conn, shot, [_draft_from_row(r) for r in rows])
-            page = result["events"][cursor:cursor + limit + 1]
-            more = len(page) > limit
-            page = page[:limit]
-            await conn.commit()
-            return {
-                "shot_id": shot_id,
-                "duration_ms": shot.duration_ms,
-                "event_set_hash": result["event_set_hash"],
-                "terminal_states": result["terminal_states"],
-                "events": [_public_event(d) for d in page],
-                "next_cursor": cursor + limit if more else None,
-            }
-        except Exception:
-            with contextlib.suppress(Exception):
-                await conn.rollback()
-            raise
-
-
 async def create_event(session: AsyncSession, shot_id: str, payload, *,
                        source_kind: str = "authored",
                        source_proposal_id: str | None = None) -> dict:

@@ -90,6 +90,8 @@ class ShotRead(BaseModel):
     updated_at: str
     working_snapshot_hash: str | None
     working_state_differs_from_approved: bool | None
+    intra_shot_ready: bool = False
+    intra_shot_issues: list = []
     semantic_dependencies: list[SemanticDependencyItem] = []
     continuity_ready: bool = False
     continuity_state_ready: bool = True

@@ -96,6 +96,48 @@ class IntraShotEventRead(_ClosedModel):
     source_proposal_id: str | None
 
 
+class IntraShotIssue(_ClosedModel):
+    code: str
+    message: str
+    details: dict = {}
+
+
+class IntraShotHandoff(_ClosedModel):
+    target: dict
+    required_state: dict | str
+    existing: dict | None
+    matched: bool
+    reason: str
+
+
+class IntraShotTerminalTarget(_ClosedModel):
+    target: dict
+    terminal_event_id: str | None
+    time_ms: int
+    ordinal: int
+    terminal_state: dict | str
+    persistence_mode: Literal["transient", "require_handoff"]
+
+
+class IntraShotRead(_ClosedModel):
+    """The one server-side M16 resolver projection (frozen R6 §9.1/§10.1).
+
+    The browser renders this; it never re-folds events or re-compares
+    handoffs. ``next_cursor`` pages the ordered events list (default 100,
+    maximum 500) — readiness/issues/hash cover the WHOLE active set.
+    """
+
+    shot_id: str
+    intra_shot_ready: bool
+    intra_shot_issues: list[IntraShotIssue]
+    duration_ms: int | None
+    events: list[IntraShotEventRead]
+    terminal_targets: list[IntraShotTerminalTarget]
+    handoffs: list[IntraShotHandoff]
+    event_set_hash: str | None
+    next_cursor: int | None = None
+
+
 # Proposal Grammar v1 is frozen in M16-A even though proposal ingestion/adoption
 # is delivered in M16-D. These schemas make the eventual boundary unambiguous.
 class ProposalCandidateEvent(_ClosedModel):

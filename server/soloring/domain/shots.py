@@ -246,6 +246,7 @@ async def snapshot_references(session: AsyncSession, shot_id: str) -> list[Refer
 _DETAIL_COLUMNS = (
     Shot.id,
     Shot.project_id,
+    Shot.scene_id,
     Shot.shot_number,
     Shot.title,
     Shot.subject,
@@ -342,10 +343,12 @@ async def read_shot_detail(engine: AsyncEngine, shot_id: str, *, settings=None):
                     conn, shot_id=shot_id,
                     resolved_dependencies=resolved,
                 )
+            m13_outcome = None
             if readiness["continuity_state_ready"] and (
                 spatial_outcome is None or spatial_outcome.ready
             ):
                 production_world_pack = None
+                m13_ready = True
                 if spatial_outcome is not None and spatial_outcome.ready:
                     from soloring.production_world.resolver import (
                         resolve_production_world,
@@ -359,31 +362,46 @@ async def read_shot_detail(engine: AsyncEngine, shot_id: str, *, settings=None):
                     if m13_outcome.ready:
                         production_world_pack = m13_outcome.pack
                     else:
-                        effective_hash = None
-                        differs = None
-                        await conn.commit()
-                        return (
-                            shot, refs, differs, resolved, effective_hash,
-                            readiness, visual_result, spatial_outcome,
-                        )
-                effective_hash = effective_working_snapshot_hash(
-                    shot, refs, resolved, outcome.states,
-                    relation_outcome.relation_states,
-                    visual_result.pack,
-                    spatial_outcome.pack if spatial_outcome is not None
-                    else None,
-                    production_world_pack,
-                )
-                differs = await canon.differs_from_approved(
-                    conn, shot, refs, effective_hash
-                )
+                        m13_ready = False
+                if m13_ready:
+                    effective_hash = effective_working_snapshot_hash(
+                        shot, refs, resolved, outcome.states,
+                        relation_outcome.relation_states,
+                        visual_result.pack,
+                        spatial_outcome.pack if spatial_outcome is not None
+                        else None,
+                        production_world_pack,
+                    )
+                    differs = await canon.differs_from_approved(
+                        conn, shot, refs, effective_hash
+                    )
+                else:
+                    effective_hash = None
+                    differs = None
             else:
+                effective_hash = None
+                differs = None
+            from soloring.continuity.intra_shot_resolver import (
+                resolve_intra_shot,
+            )
+
+            intra = await resolve_intra_shot(
+                conn, shot,
+                resolved_deps=resolved,
+                feature_outcome=outcome,
+                relation_outcome=relation_outcome,
+                production_world_outcome=m13_outcome)
+            if intra["events"]:
+                # M16-B fail-closed seam: an event-bearing working
+                # snapshot requires the canonical schema-7 intra_shot
+                # block (M16-C); no interim representation is invented,
+                # so the working hash stays unavailable.
                 effective_hash = None
                 differs = None
             await conn.commit()
             return (
                 shot, refs, differs, resolved, effective_hash, readiness,
-                visual_result, spatial_outcome,
+                visual_result, spatial_outcome, intra,
             )
         except Exception:
             with contextlib.suppress(Exception):
