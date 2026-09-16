@@ -248,7 +248,17 @@ def _verify_review(row, rows) -> None:
         )
 
         try:
-            recomputed_batch = batch_basis_root(**batch_doc)
+            recomputed_batch = batch_basis_root(
+                shot_id=batch_doc["shot_id"],
+                source_shot_revision_id=batch_doc[
+                    "source_shot_revision_id"],
+                source_shot_revision_hash=batch_doc[
+                    "source_shot_revision_hash"],
+                expected_working_snapshot_hash=batch_doc[
+                    "expected_working_snapshot_hash"],
+                expected_event_set_hash=batch_doc[
+                    "expected_event_set_hash"],
+                reviews=batch_doc["reviews"])
         except Exception:
             _corrupt(
                 f"review {rid} batch basis object violates the frozen "
@@ -298,6 +308,38 @@ def _verify_review(row, rows) -> None:
             _corrupt(
                 f"review {rid} batch members disagree with the persisted "
                 "review rows for that batch")
+        # IMMUTABLE committed-result evidence for authority-creating
+        # proposal decisions — the same contract as event-source
+        # reviews: the operation record carries the exact result event
+        # hash (and for adopt_persistence the transition kind + exact
+        # semantic hash). ignore creates no authority and needs none.
+        if decision != "ignore":
+            result = doc.get("result")
+            if not isinstance(result, dict):
+                _corrupt(
+                    f"review {rid} operation lacks the result record")
+            if result.get("event_id") != result_event_id:
+                _corrupt(
+                    f"review {rid} result record disagrees with the "
+                    "row's result event")
+            if not _is_hash(result.get("event_hash")):
+                _corrupt(f"review {rid} result event hash missing")
+            if decision == "adopt_persistence":
+                tr = result.get("transition")
+                if not isinstance(tr, dict) or not _is_hash(
+                        tr.get("semantic_hash")):
+                    _corrupt(
+                        f"review {rid} adopt_persistence lacks the "
+                        "committed transition semantic hash")
+                kinds = {k for k, tid in (
+                    ("entity_feature", ef_transition),
+                    ("entity_relation", er_transition),
+                    ("production_instance_feature",
+                     pf_transition)) if tid is not None}
+                if len(kinds) != 1 or tr.get("kind") not in kinds:
+                    _corrupt(
+                        f"review {rid} result transition kind "
+                        "disagrees with the row's transition columns")
     else:
         _corrupt(f"review {rid} unknown source kind {source_kind!r}")
 
@@ -318,10 +360,19 @@ def _verify_review(row, rows) -> None:
     if not _result_event_exists(rows, result_event_id):
         _corrupt(f"review {rid} result event missing")
     res = rows(
-        "SELECT shot_id FROM shot_intra_shot_events WHERE id = ?",
-        (result_event_id,))[0]
+        "SELECT shot_id, event_hash FROM shot_intra_shot_events "
+        "WHERE id = ?", (result_event_id,))[0]
     if res[0] != shot_id:
         _corrupt(f"review {rid} result event belongs to another Shot")
+    # cross-check the committed result hash against the referenced
+    # event row — recovery certifies AGREEMENT of the recorded evidence
+    # with the referenced row (a later edit is a conflict to surface,
+    # never silently certified)
+    recorded = doc.get("result", {}).get("event_hash")
+    if res[1] != recorded:
+        _corrupt(
+            f"review {rid} recorded result event hash disagrees with "
+            "the referenced event row")
     if decision in ("adopt_event_only", "decline_persistence"):
         if (ef_transition is not None or er_transition is not None
                 or pf_transition is not None):
@@ -361,13 +412,58 @@ def _verify_review(row, rows) -> None:
         _corrupt(
             f"review {rid} result transition is not this Shot's "
             "Shot/end owning-domain handoff")
+    # cross-check the committed transition semantic hash: recompute the
+    # canonical §4.8 semantic handoff from the transition row's own
+    # domain columns and compare with the recorded evidence
+    recorded_tr = doc.get("result", {}).get("transition", {})
+    if kind == "entity_relation":
+        tr_cols = rows(
+            "SELECT relation_id, state FROM "
+            "continuity_relation_transitions WHERE id = ?", (tid,))[0]
+        from soloring.continuity.intra_shot_canonical import (
+            relation_handoff_value,
+        )
+
+        semantic = relation_handoff_value(
+            relation_id=tr_cols[0], shot_id=shot_id, state=tr_cols[1])
+    else:
+        tr_cols = rows(
+            f"SELECT feature_id, operation, value_json FROM {table} "
+            "WHERE id = ?", (tid,))[0]
+        from soloring.continuity.intra_shot_canonical import (
+            feature_handoff_value,
+        )
+
+        st = ({"present": False} if tr_cols[1] == "clear" else {
+            "present": True,
+            "value": _json_loads_str(tr_cols[2]),
+            "value_hash": None})
+        if tr_cols[1] == "set":
+            vh = rows(
+                f"SELECT value_hash FROM {table} WHERE id = ?",
+                (tid,))[0][0]
+            st["value_hash"] = vh
+        semantic = feature_handoff_value(
+            domain=kind, target_kind=kind, target_id=tr_cols[0],
+            shot_id=shot_id, operation=tr_cols[1], state=st)
+    if canonical_hash(semantic) != recorded_tr.get("semantic_hash"):
+        _corrupt(
+            f"review {rid} recorded transition semantic hash disagrees "
+            "with the referenced transition row")
+
+
+def _json_loads_str(raw):
+    import json as _json
+
+    return _json.loads(raw)
 
 
 def _review_batch_root(rows, proposal_id):
+    # rows() already returns a plain list — no .fetchall() here
     row = rows(
         "SELECT operation_json FROM "
         "persistent_consequence_reviews WHERE source_kind = 'proposal' "
-        "AND source_proposal_id = ?", (proposal_id,)).fetchall()
+        "AND source_proposal_id = ?", (proposal_id,))
     if not row:
         return None
     import json as _json

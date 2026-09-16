@@ -136,13 +136,17 @@ _IDENTITY_KEYSETS = {
 
 _UUID_RE = __import__("re").compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+# The EXACT frozen M7/M13 feature-kind domain (0008 _KINDS == 0014
+# _M7_KINDS): injury, surface_condition, damage, wardrobe_condition,
+# configuration, status, custom.
 _FEATURE_KINDS = {
     "injury", "surface_condition", "damage", "wardrobe_condition",
-    "condition", "state", "configuration", "position", "wear",
-    "attachment", "location_marker", "custom",
+    "configuration", "status", "custom",
 }
 _VALUE_TYPES = {"boolean", "enum", "integer", "decimal", "text"}
-_KEY_RE = __import__("re").compile(r"^[a-z][a-z0-9_]*$")
+# frozen 0008 ck_continuity_features_key: length 1..64, leading
+# [a-z], only [a-z0-9_]
+_KEY_RE = __import__("re").compile(r"^[a-z][a-z0-9_]{0,63}$")
 
 
 def _is_uuid(value) -> bool:
@@ -207,15 +211,19 @@ def _verify_identity_grammar(identity, kind, revision_id, position):
                 f"{where} value_type {identity['value_type']!r} is "
                 "outside the frozen vocabulary")
         if identity["unit"] is not None:
-            if not isinstance(identity["unit"], str) or \
-                    not identity["unit"]:
-                raise internal_invariant(f"{where} unit is malformed")
+            unit = identity["unit"]
+            # frozen input contract: units are 1-64 characters, already
+            # trimmed, non-whitespace-only — never silently normalized
+            if (not isinstance(unit, str)
+                    or not (1 <= len(unit) <= 64)
+                    or unit != unit.strip() or not unit.strip()):
+                raise internal_invariant(
+                    f"{where} unit violates the frozen 1-64/trimmed "
+                    "form")
             if identity["value_type"] not in ("integer", "decimal"):
                 raise internal_invariant(
                     f"{where} unit is only lawful for numeric "
                     "value_types")
-
-
 def _bind_identity_to_planes(identity, kind, features, relations, world,
                              revision_id, position):
     """§8.4 identity binding: the frozen captured identity must EXACTLY
