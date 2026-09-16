@@ -62,30 +62,11 @@ def _alembic_stamp(data_dir: Path) -> None:
     try:
         cfg = Config(str(REPO / "server" / "alembic.ini"))
         cfg.set_main_option("script_location", str(REPO / "server" / "alembic"))
-        # Recovery is fail-closed at 0017 until the M16-C recovery slice
-        # (frozen R6 §16/§21), so the template constructs the legitimate
-        # certified 0016 posture: the schema is ORM create_all (parity is
-        # separately frozen, §8.1), the five M16 tables are provably empty
-        # and therefore dropped, and the head is stamped at 0016.
-        import sqlite3
-
-        con = sqlite3.connect(str(data_dir / "soloring.db"))
-        try:
-            con.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-            for table in ("persistent_consequence_reviews",
-                          "shot_intra_shot_events",
-                          "shot_revision_intra_shot_events",
-                          "shot_revision_intra_shot_specs",
-                          "shot_intra_shot_event_proposals"):
-                n = con.execute(
-                    f"SELECT COUNT(*) FROM {table}").fetchone()[0]
-                assert n == 0, (
-                    f"{table} has {n} rows — not a lawful 0016 posture")
-                con.execute(f"DROP TABLE {table}")
-            con.commit()
-        finally:
-            con.close()
-        command.stamp(cfg, "0016_m15_revision_compatibility")
+        # M16-C certified the 0017 recovery head: the template stamps the
+        # true head the production deployment would carry after
+        # `alembic upgrade head`; the empty M16 tables verify cleanly at
+        # full M16 depth.
+        command.stamp(cfg, "head")
     finally:
         settings_mod._settings = prev
 

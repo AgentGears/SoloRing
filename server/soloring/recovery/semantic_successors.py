@@ -279,6 +279,102 @@ def _fold_summary(verdicts: list[str]) -> str:
     return min(verdicts, key=lambda value: precedence[value])
 
 
+def verify_m16_intra_shot_state(staged_db: Path) -> None:
+    """Full M16-depth recovery verification for head 0017 (frozen R6
+    §16.2). Companion-row-only reconstruction shared with the historical
+    inspector; read-only — no proposal/review product operation is
+    performed, only canonical integrity of whatever rows exist."""
+    import sqlite3
+
+    from soloring.continuity.intra_shot_canonical import (
+        MAX_PROPOSAL_CANONICAL_BYTES,
+    )
+    from soloring.continuity.intra_shot_history import (
+        verify_intra_shot_history_sync,
+        verify_working_event_row,
+    )
+    from soloring.domain.canonical import canonical_hash, canonical_json_str
+
+    con = sqlite3.connect(str(staged_db))
+    try:
+        def rows(query, params=()):
+            return con.execute(query, params).fetchall()
+
+        for row in rows(
+                "SELECT id, shot_id, time_ms, ordinal, target_kind, "
+                "entity_feature_id, entity_relation_id, "
+                "production_instance_feature_id, before_state_json, "
+                "before_state_hash, after_state_json, after_state_hash, "
+                "persistence_mode, source_kind, source_proposal_id, "
+                "event_json, event_hash FROM shot_intra_shot_events "
+                "WHERE deleted_at IS NULL"):
+            verify_working_event_row(_Row(row, WORKING_EVENT_COLUMNS))
+            if row[13] == "proposal_adoption" and row[14] is None:
+                _corrupt(
+                    f"working event {row[0]} claims proposal_adoption "
+                    "without a source proposal")
+
+        for rev_id, in rows(
+                "SELECT DISTINCT shot_revision_id FROM "
+                "shot_revision_intra_shot_events"):
+            snapshot = rows(
+                "SELECT snapshot_json FROM shot_revisions WHERE id = :r",
+                {"r": rev_id})
+            if not snapshot:
+                _corrupt(
+                    f"intra_shot companions reference missing "
+                    f"ShotRevision {rev_id}")
+            import json as _json
+
+            verify_intra_shot_history_sync(
+                con, rev_id, snapshot=_json.loads(snapshot[0][0]))
+
+        for row in rows(
+                "SELECT id, proposal_json, proposal_hash FROM "
+                "shot_intra_shot_event_proposals"):
+            doc = _json_loads(row[1])
+            if canonical_json_str(doc) != row[1] or                     canonical_hash(doc) != row[2]:
+                _corrupt(f"proposal {row[0]} is not canonical")
+            if len(row[1].encode("utf-8")) > MAX_PROPOSAL_CANONICAL_BYTES:
+                _corrupt(f"proposal {row[0]} exceeds the frozen byte cap")
+
+        for row in rows(
+                "SELECT id, operation_json, operation_hash FROM "
+                "persistent_consequence_reviews"):
+            doc = _json_loads(row[1])
+            if canonical_json_str(doc) != row[1] or                     canonical_hash(doc) != row[2]:
+                _corrupt(f"review {row[0]} is not canonical")
+    finally:
+        con.close()
+
+
+WORKING_EVENT_COLUMNS = (
+    "id", "shot_id", "time_ms", "ordinal", "target_kind",
+    "entity_feature_id", "entity_relation_id",
+    "production_instance_feature_id", "before_state_json",
+    "before_state_hash", "after_state_json", "after_state_hash",
+    "persistence_mode", "source_kind", "source_proposal_id",
+    "event_json", "event_hash",
+)
+
+
+class _Row:
+    def __init__(self, values, columns):
+        self._map = dict(zip(columns, values))
+
+    def __getattr__(self, name):
+        return self._map[name]
+
+
+def _json_loads(raw: str):
+    import json
+
+    try:
+        return json.loads(raw)
+    except (ValueError, TypeError):
+        _corrupt("stored M16 canonical JSON is malformed")
+
+
 def verify_m15_compatibility_state(staged_db: Path) -> None:
     """Verify all immutable M15 assessment/use/update evidence at head 0016."""
     from soloring.compatibility.canonical import (

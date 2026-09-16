@@ -275,6 +275,19 @@ def _visual_blob_store(settings=None):
     return BlobStore(get_settings())
 
 
+def _working_intra_pack(shot_id: str, intra: dict):
+    """The schema-7 working-hash pack from the READY resolver projection
+    (M16-C completes the B seam: event-bearing working hashes now exist
+    through the same canonical builder capture uses). Unready or
+    unresolved-target projections never produce a pack — the caller's
+    not-ready gate then keeps the hash unavailable."""
+    from soloring.continuity.intra_shot_capture import pack_from_projection
+
+    if not intra["intra_shot_ready"] or not intra["target_identities"]:
+        return None
+    return pack_from_projection(shot_id, intra)[0]
+
+
 async def read_shot_detail(engine: AsyncEngine, shot_id: str, *, settings=None):
     """One bounded consistent read unit (M2 §3.2, §47; M6C §48).
 
@@ -363,6 +376,16 @@ async def read_shot_detail(engine: AsyncEngine, shot_id: str, *, settings=None):
                         production_world_pack = m13_outcome.pack
                     else:
                         m13_ready = False
+                from soloring.continuity.intra_shot_resolver import (
+                    resolve_intra_shot,
+                )
+
+                intra = await resolve_intra_shot(
+                    conn, shot,
+                    resolved_deps=resolved,
+                    feature_outcome=outcome,
+                    relation_outcome=relation_outcome,
+                    production_world_outcome=m13_outcome)
                 if m13_ready:
                     effective_hash = effective_working_snapshot_hash(
                         shot, refs, resolved, outcome.states,
@@ -371,6 +394,9 @@ async def read_shot_detail(engine: AsyncEngine, shot_id: str, *, settings=None):
                         spatial_outcome.pack if spatial_outcome is not None
                         else None,
                         production_world_pack,
+                        intra_shot_pack=(
+                            _working_intra_pack(shot_id, intra)
+                            if intra["events"] else None),
                     )
                     differs = await canon.differs_from_approved(
                         conn, shot, refs, effective_hash
@@ -381,23 +407,19 @@ async def read_shot_detail(engine: AsyncEngine, shot_id: str, *, settings=None):
             else:
                 effective_hash = None
                 differs = None
-            from soloring.continuity.intra_shot_resolver import (
-                resolve_intra_shot,
-            )
+                from soloring.continuity.intra_shot_resolver import (
+                    resolve_intra_shot,
+                )
 
-            intra = await resolve_intra_shot(
-                conn, shot,
-                resolved_deps=resolved,
-                feature_outcome=outcome,
-                relation_outcome=relation_outcome,
-                production_world_outcome=m13_outcome)
-            if not intra["intra_shot_ready"] or intra["events"]:
-                # M16-B fail-closed seam: an M16 blocker or any
-                # event-bearing Shot keeps the authoritative working
-                # hash unavailable — the canonical event-bearing
-                # snapshot requires the M16-C schema-7 intra_shot
-                # block; no interim representation is invented, and an
-                # unresolved current target/context is a blocker.
+                intra = await resolve_intra_shot(
+                    conn, shot,
+                    resolved_deps=resolved,
+                    feature_outcome=outcome,
+                    relation_outcome=relation_outcome,
+                    production_world_outcome=None)
+            if not intra["intra_shot_ready"]:
+                # an M16 blocker keeps the authoritative working hash
+                # unavailable even when every predecessor layer is ready
                 effective_hash = None
                 differs = None
             await conn.commit()

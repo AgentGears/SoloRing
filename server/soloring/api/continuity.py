@@ -418,12 +418,23 @@ async def _revision_continuity(
                 f"ShotRevision {revision_id} snapshot is not a JSON "
                 "object — corrupted history.")
         schema_version = snapshot.get("schema_version")
+        intra_block = None
         if not isinstance(schema_version, int) or isinstance(
                 schema_version, bool) or schema_version not in (
-                1, 2, 3, 4, 5, 6):
+                1, 2, 3, 4, 5, 6, 7):
             raise internal_invariant(
                 f"ShotRevision {revision_id} carries illegal snapshot "
                 f"schema_version {schema_version!r}.")
+        if schema_version == 7:
+            # M16-C (frozen R6 §8.4/§15.4): rebuild + verify the intra_shot
+            # history from immutable companion rows only — never current
+            # M16 state, current target definitions, or current selections.
+            from soloring.continuity.intra_shot_history import (
+                verify_intra_shot_history,
+            )
+
+            intra_block = await verify_intra_shot_history(
+                session, revision_id, snapshot=snapshot)
         snap_hash_row = (await session.execute(text(
             "SELECT snapshot_hash FROM shot_revisions WHERE id = :rid"),
             {"rid": revision_id})).scalar_one()
@@ -641,7 +652,6 @@ async def _revision_continuity(
     spatial_provenance = await _captured_spatial_provenance(
         session, rev, snapshot or {}
     )
-
     return {
         "shot_revision_id": rev["id"],
         "snapshot_schema_version": schema_version,
@@ -654,6 +664,7 @@ async def _revision_continuity(
         "source_transition_audit": transition_audit,
         "visual": visual_provenance,
         "spatial": spatial_provenance,
+        "intra_shot": intra_block,
     }
 
 

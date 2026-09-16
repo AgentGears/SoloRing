@@ -143,6 +143,7 @@ def _event_free(duration_ms) -> dict:
         "terminal_targets": [],
         "handoffs": [],
         "event_set_hash": None,
+        "target_identities": {},
     }
 
 
@@ -226,6 +227,7 @@ async def resolve_intra_shot(conn: AsyncConnection, shot, *,
             "terminal_targets": [],
             "handoffs": [],
             "event_set_hash": None,
+            "target_identities": {},
         }
     duration = shot.duration_ms
     duration_ok = type(duration) is int and duration > 0
@@ -262,6 +264,13 @@ async def resolve_intra_shot(conn: AsyncConnection, shot, *,
     dep_ids = {d.entity_id for d in resolved_deps}
     metadata: dict[tuple[str, str], dict] = {}
     starts: dict[tuple[str, str], dict] = {}
+    identities: dict[tuple[str, str], dict] = {}
+
+    from soloring.continuity.intra_shot_canonical import (
+        entity_feature_target_identity,
+        entity_relation_target_identity,
+        production_instance_feature_target_identity,
+    )
 
     if kinds["entity_feature"]:
         ph, ps = _params("ef", kinds["entity_feature"])
@@ -296,6 +305,7 @@ async def resolve_intra_shot(conn: AsyncConnection, shot, *,
                     reason="start_state_unresolvable"))
                 continue
             metadata[("entity_feature", fid)] = f
+            identities[("entity_feature", fid)] =                 entity_feature_target_identity(f)
             starts[("entity_feature", fid)] = feature_states.get(
                 fid, {"present": False})
 
@@ -331,6 +341,7 @@ async def resolve_intra_shot(conn: AsyncConnection, shot, *,
                     target_id=rid, reason="start_state_unresolvable"))
                 continue
             metadata[("entity_relation", rid)] = r
+            identities[("entity_relation", rid)] =                 entity_relation_target_identity(r)
             starts[("entity_relation", rid)] = {
                 "active": rid in relation_active}
 
@@ -389,6 +400,7 @@ async def resolve_intra_shot(conn: AsyncConnection, shot, *,
                         target_id=fid))
                     continue
                 metadata[("production_instance_feature", fid)] = f
+                identities[("production_instance_feature", fid)] =                     production_instance_feature_target_identity(f)
                 starts[("production_instance_feature", fid)] = pi_states.get(
                     fid, {"present": False})
 
@@ -610,6 +622,7 @@ async def resolve_intra_shot(conn: AsyncConnection, shot, *,
         "terminal_targets": terminal_targets,
         "handoffs": handoffs,
         "event_set_hash": set_hash,
+        "target_identities": identities,
     }
 
 
@@ -656,6 +669,7 @@ async def resolve_intra_shot_read(session: AsyncSession, shot_id: str) -> dict:
                 relation_outcome=relation_outcome,
                 production_world_outcome=world_outcome)
             await conn.commit()
+            projection.pop("target_identities", None)
             return projection
         except Exception:
             import contextlib

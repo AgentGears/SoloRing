@@ -79,7 +79,7 @@ ALLOWED_PATTERNS = [
     # exact: it does not admit resolver/capture/review/UI successor slices.
     r"^server/alembic/versions/0017_m16_intra_shot_consequences\.py$",
     r"^server/soloring/continuity/intra_shot_(models|canonical|service|"
-    r"resolver)\.py$",
+    r"resolver|capture|history)\.py$",
     r"^server/soloring/api/schemas/shots\.py$",
     r"^server/soloring/api/shots\.py$",
     r"^server/soloring/api/schemas/intra_shot\.py$",
@@ -87,7 +87,8 @@ ALLOWED_PATTERNS = [
     r"^server/soloring/api/main\.py$",
     r"^server/soloring/domain/shots\.py$",
     r"^tests/test_m16_(migration|grammar|duration|events|identity|"
-    r"start_state|fold|handoff|readiness|entity|relation|instance|scale)\.py$",
+    r"start_state|fold|handoff|readiness|entity|relation|instance|scale|"
+    r"capture|history_c|generation_fence|recovery_c)\.py$",
     r"^tests/m16_seed_b\.py$",
     r"^tests/test_m3a_happy_path\.py$",
     r"^tests/test_working_state_comparison\.py$",

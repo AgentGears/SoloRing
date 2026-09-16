@@ -21,6 +21,7 @@ from pathlib import Path
 from types import ModuleType
 
 from soloring.domain.canonical import canonical_hash, canonical_json_str
+from soloring.recovery import semantic_successors
 from soloring.recovery.semantic_successors import (
     verify_m15_compatibility_state,
 )
@@ -314,6 +315,8 @@ def install_successor_semantics(recovery: ModuleType) -> None:
 
     recovery._verify_m14_observation_state = verify_m14_observation_state
     recovery._verify_m15_compatibility_state = verify_m15_compatibility_state
+    recovery._verify_m16_intra_shot_state = (
+        semantic_successors.verify_m16_intra_shot_state)
 
     def _verify_head_semantics(staged_db: Path, head: str) -> None:
         if head not in recovery.SUPPORTED_RESTORE_ALEMBIC_HEADS:
@@ -333,6 +336,9 @@ def install_successor_semantics(recovery: ModuleType) -> None:
         if head == recovery.M14_ALEMBIC_HEAD:
             return
         recovery._verify_m15_compatibility_state(staged_db)
+        if head == recovery.M15_ALEMBIC_HEAD:
+            return
+        recovery._verify_m16_intra_shot_state(staged_db)
 
     recovery._verify_head_semantics = _verify_head_semantics
 
@@ -341,10 +347,13 @@ def install_successor_semantics(recovery: ModuleType) -> None:
     def _enumerate_with_successor_semantics(staged_db: Path,
                                             expected_columns=None):
         head = recovery._staged_db_head(staged_db)
-        if head in (recovery.M14_ALEMBIC_HEAD, recovery.M15_ALEMBIC_HEAD):
+        if head in (recovery.M14_ALEMBIC_HEAD, recovery.M15_ALEMBIC_HEAD,
+                    recovery.M16_ALEMBIC_HEAD):
             recovery._verify_m14_observation_state(staged_db)
-        if head == recovery.M15_ALEMBIC_HEAD:
+        if head in (recovery.M15_ALEMBIC_HEAD, recovery.M16_ALEMBIC_HEAD):
             recovery._verify_m15_compatibility_state(staged_db)
+        if head == recovery.M16_ALEMBIC_HEAD:
+            recovery._verify_m16_intra_shot_state(staged_db)
         return original_enumerate(staged_db, expected_columns)
 
     recovery._enumerate_liveness = _enumerate_with_successor_semantics

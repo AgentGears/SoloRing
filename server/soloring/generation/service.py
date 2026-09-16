@@ -605,6 +605,24 @@ async def create_generation_request(
     # schema-6 capture.
     snapshot = json.loads(revision.snapshot_json)
     snapshot_schema = snapshot.get("schema_version")
+    # M16-C (frozen R6 §15.2): no published workflow realizes intra-Shot
+    # event timing. Any schema-7 ShotRevision with non-empty M16
+    # authority — including an all-transient event set — refuses HERE,
+    # before any Generation row, GenerationInput, derived artifact,
+    # package publication/queueing, or worker submission. No lowering,
+    # event stripping, prompt approximation, or executor
+    # interpretation; terminal capability refusal, not a retry
+    # condition.
+    if snapshot_schema == 7 and snapshot.get("intra_shot", {}).get(
+            "events"):
+        from soloring.errors import ErrorCode, SoloRingError
+
+        raise SoloRingError(
+            ErrorCode.INTRA_SHOT_REALIZATION_UNSUPPORTED,
+            "schema-7 ShotRevisions carry intra-Shot event authority "
+            "that no published workflow can realize",
+            status_code=409,
+            details={"shot_revision_id": revision.id})
     spatial_pack = (
         snapshot.get("spatial_continuity")
         if snapshot_schema in (5, 6) else None

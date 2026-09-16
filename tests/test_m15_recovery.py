@@ -43,7 +43,7 @@ async def _assess_and_apply(client, base):
     return result
 
 
-async def _stamp_alembic(client, head="0016_m15_revision_compatibility"):
+async def _stamp_alembic(client, head="0017_m16_intra_shot_consequences"):
     """The conftest engine builds schema via create_all (no
     alembic_version); the backup machinery requires the table."""
     engine = client._transport.app.state.engine
@@ -125,7 +125,42 @@ async def test_0016_backup_restore_preserves_m15_rows_and_hashes(
     await backup(settings, backup_root)
     manifest = json.loads((backup_root / "backup-manifest.json")
                           .read_text(encoding="utf-8"))
-    assert manifest["alembic_version"] == "0016_m15_revision_compatibility"
+    assert manifest["alembic_version"] == "0017_m16_intra_shot_consequences"
+
+    # M16-C certified the 0017 head, so the live backup runs there; the
+    # REC:01 proof stays pinned to the 0016 posture via the REC:02
+    # BACKUP-TREE conversion precedent (the five M16 tables are empty in
+    # this test — each proven empty before its drop).
+    import hashlib
+    import sqlite3
+
+    from soloring.domain.canonical import canonical_json_bytes
+
+    db_file = backup_root / "soloring.db"
+    con = sqlite3.connect(str(db_file))
+    try:
+        con.execute("PRAGMA foreign_keys=OFF")
+        for table in ("persistent_consequence_reviews",
+                      "shot_intra_shot_events",
+                      "shot_revision_intra_shot_events",
+                      "shot_revision_intra_shot_specs",
+                      "shot_intra_shot_event_proposals"):
+            n = con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            assert n == 0, (
+                f"{table} has {n} rows — not a lawful 0016 posture")
+            con.execute(f"DROP TABLE {table}")
+        con.execute(
+            "UPDATE alembic_version SET version_num = "
+            "'0016_m15_revision_compatibility'")
+        con.commit()
+    finally:
+        con.close()
+    manifest["alembic_version"] = "0016_m15_revision_compatibility"
+    manifest["database_sha256"] = hashlib.sha256(
+        db_file.read_bytes()).hexdigest()
+    (backup_root / "backup-manifest.json").write_bytes(
+        canonical_json_bytes(manifest))
+
     dest = tmp_path / "restored"
     await restore(backup_root, dest)
 

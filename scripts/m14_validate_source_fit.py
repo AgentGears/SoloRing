@@ -40,6 +40,8 @@ REVIEWED_SUCCESSOR_PATHS = frozenset({
     "server/soloring/continuity/intra_shot_canonical.py",
     "server/soloring/continuity/intra_shot_service.py",
     "server/soloring/continuity/intra_shot_resolver.py",
+    "server/soloring/continuity/intra_shot_capture.py",
+    "server/soloring/continuity/intra_shot_history.py",
     "server/soloring/api/schemas/shots.py",
     "server/soloring/api/shots.py",
     "server/soloring/api/schemas/intra_shot.py",

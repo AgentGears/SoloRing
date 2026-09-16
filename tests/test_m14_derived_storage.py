@@ -385,8 +385,9 @@ async def test_recovery_blob_fk_inventory_eight_paths(
         "0014_m13_authority_complete_world",
         "0015_m14_world_observation_execution",
         # M15A: 0016 restores with the exact published M14 inventory;
-        # 0017 stays fail-closed until the M16-C recovery slice (R6 §16/§21)
+        # M16-C admits 0017 with the same inventory (no M16 Blob FK)
         "0016_m15_revision_compatibility",
+        "0017_m16_intra_shot_consequences",
     }), SUPPORTED_RESTORE_ALEMBIC_HEADS
     assert _blob_fk_policy_for_head(
         "0016_m15_revision_compatibility") == M14_BLOB_FK_COLUMNS

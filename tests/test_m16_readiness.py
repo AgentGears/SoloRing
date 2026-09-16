@@ -146,15 +146,19 @@ async def test_ready_06(client, factory):
     assert detail1["working_snapshot_hash"] is None
     assert detail1["working_state_differs_from_approved"] is None
 
-    # even an M16-READY event set keeps the working hash unavailable in
-    # M16-B: no interim representation of the event-bearing snapshot
+    # M16-C completes the seam: a READY event-bearing Shot now carries
+    # the authoritative schema-7 working hash through the same canonical
+    # builder capture uses; it still changes when event meaning changes
     base2 = await seed_feature_world(client, factory)
     sid2, fid2 = base2["shot_id"], base2["feature_id"]
+    before_events = (await client.get(f"/shots/{sid2}")).json()[
+        "working_snapshot_hash"]
     await post_event(client, sid2, event(fid2, 1000, state(), state("fresh")))
     detail2 = (await client.get(f"/shots/{sid2}")).json()
     assert detail2["intra_shot_ready"] is True
-    assert detail2["working_snapshot_hash"] is None
-    assert detail2["working_state_differs_from_approved"] is None
+    assert detail2["working_snapshot_hash"] is not None
+    assert detail2["working_snapshot_hash"] != before_events
+    assert detail2["working_state_differs_from_approved"] is False
 
 
 async def test_ready_07(client, factory):
