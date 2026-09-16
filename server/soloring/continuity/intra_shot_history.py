@@ -80,6 +80,46 @@ def _load_captured_planes_sync(conn, revision_id):
     return features, relations
 
 
+def _verify_state_grammar(kind, state, value_type,
+                           what, revision_id):
+    """Captured-row-only state grammar (R6 §4.4): presence shape, value
+    canonicalization against the FROZEN captured value_type/unit/enum
+    vocabulary, and hash agreement — the repository's historical scalar
+    grammar participates instead of generic canonical JSON."""
+    from soloring.continuity.snapshots import historical_canonicalize_value
+
+    if kind == "entity_relation":
+        if set(state) != {"active"} or type(state["active"]) is not bool:
+            raise internal_invariant(
+                f"ShotRevision {revision_id} {what} is not the exact "
+                "relation state grammar")
+        return
+    if type(state.get("present")) is not bool:
+        raise internal_invariant(
+            f"ShotRevision {revision_id} {what} lacks literal boolean "
+            "present")
+    if state["present"] is False:
+        if set(state) != {"present"}:
+            raise internal_invariant(
+                f"ShotRevision {revision_id} {what} absence carries "
+                "extra fields")
+        return
+    if set(state) != {"present", "value", "value_hash"}:
+        raise internal_invariant(
+            f"ShotRevision {revision_id} {what} presence shape invalid")
+    try:
+        value_json, value_hash = historical_canonicalize_value(
+            value_type, canonical_json_str(state["value"]))
+    except Exception:
+        raise internal_invariant(
+            f"ShotRevision {revision_id} {what} value violates the "
+            f"captured {value_type!r} grammar") from None
+    if value_hash != state["value_hash"]:
+        raise internal_invariant(
+            f"ShotRevision {revision_id} {what} value_hash disagrees "
+            "with the captured-type canonical value")
+
+
 def _bind_identity_to_planes(identity, kind, features, relations, world,
                              revision_id, position):
     """§8.4 identity binding: the frozen captured identity must EXACTLY
@@ -125,13 +165,28 @@ def _bind_identity_to_planes(identity, kind, features, relations, world,
             return
         # absent-at-start relations are legal (inactive Shot/start)
         return
-    # production_instance_feature: identity must match a captured world
-    # plane occurrence when the plane lists it; absent-at-start PI
-    # features are legal, but the plane itself must exist (checked
-    # separately for every PI child)
+    # production_instance_feature: the FULL captured identity must match
+    # the same-revision world plane — composition, occurrence, subject
+    # kind, key/kind/value_type/unit — not merely the feature id
     for state in (world or {}).get("instance_feature_states", ()):
-        if state["feature_id"] == target_id:
-            return
+        if state["feature_id"] != target_id:
+            continue
+        if (identity.get("composition_id") is not None
+                and state.get("composition_id") is not None
+                and identity["composition_id"] != state["composition_id"]):
+            raise internal_invariant(
+                f"ShotRevision {revision_id} intra_shot child {position} "
+                "PI composition disagrees with the captured world plane")
+        if (identity.get("occurrence_id") is not None
+                and state.get("occurrence_id") is not None
+                and identity["occurrence_id"] != state["occurrence_id"]):
+            raise internal_invariant(
+                f"ShotRevision {revision_id} intra_shot child {position} "
+                "PI occurrence disagrees with the captured world plane")
+        return
+    # the plane may legitimately not list an absent-at-start feature;
+    # the frozen schema fields still stand as captured grammar — the
+    # pack lists only present states, so absence is lawful
     return
 
 
@@ -266,6 +321,18 @@ def _verify_core(parent, children, starts, world, revision_id: str,
         _canon_pair(after, row["captured_after_state_json"],
                     row["captured_after_state_hash"],
                     f"child {row['position']} after state", revision_id)
+        # captured-row-only TARGET grammar: states validated against the
+        # frozen captured value_type/unit/enum vocabulary
+        _verify_state_grammar(
+            row["target_kind"], before, identity.get("value_type"),
+            f"child {row['position']} before state", revision_id)
+        _verify_state_grammar(
+            row["target_kind"], after, identity.get("value_type"),
+            f"child {row['position']} after state", revision_id)
+        if before == after:
+            raise internal_invariant(
+                f"ShotRevision {revision_id} intra_shot child "
+                f"{row['position']} is a no-op (before == after)")
         rebuilt = {
             "schema_version": 1,
             "time_ms": row["time_ms"],

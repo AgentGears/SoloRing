@@ -104,7 +104,7 @@ async def test_entity_05(client, factory):
     assert first["terminal_targets"][0]["terminal_state"] == state("fresh")
 
 
-async def test_entity_03_captured_type_unit_is_historical(client, factory):
+async def test_entity_03(client, factory):
     """ENTITY:03 — the captured feature type/unit is historical: a
     current schema edit never alters the captured target identity."""
     import json

@@ -44,7 +44,7 @@ async def _history(client, revision_id):
     return r.json()
 
 
-async def test_hist_01_predecessor_spec_unchanged(client, factory):
+async def test_hist_01(client, factory):
     """HIST:01 — continuity-spec schemas 1/2 historical behavior remains
     exact: event-free and event-bearing revisions carry the same
     predecessor spec bytes for the same dependency state."""
@@ -62,7 +62,7 @@ async def test_hist_01_predecessor_spec_unchanged(client, factory):
     assert rows[0][0] == rows[1][0]
 
 
-async def test_hist_02_schema6_accepted(client, factory):
+async def test_hist_02(client, factory):
     """HIST:02 — published outer schema 6 remains inspectable without
     current state (the P0-B correction holds under schema 7)."""
     from tests.test_m13_shot_capture import _full_m13_world, _select_binding

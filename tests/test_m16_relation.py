@@ -72,7 +72,7 @@ async def test_relation_03(client, factory):
         (1000, 0), (2000, 0)]
 
 
-async def test_relation_05_soft_delete_does_not_alter_history(client, factory):
+async def test_relation_05(client, factory):
     """RELATION:05 — later soft-delete/edit of the current relation
     never changes the captured historical meaning."""
     import json as _json

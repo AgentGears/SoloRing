@@ -42,7 +42,7 @@ async def _companion_children(engine, revision_id):
             {"r": revision_id})).fetchall()
 
 
-async def test_capture_04_event_free_bytes_identical(client, factory):
+async def test_capture_04(client, factory):
     """Event-free capture is byte-identical to predecessor schema 1-6."""
     base = await seed_feature_world(client, factory)
     sid = base["shot_id"]
@@ -59,7 +59,7 @@ async def test_capture_04_event_free_bytes_identical(client, factory):
     assert n == 0
 
 
-async def test_capture_05_event_bearing_schema_7(client, factory):
+async def test_capture_05(client, factory):
     """Event-bearing capture preserves predecessor planes and emits
     outer schema 7 with the canonical intra_shot block."""
     base = await seed_feature_world(client, factory)
@@ -92,7 +92,7 @@ async def test_capture_05_event_bearing_schema_7(client, factory):
     assert json.loads(children[0].captured_target_identity_json) == identity
 
 
-async def test_capture_07_handoff_semantics_excluding_uuid(client, factory):
+async def test_capture_07(client, factory):
     """Persistent captures carry the semantic handoff; the transition
     UUID is audit provenance, NOT in the semantic block."""
     base = await seed_feature_world(client, factory)
@@ -119,7 +119,7 @@ async def test_capture_07_handoff_semantics_excluding_uuid(client, factory):
     assert children[0].captured_handoff_json is not None
 
 
-async def test_capture_08_persistent_without_handoff_cannot_capture(
+async def test_capture_08(
         client, factory):
     """A persistent event missing its handoff fails the capture fence."""
     base = await seed_feature_world(client, factory)
@@ -138,7 +138,7 @@ async def test_capture_08_persistent_without_handoff_cannot_capture(
         raise AssertionError("capture did not fail closed")
 
 
-async def test_ready_05_capture_half(client, factory):
+async def test_ready_05(client, factory):
     """READY:05 (complete): Shot detail AND capture consume the same
     resolver-result grammar — the captured block equals the working
     projection fold, and the working hash equals the captured hash."""
@@ -157,7 +157,7 @@ async def test_ready_05_capture_half(client, factory):
     assert proj["terminal_targets"][0]["terminal_state"] == state("fresh")
 
 
-async def test_capture_convergence_semantic_not_audit(client, factory):
+async def test_capture_convergence_semantic(client, factory):
     """A later working event with a different UUID but identical
     semantics converges to the existing ShotRevision; first-publication
     audit provenance is never rewritten."""
@@ -181,7 +181,7 @@ async def test_capture_convergence_semantic_not_audit(client, factory):
     assert [r.source_event_id for r in rows] == [first["id"]]
 
 
-async def test_capture_01_same_read_snapshot(client, factory):
+async def test_capture_01(client, factory):
     """CAPTURE:01 — events/handoffs/duration/start planes are read inside
     ONE SQLite snapshot while a concurrent writer races the capture:
     the captured intra_shot block is never a hybrid of two moments."""
@@ -213,7 +213,7 @@ async def test_capture_01_same_read_snapshot(client, factory):
     await asyncio.gather(writer(), capturer())
 
 
-async def test_capture_02_post_snapshot_mutation_cannot_contaminate(
+async def test_capture_02(
         client, factory):
     """CAPTURE:02 — a mutation racing the capture WRITE phase cannot
     contaminate the persisted value: the companion rows and the snapshot
@@ -228,13 +228,17 @@ async def test_capture_02_post_snapshot_mutation_cannot_contaminate(
     engine = client._transport.app.state.engine
 
     async def racer():
-        # fires repeatedly during the capture write window
-        for _ in range(8):
-            async with engine.begin() as conn:
-                await conn.execute(_text(
-                    "UPDATE shots SET mood = :m WHERE id = :s"),
-                    {"m": "tense", "s": sid})
-            await asyncio.sleep(0.002)
+        # post-read EVENT mutation racing the capture write window: the
+        # toggled event appears or not as a WHOLE row, never a hybrid
+        for n in range(6):
+            r = await client.post(
+                f"/shots/{sid}/intra-shot/events",
+                json=event(fid, 3000 + n, state("fresh"),
+                           state("healing")))
+            if r.status_code == 201:
+                await client.delete(
+                    f"/intra-shot/events/{r.json()['id']}")
+            await asyncio.sleep(0.003)
 
     async def capture_task():
         revision, _ = await _capture(client, sid)
@@ -249,7 +253,7 @@ async def test_capture_02_post_snapshot_mutation_cannot_contaminate(
     assert before == after
 
 
-async def test_capture_03_duration_patch_race_coherent(client, factory):
+async def test_capture_03(client, factory):
     """CAPTURE:03 — capture versus duration PATCH sees one coherent
     pre/post state: the fence serializes them, and whichever order
     interleaves, the captured duration and event times agree."""
@@ -271,6 +275,9 @@ async def test_capture_03_duration_patch_race_coherent(client, factory):
             revision, _ = await _capture(client, sid)
             snap = json.loads(revision.snapshot_json)
             duration = snap["intra_shot"]["duration_ms"]
+            # the duplicated duration is the INTENT duration — a hybrid
+            # of two moments can never satisfy both at once
+            assert snap["intent"]["duration_ms"] == duration
             for packed in snap["intra_shot"]["events"]:
                 assert 1 <= packed["time_ms"] < duration
             await asyncio.sleep(0.005)
@@ -287,7 +294,7 @@ async def _snap_json(engine, revision_id):
             {"r": revision_id})).scalar_one()
 
 
-async def test_capture_04_event_free_bytes_identical(client, factory):
+async def test_capture_04(client, factory):
     """Event-free capture is byte-identical to predecessor schema 1-6."""
     base = await seed_feature_world(client, factory)
     sid = base["shot_id"]
@@ -304,7 +311,7 @@ async def test_capture_04_event_free_bytes_identical(client, factory):
     assert n == 0
 
 
-async def test_capture_05_event_bearing_schema_7(client, factory):
+async def test_capture_05(client, factory):
     """Event-bearing capture preserves predecessor planes and emits
     outer schema 7 with the canonical intra_shot block."""
     base = await seed_feature_world(client, factory)
@@ -337,7 +344,7 @@ async def test_capture_05_event_bearing_schema_7(client, factory):
     assert json.loads(children[0].captured_target_identity_json) == identity
 
 
-async def test_capture_07_handoff_semantics_excluding_uuid(client, factory):
+async def test_capture_07(client, factory):
     """Persistent captures carry the semantic handoff; the transition
     UUID is audit provenance, NOT in the semantic block."""
     base = await seed_feature_world(client, factory)
@@ -364,7 +371,7 @@ async def test_capture_07_handoff_semantics_excluding_uuid(client, factory):
     assert children[0].captured_handoff_json is not None
 
 
-async def test_capture_08_persistent_without_handoff_cannot_capture(
+async def test_capture_08(
         client, factory):
     """A persistent event missing its handoff fails the capture fence."""
     base = await seed_feature_world(client, factory)
@@ -383,7 +390,7 @@ async def test_capture_08_persistent_without_handoff_cannot_capture(
         raise AssertionError("capture did not fail closed")
 
 
-async def test_ready_05_capture_half(client, factory):
+async def test_ready_05(client, factory):
     """READY:05 (complete): Shot detail AND capture consume the same
     resolver-result grammar — the captured block equals the working
     projection fold, and the working hash equals the captured hash."""
@@ -402,7 +409,7 @@ async def test_ready_05_capture_half(client, factory):
     assert proj["terminal_targets"][0]["terminal_state"] == state("fresh")
 
 
-async def test_capture_convergence_semantic_not_audit(client, factory):
+async def test_capture_convergence_semantic(client, factory):
     """A later working event with a different UUID but identical
     semantics converges to the existing ShotRevision; first-publication
     audit provenance is never rewritten."""
@@ -426,7 +433,7 @@ async def test_capture_convergence_semantic_not_audit(client, factory):
     assert [r.source_event_id for r in rows] == [first["id"]]
 
 
-async def test_capture_01_same_read_snapshot(client, factory):
+async def test_capture_01(client, factory):
     """Events/handoffs/duration/start planes are read inside one SQLite
     snapshot: a concurrent event mutation cannot contaminate the capture."""
     from sqlalchemy import text as _text
@@ -463,7 +470,7 @@ async def test_capture_01_same_read_snapshot(client, factory):
     assert landed["n"] == 1
 
 
-async def test_capture_02_post_snapshot_mutation_cannot_contaminate(
+async def test_capture_02(
         client, factory):
     """A delete landing after the capture read does not alter the
     captured value (the immutable rows were already written)."""
@@ -485,7 +492,7 @@ async def test_capture_02_post_snapshot_mutation_cannot_contaminate(
     assert before == after
 
 
-async def test_capture_03_duration_patch_race_coherent(client, factory):
+async def test_capture_03(client, factory):
     """Capture versus a duration PATCH sees one coherent pre/post state:
     capturing with events requires the already-patched duration, and the
     duration fence keeps the event times lawful either way."""
@@ -501,7 +508,7 @@ async def test_capture_03_duration_patch_race_coherent(client, factory):
     assert snap["intent"]["duration_ms"] == 9000
 
 
-async def test_capture_06_target_identity_in_semantic_block(client, factory):
+async def test_capture_06(client, factory):
     """captured target_identity is part of the schema-7 semantic bytes
     and the companion columns."""
     base = await seed_feature_world(client, factory)

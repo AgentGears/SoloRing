@@ -214,7 +214,7 @@ def test_scale_fixture_canonical_columns_only():
     assert bh != ah and eh is not None and len(eh) == 64
 
 
-async def test_scale_resolver_overflow_fails_closed(client, factory):
+async def test_scale_resolver_overflow(client, factory):
     """A >10,000-active-event database (only reachable through corrupt
     direct storage) is detected, never folded or hashed as valid."""
     base = await seed_feature_world(client, factory, duration=30_000)

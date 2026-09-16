@@ -196,6 +196,28 @@ def _verify_review(row, rows) -> None:
         batch_basis = doc.get("batch_basis_hash")
         if not _is_hash(batch_basis):
             _corrupt(f"review {rid} operation lacks a batch basis hash")
+        # the batch hash itself must derive from the frozen §7.5.2
+        # batch object recorded in the operation — never a supplied
+        # arbitrary 64-hex value
+        batch_doc = doc.get("batch_basis")
+        if not isinstance(batch_doc, dict):
+            _corrupt(
+                f"review {rid} operation lacks the frozen batch basis "
+                "object")
+        from soloring.continuity.intra_shot_canonical import (
+            proposal_batch_basis_hash as batch_basis_root,
+        )
+
+        try:
+            recomputed_batch = batch_basis_root(**batch_doc)
+        except Exception:
+            _corrupt(
+                f"review {rid} batch basis object violates the frozen "
+                "grammar")
+        if recomputed_batch != batch_basis:
+            _corrupt(
+                f"review {rid} batch basis hash is not the frozen batch "
+                "object root")
         recomputed = proposal_basis(
             batch_basis_hash=batch_basis,
             proposal_id=source_proposal_id,
@@ -244,12 +266,17 @@ def _verify_review(row, rows) -> None:
             f"review {rid} adopt_persistence requires exactly one "
             "owning-domain transition id")
     kind, tid = populated[0]
-    table = {"entity_feature": "continuity_feature_transitions",
-             "entity_relation": "continuity_relation_transitions",
-             "production_instance_feature":
-                 "production_instance_feature_transitions"}
+    table, column = {
+        "entity_feature": ("continuity_feature_transitions",
+                           "feature_id"),
+        "entity_relation": ("continuity_relation_transitions",
+                            "relation_id"),
+        "production_instance_feature":
+            ("production_instance_feature_transitions", "feature_id"),
+    }[kind]
     tr = rows(
-        f"SELECT anchor_type, anchor_id, boundary FROM {table[kind]} "
+        f"SELECT anchor_type, anchor_id, boundary, {column}, operation, "
+        f"state, value_json, value_hash FROM {table[kind]} "
         "WHERE id = ?", (tid,))
     if not tr:
         _corrupt(f"review {rid} result transition missing")
@@ -257,6 +284,44 @@ def _verify_review(row, rows) -> None:
         _corrupt(
             f"review {rid} result transition is not this Shot's "
             "Shot/end owning-domain handoff")
+
+    # the transition's TARGET and SEMANTIC VALUE must equal the result
+    # event's target and terminal state — a same-Shot/end transition for
+    # a different target (or a different value) is NOT this review's
+    # handoff
+    res_ev = rows(
+        "SELECT target_kind, entity_feature_id, entity_relation_id, "
+        "production_instance_feature_id, persistence_mode, "
+        "after_state_json FROM shot_intra_shot_events WHERE id = ?",
+        (result_event_id,))[0]
+    res_kind = res_ev[0]
+    res_target = res_ev[1] or res_ev[2] or res_ev[3]
+    if res_kind != kind or tr[0][3] != res_target:
+        _corrupt(
+            f"review {rid} result transition targets a different "
+            "target than the result event")
+    if res_ev[4] != "require_handoff":
+        _corrupt(
+            f"review {rid} adopt_persistence result event is not "
+            "persistent")
+    import json as _json
+
+    terminal = _json.loads(res_ev[5])
+    if kind == "entity_relation":
+        expected = ("active" if terminal["active"] else "inactive")
+        if tr[0][5] != expected:
+            _corrupt(
+                f"review {rid} result transition state does not equal "
+                "the result event terminal state")
+    elif terminal.get("present"):
+        if tr[0][4] != "set" or tr[0][7] != terminal.get("value_hash"):
+            _corrupt(
+                f"review {rid} result transition value does not equal "
+                "the result event terminal state")
+    elif tr[0][4] != "clear" or tr[0][6] is not None:
+        _corrupt(
+            f"review {rid} clear transition does not equal canonical "
+            "terminal absence")
 
 
 def _result_event_exists(rows, event_id) -> bool:

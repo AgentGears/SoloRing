@@ -37,7 +37,7 @@ async def _insert_terminal_generation(engine, sid, revision_id):
               "sj": '{"schema_version": 1}', "sh": '0421214960441d55a9859ecf90ddb72f90b7ca185481b2154652c40f392d63af'})
 
 
-async def test_exec_01_schema7_refused_before_generation_row(client, factory):
+async def test_exec_01(client, factory):
     """Any non-empty schema-7 intra_shot authority — including an
     all-transient set — refuses generation creation with the typed code,
     before any Generation row exists."""
@@ -61,7 +61,7 @@ async def test_exec_01_schema7_refused_before_generation_row(client, factory):
     assert after == before
 
 
-async def test_exec_04_no_lowering_or_stripping(client, factory):
+async def test_exec_04(client, factory):
     """The refusal is typed and total: no Generation row, no inputs, and
     the captured ShotRevision keeps its schema-7 authority intact."""
     base = await seed_feature_world(client, factory)
@@ -82,7 +82,7 @@ async def test_exec_04_no_lowering_or_stripping(client, factory):
     assert gi == 0
 
 
-async def test_exec_05_exact_rerun_stays_pinned(client, factory):
+async def test_exec_05(client, factory):
     """A pre-M16 generation's Exact Rerun remains pinned to its captured
     ShotRevision and never consults current M16 state."""
     base = await seed_feature_world(client, factory)
@@ -110,14 +110,14 @@ async def test_exec_05_exact_rerun_stays_pinned(client, factory):
     assert new_snap["schema_version"] < 7
 
 
-async def test_exec_02_refusal_before_generation_input(client, factory):
+async def test_exec_02(client, factory):
     """EXEC:02 — the schema-7 refusal precedes GenerationInput insertion
     and any queue write: a refused comfy request leaves an initially
     empty artifact store empty."""
     await _exec_refusal_assertions(client, factory)
 
 
-async def test_exec_03_refusal_before_derived_publication(client, factory):
+async def test_exec_03(client, factory):
     """EXEC:03 — the schema-7 refusal precedes derived spatial/observation
     publication and package queueing: identical empty-store proof from a
     clean store."""
