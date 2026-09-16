@@ -176,6 +176,7 @@ ALLOWLIST = (
     "server/soloring/recovery/__init__.py",
     "server/soloring/recovery/semantic_successors.py",
     "server/soloring/recovery/successor_semantics.py",
+    "server/soloring/recovery/m16_verifier.py",
     "tests/test_m16_p0_repairs.py",
     # M16-A exact authority surface.
     "server/alembic/versions/0017_m16_intra_shot_consequences.py",
@@ -232,6 +233,7 @@ POST_M15_REMEDIATION_BACKEND_PATHS = frozenset({
     "server/soloring/recovery/__init__.py",
     "server/soloring/recovery/semantic_successors.py",
     "server/soloring/recovery/successor_semantics.py",
+    "server/soloring/recovery/m16_verifier.py",
 })
 
 

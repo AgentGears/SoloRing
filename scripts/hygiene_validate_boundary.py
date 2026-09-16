@@ -205,6 +205,7 @@ ALLOWLIST = (
     "server/soloring/recovery/__init__.py",
     "server/soloring/recovery/semantic_successors.py",
     "server/soloring/recovery/successor_semantics.py",
+    "server/soloring/recovery/m16_verifier.py",
     "tests/test_m16_p0_repairs.py",
     # M16-A migration + event-authoring foundation. Exact only: no M16-B+
     # resolver/capture/review/UI surface is admitted by this slice.
@@ -299,6 +300,7 @@ M16_OWNED_PREFIXES = (
     "server/soloring/recovery/__init__.py",
     "server/soloring/recovery/semantic_successors.py",
     "server/soloring/recovery/successor_semantics.py",
+    "server/soloring/recovery/m16_verifier.py",
     "tests/test_m16_p0_repairs.py",
     "server/alembic/versions/0017_m16_intra_shot_consequences.py",
     "server/soloring/continuity/intra_shot_models.py",
