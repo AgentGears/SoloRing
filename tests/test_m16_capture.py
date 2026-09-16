@@ -183,9 +183,10 @@ async def test_capture_convergence_semantic(client, factory):
 
 async def test_capture_01(client, factory):
     """CAPTURE:01 — events/handoffs/duration/start planes are read inside
-    ONE SQLite snapshot: capture is held at a deterministic seam right
-    after its read unit; a mutation lands and is asserted; release
-    persists EXACTLY the pre-mutation value."""
+    ONE SQLite snapshot: a deterministic barrier INSIDE the live read
+    transaction (between constituent reads, before its COMMIT) holds the
+    capture while a writer commits on another connection; the captured
+    value must be exactly one complete pre-state."""
     import asyncio
 
     base = await seed_feature_world(client, factory)
@@ -193,35 +194,50 @@ async def test_capture_01(client, factory):
     await post_event(client, sid, event(fid, 1000, state(), state("fresh")))
     engine = client._transport.app.state.engine
 
+    from soloring.continuity import state as state_svc
+
+    real_features = state_svc.resolve_effective_feature_state
+    gate = asyncio.Event()
+    inside_tx = asyncio.Event()
+
+    async def held_features(conn, shot_id):
+        # this runs INSIDE _snapshot_one_read's explicit BEGIN, before
+        # the M16 resolver read and before COMMIT: the read snapshot is
+        # LIVE here, and a competing writer must not interleave
+        inside_tx.set()
+        await gate.wait()
+        return await real_features(conn, shot_id)
+
+    state_svc.resolve_effective_feature_state = held_features
     from soloring.domain import revisions as rev_svc
 
     real_read = rev_svc._snapshot_one_read
-    gate = asyncio.Event()
-    inside_read = asyncio.Event()
 
-    async def held_read(session, shot_id, *, settings=None):
-        read = await real_read(session, shot_id, settings=settings)
-        inside_read.set()
-        await gate.wait()
-        return read
+    async def routed_read(session, shot_id, *, settings=None):
+        # route the in-unit import to the held resolver
+        import soloring.domain.revisions as rv
 
-    rev_svc._snapshot_one_read = held_read
+        orig = rv._snapshot_one_read
+        return await orig(session, shot_id, settings=settings)
+
     capture_task = asyncio.ensure_future(_capture(client, sid))
-    await inside_read.wait()
+    await inside_tx.wait()
 
-    # the mutation lands AFTER the read unit closed and BEFORE the
-    # write phase — it must NOT contaminate the capture
+    # the writer commits on ANOTHER connection WHILE the read
+    # transaction is live: the pinned snapshot must not see it
     r = await client.post(
         f"/shots/{sid}/intra-shot/events",
         json=event(fid, 2000, state("fresh"), state("healing")))
     assert r.status_code == 201, r.text
+
     gate.set()
     revision = (await capture_task)[0]
     snap = json.loads(revision.snapshot_json)
     events = snap["intra_shot"]["events"]
+    # exactly the PRE-state: the single 1000ms event, complete
     assert [(e["time_ms"], e["ordinal"]) for e in events] == [(1000, 0)]
     assert events[0]["after"] == state("fresh")
-    rev_svc._snapshot_one_read = real_read
+    state_svc.resolve_effective_feature_state = real_features
 
 
 async def test_capture_02(client, factory):

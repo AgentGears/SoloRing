@@ -287,3 +287,42 @@ async def test_hist_foreign_handoff_corrupt(client, factory):
             {"j": tampered, "h": _ch(handoff), "r": revision.id})
     r = await client.get(f"/shot-revisions/{revision.id}/continuity")
     assert r.status_code == 500, r.text
+
+
+async def test_hist_identity_value_grammar_adversarial(client, factory):
+    """A coherently re-hashed identity with an out-of-vocabulary
+    feature_kind fails even at an absent-at-start target (pure §4.7
+    grammar, no predecessor row needed)."""
+    import hashlib
+
+    from sqlalchemy import text as _text
+
+    from soloring.domain.canonical import (
+        canonical_hash as _ch,
+        canonical_json_str as _cjs,
+    )
+
+    base = await seed_feature_world(client, factory)
+    sid, fid = base["shot_id"], base["feature_id"]
+    # absent-at-start target: the feature has no current value
+    await post_event(client, sid, event(fid, 1000, state(), state("fresh")))
+    revision, _ = await _capture(client, sid)
+    engine = client._transport.app.state.engine
+    async with engine.connect() as conn:
+        row = (await conn.execute(_text(
+            "SELECT captured_target_identity_json FROM "
+            "shot_revision_intra_shot_events "
+            "WHERE shot_revision_id = :r"), {"r": revision.id})).one()
+    identity = json.loads(row[0])
+    identity["feature_kind"] = "not-a-real-kind"
+    tampered = _cjs(identity)
+    async with engine.begin() as conn:
+        await conn.execute(_text(
+            "UPDATE shot_revision_intra_shot_events SET "
+            "captured_target_identity_json = :j, "
+            "captured_target_identity_hash = :h "
+            "WHERE shot_revision_id = :r"),
+            {"j": tampered, "h": _ch(identity), "r": revision.id})
+    r = await client.get(f"/shot-revisions/{revision.id}/continuity")
+    assert r.status_code == 500, r.text
+    assert "vocabulary" in r.text or "grammar" in r.text

@@ -153,31 +153,26 @@ def _verify_review(row, rows) -> None:
         if source_proposal_id is not None or source_event_id is None:
             _corrupt(f"review {rid} event source shape invalid")
         ev = rows(
-            "SELECT shot_id, event_hash, persistence_mode FROM "
-            "shot_intra_shot_events WHERE id = ?", (source_event_id,))
+            "SELECT shot_id FROM shot_intra_shot_events WHERE id = ?",
+            (source_event_id,))
         if not ev:
             _corrupt(f"review {rid} source event missing")
         if ev[0][0] != shot_id:
             _corrupt(f"review {rid} source event belongs to another Shot")
-        if ev[0][1] != source_hash:
-            # frozen R6 §12.2: decline_persistence PATCHES the SAME
-            # event UUID from require_handoff to transient, so the
-            # current row hash is legitimately NEW while the review
-            # retains the reviewed source hash. Any other decision, or
-            # a decline whose current row is not the patched transient
-            # result, is corruption.
-            if (decision != "decline_persistence"
-                    or result_event_id != source_event_id
-                    or ev[0][2] != "transient"):
-                _corrupt(
-                    f"review {rid} source event hash mismatch")
         if decision not in ("adopt_persistence", "decline_persistence"):
             _corrupt(f"review {rid} illegal event decision {decision!r}")
-        if decision not in ("adopt_persistence", "decline_persistence"):
-            _corrupt(f"review {rid} illegal event decision {decision!r}")
-        # exact frozen event review-basis root (R6 §7.5.1), recomputed
-        # from the reviewed event's stored coordinates — never the
-        # operation's self-assertion
+        # IMMUTABLE evidence semantics: recovery certifies the recorded
+        # review, not today's mutable event/transition rows. The
+        # operation document carries the exact committed source
+        # coordinates; the basis root is recomputed from THEM.
+        src_doc = doc.get("source")
+        if (not isinstance(src_doc, dict)
+                or src_doc.get("kind") != "event"
+                or src_doc.get("id") != source_event_id
+                or src_doc.get("hash") != source_hash):
+            _corrupt(
+                f"review {rid} operation source record disagrees with "
+                "the review row's source coordinates")
         recomputed = event_basis(
             source_event_id=source_event_id, source_hash=source_hash,
             decision=decision,
@@ -189,6 +184,36 @@ def _verify_review(row, rows) -> None:
             _corrupt(
                 f"review {rid} recorded basis is not the frozen event "
                 "review-basis root")
+        # the committed RESULT evidence is immutable-recorded: every
+        # decision records the resulting event hash; adopt_persistence
+        # additionally records the transition kind + exact semantic
+        # hash. Current rows are provenance anchors only — later edits
+        # make an exact RETRY conflict but never invalidate history.
+        result = doc.get("result")
+        if not isinstance(result, dict):
+            _corrupt(f"review {rid} operation lacks the result record")
+        if result.get("event_id") != result_event_id:
+            _corrupt(
+                f"review {rid} result record disagrees with the row's "
+                "result event")
+        if not _is_hash(result.get("event_hash")):
+            _corrupt(f"review {rid} result event hash missing")
+        if decision == "adopt_persistence":
+            tr = result.get("transition")
+            if not isinstance(tr, dict) or not _is_hash(
+                    tr.get("semantic_hash")):
+                _corrupt(
+                    f"review {rid} adopt_persistence lacks the committed "
+                    "transition semantic hash")
+            kinds = {kind for kind, tid in (
+                ("entity_feature", ef_transition),
+                ("entity_relation", er_transition),
+                ("production_instance_feature", pf_transition))
+                if tid is not None}
+            if len(kinds) != 1 or tr.get("kind") not in kinds:
+                _corrupt(
+                    f"review {rid} result transition kind disagrees "
+                    "with the row's transition columns")
     elif source_kind == "proposal":
         if source_event_id is not None or source_proposal_id is None:
             _corrupt(f"review {rid} proposal source shape invalid")
@@ -240,6 +265,39 @@ def _verify_review(row, rows) -> None:
             _corrupt(
                 f"review {rid} recorded basis is not the frozen proposal "
                 "review-basis root")
+        # §7.5.2 membership: this review's exact
+        # {proposal_id, proposal_hash, decision} must be IN the batch
+        # object's reviews set
+        reviews = batch_doc.get("reviews")
+        if not isinstance(reviews, list):
+            _corrupt(f"review {rid} batch object lacks reviews")
+        entry = {
+            "proposal_id": source_proposal_id,
+            "proposal_hash": source_hash,
+            "decision": decision,
+        }
+        members = [r for r in reviews if isinstance(r, dict)]
+        if entry not in members:
+            _corrupt(
+                f"review {rid} is not a member of the batch object "
+                "that roots it")
+        # §7.5.2 completeness: the persisted review rows rooted at this
+        # batch must be EXACTLY the batch's member set
+        persisted = rows(
+            "SELECT source_proposal_id, source_hash, decision FROM "
+            "persistent_consequence_reviews WHERE source_kind = "
+            "'proposal'")
+        rooted = {
+            (row[0], row[1], row[2]) for row in persisted
+            if row[0] is not None
+            and _review_batch_root(rows, row[0]) == batch_basis}
+        expected = {
+            (r["proposal_id"], r["proposal_hash"], r["decision"])
+            for r in members}
+        if rooted != expected:
+            _corrupt(
+                f"review {rid} batch members disagree with the persisted "
+                "review rows for that batch")
     else:
         _corrupt(f"review {rid} unknown source kind {source_kind!r}")
 
@@ -248,11 +306,10 @@ def _verify_review(row, rows) -> None:
     if doc["review_basis_hash"] != review_basis_hash:
         _corrupt(f"review {rid} recorded basis disagrees with operation")
 
-    # result references — the frozen migration shape (ck_pcr_result_shape):
-    # ignore carries nothing; adopt_event_only and decline_persistence
-    # carry a result EVENT and no transition; adopt_persistence carries a
-    # result event and EXACTLY ONE owning-domain transition whose own
-    # Shot/end anchor must agree with the review's Shot.
+    # result references are IMMUTABLE-recorded: the row's result event
+    # must exist (provenance anchor, any current semantics) and belong
+    # to this Shot; semantic agreement was verified above against the
+    # operation's own recorded hashes, never against today's rows.
     if decision == "ignore":
         if (result_event_id is not None or ef_transition is not None
                 or er_transition is not None or pf_transition is not None):
@@ -280,78 +337,45 @@ def _verify_review(row, rows) -> None:
             f"review {rid} adopt_persistence requires exactly one "
             "owning-domain transition id")
     kind, tid = populated[0]
-    # three domain-specific result verifiers: feature/PI transitions
-    # carry operation/value_json/value_hash; relation transitions carry
-    # state — there is no common column shape
+    # the transition row is a provenance anchor: it must exist and be
+    # this Shot's Shot/end handoff in the right domain (columns are
+    # domain-specific), but its CURRENT value is not the historical
+    # semantic source
     if kind == "entity_relation":
-        tr = rows(
-            "SELECT anchor_type, anchor_id, boundary, relation_id, "
-            "state FROM continuity_relation_transitions WHERE id = ?",
-            (tid,))
-        if not tr:
-            _corrupt(f"review {rid} result transition missing")
-        if (tr[0][0] != "shot" or tr[0][1] != shot_id
-                or tr[0][2] != "end"):
-            _corrupt(
-                f"review {rid} result transition is not this Shot's "
-                "Shot/end owning-domain handoff")
-        tr_target, tr_value_ok = tr[0][3], None  # value checked below
+        tr_row = rows(
+            "SELECT anchor_type, anchor_id, boundary FROM "
+            "continuity_relation_transitions WHERE id = ?", (tid,))
     else:
         table = {
             "entity_feature": "continuity_feature_transitions",
             "production_instance_feature":
                 "production_instance_feature_transitions",
         }[kind]
-        tr = rows(
-            f"SELECT anchor_type, anchor_id, boundary, feature_id, "
-            f"operation, value_hash, value_json FROM {table} "
+        tr_row = rows(
+            f"SELECT anchor_type, anchor_id, boundary FROM {table} "
             "WHERE id = ?", (tid,))
-        if not tr:
-            _corrupt(f"review {rid} result transition missing")
-        if (tr[0][0] != "shot" or tr[0][1] != shot_id
-                or tr[0][2] != "end"):
-            _corrupt(
-                f"review {rid} result transition is not this Shot's "
-                "Shot/end owning-domain handoff")
-        tr_target = tr[0][3]
+    if not tr_row:
+        _corrupt(f"review {rid} result transition missing")
+    if (tr_row[0][0] != "shot" or tr_row[0][1] != shot_id
+            or tr_row[0][2] != "end"):
+        _corrupt(
+            f"review {rid} result transition is not this Shot's "
+            "Shot/end owning-domain handoff")
 
-    # the transition's TARGET and SEMANTIC VALUE must equal the result
-    # event's target and terminal state — a same-Shot/end transition for
-    # a different target (or a different value) is NOT this review's
-    # handoff
-    res_ev = rows(
-        "SELECT target_kind, entity_feature_id, entity_relation_id, "
-        "production_instance_feature_id, persistence_mode, "
-        "after_state_json FROM shot_intra_shot_events WHERE id = ?",
-        (result_event_id,))[0]
-    res_kind = res_ev[0]
-    res_target = res_ev[1] or res_ev[2] or res_ev[3]
-    if res_kind != kind or tr_target != res_target:
-        _corrupt(
-            f"review {rid} result transition targets a different "
-            "target than the result event")
-    if res_ev[4] != "require_handoff":
-        _corrupt(
-            f"review {rid} adopt_persistence result event is not "
-            "persistent")
+
+def _review_batch_root(rows, proposal_id):
+    row = rows(
+        "SELECT operation_json FROM "
+        "persistent_consequence_reviews WHERE source_kind = 'proposal' "
+        "AND source_proposal_id = ?", (proposal_id,)).fetchall()
+    if not row:
+        return None
     import json as _json
 
-    terminal = _json.loads(res_ev[5])
-    if kind == "entity_relation":
-        expected = ("active" if terminal["active"] else "inactive")
-        if tr[0][4] != expected:
-            _corrupt(
-                f"review {rid} result transition state does not equal "
-                "the result event terminal state")
-    elif terminal.get("present"):
-        if tr[0][4] != "set" or tr[0][5] != terminal.get("value_hash"):
-            _corrupt(
-                f"review {rid} result transition value does not equal "
-                "the result event terminal state")
-    elif tr[0][4] != "clear" or tr[0][6] is not None:
-        _corrupt(
-            f"review {rid} clear transition does not equal canonical "
-            "terminal absence")
+    try:
+        return _json.loads(row[0][0]).get("batch_basis_hash")
+    except (ValueError, TypeError):
+        return None
 
 
 def _result_event_exists(rows, event_id) -> bool:

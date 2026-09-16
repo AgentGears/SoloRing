@@ -134,9 +134,26 @@ _IDENTITY_KEYSETS = {
 }
 
 
+_UUID_RE = __import__("re").compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+_FEATURE_KINDS = {
+    "injury", "surface_condition", "damage", "wardrobe_condition",
+    "condition", "state", "configuration", "position", "wear",
+    "attachment", "location_marker", "custom",
+}
+_VALUE_TYPES = {"boolean", "enum", "integer", "decimal", "text"}
+_KEY_RE = __import__("re").compile(r"^[a-z][a-z0-9_]*$")
+
+
+def _is_uuid(value) -> bool:
+    return isinstance(value, str) and _UUID_RE.fullmatch(value) is not None
+
+
 def _verify_identity_grammar(identity, kind, revision_id, position):
-    """The exact frozen §4.7 captured target-identity key set — extra
-    or missing fields are corruption, not display variance."""
+    """The exact frozen §4.7 captured target-identity grammar — pure
+    captured-row validation, independent of current definitions: exact
+    key set, UUID fields, frozen key grammar, closed feature_kind and
+    value_type vocabularies, unit law (null or numeric-typed)."""
     expected = _IDENTITY_KEYSETS[kind]
     if set(identity) != expected:
         raise internal_invariant(
@@ -147,6 +164,56 @@ def _verify_identity_grammar(identity, kind, revision_id, position):
         raise internal_invariant(
             f"ShotRevision {revision_id} intra_shot child {position} "
             "identity kind disagrees with the row target kind")
+    where = (f"ShotRevision {revision_id} intra_shot child {position} "
+             f"{kind} identity")
+    if not _is_uuid(identity[
+            {"entity_feature": "feature_id",
+             "entity_relation": "relation_id",
+             "production_instance_feature": "feature_id"}[kind]]):
+        raise internal_invariant(f"{where} target id is not a UUID")
+    if kind == "entity_feature":
+        if not _is_uuid(identity["entity_id"]):
+            raise internal_invariant(f"{where} entity_id is not a UUID")
+        if not _KEY_RE.fullmatch(identity["feature_key"]):
+            raise internal_invariant(
+                f"{where} feature_key violates the frozen key grammar")
+        if identity["feature_kind"] not in _FEATURE_KINDS:
+            raise internal_invariant(
+                f"{where} feature_kind {identity['feature_kind']!r} is "
+                "outside the frozen vocabulary")
+    elif kind == "entity_relation":
+        for field in ("subject_entity_id", "predicate_id",
+                      "object_entity_id"):
+            if not _is_uuid(identity[field]):
+                raise internal_invariant(
+                    f"{where} {field} is not a UUID")
+        if not _KEY_RE.fullmatch(identity["predicate_key"]):
+            raise internal_invariant(
+                f"{where} predicate_key violates the frozen key grammar")
+    else:
+        for field in ("composition_id", "occurrence_id"):
+            if not _is_uuid(identity[field]):
+                raise internal_invariant(f"{where} {field} is not a UUID")
+        if not _KEY_RE.fullmatch(identity["feature_key"]):
+            raise internal_invariant(
+                f"{where} feature_key violates the frozen key grammar")
+        if identity["feature_kind"] not in _FEATURE_KINDS:
+            raise internal_invariant(
+                f"{where} feature_kind {identity['feature_kind']!r} is "
+                "outside the frozen vocabulary")
+    if kind in ("entity_feature", "production_instance_feature"):
+        if identity["value_type"] not in _VALUE_TYPES:
+            raise internal_invariant(
+                f"{where} value_type {identity['value_type']!r} is "
+                "outside the frozen vocabulary")
+        if identity["unit"] is not None:
+            if not isinstance(identity["unit"], str) or \
+                    not identity["unit"]:
+                raise internal_invariant(f"{where} unit is malformed")
+            if identity["value_type"] not in ("integer", "decimal"):
+                raise internal_invariant(
+                    f"{where} unit is only lawful for numeric "
+                    "value_types")
 
 
 def _bind_identity_to_planes(identity, kind, features, relations, world,

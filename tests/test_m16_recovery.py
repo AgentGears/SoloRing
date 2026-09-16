@@ -263,6 +263,16 @@ async def test_recovery_04(client, factory, tmp_path):
         f"/intra-shot/events/{ev[0]}", json={"persistence_mode":
                                              "transient"})
     assert d.status_code == 200, d.text
+    # the immutable operation record carries the committed RESULT
+    # evidence: the resulting (patched, transient) event hash
+    import sqlite3 as _sq
+
+    con0 = _sq.connect(str(client._transport.app.state.settings
+                            .data_dir / "soloring.db"))
+    patched_hash = con0.execute(
+        "SELECT event_hash FROM shot_intra_shot_events WHERE id = ?",
+        (ev[0],)).fetchone()[0]
+    con0.close()
     op = {
         "schema_version": 1,
         "source": {"kind": "event", "id": ev[0], "hash": ev[1]},
@@ -271,6 +281,7 @@ async def test_recovery_04(client, factory, tmp_path):
         "expected_event_set_hash": revision.snapshot_hash,
         "expected_handoff": None,
         "review_basis_hash": basis,
+        "result": {"event_id": ev[0], "event_hash": patched_hash},
     }
     op_json = _cjs(op)
     rid = "00000000-0000-4000-8000-0000000000c1"
