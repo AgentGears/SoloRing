@@ -92,7 +92,7 @@ ALLOWED_PATTERNS = [
     r"^tests/test_m16_(migration|grammar|duration|events|identity|"
     r"start_state|fold|handoff|readiness|entity|relation|instance|scale|"
     r"capture|history|history_c|races|generation_fence|recovery"
-    r"|recovery_proposals)\.py$",
+    r"|recovery_proposals|recovery_coherence)\.py$",
     r"^tests/m16_seed_b\.py$",
     r"^tests/test_m3a_happy_path\.py$",
     r"^tests/test_working_state_comparison\.py$",

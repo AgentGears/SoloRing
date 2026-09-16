@@ -153,12 +153,20 @@ def _verify_review(row, rows) -> None:
         if source_proposal_id is not None or source_event_id is None:
             _corrupt(f"review {rid} event source shape invalid")
         ev = rows(
-            "SELECT shot_id FROM shot_intra_shot_events WHERE id = ?",
+            "SELECT shot_id, target_kind, entity_feature_id, "
+            "entity_relation_id, production_instance_feature_id "
+            "FROM shot_intra_shot_events WHERE id = ?",
             (source_event_id,))
         if not ev:
             _corrupt(f"review {rid} source event missing")
         if ev[0][0] != shot_id:
             _corrupt(f"review {rid} source event belongs to another Shot")
+        # the immutable TARGET coordinate of the reviewed event (stable
+        # kind/id only — never current semantic values)
+        event_target = {
+            "kind": ev[0][1],
+            "id": ev[0][2] or ev[0][3] or ev[0][4],
+        }
         if decision not in ("adopt_persistence", "decline_persistence"):
             _corrupt(f"review {rid} illegal event decision {decision!r}")
         # IMMUTABLE evidence semantics: recovery certifies the recorded
@@ -214,11 +222,37 @@ def _verify_review(row, rows) -> None:
                 _corrupt(
                     f"review {rid} result transition kind disagrees "
                     "with the row's transition columns")
+            # the committed handoff semantic hash must equal the exact
+            # expected_handoff committed by the event review basis
+            eh = doc.get("expected_handoff")
+            if not isinstance(eh, dict) or not _is_hash(
+                    eh.get("semantic_hash")):
+                _corrupt(
+                    f"review {rid} event basis lacks the committed "
+                    "expected_handoff semantic hash")
+            if tr.get("semantic_hash") != eh["semantic_hash"]:
+                _corrupt(
+                    f"review {rid} committed transition semantic hash "
+                    "disagrees with the basis expected_handoff")
+        # direct reviews operate on the reviewed event itself: the
+        # result event IS the source event
+        if result_event_id != source_event_id:
+            _corrupt(
+                f"review {rid} direct event review result must be the "
+                "reviewed event itself")
+        # adopt_persistence does not edit the event, so the committed
+        # result hash equals the reviewed source hash
+        if decision == "adopt_persistence" and \
+                result.get("event_hash") != source_hash:
+            _corrupt(
+                f"review {rid} adopt_persistence result hash must "
+                "equal the reviewed source hash")
     elif source_kind == "proposal":
         if source_event_id is not None or source_proposal_id is None:
             _corrupt(f"review {rid} proposal source shape invalid")
         pr = rows(
-            "SELECT shot_id, proposal_hash FROM "
+            "SELECT shot_id, proposal_hash, source_shot_revision_id, "
+            "source_shot_revision_hash FROM "
             "shot_intra_shot_event_proposals WHERE id = ?",
             (source_proposal_id,))
         if not pr or pr[0][1] != source_hash:
@@ -226,6 +260,16 @@ def _verify_review(row, rows) -> None:
         if pr[0][0] != shot_id:
             _corrupt(
                 f"review {rid} source proposal belongs to another Shot")
+        # the operation's duplicated source record must agree with the
+                # review row (same contract as the event-source branch)
+        src_doc = doc.get("source")
+        if (not isinstance(src_doc, dict)
+                or src_doc.get("kind") != "proposal"
+                or src_doc.get("id") != source_proposal_id
+                or src_doc.get("hash") != source_hash):
+            _corrupt(
+                f"review {rid} operation source record disagrees with "
+                "the review row's source coordinates")
         if decision not in ("adopt_event_only", "adopt_persistence",
                             "ignore"):
             _corrupt(f"review {rid} illegal proposal decision {decision!r}")
@@ -308,6 +352,18 @@ def _verify_review(row, rows) -> None:
             _corrupt(
                 f"review {rid} batch members disagree with the persisted "
                 "review rows for that batch")
+        # §7.5.2 source coherence: the batch object must be rooted in
+        # the SAME Shot and the SAME source ShotRevision the proposal
+        # itself pins — a well-formed foreign batch cannot adopt this
+        # review
+        if batch_doc.get("shot_id") != shot_id:
+            _corrupt(
+                f"review {rid} batch object is rooted in another Shot")
+        if (batch_doc.get("source_shot_revision_id") != pr[0][2]
+                or batch_doc.get("source_shot_revision_hash") != pr[0][3]):
+            _corrupt(
+                f"review {rid} batch object source ShotRevision "
+                "disagrees with the proposal's pinned source")
         # IMMUTABLE committed-result evidence for authority-creating
         # proposal decisions — the same contract as event-source
         # reviews: the operation record carries the exact result event
@@ -356,6 +412,7 @@ def _verify_review(row, rows) -> None:
                     f"review {rid} recorded result event is not the "
                     "reviewed proposal candidate under the frozen "
                     "decision semantics")
+            candidate_target = candidate["target"]
             if decision == "adopt_persistence":
                 # §12.3: adopt_persistence = candidate event + the
                 # EXACT A2 handoff derived from that same event's
@@ -419,10 +476,26 @@ def _verify_review(row, rows) -> None:
     if not _result_event_exists(rows, result_event_id):
         _corrupt(f"review {rid} result event missing")
     res = rows(
-        "SELECT shot_id FROM shot_intra_shot_events "
-        "WHERE id = ?", (result_event_id,))[0]
+        "SELECT shot_id, target_kind, entity_feature_id, "
+        "entity_relation_id, production_instance_feature_id "
+        "FROM shot_intra_shot_events WHERE id = ?",
+        (result_event_id,))[0]
     if res[0] != shot_id:
         _corrupt(f"review {rid} result event belongs to another Shot")
+    # bind the referenced result event to the immutable TARGET
+    # coordinate (stable kind/id only — never current values)
+    if source_kind == "proposal":
+        expected_target = candidate_target
+    else:
+        expected_target = event_target
+    res_target = {
+        "kind": res[1],
+        "id": res[2] or res[3] or res[4],
+    }
+    if res_target != expected_target:
+        _corrupt(
+            f"review {rid} result event targets a different target "
+            "than the reviewed authority")
     # §16.2: current rows are FK/provenance anchors only — existence,
     # Shot ownership, domain and Shot/end coordinate. An ordinary later
     # PATCH/transition edit must NOT make a valid backup unrestorable;
@@ -466,6 +539,20 @@ def _verify_review(row, rows) -> None:
         _corrupt(
             f"review {rid} result transition is not this Shot's "
             "Shot/end owning-domain handoff")
+    # bind the transition's stable target FK to the immutable target
+    # coordinate (no current semantic values)
+    if kind == "entity_relation":
+        tr_target_id = rows(
+            "SELECT relation_id FROM "
+            "continuity_relation_transitions WHERE id = ?", (tid,))[0][0]
+    else:
+        tr_target_id = rows(
+            f"SELECT feature_id FROM {table} WHERE id = ?",
+            (tid,))[0][0]
+    if tr_target_id != expected_target["id"]:
+        _corrupt(
+            f"review {rid} result transition targets a different "
+            "target than the reviewed authority")
     # §16.2: the transition row is a provenance anchor — its CURRENT
     # value is never the historical semantic source (the recorded
     # semantic hash was already verified against the immutable derived
