@@ -191,6 +191,12 @@ ALLOWLIST = (
     "tests/test_m16_duration.py",
     "tests/test_m16_events.py",
     "tests/test_m16_identity.py",
+    # Reviewed M16-A recovery-boundary fixture correction: 0017 stays
+    # fail-closed until M16-C, so these two M10F fixtures construct the
+    # legitimate certified 0016 posture. Test fixtures, not M16 product
+    # source — deliberately NOT in M16_A_BACKEND_PATHS.
+    "tests/test_m10f_backup_restore.py",
+    "tests/test_m10f_scale.py",
 )
 
 POST_M15_REMEDIATION_BACKEND_PATHS = frozenset({
