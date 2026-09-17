@@ -231,6 +231,12 @@ ALLOWLIST = (
     # source — deliberately NOT in M16_A_BACKEND_PATHS.
     "tests/test_m10f_backup_restore.py",
     "tests/test_m10f_scale.py",
+    # M16-D R7 review-artifact placement: successor plan revision +
+    # delta record committed solely for the reviewer's byte inspection
+    # ahead of the R7 freeze. Documentation, not code.
+    "SoloRing-M16-Intra-Shot-Persistent-Consequences-"
+    "Implementation-Plan-R7.md",
+    "SoloRing-M16-R6-to-R7.delta.md",
 )
 
 POST_M15_REMEDIATION_BACKEND_PATHS = frozenset({

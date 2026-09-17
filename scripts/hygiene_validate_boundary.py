@@ -58,6 +58,12 @@ ALLOWLIST = (
     "tests/test_schema_m1.py",
     "tests/test_upload.py",
     "tests/test_generation_repository.py",
+    # M16-D R7 review-artifact placement: the successor plan revision
+    # and its delta record are committed solely for the reviewer's
+    # byte inspection ahead of the R7 freeze. Documentation, not code.
+    "SoloRing-M16-Intra-Shot-Persistent-Consequences-"
+    "Implementation-Plan-R7.md",
+    "SoloRing-M16-R6-to-R7.delta.md",
     "tests/test_m10d_races.py",
     "tests/test_m13_binding.py",
     "tests/test_m13_shot_capture.py",

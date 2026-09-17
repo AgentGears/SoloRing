@@ -102,6 +102,12 @@ ALLOWED_PATTERNS = [
     # certified 0016 posture.
     r"^tests/test_m10f_backup_restore\.py$",
     r"^tests/test_m10f_scale\.py$",
+    # M16-D R7 review-artifact placement: successor plan revision +
+    # delta record committed solely for the reviewer's byte inspection
+    # ahead of the R7 freeze. Documentation, not code.
+    r"^SoloRing-M16-Intra-Shot-Persistent-Consequences-"
+    r"Implementation-Plan-R7\.md$",
+    r"^SoloRing-M16-R6-to-R7\.delta\.md$",
 ]
 
 FORBIDDEN_PATTERNS = [
