@@ -27,8 +27,8 @@ from tests.m16_seed_b import (
     state,
 )
 from tests.test_m16_capture import _capture
+from tests.test_m16_proposals import _capture_revision, _ingest
 from tests.test_m16_recovery import _settings, _stamp_alembic
-
 
 async def _valid_proposal_review_world(client, factory):
     """One event-bearing Shot + a valid imported proposal + a valid
@@ -375,3 +375,70 @@ async def test_recovery_proposal_batch_completeness_corrupt(
             or "member" in str(exc).lower()
     else:
         raise AssertionError("orphan batch review restored")
+
+async def test_recovery_d_written_review_rows_restore(client, factory,
+                                                       tmp_path):
+    """D-written review rows survive backup/restore at C depth: a
+    single-source mixed-decision batch (authority adoption + ignore) on
+    an event-free Shot records the §7.5.2 nullable basis values as JSON
+    null — never "" — and a separate ignore-only batch records a null
+    working hash. The staged restore runs the full certified verifier
+    over these real D rows."""
+    base = await seed_feature_world(
+        client, factory, extra_feature_keys=("wardrobe",))
+    sid = base["shot_id"]
+    revision = await _capture_revision(client, sid)
+    r1, _ = await _ingest(client, sid, base["feature_id"], revision)
+    r2, _ = await _ingest(
+        client, sid, base["wardrobe_feature_id"], revision, t=1600)
+    p1, p2 = r1.json(), r2.json()
+    # single-source mixed-decision batch BEFORE any event exists: the
+    # recorded batch basis carries expected_event_set_hash = null
+    rr = await client.post(
+        f"/shots/{sid}/intra-shot/proposals/review-batch",
+        json={"reviews": [
+            {"proposal_id": p1["id"],
+             "expected_proposal_hash": p1["proposal_hash"],
+             "decision": "adopt_persistence"},
+            {"proposal_id": p2["id"],
+             "expected_proposal_hash": p2["proposal_hash"],
+             "decision": "ignore"}]})
+    assert rr.status_code == 200, rr.text
+    # ignore-only batch: no authority member, so the working hash is
+    # recorded as null as well
+    r3, _ = await _ingest(
+        client, sid, base["wardrobe_feature_id"], revision, t=1700)
+    p3 = r3.json()
+    sep = await client.post(
+        f"/shots/{sid}/intra-shot/proposals/review-batch",
+        json={"reviews": [
+            {"proposal_id": p3["id"],
+             "expected_proposal_hash": p3["proposal_hash"],
+             "decision": "ignore"}]})
+    assert sep.status_code == 200, sep.text
+    await _stamp_alembic(client)
+    engine = client._transport.app.state.engine
+    async with engine.connect() as conn:
+        rows = (await conn.execute(text(
+            "SELECT operation_json FROM "
+            "persistent_consequence_reviews WHERE source_kind = "
+            "'proposal' ORDER BY created_at"))).fetchall()
+    docs = {_json.loads(r[0])["source"]["id"]: _json.loads(r[0])
+            for r in rows}
+    assert len(docs) == 3
+    for d in docs.values():
+        bb = d["batch_basis"]
+        for field in ("expected_working_snapshot_hash",
+                      "expected_event_set_hash"):
+            # null or a real 64-hex hash — an empty string is not a
+            # legal value anywhere in the frozen §7.5.2 grammar
+            assert bb[field] is None or len(bb[field]) == 64
+    # the event-free Shot batch recorded a null event set; the
+    # ignore-only batch recorded a null working hash
+    assert docs[p1["id"]]["batch_basis"][
+        "expected_event_set_hash"] is None
+    assert docs[p3["id"]]["batch_basis"][
+        "expected_working_snapshot_hash"] is None
+    # backup -> staged restore: the certified C-depth verifier must
+    # accept every one of these D-written rows
+    await _roundtrip(client, tmp_path, "dwrite")

@@ -455,9 +455,10 @@ async def test_adopt_14(client, factory):
 
 
 async def test_adopt_15(client, factory):
-    """ADOPT:15 — an ignored proposal from an older ShotRevision does
-    not poison a batch whose authority pins the current revision; the
-    ignore decision is itself recorded as review evidence."""
+    """ADOPT:15 — one source ShotRevision per ATOMIC batch (the
+    C-recovery source-coherence invariant): mixed-decision batching is
+    legal only when every member pins the SAME revision; a batch mixing
+    revisions conflicts and the stale proposal is reviewed separately."""
     base = await seed_feature_world(
         client, factory, extra_feature_keys=("wardrobe",))
     sid = base["shot_id"]
@@ -471,8 +472,12 @@ async def test_adopt_15(client, factory):
     assert new_rev.id != old_rev.id
     r_new, _ = await _ingest(
         client, sid, base["wardrobe_feature_id"], new_rev, t=1600)
-    old_p, new_p = r_old.json(), r_new.json()
-    rr = await client.post(
+    r_third, _ = await _ingest(
+        client, sid, base["wardrobe_feature_id"], new_rev, t=1700)
+    old_p, new_p, third_p = (r_old.json(), r_new.json(),
+                             r_third.json())
+    # mixing source revisions inside one atomic batch is refused
+    mixed = await client.post(
         f"/shots/{sid}/intra-shot/proposals/review-batch",
         json={"reviews": [
             {"proposal_id": new_p["id"],
@@ -481,28 +486,122 @@ async def test_adopt_15(client, factory):
             {"proposal_id": old_p["id"],
              "expected_proposal_hash": old_p["proposal_hash"],
              "decision": "ignore"}]})
-    assert rr.status_code == 200, rr.text
-    assert rr.json()["idempotent"] is False
+    assert mixed.status_code == 409, mixed.text
+    assert "INTRA_SHOT_PROPOSAL_STALE" in mixed.text
+    assert "separately" in mixed.text
+    # a mixed-DECISION batch is legal when every member shares one
+    # revision — ignore records its review evidence with no authority
+    ok = await client.post(
+        f"/shots/{sid}/intra-shot/proposals/review-batch",
+        json={"reviews": [
+            {"proposal_id": new_p["id"],
+             "expected_proposal_hash": new_p["proposal_hash"],
+             "decision": "adopt_persistence"},
+            {"proposal_id": third_p["id"],
+             "expected_proposal_hash": third_p["proposal_hash"],
+             "decision": "ignore"}]})
+    assert ok.status_code == 200, ok.text
+    assert ok.json()["idempotent"] is False
     engine = client._transport.app.state.engine
     async with engine.connect() as conn:
         dec = (await conn.execute(text(
             "SELECT decision FROM persistent_consequence_reviews "
             "WHERE source_proposal_id = :p"),
-            {"p": old_p["id"]})).scalar_one()
+            {"p": third_p["id"]})).scalar_one()
     assert dec == "ignore"
-    # an ignore-only batch spanning several revisions has no single
-    # basis to anchor on
-    r_third, _ = await _ingest(
-        client, sid, base["wardrobe_feature_id"], new_rev, t=1700)
-    third_p = r_third.json()
-    sub = await client.post(
+    # the stale proposal is ignored in its own batch at its own revision
+    sep = await client.post(
         f"/shots/{sid}/intra-shot/proposals/review-batch",
         json={"reviews": [
             {"proposal_id": old_p["id"],
              "expected_proposal_hash": old_p["proposal_hash"],
-             "decision": "ignore"},
-            {"proposal_id": third_p["id"],
-             "expected_proposal_hash": third_p["proposal_hash"],
              "decision": "ignore"}]})
-    assert sub.status_code == 409, sub.text
-    assert "INTRA_SHOT_PROPOSAL_STALE" in sub.text
+    assert sep.status_code == 200, sep.text
+    async with engine.connect() as conn:
+        dec2 = (await conn.execute(text(
+            "SELECT decision FROM persistent_consequence_reviews "
+            "WHERE source_proposal_id = :p"),
+            {"p": old_p["id"]})).scalar_one()
+    assert dec2 == "ignore"
+
+
+async def test_adopt_16(client, factory):
+    """ADOPT:16 — a committed batch missing a persisted review row is
+    corruption: the full retry conflicts and never recreates the
+    missing member (§12.4 forbids repairing partial persistence)."""
+    base, sid, revision, props = await _two_sibling_proposals(
+        client, factory)
+    rr = await client.post(
+        f"/shots/{sid}/intra-shot/proposals/review-batch",
+        json={"reviews": [{
+            "proposal_id": p["id"],
+            "expected_proposal_hash": p["proposal_hash"],
+            "decision": "adopt_persistence"} for p in props]})
+    assert rr.status_code == 200, rr.text
+    engine = client._transport.app.state.engine
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "DELETE FROM persistent_consequence_reviews WHERE "
+            "source_proposal_id = :p"),
+            {"p": props[1]["id"]})
+    rr2 = await client.post(
+        f"/shots/{sid}/intra-shot/proposals/review-batch",
+        json={"reviews": [{
+            "proposal_id": p["id"],
+            "expected_proposal_hash": p["proposal_hash"],
+            "decision": "adopt_persistence"} for p in props]})
+    assert rr2.status_code == 409, rr2.text
+    assert "INTRA_SHOT_REVIEW_CONFLICT" in rr2.text
+    assert "corruption" in rr2.text.lower()
+    # nothing was recreated: only the surviving row remains
+    async with engine.connect() as conn:
+        n = (await conn.execute(text(
+            "SELECT COUNT(*) FROM "
+            "persistent_consequence_reviews"))).scalar_one()
+    assert n == 1
+
+
+async def test_adopt_17(client, factory):
+    """ADOPT:17 — direct retries survive unrelated later captures and
+    event-set evolution: the prior review is located from the immutable
+    request source tuple; current state only certifies result drift."""
+    base = await seed_feature_world(
+        client, factory, extra_feature_keys=("wardrobe",))
+    sid, fid = base["shot_id"], base["feature_id"]
+    ev1 = await post_event(
+        client, sid,
+        event(fid, 1000, state(), state("fresh"),
+              persistence="require_handoff"))
+    proj = await get_intra(client, sid)
+    adopt_body = {"expected_event_hash": ev1["event_hash"],
+                  "expected_event_set_hash": proj["event_set_hash"]}
+    r1 = await client.post(
+        f"/intra-shot/events/{ev1['id']}/persistence/adopt",
+        json=adopt_body)
+    assert r1.status_code == 200, r1.text
+    # unrelated event-set evolution: a second event joins the set
+    ev2 = await post_event(
+        client, sid,
+        event(base["wardrobe_feature_id"], 1200, state(), state("wet"),
+              persistence="require_handoff"))
+    # the exact adopt retry (original request evidence) still converges
+    r2 = await client.post(
+        f"/intra-shot/events/{ev1['id']}/persistence/adopt",
+        json=adopt_body)
+    assert r2.status_code == 200, r2.text
+    assert r2.json()["idempotent"] is True
+    # decline flow: decline ev2, then capture a NEW revision (which
+    # moves the working pin), then retry the decline unchanged
+    proj2 = await get_intra(client, sid)
+    decline_body = {"expected_event_hash": ev2["event_hash"],
+                    "expected_event_set_hash": proj2["event_set_hash"]}
+    d1 = await client.post(
+        f"/intra-shot/events/{ev2['id']}/persistence/decline",
+        json=decline_body)
+    assert d1.status_code == 200, d1.text
+    await _capture_revision(client, sid)
+    d2 = await client.post(
+        f"/intra-shot/events/{ev2['id']}/persistence/decline",
+        json=decline_body)
+    assert d2.status_code == 200, d2.text
+    assert d2.json()["idempotent"] is True

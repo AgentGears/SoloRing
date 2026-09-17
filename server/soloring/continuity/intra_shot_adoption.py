@@ -264,11 +264,14 @@ async def _result_entry_valid(conn, result: dict,
         return False
     if kind == "entity_relation":
         rows = (await conn.execute(text(
-            "SELECT relation_id, anchor_id, state FROM "
-            "continuity_relation_transitions WHERE id = :t "
+            "SELECT relation_id, anchor_id, anchor_type, boundary, "
+            "state FROM continuity_relation_transitions WHERE id = :t "
             "AND deleted_at IS NULL"), {"t": tid})).fetchall()
         if not rows:
             return False  # tombstoned or deleted
+        if (rows[0].anchor_type != "shot"
+                or rows[0].boundary != "end"):
+            return False  # re-anchored off the Shot/end boundary
         semantic = relation_handoff_value(
             relation_id=rows[0].relation_id, shot_id=rows[0].anchor_id,
             state=rows[0].state)
@@ -281,11 +284,15 @@ async def _result_entry_valid(conn, result: dict,
     if table is None:
         return False
     rows = (await conn.execute(text(
-        f"SELECT feature_id, anchor_id, operation, value_json, "
-        f"value_hash FROM {table} WHERE id = :t AND deleted_at IS NULL"),
+        f"SELECT feature_id, anchor_id, anchor_type, boundary, "
+        f"operation, value_json, value_hash FROM {table} WHERE id = :t "
+        f"AND deleted_at IS NULL"),
         {"t": tid})).fetchall()
     if not rows:
         return False  # tombstoned or deleted
+    if (rows[0].anchor_type != "shot"
+            or rows[0].boundary != "end"):
+        return False  # re-anchored off the Shot/end boundary
     row = rows[0]
     if row.operation == "set":
         if row.value_json is None or row.value_hash is None:
@@ -305,6 +312,19 @@ async def _probe_review(conn, basis: str):
         "SELECT id, operation_json, operation_hash FROM "
         "persistent_consequence_reviews WHERE review_basis_hash = :b"),
         {"b": basis})).first()
+
+
+async def _probe_event_review(conn, *, event_id: str, source_hash: str,
+                              decision: str):
+    """Locate a direct event review by its IMMUTABLE source tuple —
+    (source event, source hash, decision) is unique under
+    uq_pcr_event_source_hash and depends on nothing about today's
+    state (§12.4: current state never masks an exact retry)."""
+    return (await conn.execute(text(
+        "SELECT id, operation_json, operation_hash FROM "
+        "persistent_consequence_reviews WHERE source_event_id = :e "
+        "AND source_hash = :h AND decision = :d"),
+        {"e": event_id, "h": source_hash, "d": decision})).first()
 
 
 async def _row_transition_ids(conn, review_id) -> tuple:
@@ -452,6 +472,31 @@ async def adopt_event_persistence(session: AsyncSession, event_id: str, *,
         try:
             row = await _event_row(conn, event_id)
             shot = await _load_shot(conn, row.shot_id)
+            # §12.4: same tuple-first rule as decline — the committed
+            # review is located from the immutable request source tuple
+            # before any current-state gate, so unrelated event-set
+            # evolution or a later capture cannot mask an exact retry;
+            # current state only certifies recorded-result drift
+            existing = await _probe_event_review(
+                conn, event_id=event_id, source_hash=expected_event_hash,
+                decision="adopt_persistence")
+            if existing is not None:
+                op = json.loads(existing.operation_json)
+                if (op.get("expected_event_set_hash")
+                        == expected_event_set_hash):
+                    tids = await _row_transition_ids(conn, existing.id)
+                    if not await _review_result_still_valid(
+                            conn, op, row_transition_ids=tids):
+                        raise _conflict(
+                            ErrorCode.INTRA_SHOT_REVIEW_CONFLICT,
+                            "recorded review result authority drifted")
+                    await conn.commit()
+                    return _basis_result(
+                        op, review_id=existing.id,
+                        operation_hash=existing.operation_hash,
+                        transition_ids=tids)
+                # different request evidence against the same source:
+                # fall through to the gates, which conflict honestly
             if row.event_hash != expected_event_hash:
                 raise _conflict(
                     ErrorCode.INTRA_SHOT_REVIEW_CONFLICT,
@@ -484,20 +529,6 @@ async def adopt_event_persistence(session: AsyncSession, event_id: str, *,
                 expected_working_snapshot_hash=working_pin,
                 expected_event_set_hash=expected_event_set_hash,
                 expected_handoff=eh)
-            existing = await _probe_review(conn, basis)
-            if existing is not None:
-                op = json.loads(existing.operation_json)
-                tids = await _row_transition_ids(conn, existing.id)
-                if not await _review_result_still_valid(
-                        conn, op, row_transition_ids=tids):
-                    raise _conflict(
-                        ErrorCode.INTRA_SHOT_REVIEW_CONFLICT,
-                        "recorded review result authority drifted")
-                await conn.commit()
-                return _basis_result(
-                    op, review_id=existing.id,
-                    operation_hash=existing.operation_hash,
-                    transition_ids=tids)
             if shot.scene_id is None:
                 raise _conflict(
                     ErrorCode.INTRA_SHOT_HANDOFF_ANCHOR_REQUIRED,
@@ -560,39 +591,33 @@ async def decline_event_persistence(session: AsyncSession, event_id: str, *,
         try:
             row = await _event_row(conn, event_id)
             shot = await _load_shot(conn, row.shot_id)
-            # §12.4: the committed review is probed from the ORIGINAL
-            # immutable basis BEFORE the pre-decline row-shape gates —
-            # the first successful decline flips this same UUID to
-            # transient, so an exact retry must converge on the
-            # recorded decision instead of re-demanding require_handoff.
-            # The original working pin reconstructs exactly because the
-            # decline never touches ShotRevisions: the last captured
-            # hash (or, absent a capture, the client-pinned pre-decline
-            # event-set hash, which the drift gate equates to the then-
-            # current set) is unchanged by the decline itself.
-            captured = await _last_captured_hash(conn, shot.id)
-            pin0 = (captured if captured is not None
-                    else expected_event_set_hash)
-            basis0 = event_review_basis_hash(
-                source_event_id=event_id, source_hash=expected_event_hash,
-                decision="decline_persistence",
-                expected_working_snapshot_hash=pin0,
-                expected_event_set_hash=expected_event_set_hash,
-                expected_handoff=None)
-            existing = await _probe_review(conn, basis0)
+            # §12.4: the committed review is located from the immutable
+            # REQUEST source tuple BEFORE the pre-decline row-shape
+            # gates — the first successful decline flips this same UUID
+            # to transient, and a LATER capture moves the working pin,
+            # so neither today's row shape nor today's state may gate
+            # the probe; current state is only consulted to verify the
+            # recorded result authority for drift.
+            existing = await _probe_event_review(
+                conn, event_id=event_id, source_hash=expected_event_hash,
+                decision="decline_persistence")
             if existing is not None:
                 op = json.loads(existing.operation_json)
-                tids = await _row_transition_ids(conn, existing.id)
-                if not await _review_result_still_valid(
-                        conn, op, row_transition_ids=tids):
-                    raise _conflict(
-                        ErrorCode.INTRA_SHOT_REVIEW_CONFLICT,
-                        "recorded review result authority drifted")
-                await conn.commit()
-                return _basis_result(
-                    op, review_id=existing.id,
-                    operation_hash=existing.operation_hash,
-                    transition_ids=tids)
+                if (op.get("expected_event_set_hash")
+                        == expected_event_set_hash):
+                    tids = await _row_transition_ids(conn, existing.id)
+                    if not await _review_result_still_valid(
+                            conn, op, row_transition_ids=tids):
+                        raise _conflict(
+                            ErrorCode.INTRA_SHOT_REVIEW_CONFLICT,
+                            "recorded review result authority drifted")
+                    await conn.commit()
+                    return _basis_result(
+                        op, review_id=existing.id,
+                        operation_hash=existing.operation_hash,
+                        transition_ids=tids)
+                # different request evidence against the same source:
+                # fall through to the gates, which conflict honestly
             if row.event_hash != expected_event_hash:
                 raise _conflict(
                     ErrorCode.INTRA_SHOT_REVIEW_CONFLICT,
@@ -604,7 +629,12 @@ async def decline_event_persistence(session: AsyncSession, event_id: str, *,
                     "declined", event_id=event_id)
             current_set0 = await _current_event_set(conn, shot)
             working_pin = await _working_pin(conn, shot, current_set0)
-            basis = basis0
+            basis = event_review_basis_hash(
+                source_event_id=event_id, source_hash=expected_event_hash,
+                decision="decline_persistence",
+                expected_working_snapshot_hash=working_pin,
+                expected_event_set_hash=expected_event_set_hash,
+                expected_handoff=None)
             current_set = await _current_event_set(conn, shot)
             if current_set != expected_event_set_hash:
                 raise _conflict(
@@ -863,8 +893,13 @@ async def review_proposals(session: AsyncSession, shot_id: str,
         try:
             shot = await _load_shot(conn, shot_id)
             authority = [r for r in reviews if r["decision"] != "ignore"]
-            authority_pins: set[tuple[str, str]] = set()
-            all_pins: set[tuple[str, str]] = set()
+            # one source ShotRevision per ATOMIC batch. §7.5.2 gives the
+            # batch object a single source coordinate pair, and the
+            # certified C-recovery source-coherence invariant requires it
+            # to equal EVERY member proposal's own pinned source — a
+            # stale proposal (ignored or not) is reviewed in its own
+            # batch, never mixed into a current-authority batch.
+            pins: set[tuple[str, str]] = set()
             specs = []
             for r in reviews:
                 row = (await conn.execute(text(
@@ -883,33 +918,15 @@ async def review_proposals(session: AsyncSession, shot_id: str,
                         ErrorCode.INTRA_SHOT_PROPOSAL_STALE,
                         "proposal hash drifted",
                         proposal_id=r["proposal_id"])
-                pin = (row.source_shot_revision_id,
-                       row.source_shot_revision_hash)
-                all_pins.add(pin)
-                # §7.5.2/§12.3: only authority-creating decisions pin
-                # the shared source basis — an ignored proposal from an
-                # older ShotRevision must not poison the batch
-                if r["decision"] != "ignore":
-                    authority_pins.add(pin)
+                pins.add((row.source_shot_revision_id,
+                          row.source_shot_revision_hash))
                 specs.append((r, row))
-            if len(authority_pins) > 1:
+            if len(pins) != 1:
                 raise _conflict(
                     ErrorCode.INTRA_SHOT_PROPOSAL_STALE,
-                    "authority-creating proposals must share one source "
-                    "ShotRevision")
-            source_rev = source_hash = ""
-            if authority_pins:
-                source_rev, source_hash = next(iter(authority_pins))
-            elif len(all_pins) == 1:
-                # ignore-only batch: the §7.5.2 basis still requires one
-                # revision identity, anchored on the members' own
-                # shared pin (expected hashes may be None here)
-                source_rev, source_hash = next(iter(all_pins))
-            else:
-                raise _conflict(
-                    ErrorCode.INTRA_SHOT_PROPOSAL_STALE,
-                    "an ignore-only batch spanning several source "
-                    "ShotRevisions has no single batch basis")
+                    "proposals in one atomic batch must share one source "
+                    "ShotRevision; review a stale proposal separately")
+            source_rev, source_hash = next(iter(pins))
             # §12.3 batch-retry convergence FIRST: if every member
             # already has a committed review sharing ONE batch basis
             # and the recorded results are still valid, return the
@@ -926,6 +943,29 @@ async def review_proposals(session: AsyncSession, shot_id: str,
                      "h": r["expected_proposal_hash"],
                      "d": r["decision"]})).first()
                 committed.append(row)
+            if any(c is not None for c in committed) and not all(
+                    c is not None for c in committed):
+                # §12.4: a committed batch missing persisted member rows
+                # is invariant corruption — the retry must conflict,
+                # never repair the batch by recreating the missing rows
+                # through the per-member path
+                partial_incoming = {
+                    (r["proposal_id"], r["expected_proposal_hash"],
+                     r["decision"]) for r in reviews}
+                for c in committed:
+                    if c is None:
+                        continue
+                    c_op = json.loads(c.operation_json)
+                    c_recorded = (c_op.get("batch_basis") or {}
+                                  ).get("reviews") or []
+                    c_recorded_set = {
+                        (x["proposal_id"], x["proposal_hash"],
+                         x["decision"]) for x in c_recorded}
+                    if partial_incoming <= c_recorded_set:
+                        raise _conflict(
+                            ErrorCode.INTRA_SHOT_REVIEW_CONFLICT,
+                            "a committed batch is missing persisted "
+                            "review rows — corruption, not a retry")
             if all(c is not None for c in committed):
                 ops = [json.loads(c.operation_json) for c in committed]
                 bases = {op.get("batch_basis_hash") for op in ops}
@@ -1026,8 +1066,12 @@ async def review_proposals(session: AsyncSession, shot_id: str,
                 "shot_id": shot_id,
                 "source_shot_revision_id": source_rev,
                 "source_shot_revision_hash": source_hash,
-                "expected_working_snapshot_hash": working or "",
-                "expected_event_set_hash": event_set or "",
+                # §7.5.2 nullable basis values are recorded as JSON null,
+                # byte-verbatim with the hashed basis inputs — C recovery
+                # recomputes the batch root from this doc, and "" is not
+                # a legal hash in the frozen grammar
+                "expected_working_snapshot_hash": working,
+                "expected_event_set_hash": event_set,
                 "reviews": batch_reviews,
             }
             new_drafts = []
@@ -1141,7 +1185,7 @@ async def review_proposals(session: AsyncSession, shot_id: str,
                                "id": r["proposal_id"],
                                "hash": r["expected_proposal_hash"]},
                     "decision": decision,
-                    "expected_working_snapshot_hash": working or "",
+                    "expected_working_snapshot_hash": working,
                     "expected_event_set_hash": event_set,
                     "expected_handoff": eh,
                     "review_basis_hash": basis,
