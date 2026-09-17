@@ -202,30 +202,6 @@ async def _current_event_set(conn, shot) -> str | None:
                    events=docs)
 
 
-async def _last_captured_hash(conn, shot_id: str) -> str | None:
-    return (await conn.execute(text(
-        "SELECT snapshot_hash FROM shot_revisions WHERE shot_id = :s "
-        "ORDER BY revision_number DESC LIMIT 1"),
-        {"s": shot_id})).scalar_one_or_none()
-
-
-async def _working_pin(conn, shot, event_set: str | None) -> str:
-    """The §7.5.1 working-hash commitment for DIRECT reviews: the last
-    certified authority basis (the most recent ShotRevision hash); when
-    no capture exists yet, the current event-set hash stands in as the
-    pre-adoption authority pin (the M16-blocked working hash is by
-    definition unavailable — that is what adoption fixes). The pin is
-    recorded in the basis and verified by recovery from the record."""
-    captured = await _last_captured_hash(conn, shot.id)
-    if captured is not None:
-        return captured
-    if event_set is not None:
-        return event_set
-    from soloring.domain.canonical import canonical_hash as _h
-
-    return _h({"pre_adoption_empty_basis": shot.id})
-
-
 async def _review_result_still_valid(conn, op: dict,
                                      row_transition_ids=()) -> bool:
     """Exact-retry guard (frozen §12.4): every recorded result EVENT
@@ -539,12 +515,12 @@ async def adopt_event_persistence(session: AsyncSession, event_id: str, *,
                     ErrorCode.INTRA_SHOT_REVIEW_CONFLICT,
                     "only the terminal event for a target may adopt "
                     "persistence", event_id=event_id)
-            working_pin = await _working_pin(
-                conn, shot, refolded["event_set_hash"])
+            # R7 §7.5.1: the direct basis is fenced by current M16
+            # authority only — source event + event-set hashes; no
+            # working-snapshot field exists on this basis
             basis = event_review_basis_hash(
                 source_event_id=event_id, source_hash=expected_event_hash,
                 decision="adopt_persistence",
-                expected_working_snapshot_hash=working_pin,
                 expected_event_set_hash=expected_event_set_hash,
                 expected_handoff=eh)
             if shot.scene_id is None:
@@ -567,7 +543,6 @@ async def adopt_event_persistence(session: AsyncSession, event_id: str, *,
                 "source": {"kind": "event", "id": event_id,
                            "hash": expected_event_hash},
                 "decision": "adopt_persistence",
-                "expected_working_snapshot_hash": working_pin,
                 "expected_event_set_hash": expected_event_set_hash,
                 "expected_handoff": eh,
                 "review_basis_hash": basis,
@@ -645,12 +620,12 @@ async def decline_event_persistence(session: AsyncSession, event_id: str, *,
                     ErrorCode.INTRA_SHOT_REVIEW_CONFLICT,
                     "only an unreviewed require_handoff event can be "
                     "declined", event_id=event_id)
-            current_set0 = await _current_event_set(conn, shot)
-            working_pin = await _working_pin(conn, shot, current_set0)
+            # R7 §7.5.1: the direct basis is fenced by current M16
+            # authority only — source event + event-set hashes; no
+            # working-snapshot field exists on this basis
             basis = event_review_basis_hash(
                 source_event_id=event_id, source_hash=expected_event_hash,
                 decision="decline_persistence",
-                expected_working_snapshot_hash=working_pin,
                 expected_event_set_hash=expected_event_set_hash,
                 expected_handoff=None)
             current_set = await _current_event_set(conn, shot)
@@ -686,7 +661,6 @@ async def decline_event_persistence(session: AsyncSession, event_id: str, *,
                 "source": {"kind": "event", "id": event_id,
                            "hash": expected_event_hash},
                 "decision": "decline_persistence",
-                "expected_working_snapshot_hash": working_pin,
                 "expected_event_set_hash": expected_event_set_hash,
                 "expected_handoff": None,
                 "review_basis_hash": basis,

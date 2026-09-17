@@ -181,13 +181,24 @@ def _verify_review(row, rows) -> None:
             _corrupt(
                 f"review {rid} operation source record disagrees with "
                 "the review row's source coordinates")
-        recomputed = event_basis(
-            source_event_id=source_event_id, source_hash=source_hash,
-            decision=decision,
-            expected_working_snapshot_hash=doc.get(
-                "expected_working_snapshot_hash", ""),
-            expected_event_set_hash=doc.get("expected_event_set_hash", ""),
-            expected_handoff=doc.get("expected_handoff"))
+        # R7: the event-source basis grammar is the exact §7.5.1 R7
+        # field set — a missing or extra field (including any
+        # expected_working_snapshot_hash) is corruption
+        if "expected_working_snapshot_hash" in doc:
+            _corrupt(
+                f"review {rid} event basis carries the removed "
+                "expected_working_snapshot_hash field")
+        try:
+            recomputed = event_basis(
+                source_event_id=source_event_id, source_hash=source_hash,
+                decision=decision,
+                expected_event_set_hash=doc.get("expected_event_set_hash"),
+                expected_handoff=doc.get("expected_handoff"))
+        except Exception:
+            _corrupt(
+                f"review {rid} event basis violates the R7 grammar "
+                "(missing or extra fields, including any "
+                "expected_working_snapshot_hash)")
         if recomputed != review_basis_hash:
             _corrupt(
                 f"review {rid} recorded basis is not the frozen event "

@@ -82,7 +82,6 @@ async def _valid_direct_adopt_review(client, factory):
     basis = event_review_basis_hash(
         source_event_id=ev["id"], source_hash=ev["event_hash"],
         decision="adopt_persistence",
-        expected_working_snapshot_hash=revision.snapshot_hash,
         expected_event_set_hash=(await get_intra(
             client, sid))["event_set_hash"],
         expected_handoff=eh)
@@ -91,7 +90,6 @@ async def _valid_direct_adopt_review(client, factory):
         "source": {"kind": "event", "id": ev["id"],
                    "hash": ev["event_hash"]},
         "decision": "adopt_persistence",
-        "expected_working_snapshot_hash": revision.snapshot_hash,
         "expected_event_set_hash": (await get_intra(
             client, sid))["event_set_hash"],
         "expected_handoff": eh,
@@ -246,8 +244,6 @@ async def test_recovery_foreign_expected_handoff_target_fails(
         source_event_id=world["ev"]["id"],
         source_hash=world["ev"]["event_hash"],
         decision="adopt_persistence",
-        expected_working_snapshot_hash=op[
-            "expected_working_snapshot_hash"],
         expected_event_set_hash=op["expected_event_set_hash"],
         expected_handoff=eh)
     op["review_basis_hash"] = basis
@@ -290,8 +286,6 @@ async def test_recovery_nested_handoff_extra_field_fails(
         source_event_id=world["ev"]["id"],
         source_hash=world["ev"]["event_hash"],
         decision="adopt_persistence",
-        expected_working_snapshot_hash=op[
-            "expected_working_snapshot_hash"],
         expected_event_set_hash=op["expected_event_set_hash"],
         expected_handoff=eh)
     op["review_basis_hash"] = basis

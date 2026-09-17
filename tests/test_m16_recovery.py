@@ -253,7 +253,6 @@ async def test_recovery_04(client, factory, tmp_path):
     basis = event_review_basis_hash(
         source_event_id=ev[0], source_hash=ev[1],
         decision="decline_persistence",
-        expected_working_snapshot_hash=revision.snapshot_hash,
         expected_event_set_hash=revision.snapshot_hash,
         expected_handoff=None)
     # frozen R6 §12.2 decline semantics: the SAME event UUID is PATCHed
@@ -277,7 +276,6 @@ async def test_recovery_04(client, factory, tmp_path):
         "schema_version": 1,
         "source": {"kind": "event", "id": ev[0], "hash": ev[1]},
         "decision": "decline_persistence",
-        "expected_working_snapshot_hash": revision.snapshot_hash,
         "expected_event_set_hash": revision.snapshot_hash,
         "expected_handoff": None,
         "review_basis_hash": basis,

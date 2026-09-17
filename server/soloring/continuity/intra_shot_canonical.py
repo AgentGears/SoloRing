@@ -269,16 +269,18 @@ def proposal_storage(**kwargs) -> tuple[dict, str, str]:
 
 
 def event_review_basis_value(*, source_event_id: str, source_hash: str,
-                             decision: str, expected_working_snapshot_hash: str,
+                             decision: str,
                              expected_event_set_hash: str,
                              expected_handoff: dict | None) -> dict:
+    """R7 event-source basis: fenced by current M16 authority (source
+    event + event-set hashes) — deliberately NO working-snapshot field,
+    which §9.2 defines as unavailable exactly while the reviewed
+    require_handoff state is unresolved."""
     if decision not in EVENT_DECISIONS:
         raise validation_error("invalid event review decision")
     if not is_uuid(source_event_id):
         raise validation_error("source event id must be UUID")
     require_hash(source_hash, field="source_hash")
-    require_hash(expected_working_snapshot_hash,
-                 field="expected_working_snapshot_hash")
     require_hash(expected_event_set_hash, field="expected_event_set_hash")
     if decision == "decline_persistence" and expected_handoff is not None:
         raise validation_error("decline_persistence requires expected_handoff null")
@@ -287,7 +289,6 @@ def event_review_basis_value(*, source_event_id: str, source_hash: str,
         "source": {"kind": "event", "id": source_event_id,
                    "hash": source_hash},
         "decision": decision,
-        "expected_working_snapshot_hash": expected_working_snapshot_hash,
         "expected_event_set_hash": expected_event_set_hash,
         "expected_handoff": expected_handoff,
     }

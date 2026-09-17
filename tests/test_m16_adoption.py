@@ -751,3 +751,81 @@ async def test_adopt_20(client, factory):
             "WHERE anchor_id = :s"),
             {"s": sid})).scalar_one()
     assert n == 0
+
+
+async def test_adopt_21(client, factory):
+    """ADOPT:21 — R7: the two-field direct adopt succeeds while the
+    working snapshot hash is null; the Shot then becomes M16-ready and
+    obtains its ordinary authoritative working snapshot hash — the §9.2
+    vs §12.1 contradiction is removed, not hidden."""
+    base = await seed_feature_world(client, factory)
+    sid, fid = base["shot_id"], base["feature_id"]
+    ev = await post_event(
+        client, sid,
+        event(fid, 1000, state(), state("fresh"),
+              persistence="require_handoff"))
+    # the unresolved require_handoff event blocks the working hash
+    blocked = (await client.get(f"/shots/{sid}")).json()
+    assert blocked["working_snapshot_hash"] is None
+    assert blocked["intra_shot_ready"] is False
+    r = await _adopt_direct(client, sid, ev)
+    assert r.status_code == 200, r.text
+    ready = (await client.get(f"/shots/{sid}")).json()
+    assert ready["intra_shot_ready"] is True
+    assert ready["working_snapshot_hash"] is not None
+
+
+async def test_adopt_22(client, factory):
+    """ADOPT:22 — the direct review basis/operation grammar carries no
+    working-snapshot field; both decisions root exactly in the §7.5.1
+    R7 field set."""
+    from soloring.continuity.intra_shot_canonical import (
+        event_review_basis_hash,
+    )
+
+    base = await seed_feature_world(
+        client, factory, extra_feature_keys=("wardrobe",))
+    sid, fid = base["shot_id"], base["feature_id"]
+    ev1 = await post_event(
+        client, sid,
+        event(fid, 1000, state(), state("fresh"),
+              persistence="require_handoff"))
+    ev2 = await post_event(
+        client, sid,
+        event(base["wardrobe_feature_id"], 1200, state(), state("wet"),
+              persistence="require_handoff"))
+    proj = await get_intra(client, sid)
+    r1 = await client.post(
+        f"/intra-shot/events/{ev1['id']}/persistence/adopt",
+        json={"expected_event_hash": ev1["event_hash"],
+              "expected_event_set_hash": proj["event_set_hash"]})
+    assert r1.status_code == 200, r1.text
+    d = await client.post(
+        f"/intra-shot/events/{ev2['id']}/persistence/decline",
+        json={"expected_event_hash": ev2["event_hash"],
+              "expected_event_set_hash": proj["event_set_hash"]})
+    assert d.status_code == 200, d.text
+    engine = client._transport.app.state.engine
+    async with engine.connect() as conn:
+        rows = (await conn.execute(text(
+            "SELECT source_event_id, review_basis_hash, operation_json "
+            "FROM persistent_consequence_reviews WHERE source_kind = "
+            "'event'"))).fetchall()
+    by_event = {r[0]: (r[1], json.loads(r[2])) for r in rows}
+    adopt_basis, adopt_op = by_event[ev1["id"]]
+    decline_basis, decline_op = by_event[ev2["id"]]
+    for _basis, op in ((adopt_basis, adopt_op),
+                       (decline_basis, decline_op)):
+        assert "expected_working_snapshot_hash" not in op
+    assert adopt_basis == event_review_basis_hash(
+        source_event_id=ev1["id"], source_hash=ev1["event_hash"],
+        decision="adopt_persistence",
+        expected_event_set_hash=proj["event_set_hash"],
+        expected_handoff=adopt_op["expected_handoff"])
+    assert adopt_op["review_basis_hash"] == adopt_basis
+    assert decline_basis == event_review_basis_hash(
+        source_event_id=ev2["id"], source_hash=ev2["event_hash"],
+        decision="decline_persistence",
+        expected_event_set_hash=proj["event_set_hash"],
+        expected_handoff=None)
+    assert decline_op["review_basis_hash"] == decline_basis
