@@ -140,6 +140,7 @@ def _verify_proposal_source(row, rows) -> None:
 def _verify_review(row, rows) -> None:
     from soloring.continuity.intra_shot_canonical import (
         event_review_basis_hash as event_basis,
+        event_review_basis_value as event_basis_value,
         proposal_review_basis_hash as proposal_basis,
     )
 
@@ -194,8 +195,15 @@ def _verify_review(row, rows) -> None:
             _corrupt(
                 f"review {rid} event operation key set is not the exact "
                 "R7 shape (missing or extra top-level field)")
+        # R7 exact canonical basis projection: the operation's OWN five
+        # basis fields — schema_version, source, decision,
+        # expected_event_set_hash, expected_handoff — must equal the
+        # canonical value built from the ROW coordinates; a duplicated
+        # schema_version/decision/source with a different value or an
+        # extra nested source key is corruption even after a coherent
+        # operation rehash
         try:
-            recomputed = event_basis(
+            canonical_basis = event_basis_value(
                 source_event_id=source_event_id, source_hash=source_hash,
                 decision=decision,
                 expected_event_set_hash=doc["expected_event_set_hash"],
@@ -205,7 +213,25 @@ def _verify_review(row, rows) -> None:
                 f"review {rid} event basis violates the R7 grammar "
                 "(missing or extra fields, including any "
                 "expected_working_snapshot_hash)")
-        if recomputed != review_basis_hash:
+        projected = {k: doc[k] for k in (
+            "schema_version", "source", "decision",
+            "expected_event_set_hash", "expected_handoff")}
+        if projected != canonical_basis:
+            _corrupt(
+                f"review {rid} operation basis projection is not the "
+                "exact R7 canonical value")
+        # the duplicated root must agree with BOTH the review row and
+        # the canonical basis hash
+        if doc["review_basis_hash"] != review_basis_hash:
+            _corrupt(
+                f"review {rid} duplicated review_basis_hash disagrees "
+                "with the review row")
+        if event_basis(
+                source_event_id=source_event_id, source_hash=source_hash,
+                decision=decision,
+                expected_event_set_hash=doc["expected_event_set_hash"],
+                expected_handoff=doc["expected_handoff"]) != \
+                review_basis_hash:
             _corrupt(
                 f"review {rid} recorded basis is not the frozen event "
                 "review-basis root")

@@ -335,3 +335,68 @@ async def test_recovery_event_op_extra_field_fails(client, factory,
             or "key set" in str(exc).lower(), str(exc)
     else:
         raise AssertionError("extra top-level operation field restored")
+
+
+async def test_recovery_event_projection_values_fails(client, factory,
+                                                      tmp_path):
+    """R7 exact projection: a coherently rehashed operation whose
+    duplicated basis fields disagree with the canonical value — wrong
+    schema_version, an extra nested source key, and a different
+    duplicated decision — is corruption even though the row-level root
+    is intact."""
+    from soloring.recovery.backup import restore
+
+    world = await _valid_direct_adopt_review(client, factory)
+    backup_root = await _backup(client, tmp_path, "pv")
+    con = sqlite3.connect(str(backup_root / "soloring.db"))
+    op = _json.loads(con.execute(
+        "SELECT operation_json FROM "
+        "persistent_consequence_reviews WHERE id = ?",
+        (world["review_id"],)).fetchone()[0])
+    op["schema_version"] = 999
+    op["source"] = {**op["source"], "extra": 1}
+    op["decision"] = "decline_persistence"
+    con.execute(
+        "UPDATE persistent_consequence_reviews SET operation_json = :oj,"
+        " operation_hash = :oh WHERE id = :rid",
+        {"oj": _cjs(op), "oh": _ch(op), "rid": world["review_id"]})
+    con.commit()
+    con.close()
+    _rehash_manifest(backup_root)
+    try:
+        await restore(backup_root, tmp_path / "ref-pv")
+    except Exception as exc:
+        assert "projection" in str(exc).lower(), str(exc)
+    else:
+        raise AssertionError("non-canonical basis projection restored")
+
+
+async def test_recovery_event_duplicated_root_mismatch_fails(
+        client, factory, tmp_path):
+    """R7 exact projection: the duplicated review_basis_hash inside the
+    operation must equal the review row's column — a coherently
+    rehashed bogus root is corruption."""
+    from soloring.recovery.backup import restore
+
+    world = await _valid_direct_adopt_review(client, factory)
+    backup_root = await _backup(client, tmp_path, "dr")
+    con = sqlite3.connect(str(backup_root / "soloring.db"))
+    op = _json.loads(con.execute(
+        "SELECT operation_json FROM "
+        "persistent_consequence_reviews WHERE id = ?",
+        (world["review_id"],)).fetchone()[0])
+    op["review_basis_hash"] = "3" * 64
+    con.execute(
+        "UPDATE persistent_consequence_reviews SET operation_json = :oj,"
+        " operation_hash = :oh WHERE id = :rid",
+        {"oj": _cjs(op), "oh": _ch(op), "rid": world["review_id"]})
+    con.commit()
+    con.close()
+    _rehash_manifest(backup_root)
+    try:
+        await restore(backup_root, tmp_path / "ref-dr")
+    except Exception as exc:
+        assert "duplicated" in str(exc).lower(), str(exc)
+    else:
+        raise AssertionError("bogus duplicated review_basis_hash "
+                             "restored")
