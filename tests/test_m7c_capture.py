@@ -517,13 +517,16 @@ async def test_structural_singularity_both_paths_invoke_builder(
     original = snaps.build_capturable_snapshot
 
     def spy(shot, refs, resolved, feature_states=(), relation_states=(),
-            visual_pack=None, spatial_pack=None, production_world_pack=None):
+            visual_pack=None, spatial_pack=None, production_world_pack=None,
+            intra_shot_pack=None):
         # M13 extends the ONE builder with the schema-6 pack argument;
-        # both paths still flow through this single function.
+        # M16-C extends it with the intra_shot pack; both paths still
+        # flow through this single function.
         calls.append(len(feature_states))
         return original(
             shot, refs, resolved, feature_states, relation_states,
             visual_pack, spatial_pack, production_world_pack,
+            intra_shot_pack,
         )
 
     monkeypatch.setattr(snaps, "build_capturable_snapshot", spy)
@@ -533,12 +536,12 @@ async def test_structural_singularity_both_paths_invoke_builder(
         snaps, "effective_working_snapshot_hash",
         lambda shot, refs, resolved, feature_states=(),
         relation_states=(), visual_pack=None, spatial_pack=None,
-        production_world_pack=None: (
+        production_world_pack=None, intra_shot_pack=None: (
             __import__("soloring.domain.canonical",
                        fromlist=["canonical_hash"]).canonical_hash(
                 spy(shot, refs, resolved, feature_states,
                     relation_states, visual_pack, spatial_pack,
-                    production_world_pack)[0])
+                    production_world_pack, intra_shot_pack)[0])
         ),
     )
 

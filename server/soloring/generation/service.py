@@ -619,8 +619,9 @@ async def create_generation_request(
     # condition.
     if snapshot_schema == 7 and snapshot.get("intra_shot", {}).get(
             "events"):
-        from soloring.errors import ErrorCode, SoloRingError
-
+        # module-scope imports only — a local import here would make
+        # ErrorCode/SoloRingError function-local and break the earlier
+        # M9 error paths with UnboundLocalError
         raise SoloRingError(
             ErrorCode.INTRA_SHOT_REALIZATION_UNSUPPORTED,
             "schema-7 ShotRevisions carry intra-Shot event authority "
