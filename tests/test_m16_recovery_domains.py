@@ -305,3 +305,33 @@ async def test_recovery_nested_handoff_extra_field_fails(
         assert "key set" in str(exc).lower()             or "grammar" in str(exc).lower(), str(exc)
     else:
         raise AssertionError("nested extra field restored")
+
+
+async def test_recovery_event_op_extra_field_fails(client, factory,
+                                                   tmp_path):
+    """R7 exact shape: an EXTRA top-level operation field is corruption,
+    even with the operation hash and manifest coherently rebuilt."""
+    from soloring.recovery.backup import restore
+
+    world = await _valid_direct_adopt_review(client, factory)
+    backup_root = await _backup(client, tmp_path, "ef")
+    con = sqlite3.connect(str(backup_root / "soloring.db"))
+    op = _json.loads(con.execute(
+        "SELECT operation_json FROM "
+        "persistent_consequence_reviews WHERE id = ?",
+        (world["review_id"],)).fetchone()[0])
+    op["unexpected_extra"] = 1
+    con.execute(
+        "UPDATE persistent_consequence_reviews SET operation_json = :oj,"
+        " operation_hash = :oh WHERE id = :rid",
+        {"oj": _cjs(op), "oh": _ch(op), "rid": world["review_id"]})
+    con.commit()
+    con.close()
+    _rehash_manifest(backup_root)
+    try:
+        await restore(backup_root, tmp_path / "ref-ef")
+    except Exception as exc:
+        assert "shape" in str(exc).lower() \
+            or "key set" in str(exc).lower(), str(exc)
+    else:
+        raise AssertionError("extra top-level operation field restored")

@@ -454,3 +454,103 @@ async def test_recovery_08(client, factory):
         pass
     else:
         raise AssertionError("unknown head admitted")
+
+
+async def test_recovery_event_op_missing_handoff_field_fails(
+        client, factory, tmp_path):
+    """R7 exact shape: a decline operation that OMITS expected_handoff
+    (instead of recording JSON null) is corruption, even with the
+    operation hash and manifest coherently rebuilt."""
+    import hashlib
+    import json as _json
+    import sqlite3
+
+    from soloring.continuity.intra_shot_canonical import (
+        event_review_basis_hash,
+    )
+    from soloring.domain.canonical import (
+        canonical_hash as _ch,
+        canonical_json_bytes,
+        canonical_json_str as _cjs,
+    )
+    from soloring.recovery.backup import backup, restore
+
+    base, sid, fid, revision = await _seed_world_with_history(
+        client, factory)
+    await _stamp_alembic(client)
+    engine = client._transport.app.state.engine
+    async with engine.connect() as conn:
+        ev = (await conn.execute(text(
+            "SELECT id, event_hash FROM shot_intra_shot_events "
+            "WHERE shot_id = :s AND deleted_at IS NULL"),
+            {"s": sid})).one()
+    basis = event_review_basis_hash(
+        source_event_id=ev[0], source_hash=ev[1],
+        decision="decline_persistence",
+        expected_event_set_hash=revision.snapshot_hash,
+        expected_handoff=None)
+    d = await client.patch(
+        f"/intra-shot/events/{ev[0]}",
+        json={"persistence_mode": "transient"})
+    assert d.status_code == 200, d.text
+    import sqlite3 as _sq
+
+    con0 = _sq.connect(str(client._transport.app.state.settings
+                           .data_dir / "soloring.db"))
+    patched_hash = con0.execute(
+        "SELECT event_hash FROM shot_intra_shot_events WHERE id = ?",
+        (ev[0],)).fetchone()[0]
+    con0.close()
+    op = {
+        "schema_version": 1,
+        "source": {"kind": "event", "id": ev[0], "hash": ev[1]},
+        "decision": "decline_persistence",
+        "expected_event_set_hash": revision.snapshot_hash,
+        "expected_handoff": None,
+        "review_basis_hash": basis,
+        "result": {"event_id": ev[0], "event_hash": patched_hash},
+    }
+    rid = "00000000-0000-4000-8000-0000000000c7"
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "INSERT INTO persistent_consequence_reviews "
+            "(id, shot_id, source_kind, source_event_id, "
+            "source_proposal_id, source_hash, decision, "
+            "review_basis_hash, result_event_id, "
+            "entity_feature_transition_id, entity_relation_transition_id, "
+            "production_instance_feature_transition_id, operation_json, "
+            "operation_hash, created_at) VALUES ("
+            ":rid, :s, 'event', :eid, NULL, :sh, "
+            "'decline_persistence', :bh, :eid, NULL, NULL, NULL, :oj, "
+            ":oh, strftime('%Y-%m-%dT%H:%M:%fZ','now'))"),
+            {"rid": rid, "s": sid, "eid": ev[0], "sh": ev[1],
+             "bh": basis, "oj": _cjs(op), "oh": _ch(op)})
+    backup_root = tmp_path / "bk-mh"
+    await backup(await _settings(client), backup_root)
+    # coherent corruption: the key is deleted, then the operation hash
+    # and the manifest are rebuilt so ONLY the exact-shape rule fails
+    db_file = backup_root / "soloring.db"
+    con = sqlite3.connect(str(db_file))
+    mutated = _json.loads(con.execute(
+        "SELECT operation_json FROM persistent_consequence_reviews "
+        "WHERE id = ?", (rid,)).fetchone()[0])
+    del mutated["expected_handoff"]
+    con.execute(
+        "UPDATE persistent_consequence_reviews SET operation_json = :oj,"
+        " operation_hash = :oh WHERE id = :rid",
+        {"oj": _cjs(mutated), "oh": _ch(mutated), "rid": rid})
+    con.commit()
+    con.close()
+    manifest_path = backup_root / "backup-manifest.json"
+    manifest = _json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["database_sha256"] = hashlib.sha256(
+        db_file.read_bytes()).hexdigest()
+    manifest_path.write_bytes(canonical_json_bytes(manifest))
+    try:
+        await restore(backup_root, tmp_path / "ref-mh")
+    except Exception as exc:
+        assert "shape" in str(exc).lower() \
+            or "key set" in str(exc).lower(), str(exc)
+    else:
+        raise AssertionError("decline op missing expected_handoff "
+                             "restored")

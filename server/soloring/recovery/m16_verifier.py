@@ -181,19 +181,25 @@ def _verify_review(row, rows) -> None:
             _corrupt(
                 f"review {rid} operation source record disagrees with "
                 "the review row's source coordinates")
-        # R7: the event-source basis grammar is the exact §7.5.1 R7
-        # field set — a missing or extra field (including any
-        # expected_working_snapshot_hash) is corruption
-        if "expected_working_snapshot_hash" in doc:
+        # R7: the event-source operation shape is EXACT — the canonical
+        # §7.5.1 R7 basis fields plus the committed review_basis_hash
+        # and result evidence. A missing or extra top-level field
+        # (including any expected_working_snapshot_hash, or a decline
+        # omitting expected_handoff instead of recording JSON null) is
+        # corruption
+        if set(doc) != {
+                "schema_version", "source", "decision",
+                "expected_event_set_hash", "expected_handoff",
+                "review_basis_hash", "result"}:
             _corrupt(
-                f"review {rid} event basis carries the removed "
-                "expected_working_snapshot_hash field")
+                f"review {rid} event operation key set is not the exact "
+                "R7 shape (missing or extra top-level field)")
         try:
             recomputed = event_basis(
                 source_event_id=source_event_id, source_hash=source_hash,
                 decision=decision,
-                expected_event_set_hash=doc.get("expected_event_set_hash"),
-                expected_handoff=doc.get("expected_handoff"))
+                expected_event_set_hash=doc["expected_event_set_hash"],
+                expected_handoff=doc["expected_handoff"])
         except Exception:
             _corrupt(
                 f"review {rid} event basis violates the R7 grammar "
