@@ -11,8 +11,15 @@ from soloring.api.schemas.intra_shot import (
     IntraShotEventPatch,
     IntraShotEventRead,
     IntraShotRead,
+    ProposalCreate,
+    ProposalReviewBatch,
+    ProposalReviewDecision,
 )
-from soloring.continuity import intra_shot_resolver, intra_shot_service
+from soloring.continuity import (
+    intra_shot_adoption,
+    intra_shot_resolver,
+    intra_shot_service,
+)
 
 router = APIRouter(tags=["intra-shot"])
 
@@ -43,6 +50,95 @@ async def read_intra_shot(
     projection["next_cursor"] = cursor + limit if more else None
     return IntraShotRead(**{
         **projection, "shot_id": shot_id})
+
+
+@router.post(
+    "/shots/{shot_id}/intra-shot/proposals",
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_intra_shot_proposal(
+    shot_id: str,
+    payload: ProposalCreate,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    return await intra_shot_adoption.ingest_proposal(
+        session, shot_id, payload)
+
+
+@router.get("/shots/{shot_id}/intra-shot/proposals")
+async def list_intra_shot_proposals(
+    shot_id: str,
+    limit: int = 100,
+    cursor: int = 0,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    return await intra_shot_adoption.list_proposals(
+        session, shot_id, cursor=cursor, limit=limit)
+
+
+@router.post(
+    "/intra-shot/events/{event_id}/persistence/adopt",
+)
+async def adopt_intra_shot_persistence(
+    event_id: str,
+    payload: ProposalReviewDecision,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    body = payload.model_dump(exclude_unset=True) if hasattr(
+        payload, "model_dump") else dict(payload)
+    return await intra_shot_adoption.adopt_event_persistence(
+        session, event_id,
+        expected_event_hash=body["expected_event_hash"],
+        expected_event_set_hash=body["expected_event_set_hash"])
+
+
+@router.post(
+    "/intra-shot/events/{event_id}/persistence/decline",
+)
+async def decline_intra_shot_persistence(
+    event_id: str,
+    payload: ProposalReviewDecision,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    body = payload.model_dump(exclude_unset=True) if hasattr(
+        payload, "model_dump") else dict(payload)
+    return await intra_shot_adoption.decline_event_persistence(
+        session, event_id,
+        expected_event_hash=body["expected_event_hash"],
+        expected_event_set_hash=body["expected_event_set_hash"])
+
+
+@router.post(
+    "/intra-shot/proposals/{proposal_id}/review",
+)
+async def review_intra_shot_proposal(
+    proposal_id: str,
+    payload: ProposalReviewDecision,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    body = payload.model_dump(exclude_unset=True) if hasattr(
+        payload, "model_dump") else dict(payload)
+    shot_id = await intra_shot_adoption._proposal_shot(
+        session, proposal_id)
+    return await intra_shot_adoption.review_proposals(
+        session, shot_id, [{
+            "proposal_id": proposal_id,
+            "expected_proposal_hash": body["expected_proposal_hash"],
+            "decision": body["decision"],
+        }])
+
+
+@router.post(
+    "/shots/{shot_id}/intra-shot/proposals/review-batch",
+)
+async def review_intra_shot_proposals_batch(
+    shot_id: str,
+    payload: ProposalReviewBatch,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    return await intra_shot_adoption.review_proposals(
+        session, shot_id,
+        [dict(r) for r in payload.model_dump()["reviews"]])
 
 
 @router.post(

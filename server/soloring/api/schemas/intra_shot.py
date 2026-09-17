@@ -152,3 +152,76 @@ class ProposalGrammarV1(_ClosedModel):
     schema_version: Literal[1]
     candidate_event: ProposalCandidateEvent
     persistence_suggestion: Literal["transient", "persist"]
+
+
+# --------------------------------------------------------------------------
+# M16-D proposal + review schemas (frozen R6 §11/§12)
+# --------------------------------------------------------------------------
+
+
+class ProposalCandidate(_ClosedModel):
+    time_ms: StrictTimeMs
+    ordinal: StrictOrdinal
+    target: IntraShotTarget
+    before: IntraShotStateInput
+    after: IntraShotStateInput
+
+
+class ProposalCreate(_ClosedModel):
+    schema_version: Literal[1] = 1
+    source_kind: Literal["generation", "take", "imported"]
+    source_shot_revision_id: str
+    source_shot_revision_hash: LowerHash
+    source_generation_id: str | None = None
+    source_take_id: str | None = None
+    proposer_kind: Literal["human", "analyzer"]
+    analyzer_id: str | None = None
+    analyzer_version: str | None = None
+    analyzer_parameters_hash: LowerHash | None = None
+    candidate_event: ProposalCandidate
+    persistence_suggestion: Literal["transient", "persist"]
+
+
+class ProposalReviewDecision(_ClosedModel):
+    """One review decision: for proposal reviews it carries the proposal
+    hash + decision; for direct event adopt/decline it carries the
+    event hash + event-set hash fences."""
+
+    expected_proposal_hash: LowerHash | None = None
+    expected_event_hash: LowerHash | None = None
+    expected_event_set_hash: LowerHash | None = None
+    decision: Literal[
+        "adopt_event_only", "adopt_persistence", "ignore"] | None = None
+
+    @model_validator(mode="after")
+    def _exact_shape(self):
+        provided = self.model_fields_set
+        if self.decision is None:
+            # direct event fence form
+            if provided != {
+                    "expected_event_hash", "expected_event_set_hash"}:
+                raise ValueError(
+                    "direct event reviews require exactly "
+                    "expected_event_hash + expected_event_set_hash")
+        else:
+            # proposal review form
+            need = {"expected_proposal_hash", "decision"}
+            if "expected_event_set_hash" in provided:
+                need.add("expected_event_set_hash")
+            if provided != need:
+                raise ValueError(
+                    "proposal reviews require exactly "
+                    "expected_proposal_hash + decision")
+        return self
+
+
+class ProposalReviewItem(_ClosedModel):
+    proposal_id: str
+    expected_proposal_hash: LowerHash
+    decision: Literal[
+        "adopt_event_only", "adopt_persistence", "ignore"]
+
+
+class ProposalReviewBatch(_ClosedModel):
+    reviews: list[ProposalReviewItem] = Field(min_length=1,
+                                              max_length=10_000)
