@@ -3,8 +3,8 @@
 
 **Date:** 2026-09-17  
 **Status:** R7 freeze candidate — direct-review working-hash contradiction correction (successor revision; frozen R6 remains the immutable referent for M16-P0 through the M16-D third correction); G5 architecture closed for plan design; **NOT implementation authorization**  
-**R7 delta record:** 57 lines / 3863 bytes / SHA-256 `d6a8d6a94dc20776bf53395fc6b65c9d5b266a8de6476f02800ae978e0aff5aa`  
-**Predecessor plan:** frozen R6 — SHA-256 `cef6a82b4101df1f61a814e54df9d9d8fcffea1a14335ee8ef1c479eeadf839d` (127,396 B / 2,791 L)  
+**R7 delta record:** 60 lines / 4177 bytes / SHA-256 `c15459a5af267a3f27ad367ba9110a77a846ff6f2aa26c6b62e669424764bbf7`  
+**Predecessor plan:** frozen R6 — SHA-256 `cef6a82b4101df1f61a814e54df5d9f8fcffea1a14335ee8ef1c479eeadf839d` (127,396 B / 2,791 L)  
 **Milestone:** M16 — Intra-Shot Persistent Consequences  
 **Published predecessor:** M15 / **EVOLVE THE WORLD** @ `30ea135f3b2339491e9b36eaee2d0d8bc4ab8585`  
 **Predecessor tree:** `db21568a3522a5ed2fa6fab44d1f9741d6d71ad2`  
@@ -76,7 +76,7 @@ The milestone does **not** claim that the current generative executor is able to
 
 All seven roadmap questions have source-fit answers that can be implemented without introducing a conflicting authority domain.
 
-This R6 is a **freeze candidate**. G5 architecture is closed for plan design, but this document is not a frozen implementation contract until explicitly accepted/frozen. M16 implementation remains unauthorized.
+This R7 is a **freeze candidate**. G5 architecture is closed for plan design, but this document is not a frozen implementation contract until explicitly accepted/frozen. M16 implementation remains unauthorized.
 
 ## 1.2 G5-1 — Shot-relative timing representation
 
@@ -1882,7 +1882,7 @@ Advance recovery head to:
 0017_m16_intra_shot_consequences
 ```
 
-M16 adds no Blob foreign key in R6. The physical Blob-FK inventory remains exactly the published M14/M15 **8 paths** unless implementation evidence proves a reviewed architecture change; the 0017 structural test pins exactly 8.
+M16 adds no Blob foreign key in R7. The physical Blob-FK inventory remains exactly the published M14/M15 **8 paths** unless implementation evidence proves a reviewed architecture change; the 0017 structural test pins exactly 8.
 
 Recovery verifies:
 
@@ -2124,7 +2124,7 @@ Deliver:
 
 # 22. Proof map — exact frozen cell universe
 
-R6 freezes **162 proof cells**. `scripts/m16_validate_proof_map.py` must hard-code this exact cell set and family counts; it may not infer the universe dynamically from whatever tests happen to exist.
+R7 freezes **164 proof cells** (R6 froze 162; the two ADOPT cells below are the only additions, so ADOPT becomes 13 and every other family count is unchanged). `scripts/m16_validate_proof_map.py` must hard-code this exact cell set and family counts; it may not infer the universe dynamically from whatever tests happen to exist.
 
 Owner grammar:
 
@@ -2156,7 +2156,7 @@ Family counts:
 | CAPTURE | 8 |
 | HIST | 11 |
 | PROPOSAL | 10 |
-| ADOPT | 11 |
+| ADOPT | 13 |
 | TAKE | 5 |
 | RACE | 9 |
 | RECOVERY | 8 |
@@ -2574,7 +2574,7 @@ The final implementation is incomplete unless all are executable failures or fai
 
 # 25. Scope exclusions
 
-M16 R6 explicitly does not implement:
+M16 R7 explicitly does not implement:
 
 ```text
 per-frame database state
@@ -2779,9 +2779,9 @@ M16 does not by itself prove arbitrary animation/performance execution of that e
 
 # 30. Authorization boundary
 
-This document is a planning artifact and R6 freeze candidate.
+This document is a planning artifact and R7 freeze candidate.
 
-Creating or reviewing this R6 does **not** authorize:
+Creating or reviewing this R7 does **not** authorize:
 
 ```text
 M16 branch creation
@@ -2794,4 +2794,4 @@ merge
 M16 tag/release
 ```
 
-If R6 is explicitly accepted/frozen, that freezes the implementation contract only. Implementation still begins **only after a separate explicit implementation authorization**. Generic continuation during plan review must not be interpreted as source-mutation authority.
+If R7 is explicitly accepted/frozen, that freezes the implementation contract only. Implementation still begins **only after a separate explicit implementation authorization**. Generic continuation during plan review must not be interpreted as source-mutation authority.

@@ -1,7 +1,7 @@
 # SoloRing M16 — R6 -> R7 Normative Delta Record
 
 **Date:** 2026-09-17
-**Predecessor:** frozen R6 — SHA-256 `cef6a82b4101df1f61a814e54df9d9d8fcffea1a14335ee8ef1c479eeadf839d` (127,396 B / 2,791 L)
+**Predecessor:** frozen R6 — SHA-256 `cef6a82b4101df1f61a814e54df5d9f8fcffea1a14335ee8ef1c479eeadf839d` (127,396 B / 2,791 L)
 **Cause:** R6 contradiction confirmed by milestone ruling (PR #21 review `5237368385` follow-up). §12.1 requires the direct-review request to carry an expected current working snapshot hash; §9.2 defines `working_snapshot_hash` as NULL exactly while an M16 blocker (an unresolved `require_handoff` event) exists — which is the direct-adoption precondition; G5-5's resolution order places the working snapshot after the M16 resolver. No R6 clause defines the requested fence's meaning for the direct case. Ruling: option (b) — remove the field, do not substitute another value.
 
 ## Normative changes (the complete R7 delta)
@@ -34,7 +34,11 @@
    succeeds from `working_snapshot_hash == null`; the Shot then becomes
    M16-ready and obtains its ordinary authoritative working snapshot hash)
    and `M16:ADOPT:22` (direct review basis/operation grammar carries no
-   working-snapshot field; exact §7.5.1 R7 roots).
+   working-snapshot field; exact §7.5.1 R7 roots). Because these two cells
+   are normative, R7's frozen universe is **164 cells with ADOPT = 13**
+   (R6 froze 162 with ADOPT = 11; every other family count is unchanged).
+   The correction-round regressions ADOPT:12-20 are deliberately OUTSIDE the
+   frozen universe — they are review evidence, not frozen cells.
 
 ## Explicitly unchanged
 
