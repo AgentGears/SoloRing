@@ -2163,7 +2163,7 @@ Family counts:
 | EXEC | 5 |
 | UI | 6 |
 | SCALE | 5 |
-| **TOTAL** | **162** |
+| **TOTAL** | **164** |
 
 ## BASE
 
@@ -2650,7 +2650,7 @@ It must identify the tag as annotated and must not require it to be cryptographi
 
 ## `m16_validate_proof_map.py`
 
-Must hard-code exactly **162** cells and the §22 family counts. It must reject:
+Must hard-code exactly **164** cells and the §22 family counts. It must reject:
 
 ```text
 missing cell
@@ -2702,7 +2702,7 @@ A final M16 head may claim closure only after all gates run on that **exact unch
 1. M16-P0 predecessor repair suite green.
 2. M16 baseline validator green.
 3. All predecessor proof maps/boundaries green.
-4. M16 proof map exactly 162/162, zero pending cells.
+4. M16 proof map exactly 164/164, zero pending cells.
 5. M16 boundary/source-fit validators green.
 6. Migration upgrade/downgrade/fail-closed/parity tests green.
 7. Entity-bound source-gate scenario green.
