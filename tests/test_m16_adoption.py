@@ -295,16 +295,19 @@ async def test_adopt_10(client, factory):
     engine = client._transport.app.state.engine
     async with engine.connect() as conn:
         rows = (await conn.execute(text(
-            "SELECT review_basis_hash FROM "
+            "SELECT source_proposal_id, review_basis_hash FROM "
             "persistent_consequence_reviews WHERE source_kind = "
-            "'proposal' ORDER BY id"))).fetchall()
-    for p, row in zip(props, rows):
+            "'proposal'"))).fetchall()
+    # key by source_proposal_id — review-row ids are independent
+    # UUIDs whose incidental ordering says nothing about the batch
+    by_pid = {r[0]: r[1] for r in rows}
+    for p in props:
         expected = proposal_review_basis_hash(
             batch_basis_hash=batch,
             proposal_id=p["id"],
             proposal_hash=p["proposal_hash"],
             decision="adopt_persistence")
-        assert row[0] == expected
+        assert by_pid[p["id"]] == expected
 
 
 async def test_adopt_11(client, factory):
@@ -346,3 +349,160 @@ async def test_adopt_11(client, factory):
             "decision": "adopt_persistence"} for p in props]})
     assert rr3.status_code == 409, rr3.text
     assert "INTRA_SHOT_REVIEW_CONFLICT" in rr3.text
+
+
+async def test_adopt_12(client, factory):
+    """ADOPT:12 — an exact decline retry converges on the committed
+    review even though the first decline already made the event
+    transient; the retry writes nothing (§12.4)."""
+    base = await seed_feature_world(client, factory)
+    sid, fid = base["shot_id"], base["feature_id"]
+    ev = await post_event(
+        client, sid,
+        event(fid, 1000, state(), state("fresh"),
+              persistence="require_handoff"))
+    proj = await get_intra(client, sid)
+    body = {"expected_event_hash": ev["event_hash"],
+            "expected_event_set_hash": proj["event_set_hash"]}
+    r1 = await client.post(
+        f"/intra-shot/events/{ev['id']}/persistence/decline",
+        json=body)
+    assert r1.status_code == 200, r1.text
+    first = r1.json()
+    r2 = await client.post(
+        f"/intra-shot/events/{ev['id']}/persistence/decline",
+        json=body)
+    assert r2.status_code == 200, r2.text
+    retry = r2.json()
+    assert retry["idempotent"] is True
+    assert retry["review_id"] == first["review_id"]
+    assert retry["operation_hash"]
+    assert retry["result"]["event_hash"] == first["resulting_event_hash"]
+    engine = client._transport.app.state.engine
+    async with engine.connect() as conn:
+        n = (await conn.execute(text(
+            "SELECT COUNT(*) FROM "
+            "persistent_consequence_reviews"))).scalar_one()
+    assert n == 1
+
+
+async def test_adopt_13(client, factory):
+    """ADOPT:13 — an exact direct-adopt retry returns the committed
+    transition id and review/operation identities, and later result
+    TRANSITION drift conflicts instead of converging."""
+    base = await seed_feature_world(client, factory)
+    sid, fid = base["shot_id"], base["feature_id"]
+    ev = await post_event(
+        client, sid,
+        event(fid, 1000, state(), state("fresh"),
+              persistence="require_handoff"))
+    r1 = await _adopt_direct(client, sid, ev)
+    assert r1.status_code == 200, r1.text
+    first = r1.json()
+    r2 = await _adopt_direct(client, sid, ev)
+    assert r2.status_code == 200, r2.text
+    retry = r2.json()
+    assert retry["idempotent"] is True
+    assert retry["review_id"] == first["review_id"]
+    assert retry["operation_hash"]
+    assert retry["result"]["transition"]["id"] == first["transition_id"]
+    # drift the committed transition value: the retry must conflict
+    engine = client._transport.app.state.engine
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "UPDATE continuity_feature_transitions SET value_json = "
+            ":vj, value_hash = :vh"),
+            {"vj": '"drifted"', "vh": "8" * 64})
+    r3 = await _adopt_direct(client, sid, ev)
+    assert r3.status_code == 409, r3.text
+    assert "INTRA_SHOT_REVIEW_CONFLICT" in r3.text
+
+
+async def test_adopt_14(client, factory):
+    """ADOPT:14 — a strict subset of a committed batch is corruption:
+    the subset retry conflicts, while the exact full-batch retry
+    converges with complete committed evidence."""
+    base, sid, revision, props = await _two_sibling_proposals(
+        client, factory)
+    rr = await client.post(
+        f"/shots/{sid}/intra-shot/proposals/review-batch",
+        json={"reviews": [{
+            "proposal_id": p["id"],
+            "expected_proposal_hash": p["proposal_hash"],
+            "decision": "adopt_persistence"} for p in props]})
+    assert rr.status_code == 200, rr.text
+    sub = await client.post(
+        f"/shots/{sid}/intra-shot/proposals/review-batch",
+        json={"reviews": [{
+            "proposal_id": props[0]["id"],
+            "expected_proposal_hash": props[0]["proposal_hash"],
+            "decision": "adopt_persistence"}]})
+    assert sub.status_code == 409, sub.text
+    assert "subset" in sub.text.lower()
+    rr2 = await client.post(
+        f"/shots/{sid}/intra-shot/proposals/review-batch",
+        json={"reviews": [{
+            "proposal_id": p["id"],
+            "expected_proposal_hash": p["proposal_hash"],
+            "decision": "adopt_persistence"} for p in props]})
+    assert rr2.status_code == 200, rr2.text
+    retry = rr2.json()
+    assert retry["idempotent"] is True
+    res = retry["results"][props[0]["id"]]
+    assert res["review_id"]
+    assert res["operation_hash"]
+    assert res["transition"]["id"]
+
+
+async def test_adopt_15(client, factory):
+    """ADOPT:15 — an ignored proposal from an older ShotRevision does
+    not poison a batch whose authority pins the current revision; the
+    ignore decision is itself recorded as review evidence."""
+    base = await seed_feature_world(
+        client, factory, extra_feature_keys=("wardrobe",))
+    sid = base["shot_id"]
+    old_rev = await _capture_revision(client, sid)
+    r_old, _ = await _ingest(client, sid, base["feature_id"], old_rev)
+    # move the working state so the next capture is a NEW revision —
+    # content-identical captures deduplicate to the same revision
+    await post_event(client, sid, event(
+        base["feature_id"], 1000, state(), state("healing")))
+    new_rev = await _capture_revision(client, sid)
+    assert new_rev.id != old_rev.id
+    r_new, _ = await _ingest(
+        client, sid, base["wardrobe_feature_id"], new_rev, t=1600)
+    old_p, new_p = r_old.json(), r_new.json()
+    rr = await client.post(
+        f"/shots/{sid}/intra-shot/proposals/review-batch",
+        json={"reviews": [
+            {"proposal_id": new_p["id"],
+             "expected_proposal_hash": new_p["proposal_hash"],
+             "decision": "adopt_persistence"},
+            {"proposal_id": old_p["id"],
+             "expected_proposal_hash": old_p["proposal_hash"],
+             "decision": "ignore"}]})
+    assert rr.status_code == 200, rr.text
+    assert rr.json()["idempotent"] is False
+    engine = client._transport.app.state.engine
+    async with engine.connect() as conn:
+        dec = (await conn.execute(text(
+            "SELECT decision FROM persistent_consequence_reviews "
+            "WHERE source_proposal_id = :p"),
+            {"p": old_p["id"]})).scalar_one()
+    assert dec == "ignore"
+    # an ignore-only batch spanning several revisions has no single
+    # basis to anchor on
+    r_third, _ = await _ingest(
+        client, sid, base["wardrobe_feature_id"], new_rev, t=1700)
+    third_p = r_third.json()
+    sub = await client.post(
+        f"/shots/{sid}/intra-shot/proposals/review-batch",
+        json={"reviews": [
+            {"proposal_id": old_p["id"],
+             "expected_proposal_hash": old_p["proposal_hash"],
+             "decision": "ignore"},
+            {"proposal_id": third_p["id"],
+             "expected_proposal_hash": third_p["proposal_hash"],
+             "decision": "ignore"}]})
+    assert sub.status_code == 409, sub.text
+    assert "INTRA_SHOT_PROPOSAL_STALE" in sub.text
