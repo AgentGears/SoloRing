@@ -7,6 +7,7 @@ import Link from "next/link";
 
 import ApprovedTakePanel from "@/components/ApprovedTakePanel";
 import ContinuityStatePanel from "@/components/ContinuityStatePanel";
+import IntraShotPanel from "@/components/IntraShotPanel";
 import GenerationRealizationInspector from "@/components/GenerationRealizationInspector";
 import RealizationPanel from "@/components/RealizationPanel";
 import VisualContinuityPanel from "@/components/VisualContinuityPanel";
@@ -308,6 +309,9 @@ export default async function ShotPage({
 
       <h2>Visual references at capture</h2>
       <VisualProvenanceList revisions={revisions} continuity={provenance} />
+
+      <h2>Intra-Shot consequences</h2>
+      <IntraShotPanel shotId={id} />
 
       <h2>Current continuity state</h2>
       <ContinuityStatePanel

@@ -10,6 +10,9 @@ from tests.m16_seed_b import (
     event,
     get_intra,
     seed_relation_world,
+    assign_shot,
+    post_event,
+    put_relation_transition,
 )
 
 
@@ -104,3 +107,54 @@ async def test_relation_05(client, factory):
     assert identity["predicate_key"] == "carries"
     r = await client.get(f"/shot-revisions/{revision.id}/continuity")
     assert r.status_code == 200, r.text
+
+
+async def _later_shot(factory, pid, eid):
+    from soloring.api.schemas.shots import ShotCreate
+    from soloring.domain import shots as shot_svc
+
+    sid2 = (await shot_svc.create_shot(
+        factory(), pid, ShotCreate(subject="later",
+                                   duration_ms=4000))).id
+    await assign_shot(factory, pid, sid2, name="later scene")
+    return sid2
+
+
+def _rel(active):
+    return {"active": active}
+
+
+async def test_relation_04(client, factory):
+    """RELATION:04 — an adopted persistent relation handoff's exact
+    active/inactive state survives downstream (later Shot resolves the
+    adopted terminal relation state)."""
+    base = await seed_relation_world(client, factory)
+    sid, rid = base["shot_id"], base["relation_id"]
+    ev = await post_event(
+        client, sid,
+        event(rid, 1000, _rel(False), _rel(True),
+              kind="entity_relation", persistence="require_handoff"))
+    await put_relation_transition(client, rid, sid, st="active")
+    proj = await get_intra(client, sid)
+    r = await client.post(
+        f"/intra-shot/events/{ev['id']}/persistence/adopt",
+        json={"expected_event_hash": ev["event_hash"],
+              "expected_event_set_hash": proj["event_set_hash"]})
+    assert r.status_code == 200, r.text
+    # a later Shot chaining from the ADOPTED active relation proves the
+    # downstream feed
+    sid2 = await _later_shot(factory, base["project_id"],
+                             base["subject_id"])
+    d = await client.put(
+        f"/shots/{sid2}/semantic-dependencies",
+        json={"dependencies": [
+            {"entity_id": base["subject_id"], "role": "subject"},
+            {"entity_id": base["object_id"], "role": "object"}]})
+    assert d.status_code == 200, d.text
+    ev2 = await post_event(
+        client, sid2,
+        event(rid, 500, _rel(True), _rel(False),
+              kind="entity_relation"))
+    proj2 = await get_intra(client, sid2)
+    assert proj2["intra_shot_ready"] is True
+    assert proj2["terminal_targets"][0]["terminal_state"] == _rel(False)

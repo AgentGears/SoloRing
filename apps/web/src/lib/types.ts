@@ -432,3 +432,85 @@ export interface PublishOutcome {
     created_at: string;
   };
 }
+
+// --- M16 intra-Shot persistent consequences (§10/§17 projections) ---
+
+export interface IntraShotEventView {
+  id: string;
+  time_ms: number;
+  ordinal: number;
+  target_kind: string;
+  target_id: string;
+  before: unknown;
+  after: unknown;
+  persistence_mode: "transient" | "require_handoff";
+  source_kind: string;
+  source_proposal_id: string | null;
+  event_hash: string;
+}
+
+export interface IntraShotTerminalTarget {
+  target_kind: string;
+  target_id: string;
+  terminal_state: unknown;
+  persistence_mode: "transient" | "require_handoff";
+}
+
+export interface IntraShotHandoff {
+  target_kind: string;
+  target_id: string;
+  matched: boolean;
+  required_semantic: unknown;
+  boundary_value: unknown;
+}
+
+export interface IntraShotIssue {
+  code: string;
+  message: string;
+  event_id?: string;
+  time_ms?: number;
+  ordinal?: number;
+  stored_before?: unknown;
+  expected_state?: unknown;
+}
+
+export interface IntraShotProjection {
+  shot_id: string;
+  duration_ms: number | null;
+  intra_shot_ready: boolean;
+  event_set_hash: string | null;
+  events: IntraShotEventView[];
+  terminal_targets: IntraShotTerminalTarget[];
+  handoffs: IntraShotHandoff[];
+  issues: IntraShotIssue[];
+  next_cursor: number | null;
+}
+
+export interface IntraShotProposalView {
+  id: string;
+  source_kind: string;
+  source_shot_revision_id: string;
+  source_shot_revision_hash: string;
+  proposer_kind: string;
+  candidate_event: {
+    time_ms: number;
+    ordinal: number;
+    target: { kind: string; id: string };
+    before: unknown;
+    after: unknown;
+  };
+  persistence_suggestion: "transient" | "persist";
+  proposal_hash: string;
+  review_decision: string | null;
+}
+
+export interface IntraShotProposalsResponse {
+  shot_id: string;
+  proposals: IntraShotProposalView[];
+  next_cursor: number | null;
+}
+
+export type IntraShotDecision =
+  | "adopt_event_only"
+  | "adopt_persistence"
+  | "ignore";

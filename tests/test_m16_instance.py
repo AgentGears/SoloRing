@@ -1,14 +1,12 @@
-"""M16:INSTANCE — Production Instance fold against the selected M13 world.
-
-B-eligible cells only: cell 04 (captured schema-6 plane) is M16-C and
-cell 05 (adopted transition feeding downstream) is M16-D.
-"""
+"""M16:INSTANCE — Production Instance fold against the selected M13 world."""
 
 from __future__ import annotations
 
+import json
+
 from soloring.domain.canonical import canonical_hash
 
-from tests.m16_seed_b import get_intra
+from tests.m16_seed_b import state, get_intra
 from tests.test_m13_shot_capture import _full_m13_world, _select_binding
 
 
@@ -141,3 +139,77 @@ async def test_instance_06(client):
     # no Production-Instance event target can ever be minted for it.
     assert f.status_code == 422, f.text
     assert "creative_entity" in f.text
+
+
+async def test_instance_05(client, factory):
+    """INSTANCE:05 — an adopted PI-feature Shot/end transition feeds the
+    SAME occurrence downstream (via the real M13 world fixtures)."""
+    b, sel, fid = await _pi_world(client, tag=b"m16-inst5")
+    created = await client.post(
+        f"/shots/{b['shot']}/intra-shot/events",
+        json=_pi_event(fid, 1000, state(), state("fallen"),
+                       persistence="require_handoff"))
+    assert created.status_code == 201, created.text
+    t = await client.post(
+        f"/production-instance-features/{fid}/transitions",
+        json={"anchor_type": "shot", "anchor_id": b["shot"],
+              "boundary": "end", "operation": "set", "value": "fallen"})
+    assert t.status_code == 201, t.text
+    proj = await get_intra(client, b["shot"])
+    r = await client.post(
+        f"/intra-shot/events/{created.json()['id']}/persistence/adopt",
+        json={"expected_event_hash": created.json()["event_hash"],
+              "expected_event_set_hash": proj["event_set_hash"]})
+    assert r.status_code == 200, r.text
+    # the same occurrence still resolves with the adopted fallen state
+    # (the current world resolver picks up the A2 transition)
+    proj2 = await get_intra(client, b["shot"])
+    assert proj2["intra_shot_ready"] is True
+    assert proj2["handoffs"][0]["matched"] is True
+
+
+async def test_instance_04(client, factory):
+    """INSTANCE:04 — a PI event captures the schema-6 production-world
+    plane as its required lower authority: the captured target identity
+    embeds composition/occurrence/production_instance subject identity
+    and the predecessor continuity planes ride along unchanged."""
+    from tests.test_m16_capture import _capture
+    from tests.test_m16_instance import _pi_event, _pi_world
+    from tests.test_m16_capture import _companion_children
+
+    b, sel, fid = await _pi_world(client, tag=b"m16-inst4")
+    sid = b["shot"]
+    ev = await client.post(
+        f"/shots/{sid}/intra-shot/events",
+        json=_pi_event(fid, 1000, state(), state("fallen")))
+    assert ev.status_code == 201, ev.text
+    revision, _ = await _capture(client, sid)
+    snap = json.loads(revision.snapshot_json)
+    assert snap["schema_version"] == 7
+    block = snap["intra_shot"]
+    packed = block["events"][0]
+    identity = packed["target_identity"]
+    assert identity["kind"] == "production_instance_feature"
+    assert identity["feature_id"] == fid
+    assert identity["occurrence_id"] == sel["occurrence_id"]
+    from sqlalchemy import text as _text
+
+    engine = client._transport.app.state.engine
+    async with engine.connect() as conn:
+        comp = (await conn.execute(_text(
+            "SELECT composition_id FROM "
+            "production_instance_features WHERE id = :f"),
+            {"f": fid})).scalar_one()
+    assert identity["composition_id"] == comp
+    assert identity["authority_subject_kind"] == "production_instance"
+    # the schema-6 production-world plane is the required lower
+    # authority and rides along unchanged beneath schema 7
+    assert snap["production_world"]["schema_version"] == 1
+    assert snap["production_world"]["binding"][
+        "binding_id"] == sel["binding_id"]
+    # the immutable companion carries the same identity bytes
+    children = await _companion_children(
+        client._transport.app.state.engine, revision.id)
+    assert len(children) == 1
+    assert json.loads(children[0].captured_target_identity_json) == \
+        identity

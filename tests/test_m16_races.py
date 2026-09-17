@@ -246,3 +246,123 @@ async def test_race_09(client, factory):
     detail = (await client.get(f"/shots/{sid}")).json()
     assert detail["approved_take_id"] == take_id
     assert detail["intra_shot_ready"] is True
+
+
+async def test_race_01(client, factory):
+    """RACE:01 — event create versus duration patch has only legal
+    serialized outcomes: an event at t=4000 racing a duration shrink to
+    3000 can never leave both applied (the loser is refused by whichever
+    fence serializes second)."""
+    outcomes = []
+    for _ in range(4):
+        base = await seed_feature_world(client, factory, duration=5000)
+        sid, fid = base["shot_id"], base["feature_id"]
+
+        async def create():
+            return await client.post(
+                f"/shots/{sid}/intra-shot/events",
+                json=event(fid, 4000, state(), state("fresh")))
+
+        async def shrink():
+            return await client.patch(
+                f"/shots/{sid}", json={"duration_ms": 3000})
+
+        r_event, r_patch = await asyncio.gather(create(), shrink())
+        assert r_event.status_code in (201, 409, 422), r_event.text
+        assert r_patch.status_code in (200, 409), r_patch.text
+        # never both applied: a surviving t=4000 event with a 3000
+        # duration is an illegal hybrid
+        applied = (r_event.status_code == 201,
+                   r_patch.status_code == 200)
+        assert applied in ((True, False), (False, True), (False, False))
+        detail = (await client.get(f"/shots/{sid}")).json()
+        if applied == (True, False):
+            assert detail["duration_ms"] == 5000
+        elif applied == (False, True):
+            assert detail["duration_ms"] == 3000
+        outcomes.append(applied)
+    # the race is real and serializes legally in at least one direction
+    assert any(o[0] for o in outcomes) or any(o[1] for o in outcomes)
+
+
+async def test_race_02(client, factory):
+    """RACE:02 — event coordinate patch race commits at most one
+    conflicting coordinate: two target-orthogonal events (independent
+    before-chains) concurrently PATCHed onto the same (time, ordinal)
+    leave exactly one winner — the conflict is purely the coordinate."""
+    base = await seed_feature_world(
+        client, factory, extra_feature_keys=("wardrobe",))
+    sid, cut, wardrobe = (base["shot_id"], base["feature_id"],
+                          base["wardrobe_feature_id"])
+    e1 = await post_event(
+        client, sid, event(cut, 1000, state(), state("healing")))
+    e2 = await post_event(
+        client, sid, event(wardrobe, 2000, state(), state("torn")))
+    # both events race onto the SAME (3000, 0) coordinate; each move is
+    # individually chain-legal, so only the coordinate can conflict
+    async def move(eid):
+        return await client.patch(
+            f"/intra-shot/events/{eid}",
+            json={"time_ms": 3000, "ordinal": 0})
+
+    r1, r2 = await asyncio.gather(move(e1["id"]), move(e2["id"]))
+    codes = sorted((r1.status_code, r2.status_code))
+    assert codes in ([200, 200], [200, 409], [200, 422]), \
+        (r1.text, r2.text)
+    # if BOTH committed, they must hold distinct coordinates — never
+    # two active events at one coordinate
+    engine = client._transport.app.state.engine
+    async with engine.connect() as conn:
+        rows = (await conn.execute(text(
+            "SELECT time_ms, ordinal, COUNT(*) FROM "
+            "shot_intra_shot_events WHERE shot_id = :s AND deleted_at "
+            "IS NULL GROUP BY time_ms, ordinal HAVING COUNT(*) > 1"),
+            {"s": sid})).fetchall()
+    assert rows == []
+    # the surviving set still resolves coherently
+    proj = await get_intra(client, sid)
+    assert proj["event_set_hash"] is not None
+
+
+async def test_race_03(client, factory):
+    """RACE:03 — event delete versus a dependent later event can never
+    leave a false before-chain: deleting the predecessor while the
+    dependent exists is refused, so a surviving dependent always has its
+    chain anchor."""
+    base = await seed_feature_world(client, factory)
+    sid, fid = base["shot_id"], base["feature_id"]
+    e1 = await post_event(
+        client, sid, event(fid, 1000, state(), state("fresh")))
+    e2 = await post_event(
+        client, sid,
+        event(fid, 2000, state("fresh"), state("healing")))
+
+    async def delete(eid):
+        return await client.delete(f"/intra-shot/events/{eid}")
+
+    for _ in range(4):
+        # re-seed the pair for each round
+        b = await seed_feature_world(client, factory)
+        s, f = b["shot_id"], b["feature_id"]
+        a1 = await post_event(
+            client, s, event(f, 1000, state(), state("fresh")))
+        a2 = await post_event(
+            client, s, event(f, 2000, state("fresh"), state("healing")))
+        d1, d2 = await asyncio.gather(delete(a1["id"]), delete(a2["id"]))
+        assert d1.status_code in (204, 409), d1.text
+        assert d2.status_code in (204, 409), d2.text
+        engine = client._transport.app.state.engine
+        async with engine.connect() as conn:
+            rows = (await conn.execute(text(
+                "SELECT id FROM shot_intra_shot_events WHERE shot_id = "
+                ":s AND deleted_at IS NULL ORDER BY time_ms"),
+                {"s": s})).fetchall()
+        ids = {r[0] for r in rows}
+        # the dependent may never outlive its chain anchor
+        if a2["id"] in ids:
+            assert a1["id"] in ids
+        # the surviving set is chain-coherent (the resolver certifies)
+        proj = await get_intra(client, s)
+        assert (proj["event_set_hash"] is not None
+                or proj["events"] == [])
+    _ = (e1, e2)

@@ -243,3 +243,62 @@ async def test_scale_resolver_overflow(client, factory):
     assert detail["intra_shot_ready"] is False
     assert detail["working_snapshot_hash"] is None
     assert detail["working_state_differs_from_approved"] is None
+
+
+async def test_scale_05(client, factory):
+    """SCALE:05 — proposal review batch accepts exactly up to 10,000
+    reviews in one atomic transaction and rejects a larger body."""
+    from tests.test_m16_proposals import _capture_revision
+
+    base = await seed_feature_world(client, factory)
+    sid, fid = base["shot_id"], base["feature_id"]
+    revision = await _capture_revision(client, sid)
+    engine = client._transport.app.state.engine
+    # 10,000 proposals pinned to the shared source revision, inserted
+    # directly (ingestion itself is not the scale claim under test)
+    from soloring.continuity.intra_shot_canonical import proposal_storage
+
+    value, pj, ph = proposal_storage(
+        candidate_event={
+            "time_ms": 1500, "ordinal": 0,
+            "target": {"kind": "entity_feature", "id": fid},
+            "before": state(), "after": state("fresh")},
+        persistence_suggestion="transient")
+    from soloring.domain.canonical import canonical_json_str as _cjs
+
+    rows = [{"id": f"0000000a-{i:04x}-4000-8000-0000000000b1",
+             "pj": pj, "ph": ph} for i in range(10_000)]
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "INSERT INTO shot_intra_shot_event_proposals "
+            "(id, shot_id, source_kind, source_shot_revision_id, "
+            "source_shot_revision_hash, source_generation_id, "
+            "source_take_id, proposer_kind, analyzer_id, "
+            "analyzer_version, analyzer_parameters_hash, proposal_json, "
+            "proposal_hash, created_at) VALUES (:id, :s, 'imported', "
+            f":r, :h, NULL, NULL, 'human', NULL, NULL, NULL, :pj, :ph, "
+            "strftime('%Y-%m-%dT%H:%M:%fZ','now'))"),
+            [{"id": r["id"], "s": sid, "r": revision.id,
+              "h": revision.snapshot_hash, "pj": r["pj"],
+              "ph": r["ph"]} for r in rows])
+    reviews = [{"proposal_id": r["id"], "expected_proposal_hash": ph,
+                "decision": "ignore"} for r in rows]
+    ok = await client.post(
+        f"/shots/{sid}/intra-shot/proposals/review-batch",
+        json={"reviews": reviews})
+    assert ok.status_code == 200, ok.text[:400]
+    assert len(ok.json()["review_ids"]) == 10_000
+    async with engine.connect() as conn:
+        n = (await conn.execute(text(
+            "SELECT COUNT(*) FROM persistent_consequence_reviews "
+            "WHERE source_kind = 'proposal'"))).scalar_one()
+    assert n == 10_000
+    # one review above the bound is refused before any work
+    over = [{"proposal_id": r["id"], "expected_proposal_hash": ph,
+             "decision": "ignore"} for r in rows]
+    over.append({"proposal_id": rows[0]["id"],
+                 "expected_proposal_hash": ph, "decision": "ignore"})
+    rejected = await client.post(
+        f"/shots/{sid}/intra-shot/proposals/review-batch",
+        json={"reviews": over})
+    assert rejected.status_code == 422, rejected.text[:200]
