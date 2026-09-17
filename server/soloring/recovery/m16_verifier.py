@@ -324,10 +324,11 @@ def _verify_review(row, rows) -> None:
                 "object")
         from soloring.continuity.intra_shot_canonical import (
             proposal_batch_basis_hash as batch_basis_root,
+            proposal_batch_basis_value as batch_basis_canonical,
         )
 
         try:
-            recomputed_batch = batch_basis_root(
+            canonical_batch = batch_basis_canonical(
                 shot_id=batch_doc["shot_id"],
                 source_shot_revision_id=batch_doc[
                     "source_shot_revision_id"],
@@ -342,7 +343,25 @@ def _verify_review(row, rows) -> None:
             _corrupt(
                 f"review {rid} batch basis object violates the frozen "
                 "grammar")
-        if recomputed_batch != batch_basis:
+        # the recorded batch object must BE the exact canonical value
+        # that was hashed — schema_version present, reviews sorted by
+        # proposal UUID, exact field set — not merely a doc whose
+        # extracted fields re-derive the same root
+        if canonical_batch != batch_doc:
+            _corrupt(
+                f"review {rid} batch basis object is not the exact "
+                "frozen canonical batch value")
+        if batch_basis_root(
+                shot_id=canonical_batch["shot_id"],
+                source_shot_revision_id=canonical_batch[
+                    "source_shot_revision_id"],
+                source_shot_revision_hash=canonical_batch[
+                    "source_shot_revision_hash"],
+                expected_working_snapshot_hash=canonical_batch[
+                    "expected_working_snapshot_hash"],
+                expected_event_set_hash=canonical_batch[
+                    "expected_event_set_hash"],
+                reviews=canonical_batch["reviews"]) != batch_basis:
             _corrupt(
                 f"review {rid} batch basis hash is not the frozen batch "
                 "object root")

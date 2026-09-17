@@ -292,3 +292,48 @@ async def test_proposal_10(client, factory):
             "WHERE source_proposal_id = :p"),
             {"p": proposal["id"]})).scalar_one()
     assert n == 0
+
+
+async def test_proposal_11(client, factory):
+    """PROPOSAL:11 — provenance cross-field violations are rejected as
+    input errors, never silently sanitized away."""
+    base = await seed_feature_world(client, factory)
+    sid, fid = base["shot_id"], base["feature_id"]
+    revision = await _capture_revision(client, sid)
+    engine = client._transport.app.state.engine
+    gen_id = "00000000-0000-4000-8000-0000000000g7"
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "INSERT INTO generations (id, shot_id, shot_revision_id, "
+            "status, operation, executor, workflow_id, workflow_version, "
+            "workflow_template_hash, manifest_hash, compiled_prompt, "
+            "prompt_compiler_version, parameters_json, "
+            "workflow_spec_json, workflow_spec_hash, attempt_id, "
+            "generation_number, created_at, updated_at) VALUES ("
+            ":g, :s, :r, 'succeeded', 'generate', 'comfy', 'wf', 1, "
+            ":h, :h, 'p', 'v1', '{}', :sj, :sh, 1, 1, "
+            "strftime('%Y-%m-%dT%H:%M:%fZ','now'), "
+            "strftime('%Y-%m-%dT%H:%M:%fZ','now'))"),
+            {"g": gen_id, "s": sid, "r": revision.id, "h": "0" * 64,
+             "sj": json.dumps({"schema_version": 1}),
+             "sh": __import__("hashlib").sha256(
+                 json.dumps({"schema_version": 1}).encode()).hexdigest()})
+    # a Generation proposal carrying a Take id is an input error
+    body = _proposal_body(fid, source_kind="generation")
+    body["source_shot_revision_id"] = revision.id
+    body["source_shot_revision_hash"] = revision.snapshot_hash
+    body["source_generation_id"] = gen_id
+    body["source_take_id"] = "00000000-0000-4000-8000-0000000000h7"
+    r = await client.post(f"/shots/{sid}/intra-shot/proposals",
+                          json=body)
+    assert r.status_code == 422, r.text
+    assert "Take id" in r.text
+    # a human proposal carrying analyzer identity is an input error
+    body2 = _proposal_body(fid)
+    body2["source_shot_revision_id"] = revision.id
+    body2["source_shot_revision_hash"] = revision.snapshot_hash
+    body2["analyzer_id"] = "vision-1"
+    r2 = await client.post(f"/shots/{sid}/intra-shot/proposals",
+                           json=body2)
+    assert r2.status_code == 422, r2.text
+    assert "analyzer" in r2.text

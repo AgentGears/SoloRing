@@ -10,6 +10,7 @@ from sqlalchemy import text
 
 from soloring.continuity.intra_shot_canonical import (
     proposal_batch_basis_hash,
+    proposal_batch_basis_value,
     proposal_review_basis_hash,
     proposal_storage,
 )
@@ -123,22 +124,16 @@ async def _valid_proposal_review_world(client, factory):
         "decision": "adopt_persistence",
     }]
     _ = pid2
-    batch_basis = proposal_batch_basis_hash(
+    # the recorded batch object is the EXACT canonical value that was
+    # hashed (schema_version, reviews sorted by proposal UUID)
+    batch_doc = proposal_batch_basis_value(
         shot_id=sid,
         source_shot_revision_id=revision.id,
         source_shot_revision_hash=revision.snapshot_hash,
         expected_working_snapshot_hash=revision.snapshot_hash,
         expected_event_set_hash=revision.snapshot_hash,
         reviews=batch_reviews)
-    batch_doc = {
-        "schema_version": 1,
-        "shot_id": sid,
-        "source_shot_revision_id": revision.id,
-        "source_shot_revision_hash": revision.snapshot_hash,
-        "expected_working_snapshot_hash": revision.snapshot_hash,
-        "expected_event_set_hash": revision.snapshot_hash,
-        "reviews": batch_reviews,
-    }
+    batch_basis = _ch(batch_doc)
     basis = proposal_review_basis_hash(
         batch_basis_hash=batch_basis, proposal_id=pid,
         proposal_hash=ph, decision="adopt_persistence")
@@ -442,3 +437,51 @@ async def test_recovery_d_written_review_rows_restore(client, factory,
     # backup -> staged restore: the certified C-depth verifier must
     # accept every one of these D-written rows
     await _roundtrip(client, tmp_path, "dwrite")
+
+async def test_recovery_proposal_batch_shape_noncanonical(client, factory,
+                                                          tmp_path):
+    """A recorded batch object that is not the EXACT canonical value
+    (missing schema_version) fails restore even though its extracted
+    fields re-derive the recorded basis root."""
+    world = await _valid_proposal_review_world(client, factory)
+    backup_root = await _roundtrip(client, tmp_path, "nc")
+    con = sqlite3.connect(str(backup_root / "soloring.db"))
+    op = _json.loads(con.execute(
+        "SELECT operation_json FROM persistent_consequence_reviews "
+        "WHERE id = ?", (world["review_id"],)).fetchone()[0])
+    del op["batch_basis"]["schema_version"]
+    # keep every recorded root consistent with the mutated field set so
+    # ONLY the exact-canonical-shape rule can fail
+    bb = op["batch_basis"]
+    op["batch_basis_hash"] = proposal_batch_basis_hash(
+        shot_id=bb["shot_id"],
+        source_shot_revision_id=bb["source_shot_revision_id"],
+        source_shot_revision_hash=bb["source_shot_revision_hash"],
+        expected_working_snapshot_hash=bb["expected_working_snapshot_hash"],
+        expected_event_set_hash=bb["expected_event_set_hash"],
+        reviews=bb["reviews"])
+    op["review_basis_hash"] = proposal_review_basis_hash(
+        batch_basis_hash=op["batch_basis_hash"],
+        proposal_id=world["proposal_id"],
+        proposal_hash=world["op"]["source"]["hash"],
+        decision="adopt_persistence")
+    con.execute(
+        "UPDATE persistent_consequence_reviews SET operation_json = :oj,"
+        " operation_hash = :oh, review_basis_hash = :bh WHERE id = :rid",
+        {"oj": _cjs(op), "oh": _ch(op), "bh": op["review_basis_hash"],
+         "rid": world["review_id"]})
+    con.commit()
+    con.close()
+    manifest_path = backup_root / "backup-manifest.json"
+    manifest = _json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["database_sha256"] = hashlib.sha256(
+        (backup_root / "soloring.db").read_bytes()).hexdigest()
+    manifest_path.write_bytes(canonical_json_bytes(manifest))
+    from soloring.recovery.backup import restore
+
+    try:
+        await restore(backup_root, tmp_path / "ref-nc")
+    except Exception as exc:
+        assert "canonical" in str(exc).lower()
+    else:
+        raise AssertionError("non-canonical batch object restored")

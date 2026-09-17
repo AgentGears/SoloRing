@@ -6,6 +6,8 @@ import json
 
 from sqlalchemy import text
 
+from soloring.domain.canonical import canonical_hash
+
 from tests.test_m16_proposals import (
     _capture_revision,
     _ingest,
@@ -605,3 +607,147 @@ async def test_adopt_17(client, factory):
         json=decline_body)
     assert d2.status_code == 200, d2.text
     assert d2.json()["idempotent"] is True
+
+
+async def test_adopt_18(client, factory):
+    """ADOPT:18 — fresh direct adoption re-folds the FULL event set
+    under the writer fence: a stored before-chain gone stale against
+    current Shot/start authority conflicts even though the stored
+    event-set bytes never changed, and no A2 authority is written."""
+    from soloring.api.schemas.projects import ProjectCreate
+    from soloring.domain import projects as project_svc
+    from tests.m16_seed_b import seed_ordered_pair
+
+    async with factory() as s:
+        pid = (await project_svc.create_project(
+            s, ProjectCreate(name="M16 adopt 18"))).id
+    first, second = await seed_ordered_pair(
+        factory, pid, name="M16 a18")
+    e = await client.post(
+        f"/projects/{pid}/entities",
+        json={"kind": "character", "name": "E"})
+    assert e.status_code == 201, e.text
+    eid = e.json()["id"]
+    r = await client.post(
+        f"/entities/{eid}/revisions", json={"spec": {"description": "d"}})
+    a = await client.put(
+        f"/entities/{eid}/approved-revision",
+        json={"revision_id": r.json()["id"],
+              "expected_approved_revision_id": None})
+    assert a.status_code == 200, a.text
+    for sid in (first, second):
+        d = await client.put(
+            f"/shots/{sid}/semantic-dependencies",
+            json={"dependencies": [{"entity_id": eid, "role": "subject"}]})
+        assert d.status_code == 200, d.text
+    f = await client.post(
+        f"/entities/{eid}/continuity-features",
+        json={"key": "cut", "kind": "injury", "value_type": "enum",
+              "name": "Cut", "enum_values": ["fresh", "healing"]})
+    assert f.status_code == 201, f.text
+    fid = f.json()["id"]
+    # an event in `second` chained from the ABSENT start state
+    ev = await post_event(
+        client, second,
+        event(fid, 1000, state(), state("fresh"),
+              persistence="require_handoff"))
+    proj = await get_intra(client, second)
+    body = {"expected_event_hash": ev["event_hash"],
+            "expected_event_set_hash": proj["event_set_hash"]}
+    # prior-Shot end authority now projects a DIFFERENT start state
+    # into `second`; the stored event bytes are untouched
+    await put_transition(client, fid, first, operation="set",
+                         value="healing")
+    rr = await client.post(
+        f"/intra-shot/events/{ev['id']}/persistence/adopt", json=body)
+    assert rr.status_code == 409, rr.text
+    engine = client._transport.app.state.engine
+    async with engine.connect() as conn:
+        n = (await conn.execute(text(
+            "SELECT COUNT(*) FROM continuity_feature_transitions "
+            "WHERE anchor_id = :s"),
+            {"s": second})).scalar_one()
+    assert n == 0
+
+
+async def test_adopt_19(client, factory):
+    """ADOPT:19 — an exact retry after the result event is tombstoned
+    returns the §12.4 recorded-result drift conflict, not a
+    missing-source-event 404."""
+    base = await seed_feature_world(client, factory)
+    sid, fid = base["shot_id"], base["feature_id"]
+    ev = await post_event(
+        client, sid,
+        event(fid, 1000, state(), state("fresh"),
+              persistence="require_handoff"))
+    proj = await get_intra(client, sid)
+    body = {"expected_event_hash": ev["event_hash"],
+            "expected_event_set_hash": proj["event_set_hash"]}
+    r1 = await client.post(
+        f"/intra-shot/events/{ev['id']}/persistence/adopt", json=body)
+    assert r1.status_code == 200, r1.text
+    d = await client.delete(f"/intra-shot/events/{ev['id']}")
+    assert d.status_code in (200, 204), d.text
+    r2 = await client.post(
+        f"/intra-shot/events/{ev['id']}/persistence/adopt", json=body)
+    assert r2.status_code == 409, r2.text
+    assert "INTRA_SHOT_REVIEW_CONFLICT" in r2.text
+
+
+async def test_adopt_20(client, factory):
+    """ADOPT:20 — §12.1 step 4: only the terminal event for a target
+    may adopt persistence. The authoring API refuses to demote a
+    require_handoff event (INTRA_SHOT_PERSISTENT_EVENT_NOT_TERMINAL),
+    so the non-terminal state is crafted directly in the database and
+    the adopt-side check is proven as defense-in-depth."""
+    from soloring.continuity.intra_shot_canonical import event_storage
+    from soloring.domain.canonical import canonical_json_str
+    from soloring.domain.ids import new_uuid
+
+    base = await seed_feature_world(client, factory)
+    sid, fid = base["shot_id"], base["feature_id"]
+    ev1 = await post_event(
+        client, sid,
+        event(fid, 1000, state(), state("fresh"),
+              persistence="require_handoff"))
+    # a later transient event on the same target, inserted past the
+    # authoring guard — ev1 is now non-terminal for its target
+    value, ej, eh = event_storage(
+        time_ms=1500, ordinal=0,
+        target={"kind": "entity_feature", "id": fid},
+        before=state("fresh"), after=state("healing"),
+        persistence_mode="transient")
+    engine = client._transport.app.state.engine
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "INSERT INTO shot_intra_shot_events "
+            "(id, shot_id, time_ms, ordinal, target_kind, "
+            "entity_feature_id, entity_relation_id, "
+            "production_instance_feature_id, before_state_json, "
+            "before_state_hash, after_state_json, after_state_hash, "
+            "persistence_mode, source_kind, source_proposal_id, "
+            "event_json, event_hash, created_at, updated_at) VALUES ("
+            ":id, :s, :t, 0, 'entity_feature', :f, NULL, NULL, :bj, "
+            ":bh, :aj, :ah, 'transient', 'authored', NULL, :ej, :eh, "
+            "strftime('%Y-%m-%dT%H:%M:%fZ','now'), "
+            "strftime('%Y-%m-%dT%H:%M:%fZ','now'))"),
+            {"id": new_uuid(), "s": sid, "t": 1500, "f": fid,
+             "bj": canonical_json_str(state("fresh")),
+             "bh": canonical_hash(state("fresh")),
+             "aj": canonical_json_str(state("healing")),
+             "ah": canonical_hash(state("healing")),
+             "ej": ej, "eh": eh})
+    proj = await get_intra(client, sid)
+    rr = await client.post(
+        f"/intra-shot/events/{ev1['id']}/persistence/adopt",
+        json={"expected_event_hash": ev1["event_hash"],
+              "expected_event_set_hash": proj["event_set_hash"]})
+    assert rr.status_code == 409, rr.text
+    assert "terminal" in rr.text
+    engine = client._transport.app.state.engine
+    async with engine.connect() as conn:
+        n = (await conn.execute(text(
+            "SELECT COUNT(*) FROM continuity_feature_transitions "
+            "WHERE anchor_id = :s"),
+            {"s": sid})).scalar_one()
+    assert n == 0

@@ -204,11 +204,9 @@ class ProposalReviewDecision(_ClosedModel):
                     "direct event reviews require exactly "
                     "expected_event_hash + expected_event_set_hash")
         else:
-            # proposal review form
-            need = {"expected_proposal_hash", "decision"}
-            if "expected_event_set_hash" in provided:
-                need.add("expected_event_set_hash")
-            if provided != need:
+            # proposal review form — the frozen §12.3 body is exactly
+            # these two keys; no event-set fence exists on this form
+            if provided != {"expected_proposal_hash", "decision"}:
                 raise ValueError(
                     "proposal reviews require exactly "
                     "expected_proposal_hash + decision")

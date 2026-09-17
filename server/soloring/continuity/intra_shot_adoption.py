@@ -20,7 +20,7 @@ from soloring.continuity.intra_shot_canonical import (
     MAX_PROPOSAL_REVIEW_BATCH,
     PROPOSAL_DECISIONS,
     event_review_basis_hash,
-    proposal_batch_basis_hash,
+    proposal_batch_basis_value,
     proposal_review_basis_hash,
     proposal_storage,
 )
@@ -470,13 +470,10 @@ async def adopt_event_persistence(session: AsyncSession, event_id: str, *,
     async with session.bind.connect() as conn:
         await conn.exec_driver_sql("BEGIN IMMEDIATE")
         try:
-            row = await _event_row(conn, event_id)
-            shot = await _load_shot(conn, row.shot_id)
-            # §12.4: same tuple-first rule as decline — the committed
-            # review is located from the immutable request source tuple
-            # before any current-state gate, so unrelated event-set
-            # evolution or a later capture cannot mask an exact retry;
-            # current state only certifies recorded-result drift
+            # §12.4: the immutable tuple probe comes FIRST — a tombstoned
+            # result event must surface as recorded-result drift, not as
+            # a missing source event; only a genuinely new review needs
+            # a currently active event row
             existing = await _probe_event_review(
                 conn, event_id=event_id, source_hash=expected_event_hash,
                 decision="adopt_persistence")
@@ -497,6 +494,8 @@ async def adopt_event_persistence(session: AsyncSession, event_id: str, *,
                         transition_ids=tids)
                 # different request evidence against the same source:
                 # fall through to the gates, which conflict honestly
+            row = await _event_row(conn, event_id)
+            shot = await _load_shot(conn, row.shot_id)
             if row.event_hash != expected_event_hash:
                 raise _conflict(
                     ErrorCode.INTRA_SHOT_REVIEW_CONFLICT,
@@ -517,12 +516,31 @@ async def adopt_event_persistence(session: AsyncSession, event_id: str, *,
                            "boundary": "end"},
                 "semantic_hash": semantic,
             }
-            current_set = await _current_event_set(conn, shot)
-            if current_set != expected_event_set_hash:
+            # §12.1 steps 3-4: re-fold the FULL current event set under
+            # the writer fence — stored bytes alone cannot prove the
+            # before chains are still legal against current Shot/start
+            # authority — and verify this event is the terminal event
+            # for its target before any A2 authority is written
+            active_rows = await _load_active_rows(conn, shot.id)
+            refolded = await validate_prospective_event_set(
+                conn, shot, [_draft_from_row(r) for r in active_rows])
+            if refolded["event_set_hash"] != expected_event_set_hash:
                 raise _conflict(
                     ErrorCode.INTRA_SHOT_REVIEW_CONFLICT,
                     "event-set hash drifted")
-            working_pin = await _working_pin(conn, shot, current_set)
+            same_target = [
+                e for e in refolded["events"]
+                if e["target_kind"] == doc["target"]["kind"]
+                and e["target_id"] == doc["target"]["id"]]
+            terminal = max(same_target,
+                           key=lambda e: (e["time_ms"], e["ordinal"]))
+            if terminal["id"] != event_id:
+                raise _conflict(
+                    ErrorCode.INTRA_SHOT_REVIEW_CONFLICT,
+                    "only the terminal event for a target may adopt "
+                    "persistence", event_id=event_id)
+            working_pin = await _working_pin(
+                conn, shot, refolded["event_set_hash"])
             basis = event_review_basis_hash(
                 source_event_id=event_id, source_hash=expected_event_hash,
                 decision="adopt_persistence",
@@ -589,15 +607,13 @@ async def decline_event_persistence(session: AsyncSession, event_id: str, *,
     async with session.bind.connect() as conn:
         await conn.exec_driver_sql("BEGIN IMMEDIATE")
         try:
-            row = await _event_row(conn, event_id)
-            shot = await _load_shot(conn, row.shot_id)
-            # §12.4: the committed review is located from the immutable
-            # REQUEST source tuple BEFORE the pre-decline row-shape
-            # gates — the first successful decline flips this same UUID
-            # to transient, and a LATER capture moves the working pin,
-            # so neither today's row shape nor today's state may gate
-            # the probe; current state is only consulted to verify the
-            # recorded result authority for drift.
+            # §12.4: the immutable tuple probe comes FIRST — the first
+            # successful decline flips this same UUID to transient, a
+            # later capture moves the working pin, and a tombstoned
+            # result event must surface as recorded-result drift rather
+            # than a missing source event; today's row shape and state
+            # only gate genuinely new reviews and certify recorded-result
+            # drift
             existing = await _probe_event_review(
                 conn, event_id=event_id, source_hash=expected_event_hash,
                 decision="decline_persistence")
@@ -618,6 +634,8 @@ async def decline_event_persistence(session: AsyncSession, event_id: str, *,
                         transition_ids=tids)
                 # different request evidence against the same source:
                 # fall through to the gates, which conflict honestly
+            row = await _event_row(conn, event_id)
+            shot = await _load_shot(conn, row.shot_id)
             if row.event_hash != expected_event_hash:
                 raise _conflict(
                     ErrorCode.INTRA_SHOT_REVIEW_CONFLICT,
@@ -725,6 +743,9 @@ async def ingest_proposal(session: AsyncSession, shot_id: str, payload) -> dict:
                     raise validation_error(
                         "generation proposals require "
                         "source_generation_id")
+                if body.get("source_take_id"):
+                    raise validation_error(
+                        "generation proposals carry no Take id")
                 g = (await conn.execute(text(
                     "SELECT shot_id, shot_revision_id FROM generations "
                     "WHERE id = :g"), {"g": gen_id})).first()
@@ -769,6 +790,13 @@ async def ingest_proposal(session: AsyncSession, shot_id: str, payload) -> dict:
                     raise validation_error(
                         "analyzer proposals require exact id/version/"
                         "parameter hash")
+            elif (body.get("analyzer_id") or body.get("analyzer_version")
+                    or body.get("analyzer_parameters_hash")):
+                # the frozen provenance grammar is rejected, not
+                # silently sanitized: a human proposal carrying
+                # analyzer identity is an input error
+                raise validation_error(
+                    "human proposals carry no analyzer identity")
             value, pj, ph = proposal_storage(
                 candidate_event=body["candidate_event"],
                 persistence_suggestion=body["persistence_suggestion"])
@@ -1056,24 +1084,16 @@ async def review_proposals(session: AsyncSession, shot_id: str,
                     conn, shot, [_draft_from_row(r) for r in
                                  existing_rows])
                 event_set = current["event_set_hash"]
-            batch_basis = proposal_batch_basis_hash(
+            # the persisted batch basis IS the exact canonical object
+            # that was hashed (schema_version, reviews sorted by
+            # proposal UUID) — never a parallel hand-built shape
+            batch_basis_value = proposal_batch_basis_value(
                 shot_id=shot_id, source_shot_revision_id=source_rev,
                 source_shot_revision_hash=source_hash,
                 expected_working_snapshot_hash=working,
                 expected_event_set_hash=event_set,
                 reviews=batch_reviews)
-            batch_doc = {
-                "shot_id": shot_id,
-                "source_shot_revision_id": source_rev,
-                "source_shot_revision_hash": source_hash,
-                # §7.5.2 nullable basis values are recorded as JSON null,
-                # byte-verbatim with the hashed basis inputs — C recovery
-                # recomputes the batch root from this doc, and "" is not
-                # a legal hash in the frozen grammar
-                "expected_working_snapshot_hash": working,
-                "expected_event_set_hash": event_set,
-                "reviews": batch_reviews,
-            }
+            batch_basis = canonical_hash(batch_basis_value)
             new_drafts = []
             plan = []
             for r, row in specs:
@@ -1190,7 +1210,7 @@ async def review_proposals(session: AsyncSession, shot_id: str,
                     "expected_handoff": eh,
                     "review_basis_hash": basis,
                     "batch_basis_hash": batch_basis,
-                    "batch_basis": batch_doc,
+                    "batch_basis": batch_basis_value,
                     "result": result,
                 }
                 kind = draft["target_kind"] if draft else None
