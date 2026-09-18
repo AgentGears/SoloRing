@@ -30,7 +30,9 @@ from soloring.domain.shots import (
     _reference_refs,
     _visual_blob_store,
 )
-from soloring.errors import ErrorCode, internal_invariant, not_found
+from soloring.errors import (
+    ErrorCode, SoloRingError, internal_invariant, not_found,
+)
 
 MAX_REVISION_ATTEMPTS = 5
 
@@ -73,6 +75,7 @@ async def _snapshot_one_read(
             row = (
                 await conn.execute(
                     select(
+                        Shot.id, Shot.project_id, Shot.scene_id,
                         Shot.subject, Shot.action, Shot.environment,
                         Shot.framing, Shot.camera_motion, Shot.lens,
                         Shot.mood, Shot.duration_ms,
@@ -153,16 +156,105 @@ async def _snapshot_one_read(
                 m10_spatial_result=spatial_result,
             )
             require_production_world_ready(production_world_result)
+            # M16-C (frozen R6 §14.1/§14.2): the ONE B resolver runs on
+            # this SAME pinned snapshot — capture and Shot detail consume
+            # the same resolver-result grammar, and no post-snapshot query
+            # can influence the captured M16 value. A not-ready M16 layer
+            # raises the first typed blocker before any builder runs.
+            from soloring.continuity.intra_shot_resolver import (
+                resolve_intra_shot,
+            )
+
+            intra = await resolve_intra_shot(
+                conn, shot,
+                resolved_deps=resolved,
+                feature_outcome=outcome,
+                relation_outcome=relation_outcome,
+                production_world_outcome=production_world_result)
+            if not intra["intra_shot_ready"]:
+                first = intra["intra_shot_issues"][0]
+                raise SoloRingError(
+                    first["code"], first["message"],
+                    status_code=409, details=first["details"])
             await conn.commit()
             return (
                 shot, refs, resolved, outcome.states,
                 relation_outcome.relation_states,
                 visual_result, spatial_result, production_world_result,
+                intra,
             )
         except Exception:
             with contextlib.suppress(Exception):
                 await conn.rollback()
             raise
+
+
+def snapshot_duration(shot) -> int:
+    return shot.duration_ms
+
+
+async def _intra_shot_parent_exists(conn, revision_id: str) -> bool:
+    return (await conn.execute(text(
+        "SELECT 1 FROM shot_revision_intra_shot_specs "
+        "WHERE shot_revision_id = :r"), {"r": revision_id})).first()         is not None
+
+
+async def _verify_intra_shot_companions(
+        conn, revision_id: str, children,
+        intra_shot_pack) -> None:
+    """Semantic convergence verification (frozen R6 §14.4): the stored
+    companion PARENT (schema/duration/spec bytes+hash) and children must
+    match the would-be capture on every captured semantic field.
+    ``source_event_id``/``source_proposal_id`` and transition UUIDs are
+    first-publication audit provenance — they are deliberately NOT
+    compared. Missing/extra/mismatched rows are corruption, never
+    repaired."""
+    from soloring.continuity.intra_shot_capture import (
+        intra_shot_spec_bytes,
+    )
+
+    stored_parent = (await conn.execute(text(
+        "SELECT schema_version, duration_ms, spec_json, spec_hash FROM "
+        "shot_revision_intra_shot_specs WHERE shot_revision_id = :r"),
+        {"r": revision_id})).fetchall()
+    spec_json, spec_hash = intra_shot_spec_bytes(intra_shot_pack)
+    if len(stored_parent) != 1:
+        raise internal_invariant(
+            f"ShotRevision {revision_id} convergence requires exactly "
+            "one intra_shot companion parent")
+    sp = stored_parent[0]
+    if (sp.schema_version != 1
+            or sp.duration_ms != intra_shot_pack["duration_ms"]
+            or sp.spec_json != spec_json
+            or sp.spec_hash != spec_hash):
+        raise internal_invariant(
+            f"ShotRevision {revision_id} intra_shot companion parent "
+            "disagrees with the converged capture")
+    from soloring.continuity.intra_shot_capture import (
+        expected_child_signature,
+        semantic_child_signature,
+    )
+
+    stored = (await conn.execute(text(
+        "SELECT position, time_ms, ordinal, target_kind, "
+        "captured_target_identity_json, captured_target_identity_hash, "
+        "captured_before_state_json, captured_before_state_hash, "
+        "captured_after_state_json, captured_after_state_hash, "
+        "persistence_mode, captured_handoff_json, captured_handoff_hash, "
+        "event_json, event_hash "
+        "FROM shot_revision_intra_shot_events WHERE shot_revision_id = :r "
+        "ORDER BY position"), {"r": revision_id})).fetchall()
+    expected = sorted(children or [], key=lambda c: c["position"])
+    if len(stored) != len(expected):
+        raise internal_invariant(
+            f"ShotRevision {revision_id} intra_shot companion row count "
+            f"disagrees: stored {len(stored)}, expected {len(expected)}")
+    for row, child in zip(stored, expected):
+        if semantic_child_signature(row) != expected_child_signature(child):
+            raise internal_invariant(
+                f"ShotRevision {revision_id} intra_shot companion child "
+                f"at position {row.position} disagrees semantically with "
+                "the converged capture")
 
 
 async def _allocate_number(conn, shot_id: str) -> int:
@@ -346,6 +438,9 @@ async def _persist_revision_fenced(
     visual_result=None,
     spatial_result=None,
     production_world_result=None,
+    *,
+    intra_shot_pack=None,
+    intra_shot_children=None,
 ) -> str:
     """The ShotRevision write phase as ONE BEGIN IMMEDIATE unit (M6 §9/§57,
     M6C re-gate blocker 2; M7D §10.3 adds the relation children):
@@ -389,6 +484,16 @@ async def _persist_revision_fenced(
                         visual_result, spatial_result,
                         production_world_result,
                     )
+                    if intra_shot_pack is not None:
+                        await _verify_intra_shot_companions(
+                            conn, existing[0], intra_shot_children,
+                            intra_shot_pack)
+                    elif await _intra_shot_parent_exists(
+                            conn, existing[0]):
+                        raise internal_invariant(
+                            f"ShotRevision {existing[0]} convergence "
+                            "missing the intra_shot companion the "
+                            "snapshot hash requires")
                     await conn.exec_driver_sql("COMMIT")
                     return existing[0]
 
@@ -508,9 +613,75 @@ async def _persist_revision_fenced(
                     await _persist_m13_children(
                         conn, revision_id, production_world_result
                     )
+                if intra_shot_pack is not None:
+                    from soloring.continuity.intra_shot_capture import (
+                        intra_shot_spec_bytes,
+                    )
+
+                    spec_js, spec_hs = intra_shot_spec_bytes(
+                        intra_shot_pack)
+                    await conn.execute(
+                        text(
+                            "INSERT INTO shot_revision_intra_shot_specs "
+                            "(shot_revision_id, schema_version, "
+                            " duration_ms, spec_json, spec_hash) VALUES "
+                            "(:rid, 1, :dur, :sj, :sh)"
+                        ),
+                        {"rid": revision_id,
+                         "dur": intra_shot_pack["duration_ms"],
+                         "sj": spec_js, "sh": spec_hs},
+                    )
+                    await conn.execute(
+                        text(
+                            "INSERT INTO shot_revision_intra_shot_events "
+                            "(shot_revision_id, position, source_event_id, "
+                            " time_ms, ordinal, target_kind, "
+                            " captured_target_identity_json, "
+                            " captured_target_identity_hash, "
+                            " captured_before_state_json, "
+                            " captured_before_state_hash, "
+                            " captured_after_state_json, "
+                            " captured_after_state_hash, persistence_mode, "
+                            " entity_feature_transition_id, "
+                            " entity_relation_transition_id, "
+                            " production_instance_feature_transition_id, "
+                            " captured_handoff_json, captured_handoff_hash, "
+                            " event_json, event_hash, source_proposal_id) "
+                            "VALUES "
+                            "(:rid, :position, :seid, :t, :o, :tk, :tij, "
+                            ":tih, :bj, :bh, :aj, :ah, :pm, :eft, :ert, "
+                            ":pft, :hj, :hh, :ej, :eh, :sp)"
+                        ),
+                        [{
+                            "rid": revision_id,
+                            "position": child["position"],
+                            "seid": child["source_event_id"],
+                            "t": child["time_ms"], "o": child["ordinal"],
+                            "tk": child["target_kind"],
+                            "tij": child["captured_target_identity_json"],
+                            "tih": child["captured_target_identity_hash"],
+                            "bj": child["captured_before_state_json"],
+                            "bh": child["captured_before_state_hash"],
+                            "aj": child["captured_after_state_json"],
+                            "ah": child["captured_after_state_hash"],
+                            "pm": child["persistence_mode"],
+                            "eft": child["entity_feature_transition_id"],
+                            "ert": child["entity_relation_transition_id"],
+                            "pft": (child[
+                                "production_instance_feature_transition_id"]),
+                            "hj": child["captured_handoff_json"],
+                            "hh": child["captured_handoff_hash"],
+                            "ej": child["event_json"],
+                            "eh": child["event_hash"],
+                            "sp": child["source_proposal_id"],
+                        } for child in (intra_shot_children or [])],
+                    )
                 await conn.exec_driver_sql("COMMIT")
                 return revision_id
             except IntegrityError:
+                import os
+                if os.environ.get("M16_DEBUG_FENCE"):
+                    raise
                 with contextlib.suppress(Exception):
                     await conn.exec_driver_sql("ROLLBACK")
                 continue
@@ -559,6 +730,7 @@ async def capture_revision_with_visual(
     feature_states, relation_states, visual_result = read[3], read[4], read[5]
     spatial_result = read[6]
     production_world_result = read[7]
+    intra = read[8]
     visual_pack = (
         visual_result.pack if visual_result is not None else None
     )
@@ -566,9 +738,38 @@ async def capture_revision_with_visual(
         spatial_result.pack if spatial_result is not None else None
     )
     production_world_pack = production_world_result.pack
+    intra_shot_pack = None
+    intra_shot_children = None
+    if intra["events"]:
+        from soloring.continuity.intra_shot_capture import (
+            captured_child_row,
+            pack_from_projection,
+        )
+
+        intra_shot_pack, transition_ids = pack_from_projection(
+            shot_id, intra)
+        if intra_shot_pack["duration_ms"] != snapshot_duration(shot):
+            from soloring.errors import internal_invariant
+
+            raise internal_invariant(
+                "intra_shot block duration disagrees with the captured "
+                "Shot intent duration")
+        # pack events carry the canonical semantics; the projection
+        # events (same canonical order) carry the audit ids
+        assert len(intra["events"]) == len(intra_shot_pack["events"])
+        intra_shot_children = [
+            captured_child_row(
+                packed, position=i,
+                source_event_id=public["id"],
+                source_proposal_id=public.get("source_proposal_id"),
+                transition_id=transition_ids.get(
+                    (packed["target"]["kind"], packed["target"]["id"])))
+            for i, (public, packed) in enumerate(
+                zip(intra["events"], intra_shot_pack["events"]))]
     snapshot, continuity_spec = build_capturable_snapshot(
         shot, refs, resolved, feature_states, relation_states, visual_pack,
         spatial_pack, production_world_pack,
+        intra_shot_pack=intra_shot_pack,
     )
     snapshot_hash = canonical_hash(snapshot)
     snapshot_json = canonical_json_str(snapshot)
@@ -581,6 +782,8 @@ async def capture_revision_with_visual(
         session.bind, shot_id, snapshot_json, snapshot_hash,
         spec_json, spec_hash, resolved, feature_states, relation_states,
         visual_result, spatial_result, production_world_result,
+        intra_shot_pack=intra_shot_pack,
+        intra_shot_children=intra_shot_children,
     )
     revision = await session.get(ShotRevision, revision_id)
     assert revision is not None

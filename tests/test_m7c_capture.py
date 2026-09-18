@@ -517,13 +517,16 @@ async def test_structural_singularity_both_paths_invoke_builder(
     original = snaps.build_capturable_snapshot
 
     def spy(shot, refs, resolved, feature_states=(), relation_states=(),
-            visual_pack=None, spatial_pack=None, production_world_pack=None):
+            visual_pack=None, spatial_pack=None, production_world_pack=None,
+            intra_shot_pack=None):
         # M13 extends the ONE builder with the schema-6 pack argument;
-        # both paths still flow through this single function.
+        # M16-C extends it with the intra_shot pack; both paths still
+        # flow through this single function.
         calls.append(len(feature_states))
         return original(
             shot, refs, resolved, feature_states, relation_states,
             visual_pack, spatial_pack, production_world_pack,
+            intra_shot_pack,
         )
 
     monkeypatch.setattr(snaps, "build_capturable_snapshot", spy)
@@ -533,12 +536,12 @@ async def test_structural_singularity_both_paths_invoke_builder(
         snaps, "effective_working_snapshot_hash",
         lambda shot, refs, resolved, feature_states=(),
         relation_states=(), visual_pack=None, spatial_pack=None,
-        production_world_pack=None: (
+        production_world_pack=None, intra_shot_pack=None: (
             __import__("soloring.domain.canonical",
                        fromlist=["canonical_hash"]).canonical_hash(
                 spy(shot, refs, resolved, feature_states,
                     relation_states, visual_pack, spatial_pack,
-                    production_world_pack)[0])
+                    production_world_pack, intra_shot_pack)[0])
         ),
     )
 
@@ -603,8 +606,8 @@ def test_migration_files_and_head_is_0009():
     to 0009 only with M8A's visual-identity migration."""
     versions = BASE_DIR / "server" / "alembic" / "versions"
     files = sorted(p.name for p in versions.glob("*.py"))
-    assert files[-1] == "0016_m15_revision_compatibility.py"
-    assert len(files) == 16  # M15A added 0016
+    assert files[-1] == "0017_m16_intra_shot_consequences.py"
+    assert len(files) == 17  # M16-A added 0017
 
 
 # --- Reuse integrity fail-closed ----------------------------------------------------------------

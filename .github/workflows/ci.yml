@@ -66,6 +66,14 @@ jobs:
         run: python scripts/m14_validate_source_fit.py
       - name: M15 proof map
         run: python scripts/m15_validate_proof_map.py
+      - name: M16 baseline
+        run: python scripts/m16_validate_baseline.py
+      - name: M16 proof map
+        run: python scripts/m16_validate_proof_map.py
+      - name: M16 boundary
+        run: python scripts/m16_validate_boundary.py
+      - name: M16 source fit
+        run: python scripts/m16_validate_source_fit.py
       - name: No repo-root generated residue
         run: python -c "from pathlib import Path; assert not Path('m10f-scale-pkgs').exists(), 'repo-root residue present'"
 

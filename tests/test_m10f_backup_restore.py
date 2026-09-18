@@ -62,9 +62,10 @@ def _alembic_stamp(data_dir: Path) -> None:
     try:
         cfg = Config(str(REPO / "server" / "alembic.ini"))
         cfg.set_main_option("script_location", str(REPO / "server" / "alembic"))
-        # The schema was created by the ORM (create_all); ORM↔migration
-        # parity is separately frozen (§8.1). stamp records the head the
-        # production deployment would carry after `alembic upgrade head`.
+        # M16-C certified the 0017 recovery head: the template stamps the
+        # true head the production deployment would carry after
+        # `alembic upgrade head`; the empty M16 tables verify cleanly at
+        # full M16 depth.
         command.stamp(cfg, "head")
     finally:
         settings_mod._settings = prev

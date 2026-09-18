@@ -17,6 +17,7 @@ from soloring.api.errors import register_exception_handlers
 from soloring.api.assets import router as assets_router
 from soloring.api.blobs import router as blobs_router
 from soloring.api.continuity import router as continuity_router
+from soloring.api.intra_shot import router as intra_shot_router
 from soloring.api.entities import router as entities_router
 from soloring.api.generations import router as generations_router
 from soloring.api.compositions import router as compositions_router
@@ -79,6 +80,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(entities_router)
     app.include_router(narrative_router)
     app.include_router(continuity_router)
+    app.include_router(intra_shot_router)
     app.include_router(realization_router)
     app.include_router(assets_router)
     app.include_router(production_router)

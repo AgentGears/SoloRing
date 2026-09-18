@@ -1,10 +1,9 @@
 """Next-security boundary validator (frozen R2 §17).
 
 Diffs the working tree against the implementation boundary and rejects:
-  * changed files outside the reviewed security-slice allowlist
-    (server/soloring, backend tests, unrelated frontend files);
-  * any migration at or beyond 0015 / any Alembic change;
-  * M14 observation/workflow/executor semantics in changed files;
+  * changed files outside the reviewed security/successor allowlist;
+  * unauthorized Alembic changes;
+  * M14 observation/workflow/executor semantics outside reviewed surfaces;
   * a Next major other than 15 in apps/web/package.json.
 
 Squash-survival (merge-review correction 2026-09-09): the repository
@@ -13,13 +12,10 @@ NOT permanently reachable from published main. Base selection is
 dual-mode and deterministic:
   * PREDECESSOR mode — when the reviewed hygiene head 3adead5 is
     reachable, diff exactly 3adead5..HEAD against the strict security
-    allowlist (the frozen implementation-boundary proof, unchanged);
-  * PUBLISHED mode — otherwise (squash-shaped published history), diff
-    published M13 384a46d..HEAD against the union of the security and
-    hygiene allowlists (the full reviewed post-M13 surface), and
-    require the checked-in predecessor evidence
-    (docs/security/nsec-predecessor-evidence.json) to be present and
-    internally exact. No ephemeral branch is ever a prerequisite.
+    allowlist;
+  * PUBLISHED mode — otherwise, diff published M13 384a46d..HEAD against
+    the union of the security and hygiene allowlists and require the
+    checked-in predecessor evidence.
 
 Exit codes: 0 clean; 1 violation.
 """
@@ -38,16 +34,12 @@ PREDECESSOR = "3adead55ca052808260bc4939403bd1fdcc29e13"
 PUBLISHED_M13 = "384a46d3a5c68d7d81784befc338aa8621b93fbd"
 EVIDENCE_PATH = REPO / "docs" / "security" / "nsec-predecessor-evidence.json"
 
-# The reviewed security-slice change surface (frozen R2 §5/§8.2/§17)
 ALLOWLIST = (
-    # framework dependency files
     "apps/web/package.json",
     "apps/web/package-lock.json",
     "apps/web/next-env.d.ts",
-    # the two frozen async-param pages
     "apps/web/src/app/projects/[id]/production/page.tsx",
     "apps/web/src/app/projects/[id]/world/page.tsx",
-    # security evidence + validators + harness
     "docs/security/",
     "docs/SoloRing-Next-Security-Proof-Map.md",
     "scripts/next_security_validate.py",
@@ -55,21 +47,13 @@ ALLOWLIST = (
     "scripts/next_security_validate_boundary.py",
     "scripts/next_security_smoke.py",
     "tests/test_post_m13_next_security.py",
-    # post-merge R8 determinism correction (CI run 34362011109):
-    # test-scoped park budget in the APR-032/033 race proof only
     "tests/test_m7d_relations.py",
-    # frozen §5: hygiene successor-closure documents touched by this slice
     "docs/hygiene/npm-audit-runtime-exceptions.json",
     "docs/SoloRing-Post-M13-Hygiene-Proof-Map.md",
     "docs/hygiene/post-m13-hygiene-implementation-record.md",
     "scripts/hygiene_validate_boundary.py",
     ".github/workflows/ci.yml",
-    # M14 implementation slices (frozen R2 @ 68f910f5, authorized
-    # 2026-09-10): the authorized M14 surface extends this allowlist so
-    # the security boundary stays GREEN across the M14 closure, exactly
-    # as this slice extended the hygiene allowlist before it. The
-    # blanket backend-change rejection below carves out only the
-    # M14-owned surface.
+    # M14 implementation slices.
     ".gitattributes",
     "docs/SoloRing-M14-Proof-Map.md",
     "docs/SoloRing-M14-R2-Freeze-Erratum-E1.md",
@@ -132,21 +116,14 @@ ALLOWLIST = (
     "tests/test_migration_m1.py",
     "tests/test_migration_m6.py",
     "scripts/m13_validate_boundary.py",
-    # M15 implementation slices (frozen R4 @ 7410a012, authorized
-    # 2026-09-12): the authorized M15 proof scaffold extends this
-    # allowlist so the security boundary stays GREEN across the M15
-    # closure, exactly as the M14 slice extended it before. M15-0 adds
-    # only the scaffold surface; product-source slices append their
-    # reviewed paths when they land.
+    # M15 implementation slices.
     "docs/SoloRing-M15-Proof-Map.md",
     "scripts/m15_validate_proof_map.py",
     "tests/fixtures/m15/",
     "tests/test_m15_baseline.py",
-    # M15A product surface (frozen R4 §26/§28, authorized 2026-09-12)
     "server/soloring/compatibility/",
     "server/soloring/composition/service.py",
     "server/soloring/composition/impacts.py",
-    # R5 §26.1 classifier-refactor exception (authorized 2026-09-12)
     "server/soloring/production_world/placement_consumer.py",
     "server/soloring/production_world/binding.py",
     "server/alembic/versions/0016_m15_revision_compatibility.py",
@@ -165,7 +142,6 @@ ALLOWLIST = (
     "tests/test_m15_impact.py",
     "tests/test_m15_tracking.py",
     "tests/test_m15_scale.py",
-    # M15C succession (frozen R6 §15/§27)
     "tests/test_m15_apply.py",
     "tests/test_m15_races.py",
     "tests/test_m15_history.py",
@@ -177,7 +153,6 @@ ALLOWLIST = (
     "tests/test_m13_subjects.py",
     "tests/test_m15_recovery.py",
     "tests/test_m15_api.py",
-    # M15D frontend surface (frozen R6 §28, authorized 2026-09-12)
     "apps/web/src/components/M15UpdateSummary.tsx",
     "apps/web/src/components/M15TrackingBadge.tsx",
     "apps/web/src/components/M15HistoryMessage.tsx",
@@ -188,7 +163,7 @@ ALLOWLIST = (
     "apps/web/src/components/ProductionLibrary.tsx",
     "apps/web/src/components/WorldSetWorkspace.tsx",
     "apps/web/src/lib/api.client.ts",
-    # Post-M15 review remediation: exact reviewed successor surface only.
+    # Post-M15 review remediation.
     "apps/web/src/components/ProductionWorldPanel.tsx",
     "server/soloring/executors/comfy/translate.py",
     "server/soloring/spatial/package3.py",
@@ -196,21 +171,132 @@ ALLOWLIST = (
     "server/tests/test_post_m15_recovery_hardening.py",
     "tests/test_post_m15_worker_transport.py",
     "tests/test_m10f_adversarial_worker.py",
+    # M16-P0 predecessor repairs.
+    "server/soloring/api/continuity.py",
+    "server/soloring/recovery/__init__.py",
+    "server/soloring/recovery/semantic_successors.py",
+    "server/soloring/recovery/successor_semantics.py",
+    "server/soloring/recovery/m16_verifier.py",
+    "tests/test_m16_p0_repairs.py",
+    # M16-A exact authority surface.
+    "server/alembic/versions/0017_m16_intra_shot_consequences.py",
+    "server/soloring/continuity/intra_shot_models.py",
+    "server/soloring/continuity/intra_shot_canonical.py",
+    "server/soloring/continuity/intra_shot_service.py",
+    "server/soloring/continuity/intra_shot_resolver.py",
+    "server/soloring/continuity/intra_shot_capture.py",
+    "server/soloring/continuity/intra_shot_history.py",
+    "server/soloring/continuity/intra_shot_adoption.py",
+    "server/soloring/continuity/snapshots.py",
+    "server/soloring/domain/revisions.py",
+    "server/soloring/api/schemas/intra_shot.py",
+    "server/soloring/api/intra_shot.py",
+    "server/soloring/api/main.py",
+    "server/soloring/domain/shots.py",
+    "server/soloring/api/schemas/shots.py",
+    "server/soloring/api/shots.py",
+    "tests/test_m16_migration.py",
+    "tests/test_m16_grammar.py",
+    "tests/test_m16_duration.py",
+    "tests/test_m16_events.py",
+    "tests/test_m16_identity.py",
+    # M16-B exact resolver/readiness surface (reviewed successor slice).
+    "tests/test_m16_start_state.py",
+    "tests/test_m16_fold.py",
+    "tests/test_m16_handoff.py",
+    "tests/test_m16_readiness.py",
+    "tests/test_m16_entity.py",
+    "tests/test_m16_relation.py",
+    "tests/test_m16_instance.py",
+    "tests/test_m16_scale.py",
+    "tests/test_m16_capture.py",
+    "tests/test_m16_history.py",
+    "tests/test_m16_history_c.py",
+    "tests/test_m16_races.py",
+    "tests/test_m16_generation_fence.py",
+    "tests/test_m16_recovery.py",
+    "tests/test_m16_recovery_proposals.py",
+    "tests/test_m16_recovery_coherence.py",
+    "tests/test_m16_recovery_domains.py",
+    "tests/test_m16_proposals.py",
+    "tests/test_m16_adoption.py",
+    "tests/test_m16_take_isolation.py",
+    "tests/test_m16_downstream.py",
+    # M16-E closure surface: frozen-owner P0 rename + SS23 source-gate
+    # owners + the four M16 validators + the frozen SS17 projection UI.
+    "tests/test_m16_predecessor_repairs.py",
+    "tests/test_m16_source_gates.py",
+    "scripts/m16_validate_baseline.py",
+    "scripts/m16_validate_proof_map.py",
+    "scripts/m16_validate_boundary.py",
+    "scripts/m16_validate_source_fit.py",
+    "apps/web/src/components/IntraShotPanel.tsx",
+    "apps/web/src/__tests__/IntraShotPanel.test.tsx",
+    "apps/web/src/app/shots/[id]/page.tsx",
+    "apps/web/src/lib/types.ts",
+    "apps/web/src/lib/api.client.ts",
+    "tests/m16_seed_b.py",
+    "tests/test_m3a_happy_path.py",
+    "tests/test_working_state_comparison.py",
+    # Reviewed M16-A recovery-boundary fixture correction: 0017 stays
+    # fail-closed until M16-C, so these two M10F fixtures construct the
+    # legitimate certified 0016 posture. Test fixtures, not M16 product
+    # source — deliberately NOT in M16_A_BACKEND_PATHS.
+    "tests/test_m10f_backup_restore.py",
+    "tests/test_m10f_scale.py",
+    # M16-D R7 review-artifact placement: successor plan revision +
+    # delta record committed solely for the reviewer's byte inspection
+    # ahead of the R7 freeze. Documentation, not code.
+    "SoloRing-M16-Intra-Shot-Persistent-Consequences-"
+    "Implementation-Plan-R7.md",
+    "SoloRing-M16-R6-to-R7.delta.md",
+    # post-M16-closure publication refresh (separately authorized): the
+    # README status refresh to M16/0017. Documentation only.
+    "README.md",
 )
 
-# These exact backend paths are successor review-remediation, not changes to
-# the frozen Next-security slice. Exact-path classification preserves the
-# blanket backend fence for every other non-M14/non-M15 path.
 POST_M15_REMEDIATION_BACKEND_PATHS = frozenset({
     "server/soloring/executors/comfy/translate.py",
     "server/soloring/spatial/package3.py",
     "server/soloring/spatial/worker_inputs.py",
     "server/tests/test_post_m15_recovery_hardening.py",
+    "server/soloring/api/continuity.py",
+    "server/soloring/recovery/__init__.py",
+    "server/soloring/recovery/semantic_successors.py",
+    "server/soloring/recovery/successor_semantics.py",
+    "server/soloring/recovery/m16_verifier.py",
 })
 
 
 def post_m15_remediation_backend(path: str) -> bool:
     return path in POST_M15_REMEDIATION_BACKEND_PATHS
+
+
+M16_A_BACKEND_PATHS = frozenset({
+    "server/alembic/versions/0017_m16_intra_shot_consequences.py",
+    "server/soloring/continuity/intra_shot_models.py",
+    "server/soloring/continuity/intra_shot_canonical.py",
+    "server/soloring/continuity/intra_shot_service.py",
+    "server/soloring/continuity/intra_shot_resolver.py",
+    "server/soloring/continuity/intra_shot_capture.py",
+    "server/soloring/continuity/intra_shot_history.py",
+    "server/soloring/continuity/intra_shot_adoption.py",
+    "server/soloring/continuity/snapshots.py",
+    "server/soloring/domain/revisions.py",
+    # M16-B Shot-detail readiness integration seam (reviewed successor).
+    "server/soloring/api/schemas/shots.py",
+    "server/soloring/api/shots.py",
+    "server/soloring/api/schemas/intra_shot.py",
+    "server/soloring/api/intra_shot.py",
+    "server/soloring/api/main.py",
+    "server/soloring/domain/shots.py",
+    "server/soloring/db/models.py",
+    "server/soloring/errors.py",
+})
+
+
+def m16_a_backend(path: str) -> bool:
+    return path in M16_A_BACKEND_PATHS
 
 
 M15_OWNED_PREFIXES = (
@@ -233,6 +319,7 @@ M15_OWNED_PREFIXES = (
 
 def m15_owned(path: str) -> bool:
     return path.startswith(M15_OWNED_PREFIXES)
+
 
 M14_OWNED_PREFIXES = (
     "docs/SoloRing-M14-",
@@ -263,6 +350,7 @@ M14_OWNED_PREFIXES = (
 def m14_owned(path: str) -> bool:
     return path.startswith(M14_OWNED_PREFIXES)
 
+
 M14_PATTERNS = [
     (r"\bObservationSpec\b", "M14 ObservationSpec"),
     (r"\bWorldObservationSpec\b", "M14 WorldObservationSpec"),
@@ -276,15 +364,15 @@ M14_PATTERNS = [
 
 
 def git(*args: str, repo: Path = REPO) -> str:
-    return subprocess.run(["git", "-C", str(repo), *args],
-                          capture_output=True, text=True,
-                          check=True).stdout
+    return subprocess.run(
+        ["git", "-C", str(repo), *args],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
 
 
 def path_allowed(path: str, allowlist) -> bool:
-    """Directory entries (trailing '/') match by prefix; every other
-    entry requires EXACT equality — an exact-file entry must never
-    authorize near-prefix siblings like `x.py.bak`."""
     for entry in allowlist:
         if entry.endswith("/"):
             if path.startswith(entry):
@@ -295,29 +383,30 @@ def path_allowed(path: str, allowlist) -> bool:
 
 
 def _union_allowlist() -> tuple[str, ...]:
-    """Published-mode surface: the reviewed security slice UNION the
-    reviewed hygiene slice (post-squash the two collapse into one
-    diff against published M13)."""
     spec = importlib.util.spec_from_file_location(
         "hygiene_validate_boundary",
-        REPO / "scripts" / "hygiene_validate_boundary.py")
+        REPO / "scripts" / "hygiene_validate_boundary.py",
+    )
     hyg = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(hyg)
-    merged = sorted(set(ALLOWLIST) | set(hyg.ALLOWLIST))
-    return tuple(merged)
+    return tuple(sorted(set(ALLOWLIST) | set(hyg.ALLOWLIST)))
 
 
 def _commit_reachable(sha: str, repo: Path) -> bool:
     return subprocess.run(
         ["git", "-C", str(repo), "rev-parse", "--verify", "--quiet",
-         f"{sha}^{{commit}}"], capture_output=True).returncode == 0
+         f"{sha}^{{commit}}"],
+        capture_output=True,
+    ).returncode == 0
 
 
 def _evidence_errors(repo: Path = REPO) -> list[str]:
     evidence = repo / "docs" / "security" / "nsec-predecessor-evidence.json"
     if not evidence.is_file():
-        return ["squash-shaped history without the checked-in "
-                f"predecessor evidence: {evidence} missing"]
+        return [
+            "squash-shaped history without the checked-in predecessor "
+            f"evidence: {evidence} missing"
+        ]
     try:
         ev = json.loads(evidence.read_text(encoding="utf-8"))
     except ValueError as exc:
@@ -332,15 +421,14 @@ def _evidence_errors(repo: Path = REPO) -> list[str]:
     errors = []
     for key, want in expected.items():
         if ev.get(key) != want:
-            errors.append(f"predecessor evidence {key} = "
-                          f"{ev.get(key)!r}, expected {want!r}")
+            errors.append(
+                f"predecessor evidence {key} = {ev.get(key)!r}, "
+                f"expected {want!r}"
+            )
     return errors
 
 
 def select_base(repo: Path = REPO) -> tuple[str, str]:
-    """Deterministic dual-mode base selection: the exact reviewed
-    predecessor when reachable (frozen implementation-boundary proof),
-    otherwise published M13 for squash-shaped history."""
     if _commit_reachable(PREDECESSOR, repo):
         return ("predecessor", PREDECESSOR)
     return ("published", PUBLISHED_M13)
@@ -349,76 +437,86 @@ def select_base(repo: Path = REPO) -> tuple[str, str]:
 def main(repo: Path = REPO) -> int:
     errors: list[str] = []
     mode, base = select_base(repo)
-    allowlist = ALLOWLIST if mode == "predecessor" else \
-        _union_allowlist()
+    allowlist = ALLOWLIST if mode == "predecessor" else _union_allowlist()
     if mode == "published":
         errors.extend(_evidence_errors(repo))
 
-    changed = [f for f in git("diff", "--name-only", f"{base}..HEAD",
-                              repo=repo).splitlines() if f.strip()]
+    changed = [
+        f for f in git("diff", "--name-only", f"{base}..HEAD", repo=repo)
+        .splitlines() if f.strip()
+    ]
     for f in changed:
         if f.startswith("server/") and not (
-                m14_owned(f) or m15_owned(f)
-                or post_m15_remediation_backend(f)):
+            m14_owned(f)
+            or m15_owned(f)
+            or post_m15_remediation_backend(f)
+            or m16_a_backend(f)
+        ):
             errors.append(f"backend change outside the security slice: {f}")
         if (f.startswith("server/alembic/")
                 and f not in (
-                    "server/alembic/versions/"
-                    "0015_m14_world_observation_execution.py",
-                    "server/alembic/versions/"
-                    "0016_m15_revision_compatibility.py")):
+                    "server/alembic/versions/0015_m14_world_observation_execution.py",
+                    "server/alembic/versions/0016_m15_revision_compatibility.py",
+                    "server/alembic/versions/0017_m16_intra_shot_consequences.py",
+                )):
             errors.append(f"alembic change outside the security slice: {f}")
         if not path_allowed(f, allowlist):
-            errors.append(f"changed file outside the {mode}-mode "
-                          f"allowlist: {f}")
+            errors.append(
+                f"changed file outside the {mode}-mode allowlist: {f}"
+            )
 
     versions = repo / "server" / "alembic" / "versions"
-    # M14B-2 succession (frozen R2 §23, authorized 2026-09-10): exactly
-    # ONE migration at/beyond 0015 is admitted — the frozen M14
-    # migration. Anything else (0016+, or a different 0015) still
-    # rejects; this is NOT a general future-migration allowance.
     admitted_0015 = "0015_m14_world_observation_execution.py"
-    # M15A succession (frozen R4 §11, authorized 2026-09-12)
     admitted_0016 = "0016_m15_revision_compatibility.py"
-    mig_beyond = [p.name for p in versions.glob("*.py")
-                  if p.stem >= "0015" and p.name not in (
-                      admitted_0015, admitted_0016)]
+    admitted_0017 = "0017_m16_intra_shot_consequences.py"
+    mig_beyond = [
+        p.name for p in versions.glob("*.py")
+        if p.stem >= "0015" and p.name not in (
+            admitted_0015, admitted_0016, admitted_0017)
+    ]
     if mig_beyond:
-        errors.append(f"migration at/beyond 0015 beyond the frozen M14/"
-                      f"M15 migrations exists: {mig_beyond}")
+        errors.append(
+            "migration at/beyond 0015 beyond the frozen M14/M15/M16-A "
+            f"migrations exists: {mig_beyond}"
+        )
 
-    # frozen §17: Next major other than 15
-    pkg = json.loads((repo / "apps" / "web" / "package.json")
-                     .read_text(encoding="utf-8"))
+    pkg = json.loads(
+        (repo / "apps" / "web" / "package.json").read_text(encoding="utf-8")
+    )
     next_decl = (pkg.get("dependencies") or {}).get("next", "")
     major = str(next_decl).strip().lstrip("^~").split(".")[0]
     if next_decl and (major != "15" or next_decl.startswith(("^", "~"))):
-        errors.append(f"next declaration {next_decl!r} violates the "
-                      "frozen contract (exact 15.x pin)")
+        errors.append(
+            f"next declaration {next_decl!r} violates the frozen contract "
+            "(exact 15.x pin)"
+        )
 
     for f in changed:
         p = repo / f
-        if not p.is_file() or f.endswith(("next_security_validate_"
-                                          "boundary.py",
-                                          "hygiene_validate_boundary.py")):
-            continue  # boundary validators' own scan patterns name the vocabulary
-        if m14_owned(f):
-            continue  # authorized M14 surface legitimately uses M14 vocabulary
+        if not p.is_file() or f.endswith((
+            "next_security_validate_boundary.py",
+            "hygiene_validate_boundary.py",
+        )):
+            continue
+        if m14_owned(f) or post_m15_remediation_backend(f) or m16_a_backend(f):
+            continue
         src = p.read_text(encoding="utf-8", errors="replace")
         for pattern, what in M14_PATTERNS:
             if re.search(pattern, src, re.I):
                 errors.append(f"{f}: {what} vocabulary present")
 
     if errors:
-        for e in errors:
-            print(f"NEXT-SECURITY-BOUNDARY INVALID: {e}", file=sys.stderr)
+        for error in errors:
+            print(f"NEXT-SECURITY-BOUNDARY INVALID: {error}", file=sys.stderr)
         return 1
-    print(f"Next-security boundary clean (mode={mode}, base={base[:12]}…): "
-          f"{'security-slice' if mode == 'predecessor' else 'post-M13 union'} "
-          "allowlist scoped, only the frozen M14 0015 migration, "
-          "Next major exactly 15, no M14 semantics"
-          + ("; checked-in predecessor evidence exact."
-             if mode == "published" else ""))
+    print(
+        f"Next-security boundary clean (mode={mode}, base={base[:12]}…): "
+        f"{'security-slice' if mode == 'predecessor' else 'post-M13 union'} "
+        "allowlist scoped; M14 0015, M15 0016, and exact M16-A 0017 are "
+        "the latest admitted migrations; Next major exactly 15"
+        + ("; checked-in predecessor evidence exact."
+           if mode == "published" else ".")
+    )
     return 0
 
 

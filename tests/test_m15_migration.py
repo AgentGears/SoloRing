@@ -18,6 +18,7 @@ M15_TABLES = [
     "production_update_operations",
     "production_update_items",
 ]
+M15_HEAD = "0016_m15_revision_compatibility"
 
 
 def _cfg() -> Config:
@@ -34,7 +35,7 @@ def _point_at(data_dir, monkeypatch) -> None:
     monkeypatch.setattr(settings_mod, "_settings", None)
 
 
-def _upgrade(tmp_path, monkeypatch, target="head"):
+def _upgrade(tmp_path, monkeypatch, target=M15_HEAD):
     _point_at(tmp_path, monkeypatch)
     command.upgrade(_cfg(), target)
 
@@ -62,11 +63,11 @@ def _schema_rows(con) -> list[tuple]:
 
 
 def test_0016_adds_exact_five_tables(tmp_path, monkeypatch):
-    """M15-MIG:01 — head 0016 adds exactly the five frozen tables."""
+    """M15-MIG:01 — 0016 adds exactly the five frozen tables."""
     _upgrade(tmp_path, monkeypatch, "0015")
     con15 = _con(tmp_path)
     before = set(_tables(con15))
-    _upgrade(tmp_path, monkeypatch, "head")
+    _upgrade(tmp_path, monkeypatch, M15_HEAD)
     con16 = _con(tmp_path)
     after = set(_tables(con16))
     assert after - before == set(M15_TABLES)
@@ -78,7 +79,7 @@ def test_0016_alters_no_predecessor_table(tmp_path, monkeypatch):
     _upgrade(tmp_path, monkeypatch, "0015")
     con15 = _con(tmp_path)
     before = _schema_rows(con15)
-    _upgrade(tmp_path, monkeypatch, "head")
+    _upgrade(tmp_path, monkeypatch, M15_HEAD)
     con16 = _con(tmp_path)
     assert _schema_rows(con16) == before
 
@@ -86,7 +87,7 @@ def test_0016_alters_no_predecessor_table(tmp_path, monkeypatch):
 def test_0016_constraints_and_indexes_exact(tmp_path, monkeypatch):
     """M15-MIG:03 — exact DDL contract: the frozen uniques, checks, and
     indexes exist by name."""
-    _upgrade(tmp_path, monkeypatch, "head")
+    _upgrade(tmp_path, monkeypatch, M15_HEAD)
     con = _con(tmp_path)
     objects = {r[0] for r in con.execute(
         "SELECT name FROM sqlite_master")}
@@ -94,8 +95,7 @@ def test_0016_constraints_and_indexes_exact(tmp_path, monkeypatch):
         "ix_pca_object_created", "ix_pca_pair", "ix_pca_verdict",
         "ix_pcu_occurrence"}
     assert expected_indexes <= objects
-    # table-level UNIQUE constraints live in the CREATE TABLE DDL with
-    # their frozen names
+
     def ddl(table):
         return con.execute(
             "SELECT sql FROM sqlite_master WHERE type='table' AND name=?",
@@ -119,7 +119,6 @@ def test_0016_constraints_and_indexes_exact(tmp_path, monkeypatch):
             for r in con.execute(
                 "SELECT sql FROM sqlite_master WHERE tbl_name IN "
                 "(?, ?, ?, ?, ?)", tuple(M15_TABLES))), check
-    # composite parent pins exist as declared foreign keys
     fks = con.execute(
         "SELECT * FROM pragma_foreign_key_list("
         "'production_update_operations')").fetchall()
@@ -131,7 +130,7 @@ def test_0016_constraints_and_indexes_exact(tmp_path, monkeypatch):
 
 def test_0016_downgrade_empty_succeeds(tmp_path, monkeypatch):
     """M15-MIG:04 — empty downgrade drops the five tables."""
-    _upgrade(tmp_path, monkeypatch, "head")
+    _upgrade(tmp_path, monkeypatch, M15_HEAD)
     _downgrade(tmp_path, monkeypatch, "0015")
     con = _con(tmp_path)
     tables = set(_tables(con))
@@ -143,7 +142,7 @@ def test_0016_downgrade_any_m15_state_fails_before_ddl(tmp_path,
     """M15-MIG:05 — any authored M15 row refuses downgrade before DDL."""
     from soloring.domain.ids import new_uuid
 
-    _upgrade(tmp_path, monkeypatch, "head")
+    _upgrade(tmp_path, monkeypatch, M15_HEAD)
     con = _con(tmp_path)
     con.execute("PRAGMA foreign_keys=ON")
     now = "2026-01-01T00:00:00.000Z"
@@ -174,7 +173,7 @@ def test_0016_downgrade_any_m15_state_fails_before_ddl(tmp_path,
 def test_no_backfilled_tracking_or_compatibility_decisions(tmp_path,
                                                            monkeypatch):
     """M15-MIG:06 — upgrade invents no decisions; all five empty."""
-    _upgrade(tmp_path, monkeypatch, "head")
+    _upgrade(tmp_path, monkeypatch, M15_HEAD)
     con = _con(tmp_path)
     for table in M15_TABLES:
         n = con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
@@ -182,23 +181,24 @@ def test_no_backfilled_tracking_or_compatibility_decisions(tmp_path,
 
 
 def test_foreign_key_check_clean(tmp_path, monkeypatch):
-    """M15-MIG:07 — PRAGMA foreign_key_check is empty at head."""
-    _upgrade(tmp_path, monkeypatch, "head")
+    """M15-MIG:07 — PRAGMA foreign_key_check is empty at 0016."""
+    _upgrade(tmp_path, monkeypatch, M15_HEAD)
     con = _con(tmp_path)
     assert con.execute("PRAGMA foreign_key_check").fetchall() == []
 
 
 def test_migration_roundtrip_leaves_no_temp_tables(tmp_path, monkeypatch):
-    """M15-MIG:08 — upgrade→downgrade→upgrade leaves exactly the head
-    schema, no residue."""
-    _upgrade(tmp_path, monkeypatch, "head")
+    """M15-MIG:08 — 0016 upgrade→downgrade→upgrade leaves exactly the
+    frozen 0016 schema, no successor residue."""
+    _upgrade(tmp_path, monkeypatch, M15_HEAD)
     _downgrade(tmp_path, monkeypatch, "0015")
-    _upgrade(tmp_path, monkeypatch, "head")
+    _upgrade(tmp_path, monkeypatch, M15_HEAD)
     con = _con(tmp_path)
     ref_dir = tmp_path / "ref"
     ref_dir.mkdir()
-    _upgrade(ref_dir, monkeypatch, "head")
+    _upgrade(ref_dir, monkeypatch, M15_HEAD)
     con_ref = _con(ref_dir)
+
     def names(c):
         return sorted((r[0], r[1]) for r in c.execute(
             "SELECT type, name FROM sqlite_master "
@@ -217,13 +217,12 @@ def test_migration_roundtrip_leaves_no_temp_tables(tmp_path, monkeypatch):
 
 def test_orm_migration_parity_exact_for_all_five_tables(
         tmp_path, monkeypatch):
-    """M15-MIG:09 — ORM metadata and migration DDL agree exactly on all
-    five M15 tables (columns, pk, indexes); importing the M15 models
-    changed no predecessor table definition."""
+    """M15-MIG:09 — ORM metadata and 0016 migration DDL agree exactly on all
+    five M15 tables; successor ORM registration cannot change predecessor DDL."""
     import sqlalchemy as sa
 
     _point_at(tmp_path, monkeypatch)
-    _upgrade(tmp_path, monkeypatch, "head")
+    _upgrade(tmp_path, monkeypatch, M15_HEAD)
 
     from soloring.db.base import Base
     import soloring.db.models  # noqa: F401 — populate metadata
@@ -240,7 +239,6 @@ def test_orm_migration_parity_exact_for_all_five_tables(
             f"PRAGMA table_info({table})").fetchall()
         assert [c[1] for c in cols_mig] == [c[1] for c in cols_orm], table
         assert [c[5] for c in cols_mig] == [c[5] for c in cols_orm], table
-    # a representative predecessor table is unchanged by the M15 import
     for table in ("composition_working_occurrences",
                   "production_revision_spatial_interpretations"):
         cols_mig = [c[1] for c in mig.execute(
@@ -256,7 +254,7 @@ def test_0016_blob_fk_inventory_unchanged_from_m14(tmp_path, monkeypatch):
     _upgrade(tmp_path, monkeypatch, "0015")
     con15 = _con(tmp_path)
     tables15 = _tables(con15)
-    _upgrade(tmp_path, monkeypatch, "head")
+    _upgrade(tmp_path, monkeypatch, M15_HEAD)
     con16 = _con(tmp_path)
 
     def blob_fks(con, tables):

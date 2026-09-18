@@ -33,7 +33,7 @@ async def _shot_read(request: Request, shot_id: str) -> ShotRead:
         settings=getattr(request.app.state, "settings", None),
     )
     (shot, refs, differs, resolved, effective_hash, readiness, visual,
-     spatial) = read
+     spatial, intra) = read
     return ShotRead(
         **dict(shot),
         working_snapshot_hash=effective_hash,
@@ -76,6 +76,8 @@ async def _shot_read(request: Request, shot_id: str) -> ShotRead:
             for d in resolved
         ],
         continuity_ready=bool(resolved),
+        intra_shot_ready=intra["intra_shot_ready"],
+        intra_shot_issues=intra["intra_shot_issues"],
     )
 
 

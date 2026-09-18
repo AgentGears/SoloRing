@@ -1,0 +1,781 @@
+"""Full M16-depth recovery verification for head 0017 (frozen R6 §16.2).
+
+Read-only: no proposal/review product operation is performed — only the
+canonical/source/basis integrity of whatever rows exist. Every failure
+RAISES RecoveryCorruption (no bare calls). History is enumerated from
+the OUTER schema-7 snapshots, so a revision missing all companions is
+corruption, not an escape.
+"""
+
+from __future__ import annotations
+
+import json
+import sqlite3
+from pathlib import Path
+
+from soloring.continuity.intra_shot_canonical import (
+    MAX_PROPOSAL_CANONICAL_BYTES,
+    proposal_value,
+)
+from soloring.continuity.intra_shot_history import (
+    verify_intra_shot_history_sync,
+    verify_working_event_row,
+)
+from soloring.domain.canonical import canonical_hash, canonical_json_str
+
+_HEX = frozenset("0123456789abcdef")
+
+
+def _corrupt(message: str):
+    from soloring.recovery.backup import RecoveryCorruption
+
+    raise RecoveryCorruption(message)
+
+
+def _is_hash(value: object) -> bool:
+    return (isinstance(value, str) and len(value) == 64
+            and set(value) <= _HEX)
+
+
+def _pair(raw: str, digest: str, what: str):
+    try:
+        value = json.loads(raw)
+    except (ValueError, TypeError) as exc:
+        _corrupt(f"{what} is not valid JSON: {exc}")
+    if canonical_json_str(value) != raw:
+        _corrupt(f"{what} is not canonical JSON")
+    if not _is_hash(digest) or canonical_hash(value) != digest:
+        _corrupt(f"{what} hash mismatch")
+    return value
+
+
+def _verify_proposal_source(row, rows) -> None:
+    (pid, shot_id, source_kind, source_rev_id, source_rev_hash,
+     source_gen_id, source_take_id, proposer_kind, analyzer_id,
+     analyzer_version, analyzer_params_hash, proposal_json,
+     proposal_hash) = row
+    doc = _pair(proposal_json, proposal_hash, f"proposal {pid}")
+
+    # exact Proposal Grammar v1 (candidate shape + suggestion vocabulary)
+    try:
+        rebuilt = proposal_value(
+            candidate_event=doc["candidate_event"],
+            persistence_suggestion=doc["persistence_suggestion"])
+    except Exception as exc:  # noqa: BLE001 — typed failure below
+        _corrupt(f"proposal {pid} violates Proposal Grammar v1: {exc}")
+    if canonical_json_str(rebuilt) != proposal_json:
+        _corrupt(f"proposal {pid} is not the canonical grammar value")
+
+    rev = rows(
+        "SELECT snapshot_hash FROM shot_revisions WHERE id = ?",
+        (source_rev_id,))
+    if not rev:
+        _corrupt(f"proposal {pid} pins missing source ShotRevision")
+    if rev[0][0] != source_rev_hash:
+        _corrupt(f"proposal {pid} source revision hash mismatch")
+    snap = json.loads(rows(
+        "SELECT snapshot_json FROM shot_revisions WHERE id = ?",
+        (source_rev_id,))[0][0])
+    if snap.get("intent", {}).get("duration_ms") is not None:
+        duration = snap["intent"]["duration_ms"]
+        t = doc["candidate_event"]["time_ms"]
+        if not 1 <= t < duration:
+            _corrupt(
+                f"proposal {pid} time is not interior to the captured "
+                "source duration")
+
+    if source_kind == "generation":
+        if source_gen_id is None or source_take_id is not None:
+            _corrupt(f"proposal {pid} generation source shape invalid")
+        gen = rows(
+            "SELECT shot_id, shot_revision_id FROM generations "
+            "WHERE id = ?", (source_gen_id,))
+        if not gen:
+            _corrupt(f"proposal {pid} pins missing Generation")
+        if gen[0][0] != shot_id or gen[0][1] != source_rev_id:
+            _corrupt(
+                f"proposal {pid} Generation/Shot/ShotRevision lineage "
+                "mismatch")
+    elif source_kind == "take":
+        if source_gen_id is None or source_take_id is None:
+            _corrupt(f"proposal {pid} take source shape invalid")
+        take = rows(
+            "SELECT t.generation_id, g.shot_id, g.shot_revision_id "
+            "FROM takes t JOIN generations g ON g.id = t.generation_id "
+            "WHERE t.id = ?", (source_take_id,))
+        if not take:
+            _corrupt(f"proposal {pid} pins missing Take")
+        # Take→Generation identity equality: the pinned generation id
+        # must BE the Take's own generation
+        if take[0][0] != source_gen_id:
+            _corrupt(
+                f"proposal {pid} pinned generation is not the Take's "
+                "own generation")
+        if take[0][1] != shot_id or take[0][2] != source_rev_id:
+            _corrupt(
+                f"proposal {pid} Take/Generation/Shot/ShotRevision "
+                "lineage mismatch")
+    elif source_kind == "imported":
+        if source_gen_id is not None or source_take_id is not None:
+            _corrupt(f"proposal {pid} imported source shape invalid")
+    else:
+        _corrupt(f"proposal {pid} unknown source kind {source_kind!r}")
+
+    if proposer_kind == "human":
+        if (analyzer_id is not None or analyzer_version is not None
+                or analyzer_params_hash is not None):
+            _corrupt(f"proposal {pid} human proposer carries analyzer data")
+    elif proposer_kind == "analyzer":
+        if (not isinstance(analyzer_id, str) or not analyzer_id
+                or not isinstance(analyzer_version, str)
+                or not analyzer_version
+                or not _is_hash(analyzer_params_hash)):
+            _corrupt(
+                f"proposal {pid} analyzer proposer lacks exact "
+                "id/version/parameter hash")
+    else:
+        _corrupt(f"proposal {pid} unknown proposer kind {proposer_kind!r}")
+
+
+def _verify_review(row, rows) -> None:
+    from soloring.continuity.intra_shot_canonical import (
+        event_review_basis_hash as event_basis,
+        event_review_basis_value as event_basis_value,
+        proposal_review_basis_hash as proposal_basis,
+    )
+
+    (rid, shot_id, source_kind, source_event_id, source_proposal_id,
+     source_hash, decision, review_basis_hash, result_event_id,
+     ef_transition, er_transition, pf_transition, operation_json,
+     operation_hash) = row
+    doc = _pair(operation_json, operation_hash, f"review {rid}")
+
+    if source_kind == "event":
+        if source_proposal_id is not None or source_event_id is None:
+            _corrupt(f"review {rid} event source shape invalid")
+        ev = rows(
+            "SELECT shot_id, target_kind, entity_feature_id, "
+            "entity_relation_id, production_instance_feature_id "
+            "FROM shot_intra_shot_events WHERE id = ?",
+            (source_event_id,))
+        if not ev:
+            _corrupt(f"review {rid} source event missing")
+        if ev[0][0] != shot_id:
+            _corrupt(f"review {rid} source event belongs to another Shot")
+        # the immutable TARGET coordinate of the reviewed event (stable
+        # kind/id only — never current semantic values)
+        event_target = {
+            "kind": ev[0][1],
+            "id": ev[0][2] or ev[0][3] or ev[0][4],
+        }
+        if decision not in ("adopt_persistence", "decline_persistence"):
+            _corrupt(f"review {rid} illegal event decision {decision!r}")
+        # IMMUTABLE evidence semantics: recovery certifies the recorded
+        # review, not today's mutable event/transition rows. The
+        # operation document carries the exact committed source
+        # coordinates; the basis root is recomputed from THEM.
+        src_doc = doc.get("source")
+        if (not isinstance(src_doc, dict)
+                or src_doc.get("kind") != "event"
+                or src_doc.get("id") != source_event_id
+                or src_doc.get("hash") != source_hash):
+            _corrupt(
+                f"review {rid} operation source record disagrees with "
+                "the review row's source coordinates")
+        # R7: the event-source operation shape is EXACT — the canonical
+        # §7.5.1 R7 basis fields plus the committed review_basis_hash
+        # and result evidence. A missing or extra top-level field
+        # (including any expected_working_snapshot_hash, or a decline
+        # omitting expected_handoff instead of recording JSON null) is
+        # corruption
+        if set(doc) != {
+                "schema_version", "source", "decision",
+                "expected_event_set_hash", "expected_handoff",
+                "review_basis_hash", "result"}:
+            _corrupt(
+                f"review {rid} event operation key set is not the exact "
+                "R7 shape (missing or extra top-level field)")
+        # R7 exact canonical basis projection: the operation's OWN five
+        # basis fields — schema_version, source, decision,
+        # expected_event_set_hash, expected_handoff — must equal the
+        # canonical value built from the ROW coordinates; a duplicated
+        # schema_version/decision/source with a different value or an
+        # extra nested source key is corruption even after a coherent
+        # operation rehash
+        try:
+            canonical_basis = event_basis_value(
+                source_event_id=source_event_id, source_hash=source_hash,
+                decision=decision,
+                expected_event_set_hash=doc["expected_event_set_hash"],
+                expected_handoff=doc["expected_handoff"])
+        except Exception:
+            _corrupt(
+                f"review {rid} event basis violates the R7 grammar "
+                "(missing or extra fields, including any "
+                "expected_working_snapshot_hash)")
+        projected = {k: doc[k] for k in (
+            "schema_version", "source", "decision",
+            "expected_event_set_hash", "expected_handoff")}
+        if projected != canonical_basis:
+            _corrupt(
+                f"review {rid} operation basis projection is not the "
+                "exact R7 canonical value")
+        # the duplicated root must agree with BOTH the review row and
+        # the canonical basis hash
+        if doc["review_basis_hash"] != review_basis_hash:
+            _corrupt(
+                f"review {rid} duplicated review_basis_hash disagrees "
+                "with the review row")
+        if event_basis(
+                source_event_id=source_event_id, source_hash=source_hash,
+                decision=decision,
+                expected_event_set_hash=doc["expected_event_set_hash"],
+                expected_handoff=doc["expected_handoff"]) != \
+                review_basis_hash:
+            _corrupt(
+                f"review {rid} recorded basis is not the frozen event "
+                "review-basis root")
+        # the committed RESULT evidence is immutable-recorded: every
+        # decision records the resulting event hash; adopt_persistence
+        # additionally records the transition kind + exact semantic
+        # hash. Current rows are provenance anchors only — later edits
+        # make an exact RETRY conflict but never invalidate history.
+        result = doc.get("result")
+        if not isinstance(result, dict):
+            _corrupt(f"review {rid} operation lacks the result record")
+        if result.get("event_id") != result_event_id:
+            _corrupt(
+                f"review {rid} result record disagrees with the row's "
+                "result event")
+        if not _is_hash(result.get("event_hash")):
+            _corrupt(f"review {rid} result event hash missing")
+        if decision == "adopt_persistence":
+            tr = result.get("transition")
+            if not isinstance(tr, dict) or not _is_hash(
+                    tr.get("semantic_hash")):
+                _corrupt(
+                    f"review {rid} adopt_persistence lacks the committed "
+                    "transition semantic hash")
+            kinds = {kind for kind, tid in (
+                ("entity_feature", ef_transition),
+                ("entity_relation", er_transition),
+                ("production_instance_feature", pf_transition))
+                if tid is not None}
+            if len(kinds) != 1 or tr.get("kind") not in kinds:
+                _corrupt(
+                    f"review {rid} result transition kind disagrees "
+                    "with the row's transition columns")
+            # the committed handoff semantic hash must equal the exact
+            # expected_handoff committed by the event review basis
+            eh = doc.get("expected_handoff")
+            if not isinstance(eh, dict) or not _is_hash(
+                    eh.get("semantic_hash")):
+                _corrupt(
+                    f"review {rid} event basis lacks the committed "
+                    "expected_handoff semantic hash")
+            if tr.get("semantic_hash") != eh["semantic_hash"]:
+                _corrupt(
+                    f"review {rid} committed transition semantic hash "
+                    "disagrees with the basis expected_handoff")
+            # exact §7.5.1 expected_handoff grammar/coordinates at
+            # recovery time — pure shape, no current semantic lookup:
+            # frozen key set, target == the reviewed event's own
+            # target, and the exact {shot, review.shot_id, end} anchor
+            if set(eh) != {"target", "anchor", "semantic_hash"}:
+                _corrupt(
+                    f"review {rid} expected_handoff key set is not "
+                    "the frozen §7.5.1 grammar")
+            # exact NESTED key sets — §7.5.1 is the Exact review-basis
+            # grammar; extra fields anywhere are corruption
+            if not isinstance(eh.get("target"), dict) or                     set(eh["target"]) != {"kind", "id"}:
+                _corrupt(
+                    f"review {rid} expected_handoff target key set is "
+                    "not the frozen §7.5.1 grammar")
+            if not isinstance(eh.get("anchor"), dict) or                     set(eh["anchor"]) != {
+                        "anchor_type", "anchor_id", "boundary"}:
+                _corrupt(
+                    f"review {rid} expected_handoff anchor key set is "
+                    "not the frozen §7.5.1 grammar")
+            eh_target = eh.get("target")
+            if (not isinstance(eh_target, dict)
+                    or eh_target.get("kind") != event_target["kind"]
+                    or eh_target.get("id") != event_target["id"]):
+                _corrupt(
+                    f"review {rid} expected_handoff target is not the "
+                    "reviewed event's own target")
+            eh_anchor = eh.get("anchor")
+            if (not isinstance(eh_anchor, dict)
+                    or eh_anchor.get("anchor_type") != "shot"
+                    or eh_anchor.get("anchor_id") != shot_id
+                    or eh_anchor.get("boundary") != "end"):
+                _corrupt(
+                    f"review {rid} expected_handoff anchor is not "
+                    "this Shot's Shot/end boundary")
+
+        # direct reviews operate on the reviewed event itself: the
+        # result event IS the source event
+        if result_event_id != source_event_id:
+            _corrupt(
+                f"review {rid} direct event review result must be the "
+                "reviewed event itself")
+        # adopt_persistence does not edit the event, so the committed
+        # result hash equals the reviewed source hash
+        if decision == "adopt_persistence" and \
+                result.get("event_hash") != source_hash:
+            _corrupt(
+                f"review {rid} adopt_persistence result hash must "
+                "equal the reviewed source hash")
+    elif source_kind == "proposal":
+        if source_event_id is not None or source_proposal_id is None:
+            _corrupt(f"review {rid} proposal source shape invalid")
+        pr = rows(
+            "SELECT shot_id, proposal_hash, source_shot_revision_id, "
+            "source_shot_revision_hash FROM "
+            "shot_intra_shot_event_proposals WHERE id = ?",
+            (source_proposal_id,))
+        if not pr or pr[0][1] != source_hash:
+            _corrupt(f"review {rid} source proposal hash mismatch")
+        if pr[0][0] != shot_id:
+            _corrupt(
+                f"review {rid} source proposal belongs to another Shot")
+        # the operation's duplicated source record must agree with the
+                # review row (same contract as the event-source branch)
+        src_doc = doc.get("source")
+        if (not isinstance(src_doc, dict)
+                or src_doc.get("kind") != "proposal"
+                or src_doc.get("id") != source_proposal_id
+                or src_doc.get("hash") != source_hash):
+            _corrupt(
+                f"review {rid} operation source record disagrees with "
+                "the review row's source coordinates")
+        if decision not in ("adopt_event_only", "adopt_persistence",
+                            "ignore"):
+            _corrupt(f"review {rid} illegal proposal decision {decision!r}")
+        # exact frozen proposal review-basis root (R6 §7.5.2): the sole
+        # normative construction — canonical hash of
+        # {batch_basis_hash, proposal_id, proposal_hash, decision}
+        batch_basis = doc.get("batch_basis_hash")
+        if not _is_hash(batch_basis):
+            _corrupt(f"review {rid} operation lacks a batch basis hash")
+        # the batch hash itself must derive from the frozen §7.5.2
+        # batch object recorded in the operation — never a supplied
+        # arbitrary 64-hex value
+        batch_doc = doc.get("batch_basis")
+        if not isinstance(batch_doc, dict):
+            _corrupt(
+                f"review {rid} operation lacks the frozen batch basis "
+                "object")
+        from soloring.continuity.intra_shot_canonical import (
+            proposal_batch_basis_hash as batch_basis_root,
+            proposal_batch_basis_value as batch_basis_canonical,
+        )
+
+        try:
+            canonical_batch = batch_basis_canonical(
+                shot_id=batch_doc["shot_id"],
+                source_shot_revision_id=batch_doc[
+                    "source_shot_revision_id"],
+                source_shot_revision_hash=batch_doc[
+                    "source_shot_revision_hash"],
+                expected_working_snapshot_hash=batch_doc[
+                    "expected_working_snapshot_hash"],
+                expected_event_set_hash=batch_doc[
+                    "expected_event_set_hash"],
+                reviews=batch_doc["reviews"])
+        except Exception:
+            _corrupt(
+                f"review {rid} batch basis object violates the frozen "
+                "grammar")
+        # the recorded batch object must BE the exact canonical value
+        # that was hashed — schema_version present, reviews sorted by
+        # proposal UUID, exact field set — not merely a doc whose
+        # extracted fields re-derive the same root
+        if canonical_batch != batch_doc:
+            _corrupt(
+                f"review {rid} batch basis object is not the exact "
+                "frozen canonical batch value")
+        if batch_basis_root(
+                shot_id=canonical_batch["shot_id"],
+                source_shot_revision_id=canonical_batch[
+                    "source_shot_revision_id"],
+                source_shot_revision_hash=canonical_batch[
+                    "source_shot_revision_hash"],
+                expected_working_snapshot_hash=canonical_batch[
+                    "expected_working_snapshot_hash"],
+                expected_event_set_hash=canonical_batch[
+                    "expected_event_set_hash"],
+                reviews=canonical_batch["reviews"]) != batch_basis:
+            _corrupt(
+                f"review {rid} batch basis hash is not the frozen batch "
+                "object root")
+        recomputed = proposal_basis(
+            batch_basis_hash=batch_basis,
+            proposal_id=source_proposal_id,
+            proposal_hash=source_hash, decision=decision)
+        if recomputed != review_basis_hash:
+            _corrupt(
+                f"review {rid} recorded basis is not the frozen proposal "
+                "review-basis root")
+        # §7.5.2 membership: this review's exact
+        # {proposal_id, proposal_hash, decision} must be IN the batch
+        # object's reviews set
+        reviews = batch_doc.get("reviews")
+        if not isinstance(reviews, list):
+            _corrupt(f"review {rid} batch object lacks reviews")
+        entry = {
+            "proposal_id": source_proposal_id,
+            "proposal_hash": source_hash,
+            "decision": decision,
+        }
+        members = [r for r in reviews if isinstance(r, dict)]
+        if entry not in members:
+            _corrupt(
+                f"review {rid} is not a member of the batch object "
+                "that roots it")
+        # §7.5.2 completeness: the persisted review rows rooted at this
+        # batch must be EXACTLY the batch's member set
+        persisted = rows(
+            "SELECT source_proposal_id, source_hash, decision FROM "
+            "persistent_consequence_reviews WHERE source_kind = "
+            "'proposal'")
+        rooted = {
+            (row[0], row[1], row[2]) for row in persisted
+            if row[0] is not None
+            and _review_batch_root(rows, row[0]) == batch_basis}
+        expected = {
+            (r["proposal_id"], r["proposal_hash"], r["decision"])
+            for r in members}
+        if rooted != expected:
+            _corrupt(
+                f"review {rid} batch members disagree with the persisted "
+                "review rows for that batch")
+        # §7.5.2 source coherence: the batch object must be rooted in
+        # the SAME Shot and the SAME source ShotRevision the proposal
+        # itself pins — a well-formed foreign batch cannot adopt this
+        # review
+        if batch_doc.get("shot_id") != shot_id:
+            _corrupt(
+                f"review {rid} batch object is rooted in another Shot")
+        if (batch_doc.get("source_shot_revision_id") != pr[0][2]
+                or batch_doc.get("source_shot_revision_hash") != pr[0][3]):
+            _corrupt(
+                f"review {rid} batch object source ShotRevision "
+                "disagrees with the proposal's pinned source")
+        # IMMUTABLE committed-result evidence for authority-creating
+        # proposal decisions — the same contract as event-source
+        # reviews: the operation record carries the exact result event
+        # hash (and for adopt_persistence the transition kind + exact
+        # semantic hash). ignore creates no authority and needs none.
+        if decision != "ignore":
+            result = doc.get("result")
+            if not isinstance(result, dict):
+                _corrupt(
+                    f"review {rid} operation lacks the result record")
+            if result.get("event_id") != result_event_id:
+                _corrupt(
+                    f"review {rid} result record disagrees with the "
+                    "row's result event")
+            if not _is_hash(result.get("event_hash")):
+                _corrupt(f"review {rid} result event hash missing")
+            # §12.3: the adopted result event IS the reviewed proposal
+            # candidate — derive the expected authoritative event from
+            # the IMMUTABLE proposal_json + the decision and require
+            # the recorded result-event hash to equal it. The result
+            # event is provenance-anchored below; its current row
+            # never becomes the historical semantic source.
+            pr_json = rows(
+                "SELECT proposal_json FROM "
+                "shot_intra_shot_event_proposals WHERE id = ?",
+                (source_proposal_id,))[0][0]
+            import json as _json
+
+            candidate = _json.loads(pr_json)["candidate_event"]
+            persistence = ("require_handoff"
+                           if decision == "adopt_persistence"
+                           else "transient")
+            expected_event = {
+                "schema_version": 1,
+                "time_ms": candidate["time_ms"],
+                "ordinal": candidate["ordinal"],
+                "target": candidate["target"],
+                "before": candidate["before"],
+                "after": candidate["after"],
+                "persistence_mode": persistence,
+            }
+            from soloring.domain.canonical import canonical_hash as _h
+
+            if result.get("event_hash") != _h(expected_event):
+                _corrupt(
+                    f"review {rid} recorded result event is not the "
+                    "reviewed proposal candidate under the frozen "
+                    "decision semantics")
+            candidate_target = candidate["target"]
+            if decision == "adopt_persistence":
+                # §12.3: adopt_persistence = candidate event + the
+                # EXACT A2 handoff derived from that same event's
+                # target and terminal after state
+                tr = result.get("transition")
+                if not isinstance(tr, dict) or not _is_hash(
+                        tr.get("semantic_hash")):
+                    _corrupt(
+                        f"review {rid} adopt_persistence lacks the "
+                        "committed transition semantic hash")
+                kinds = {k for k, tid in (
+                    ("entity_feature", ef_transition),
+                    ("entity_relation", er_transition),
+                    ("production_instance_feature",
+                     pf_transition)) if tid is not None}
+                if len(kinds) != 1 or tr.get("kind") not in kinds:
+                    _corrupt(
+                        f"review {rid} result transition kind "
+                        "disagrees with the row's transition columns")
+                from soloring.continuity.intra_shot_canonical import (
+                    feature_handoff_value,
+                    relation_handoff_value,
+                )
+
+                target = candidate["target"]
+                terminal = candidate["after"]
+                if target["kind"] == "entity_relation":
+                    semantic = relation_handoff_value(
+                        relation_id=target["id"], shot_id=shot_id,
+                        state=("active" if terminal["active"]
+                               else "inactive"))
+                else:
+                    semantic = feature_handoff_value(
+                        domain=target["kind"], target_kind=target["kind"],
+                        target_id=target["id"], shot_id=shot_id,
+                        operation=("set" if terminal.get("present")
+                                   else "clear"),
+                        state=terminal)
+                if tr.get("semantic_hash") != _h(semantic):
+                    _corrupt(
+                        f"review {rid} recorded transition semantic "
+                        "hash is not the exact A2 handoff of the "
+                        "adopted candidate's terminal state")
+    else:
+        _corrupt(f"review {rid} unknown source kind {source_kind!r}")
+
+    if "review_basis_hash" not in doc:
+        _corrupt(f"review {rid} operation lacks review_basis_hash")
+    if doc["review_basis_hash"] != review_basis_hash:
+        _corrupt(f"review {rid} recorded basis disagrees with operation")
+
+    # result references are IMMUTABLE-recorded: the row's result event
+    # must exist (provenance anchor, any current semantics) and belong
+    # to this Shot; semantic agreement was verified above against the
+    # operation's own recorded hashes, never against today's rows.
+    if decision == "ignore":
+        if (result_event_id is not None or ef_transition is not None
+                or er_transition is not None or pf_transition is not None):
+            _corrupt(f"review {rid} ignore carries results")
+        return
+    if not _result_event_exists(rows, result_event_id):
+        _corrupt(f"review {rid} result event missing")
+    res = rows(
+        "SELECT shot_id, target_kind, entity_feature_id, "
+        "entity_relation_id, production_instance_feature_id "
+        "FROM shot_intra_shot_events WHERE id = ?",
+        (result_event_id,))[0]
+    if res[0] != shot_id:
+        _corrupt(f"review {rid} result event belongs to another Shot")
+    # bind the referenced result event to the immutable TARGET
+    # coordinate (stable kind/id only — never current values)
+    if source_kind == "proposal":
+        expected_target = candidate_target
+    else:
+        expected_target = event_target
+    res_target = {
+        "kind": res[1],
+        "id": res[2] or res[3] or res[4],
+    }
+    if res_target != expected_target:
+        _corrupt(
+            f"review {rid} result event targets a different target "
+            "than the reviewed authority")
+    # §16.2: current rows are FK/provenance anchors only — existence,
+    # Shot ownership, domain and Shot/end coordinate. An ordinary later
+    # PATCH/transition edit must NOT make a valid backup unrestorable;
+    # historical semantics come from the immutable operation record.
+    if decision in ("adopt_event_only", "decline_persistence"):
+        if (ef_transition is not None or er_transition is not None
+                or pf_transition is not None):
+            _corrupt(
+                f"review {rid} {decision} must not carry transitions")
+        return
+    populated = [(kind, tid) for kind, tid in (
+        ("entity_feature", ef_transition),
+        ("entity_relation", er_transition),
+        ("production_instance_feature", pf_transition)) if tid is not None]
+    if len(populated) != 1:
+        _corrupt(
+            f"review {rid} adopt_persistence requires exactly one "
+            "owning-domain transition id")
+    kind, tid = populated[0]
+    # the transition row is a provenance anchor: it must exist and be
+    # this Shot's Shot/end handoff in the right domain (columns are
+    # domain-specific), but its CURRENT value is not the historical
+    # semantic source
+    if kind == "entity_relation":
+        tr_row = rows(
+            "SELECT anchor_type, anchor_id, boundary FROM "
+            "continuity_relation_transitions WHERE id = ?", (tid,))
+    else:
+        table = {
+            "entity_feature": "continuity_feature_transitions",
+            "production_instance_feature":
+                "production_instance_feature_transitions",
+        }[kind]
+        tr_row = rows(
+            f"SELECT anchor_type, anchor_id, boundary FROM {table} "
+            "WHERE id = ?", (tid,))
+    if not tr_row:
+        _corrupt(f"review {rid} result transition missing")
+    if (tr_row[0][0] != "shot" or tr_row[0][1] != shot_id
+            or tr_row[0][2] != "end"):
+        _corrupt(
+            f"review {rid} result transition is not this Shot's "
+            "Shot/end owning-domain handoff")
+    # bind the transition's stable target DOMAIN and FK to the
+    # immutable target coordinate (no current semantic values) — UUID
+    # uniqueness is not cross-table, so both must match
+    if kind == "entity_relation":
+        tr_target_id = rows(
+            "SELECT relation_id FROM "
+            "continuity_relation_transitions WHERE id = ?", (tid,))[0][0]
+    else:
+        tr_target_id = rows(
+            f"SELECT feature_id FROM {table} WHERE id = ?",
+            (tid,))[0][0]
+    if kind != expected_target["kind"] \
+            or tr_target_id != expected_target["id"]:
+        _corrupt(
+            f"review {rid} result transition targets a different "
+            "target domain/id than the reviewed authority")
+    # §16.2: the transition row is a provenance anchor — its CURRENT
+    # value is never the historical semantic source (the recorded
+    # semantic hash was already verified against the immutable derived
+    # handoff above).
+
+
+def _json_loads_str(raw):
+    import json as _json
+
+    return _json.loads(raw)
+
+
+def _review_batch_root(rows, proposal_id):
+    # rows() already returns a plain list — no .fetchall() here
+    row = rows(
+        "SELECT operation_json FROM "
+        "persistent_consequence_reviews WHERE source_kind = 'proposal' "
+        "AND source_proposal_id = ?", (proposal_id,))
+    if not row:
+        return None
+    import json as _json
+
+    try:
+        return _json.loads(row[0][0]).get("batch_basis_hash")
+    except (ValueError, TypeError):
+        return None
+
+
+def _result_event_exists(rows, event_id) -> bool:
+    if not isinstance(event_id, str):
+        return False
+    return bool(rows(
+        "SELECT 1 FROM shot_intra_shot_events WHERE id = ?", (event_id,)))
+
+
+def verify_m16_intra_shot_state(staged_db: Path) -> None:
+    con = sqlite3.connect(str(staged_db))
+    try:
+        def rows(query, params=()):
+            return con.execute(query, params).fetchall()
+
+        for row in rows(
+                "SELECT id, shot_id, time_ms, ordinal, target_kind, "
+                "entity_feature_id, entity_relation_id, "
+                "production_instance_feature_id, before_state_json, "
+                "before_state_hash, after_state_json, after_state_hash, "
+                "persistence_mode, source_kind, source_proposal_id, "
+                "event_json, event_hash FROM shot_intra_shot_events "
+                "WHERE deleted_at IS NULL"):
+            verify_working_event_row(_Row(row, WORKING_EVENT_COLUMNS))
+            if row[13] == "proposal_adoption":
+                if row[14] is None:
+                    _corrupt(
+                        f"working event {row[0]} claims proposal_adoption "
+                        "without a source proposal")
+                pr = rows(
+                    "SELECT proposal_hash FROM "
+                    "shot_intra_shot_event_proposals WHERE id = ?",
+                    (row[14],))
+                if not pr:
+                    _corrupt(
+                        f"working event {row[0]} pins missing proposal "
+                        f"{row[14]}")
+
+        # History is enumerated from the OUTER schema-7 snapshots: a
+        # schema-7 revision without companions is corruption, and a
+        # companion parent without schema 7 is corruption.
+        for rev_id, snapshot_json in rows(
+                "SELECT id, snapshot_json FROM shot_revisions"):
+            snap = json.loads(snapshot_json)
+            if snap.get("schema_version") == 7:
+                verify_intra_shot_history_sync(
+                    con, rev_id, snapshot=snap)
+        for (rev_id,) in rows(
+                "SELECT DISTINCT shot_revision_id FROM "
+                "shot_revision_intra_shot_events"):
+            snap = rows(
+                "SELECT snapshot_json FROM shot_revisions WHERE id = ?",
+                (rev_id,))
+            if not snap:
+                _corrupt(
+                    f"intra_shot companions reference missing "
+                    f"ShotRevision {rev_id}")
+            if json.loads(snap[0][0]).get("schema_version") != 7:
+                _corrupt(
+                    f"ShotRevision {rev_id} carries companions without "
+                    "outer schema 7")
+
+        for row in rows(
+                "SELECT id, shot_id, source_kind, "
+                "source_shot_revision_id, source_shot_revision_hash, "
+                "source_generation_id, source_take_id, proposer_kind, "
+                "analyzer_id, analyzer_version, analyzer_parameters_hash, "
+                "proposal_json, proposal_hash FROM "
+                "shot_intra_shot_event_proposals"):
+            _verify_proposal_source(row, rows)
+
+        for row in rows(
+                "SELECT id, shot_id, source_kind, source_event_id, "
+                "source_proposal_id, source_hash, decision, "
+                "review_basis_hash, result_event_id, "
+                "entity_feature_transition_id, "
+                "entity_relation_transition_id, "
+                "production_instance_feature_transition_id, "
+                "operation_json, operation_hash FROM "
+                "persistent_consequence_reviews"):
+            _verify_review(row, rows)
+    finally:
+        con.close()
+
+
+WORKING_EVENT_COLUMNS = (
+    "id", "shot_id", "time_ms", "ordinal", "target_kind",
+    "entity_feature_id", "entity_relation_id",
+    "production_instance_feature_id", "before_state_json",
+    "before_state_hash", "after_state_json", "after_state_hash",
+    "persistence_mode", "source_kind", "source_proposal_id",
+    "event_json", "event_hash",
+)
+
+
+class _Row:
+    def __init__(self, values, columns):
+        self._map = dict(zip(columns, values))
+
+    def __getattr__(self, name):
+        return self._map[name]

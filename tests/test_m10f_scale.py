@@ -460,8 +460,9 @@ async def test_scale_metrics_recorded_without_thresholds(tmp_path):
         metrics["sqlite_runtime_version"] = _sq.sqlite_version
         metrics["source_journal_mode"] = con.execute(
             "PRAGMA journal_mode").fetchone()[0]
-        # ORM-created schema; stamp the head the production deployment
-        # would carry (same fixture posture as the recovery template)
+        con.commit()
+        # ORM-created schema; same fixture posture as the recovery
+        # template: M16-C certified the 0017 head, so stamp the true head.
         from alembic import command
         from alembic.config import Config
         import soloring.settings as settings_mod

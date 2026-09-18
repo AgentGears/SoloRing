@@ -13,6 +13,9 @@ import type {
   Entity,
   EntityRevisionSummary,
   GenerationInfo,
+  IntraShotDecision,
+  IntraShotProjection,
+  IntraShotProposalsResponse,
   Project,
   ReferenceItem,
   RelationTransition,
@@ -1192,5 +1195,72 @@ export async function getCompatibilityAssessment(
     `${BASE}/production-revisions/${fromRevisionId}` +
       "/compatibility-assessments",
     { method: "POST", body: JSON.stringify({ to_revision_id: toRevisionId }) },
+  );
+}
+
+// --- M16 intra-Shot persistent consequences (§12 review surface) ---
+
+export async function getIntraShotProjection(
+  shotId: string,
+  opts: { limit?: number; cursor?: number } = {},
+): Promise<IntraShotProjection> {
+  const params = new URLSearchParams();
+  if (opts.limit !== undefined) params.set("limit", String(opts.limit));
+  if (opts.cursor !== undefined) {
+    params.set("cursor", String(opts.cursor));
+  }
+  const q = params.toString();
+  return fetchJson<IntraShotProjection>(
+    `${BASE}/shots/${shotId}/intra-shot${q ? `?${q}` : ""}`);
+}
+
+export async function listIntraShotProposals(
+  shotId: string,
+): Promise<IntraShotProposalsResponse> {
+  return fetchJson<IntraShotProposalsResponse>(
+    `${BASE}/shots/${shotId}/intra-shot/proposals`);
+}
+
+export async function adoptEventPersistence(
+  eventId: string,
+  body: { expected_event_hash: string; expected_event_set_hash: string },
+): Promise<unknown> {
+  return fetchJson(
+    `${BASE}/intra-shot/events/${eventId}/persistence/adopt`,
+    { method: "POST", body: JSON.stringify(body) },
+  );
+}
+
+export async function declineEventPersistence(
+  eventId: string,
+  body: { expected_event_hash: string; expected_event_set_hash: string },
+): Promise<unknown> {
+  return fetchJson(
+    `${BASE}/intra-shot/events/${eventId}/persistence/decline`,
+    { method: "POST", body: JSON.stringify(body) },
+  );
+}
+
+export async function reviewIntraShotProposal(
+  proposalId: string,
+  body: { expected_proposal_hash: string; decision: IntraShotDecision },
+): Promise<unknown> {
+  return fetchJson(`${BASE}/intra-shot/proposals/${proposalId}/review`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function reviewIntraShotProposalBatch(
+  shotId: string,
+  reviews: Array<{
+    proposal_id: string;
+    expected_proposal_hash: string;
+    decision: IntraShotDecision;
+  }>,
+): Promise<unknown> {
+  return fetchJson(
+    `${BASE}/shots/${shotId}/intra-shot/proposals/review-batch`,
+    { method: "POST", body: JSON.stringify({ reviews }) },
   );
 }

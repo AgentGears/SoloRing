@@ -146,7 +146,7 @@ def template(tmp_path_factory):
     data_dir.mkdir()
     settings = Settings(data_dir=data_dir)
     seeded = _seed_m12_state(data_dir, settings)
-    _stamp_head(data_dir, "0016_m15_revision_compatibility")
+    _stamp_head(data_dir, "0017_m16_intra_shot_consequences")
     backup_root = base / "backup"
     asyncio.run(rb.backup(settings, backup_root))
     return {"data_dir": data_dir, "settings": settings, "seed": seeded,
@@ -168,16 +168,17 @@ def env(template, tmp_path):
 
 def test_current_backup_requires_0013_head(template):
     """M12-RECOVERY:01."""
-    assert rb.EXPECTED_ALEMBIC_HEAD == "0016_m15_revision_compatibility"
+    assert rb.EXPECTED_ALEMBIC_HEAD == "0017_m16_intra_shot_consequences"
     manifest = json.loads(
         (template["backup_root"] / "backup-manifest.json").read_text())
-    assert manifest["alembic_version"] == "0016_m15_revision_compatibility"
+    assert manifest["alembic_version"] == "0017_m16_intra_shot_consequences"
     assert rb.SUPPORTED_RESTORE_ALEMBIC_HEADS == {
         "0011_m10_derived_spatial_execution",
         "0012_m11_reusable_production_revisions",
         "0013_m12_composition_occurrences",
         "0014_m13_authority_complete_world",
         "0015_m14_world_observation_execution",        "0016_m15_revision_compatibility",
+        "0017_m16_intra_shot_consequences",
     }
 
 
@@ -205,7 +206,7 @@ def test_restore_0013_verifies_composition_snapshots_and_projections(
         n = con.execute("SELECT COUNT(*) FROM composition_revisions").fetchone()[0]
     finally:
         con.close()
-    assert ver == "0016_m15_revision_compatibility"
+    assert ver == "0017_m16_intra_shot_consequences"
     assert n == 1
 
 

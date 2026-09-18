@@ -198,7 +198,7 @@ def relation_state_spec_entry(state) -> dict:
 def build_capturable_snapshot(
     shot, refs, resolved: list[ResolvedDependency], feature_states=(),
     relation_states=(), visual_pack=None, spatial_pack=None,
-    production_world_pack=None,
+    production_world_pack=None, intra_shot_pack=None,
 ) -> tuple[dict, dict | None]:
     """(snapshot value, continuity spec or None) from ONE captured value.
 
@@ -280,13 +280,26 @@ def build_capturable_snapshot(
                 **{k: v for k, v in base.items()
                    if k != "schema_version"},
                 "production_world": production_world_pack}
+    if intra_shot_pack is not None:
+        # M16-C (frozen R6 §8.3): schema 7 wraps the EXACT predecessor
+        # base (any of schemas 2-6) with the canonical non-empty
+        # intra_shot block. No empty schema 7 exists; no lowering.
+        if not intra_shot_pack.get("events"):
+            from soloring.errors import internal_invariant
+
+            raise internal_invariant(
+                "schema-7 wrap requires a non-empty intra_shot block")
+        base = {"schema_version": 7,
+                **{k: v for k, v in base.items()
+                   if k != "schema_version"},
+                "intra_shot": intra_shot_pack}
     return base, spec
 
 
 def effective_working_snapshot_hash(
     shot, refs, resolved: list[ResolvedDependency], feature_states=(),
     relation_states=(), visual_pack=None, spatial_pack=None,
-    production_world_pack=None,
+    production_world_pack=None, intra_shot_pack=None,
 ) -> str:
     """The Shot's effective working hash (M6-F15 + M7C §10.4 + M7D §10.2).
 
@@ -296,7 +309,7 @@ def effective_working_snapshot_hash(
     implementation."""
     snapshot, _ = build_capturable_snapshot(
         shot, refs, resolved, feature_states, relation_states, visual_pack,
-        spatial_pack, production_world_pack,
+        spatial_pack, production_world_pack, intra_shot_pack,
     )
     return canonical_hash(snapshot)
 
