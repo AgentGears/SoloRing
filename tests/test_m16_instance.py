@@ -143,7 +143,9 @@ async def test_instance_06(client):
 
 async def test_instance_05(client, factory):
     """INSTANCE:05 — an adopted PI-feature Shot/end transition feeds the
-    SAME occurrence downstream (via the real M13 world fixtures)."""
+    SAME occurrence downstream: a later Shot selecting the same binding
+    resolves the adopted fallen state at its start (no re-mint, no
+    Production Revision replacement, no CreativeEntity substitution)."""
     b, sel, fid = await _pi_world(client, tag=b"m16-inst5")
     created = await client.post(
         f"/shots/{b['shot']}/intra-shot/events",
@@ -161,11 +163,19 @@ async def test_instance_05(client, factory):
         json={"expected_event_hash": created.json()["event_hash"],
               "expected_event_set_hash": proj["event_set_hash"]})
     assert r.status_code == 200, r.text
-    # the same occurrence still resolves with the adopted fallen state
-    # (the current world resolver picks up the A2 transition)
+    # the adoption matched on the originating Shot
     proj2 = await get_intra(client, b["shot"])
-    assert proj2["intra_shot_ready"] is True
     assert proj2["handoffs"][0]["matched"] is True
+
+    # the downstream proof: a LATER Shot selects the SAME binding — the
+    # same occurrence — and resolves the adopted fallen state at its
+    # start (an event chaining FROM fallen is legal there)
+    sid2 = await _later_pi_shot(client, factory, b, sel,
+                                subject="later pi")
+    later = await client.post(
+        f"/shots/{sid2}/intra-shot/events",
+        json=_pi_event(fid, 500, state("fallen"), state("upright")))
+    assert later.status_code == 201, later.text
 
 
 async def test_instance_04(client, factory):
@@ -213,3 +223,43 @@ async def test_instance_04(client, factory):
     assert len(children) == 1
     assert json.loads(children[0].captured_target_identity_json) == \
         identity
+
+
+async def _later_pi_shot(client, factory, b, sel, *, subject):
+    """A LATER Shot over the same M13 world: semantic deps + a spatial
+    plan bound to the same world/axis + the SAME binding selection, so
+    the same Production Instance occurrence resolves for it."""
+    import json as _json
+
+    from soloring.api.schemas.shots import ShotCreate
+    from soloring.domain import shots as shot_svc
+    from soloring.spatial import plans as plan_svc
+    from tests.m16_seed_b import assign_shot
+    from tests.test_m13_shot_capture import CAM
+
+    sid = (await shot_svc.create_shot(
+        factory(), b["pid"], ShotCreate(subject=subject,
+                                        duration_ms=4000))).id
+    await assign_shot(factory, b["pid"], sid, name=f"{subject} scene")
+    d = await client.put(
+        f"/shots/{sid}/semantic-dependencies",
+        json={"dependencies": [
+            {"entity_id": b["loc"], "role": "cast"},
+            {"entity_id": b["eva"], "role": "cast"}]})
+    assert d.status_code == 200, d.text
+    plan = {
+        "schema_version": 1,
+        "spatial_world_id": b["world"]["id"],
+        "camera": _json.loads(_json.dumps(CAM)),
+        "blocking": [],
+        "axis_constraint": {"spatial_axis_id": b["axis"]["id"],
+                            "camera_side": "positive"},
+    }
+    await plan_svc.put_spatial_plan(
+        factory(), sid, expected_plan_hash=None, plan_raw=plan)
+    select = await client.put(
+        f"/shots/{sid}/production-world-selection",
+        json={"binding_id": sel["binding_id"],
+              "expected_binding_id": None})
+    assert select.status_code == 200, select.text
+    return sid

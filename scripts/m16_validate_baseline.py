@@ -76,6 +76,26 @@ def test_base_01() -> list[str]:
         errors.append("base01: M15 peeled commit/tree identity drifted")
     if not head_descends_from(M15_COMMIT):
         errors.append("base01: HEAD does not descend from M15 commit")
+    # the live refs/tags/M15 must still resolve to the EXACT frozen
+    # tag object and peel to the exact commit/tree
+    try:
+        tag_ref = git("rev-parse", "refs/tags/M15")
+        peeled_commit = git("rev-parse", "refs/tags/M15^{commit}")
+        peeled_tree = git("rev-parse", "refs/tags/M15^{tree}")
+    except RuntimeError:
+        return errors + ["base01: refs/tags/M15 unreadable"]
+    if not tag_ref_resolves(tag_ref):
+        errors.append(
+            "base01: refs/tags/M15 resolves to "
+            f"{tag_ref}, must be {M15_TAG_OBJECT}")
+    if peeled_commit != M15_COMMIT:
+        errors.append(
+            "base01: refs/tags/M15 peels to "
+            f"{peeled_commit}, must be {M15_COMMIT}")
+    if peeled_tree != M15_TREE:
+        errors.append(
+            "base01: refs/tags/M15 tree is "
+            f"{peeled_tree}, must be {M15_TREE}")
     return errors
 
 
@@ -118,12 +138,24 @@ def test_base_03() -> list[str]:
     return []
 
 
+def recorded_evidence_ok(release: int, pr_head: str, post_merge: str,
+                         tag_object: str) -> bool:
+    """The recorded-evidence equality: every frozen identity literal
+    must match exactly (parameterized so the drift self-test can
+    perturb each one independently)."""
+    return (release == 388490752
+            and pr_head == "#79 / 34851439162"
+            and post_merge == "#80 / 34855331701"
+            and tag_object == "4c83eaaaee9c1099512ce01ed9567d737ebee1c9")
+
+
 def test_base_04() -> list[str]:
-    # the frozen CI identities are recorded baseline evidence: the
-    # constants above ARE the record; drift means the literals changed
-    if (BASELINE_CI_PR_HEAD != "#79 / 34851439162"
-            or BASELINE_CI_POST_MERGE != "#80 / 34855331701"):
-        return ["base04: recorded baseline CI identities drifted"]
+    # the frozen identities are recorded baseline evidence: the
+    # constants above ARE the record; drift in ANY of them — Release,
+    # CI runs, or the tag-object identity — is a failure
+    if not recorded_evidence_ok(M15_RELEASE, BASELINE_CI_PR_HEAD,
+                                BASELINE_CI_POST_MERGE, M15_TAG_OBJECT):
+        return ["base04: recorded baseline evidence drifted"]
     return []
 
 
@@ -144,6 +176,13 @@ def test_base_05() -> list[str]:
     return errors
 
 
+def tag_ref_resolves(ref_value: str) -> bool:
+    """Live tag-ref equality: the observed refs/tags/M15 value must be
+    the exact frozen tag object (parameterized for the drift
+    self-test)."""
+    return ref_value == M15_TAG_OBJECT
+
+
 def test_base_06() -> list[str]:
     # self-test: the identity checks reject deliberately drifted values
     errors: list[str] = []
@@ -151,6 +190,19 @@ def test_base_06() -> list[str]:
         errors.append("base06: drifted tree was accepted")
     if commit_tree_ok("0" * 40, M15_TREE):
         errors.append("base06: drifted commit was accepted")
+    # a drifted tag ref must fail the live-ref equality
+    if tag_ref_resolves("0" * 40):
+        errors.append("base06: drifted tag ref was accepted")
+    # each perturbed recorded-evidence field must fail the equality
+    if recorded_evidence_ok(M15_RELEASE + 1, BASELINE_CI_PR_HEAD,
+                            BASELINE_CI_POST_MERGE, M15_TAG_OBJECT):
+        errors.append("base06: drifted Release accepted")
+    if recorded_evidence_ok(M15_RELEASE, "#99 / 0",
+                            BASELINE_CI_POST_MERGE, M15_TAG_OBJECT):
+        errors.append("base06: drifted PR-head CI accepted")
+    if recorded_evidence_ok(M15_RELEASE, BASELINE_CI_PR_HEAD,
+                            BASELINE_CI_POST_MERGE, "0" * 40):
+        errors.append("base06: drifted tag-object identity accepted")
     return errors
 
 

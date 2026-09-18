@@ -179,37 +179,50 @@ async def test_source_gate_entity(client, factory):
 
 
 async def test_source_gate_instance(client, factory):
-    """§23.2 instance-bound chair: the occurrence-bound configuration
-    consequence walks upright -> fallen through the terminal fold and
-    the explicit PI handoff on the SAME stable occurrence."""
+    """§23.2 instance-bound chair: an AUTHORITATIVE upright Shot/start,
+    upright -> fallen at an interior time, the explicit PI handoff, and
+    a later Shot resolving fallen on the SAME occurrence."""
     from tests.test_m16_instance import _pi_event, _pi_world
 
     b, sel, fid = await _pi_world(client, tag=b"m16-sg2")
     sid = b["shot"]
     engine = client._transport.app.state.engine
     occurrence = sel["occurrence_id"]
-    # §23.2: the configuration feature starts UPRIGHT via an explicit
-    # Shot/start authority (absent-start fallback if the predecessor
-    # route refuses the start anchor)
-    try:
-        start = await client.post(
-            f"/production-instance-features/{fid}/transitions",
-            json={"anchor_type": "shot", "anchor_id": sid,
-                  "boundary": "start", "operation": "set",
-                  "value": "upright"})
-        start_ok = start.status_code == 201
-    except Exception:
-        start_ok = False
-    before = state("upright") if start_ok else state()
+
+    # §23.2 premise: the configuration feature starts UPRIGHT via an
+    # explicit authoritative Shot/start transition — no fallback
+    start = await client.post(
+        f"/production-instance-features/{fid}/transitions",
+        json={"anchor_type": "shot", "anchor_id": sid,
+              "boundary": "start", "operation": "set",
+              "value": "upright"})
+    assert start.status_code == 201, start.text
+
+    # the resolved start state IS upright: a probe event at 2400
+    # chaining from upright is legal, and claiming an absent start is
+    # refused by the exact before-state fold check
+    probe = await client.post(
+        f"/shots/{sid}/intra-shot/events",
+        json=_pi_event(fid, 2400, state("upright"), state("fallen")))
+    assert probe.status_code == 201, probe.text
+    await client.delete(f"/intra-shot/events/{probe.json()['id']}")
+    probe_lie = await client.post(
+        f"/shots/{sid}/intra-shot/events",
+        json=_pi_event(fid, 2400, state(), state("fallen")))
+    assert probe_lie.status_code == 409, probe_lie.text
+    assert "BEFORE_STATE_MISMATCH" in probe_lie.text
+
+    # interior event: upright -> fallen, persistence requested
     created = await client.post(
         f"/shots/{sid}/intra-shot/events",
-        json=_pi_event(fid, 2500, before, state("fallen"),
+        json=_pi_event(fid, 2500, state("upright"), state("fallen"),
                        persistence="require_handoff"))
     assert created.status_code == 201, created.text
     # Shot/end- terminal fold is fallen
     proj = await get_intra(client, sid)
     assert proj["terminal_targets"][0]["terminal_state"] == \
         state("fallen")
+
     # explicit PI handoff: create the exact transition, then adopt
     t = await client.post(
         f"/production-instance-features/{fid}/transitions",
@@ -223,8 +236,9 @@ async def test_source_gate_instance(client, factory):
     assert r.status_code == 200, r.text
     proj2 = await get_intra(client, sid)
     assert proj2["handoffs"][0]["matched"] is True
-    # the SAME occurrence resolves fallen — no re-mint/substitution:
-    # the PI feature row and its occurrence authority are unchanged
+
+    # no occurrence re-mint / substitution: the PI feature row and its
+    # production_instance authority subject are unchanged
     async with engine.connect() as conn:
         row = (await conn.execute(text(
             "SELECT pif.id, c.subject_kind FROM "
@@ -234,6 +248,17 @@ async def test_source_gate_instance(client, factory):
             {"f": fid})).first()
     assert row is not None and row[1] == "production_instance"
     assert occurrence == sel["occurrence_id"]
+
+    # §23.2 downstream: a LATER Shot selects the SAME binding — the
+    # same chair-07 occurrence — and resolves fallen at its start
+    from tests.test_m16_instance import _later_pi_shot
+
+    sid2 = await _later_pi_shot(client, factory, b, sel,
+                                subject="later chair")
+    later = await client.post(
+        f"/shots/{sid2}/intra-shot/events",
+        json=_pi_event(fid, 500, state("fallen"), state("upright")))
+    assert later.status_code == 201, later.text
 
 
 async def test_source_gate_multi_proposal(client, factory):
