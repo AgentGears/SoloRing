@@ -45,7 +45,23 @@ GATE_MODEL_ROOTS = {
     "vae": Path(r"C:/AI/M10R3-evidence/executor/comfy/models/vae"),
 }
 PINNED_LIVE_CONTRACT_HASH = (
-    "9e5526b1c9f116d900772f3b0afaa2323bd68d6336898f1ff840d04011c55d40")
+    # 2026-09-18 authorized repin (M16-E closure, exec_08 isolated
+    # certification action). Field-level characterization vs the prior
+    # pin 9e5526b1c9f116d900772f3b0afaa2323bd68d6336898f1ff840d04011c55d40:
+    # EVERY contract field is byte-identical except
+    # materializer.implementation_sha256, which changed because git
+    # tooling rewrote the identical materializer.py blob from LF to
+    # CRLF on disk between 2026-09-13 and 2026-09-15 (old field =
+    # sha256 of the LF bytes aec2bcf6…; new field = sha256 of the CRLF
+    # bytes e71c3012…; git blob unchanged since the M14 tag 89298e7 —
+    # no algorithm, materializer, rasterizer, output-grammar,
+    # resource-limit, ComfyUI, wrapper, or custom-node change; the
+    # runtime block — python 3.12.10 / numpy 2.5.2 / Pillow 12.3.0 /
+    # native module c8c519ec… / zlib 1.3.1 — is byte-identical and the
+    # Pillow install of 2026-08-24 predates the original pin capture).
+    # The prior pin reconstructs EXACTLY from today's contract by
+    # substituting only that one field, proving the single-field claim.
+    "963e3a035c202d4a906e6a9b86cc416895987f6a652aa0b19d94ee7538e6925c")
 
 # the gate cameras differ from every authoring/fixture view (frozen §39
 # "a camera different from the representation's authoring/default view")
