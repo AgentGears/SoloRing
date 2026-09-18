@@ -29,6 +29,13 @@ PRODUCT_SOURCE_PREFIXES = (
 # not be judged as if they were. Keep this set exact so unrelated product source
 # containing M16 vocabulary still fails the predecessor source-fit gate.
 REVIEWED_SUCCESSOR_PATHS = frozenset({
+    # M16-E frozen §17 projection UI (browser stays a projection layer;
+    # the M16 vocabulary there is the reviewed product surface).
+    "apps/web/src/components/IntraShotPanel.tsx",
+    "apps/web/src/__tests__/IntraShotPanel.test.tsx",
+    "apps/web/src/app/shots/[id]/page.tsx",
+    "apps/web/src/lib/types.ts",
+    "apps/web/src/lib/api.client.ts",
     # M16-P0 predecessor repairs.
     "server/soloring/api/continuity.py",
     "server/soloring/recovery/__init__.py",
