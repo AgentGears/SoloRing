@@ -250,6 +250,9 @@ ALLOWLIST = (
     "SoloRing-M16-Intra-Shot-Persistent-Consequences-"
     "Implementation-Plan-R7.md",
     "SoloRing-M16-R6-to-R7.delta.md",
+    # post-M16-closure publication refresh (separately authorized): the
+    # README status refresh to M16/0017. Documentation only.
+    "README.md",
 )
 
 POST_M15_REMEDIATION_BACKEND_PATHS = frozenset({
