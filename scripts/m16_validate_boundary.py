@@ -63,6 +63,9 @@ M16_SURFACE = (
     # certification action): one pin constant + characterization note
     # in the M14 GPU-gate harness; no production code
     r"^tests/test_m14_gpu_gate\.py$",
+    # post-closure publication refresh (separately authorized): the
+    # README status refresh to M16/0017. Documentation only.
+    r"^README\.md$",
     # reviewed successor carves from the M16 correction rounds:
     # predecessor-test era head-pins/migration expectations, the m10f
     # 0016-posture fixtures, and boundary-validator carve entries

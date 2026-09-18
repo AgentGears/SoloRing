@@ -108,6 +108,9 @@ ALLOWED_PATTERNS = [
     r"^SoloRing-M16-Intra-Shot-Persistent-Consequences-"
     r"Implementation-Plan-R7\.md$",
     r"^SoloRing-M16-R6-to-R7\.delta\.md$",
+    # post-M16-closure publication refresh (separately authorized):
+    # the README status refresh to M16/0017. Documentation only.
+    r"^README\.md$",
     # M16-E closure surface (reviewed successor slice): the frozen §22
     # owner rename of the P0 module, the §23 source-gate owners, and
     # the four M16 validators.
