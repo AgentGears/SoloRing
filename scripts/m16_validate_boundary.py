@@ -59,6 +59,10 @@ M16_SURFACE = (
     r"^SoloRing-M16-Intra-Shot-Persistent-Consequences-"
     r"Implementation-Plan-R7\.md$",
     r"^SoloRing-M16-R6-to-R7\.delta\.md$",
+    # the M16-E closure authorized exec_08 repin (the isolated final
+    # certification action): one pin constant + characterization note
+    # in the M14 GPU-gate harness; no production code
+    r"^tests/test_m14_gpu_gate\.py$",
     # reviewed successor carves from the M16 correction rounds:
     # predecessor-test era head-pins/migration expectations, the m10f
     # 0016-posture fixtures, and boundary-validator carve entries
