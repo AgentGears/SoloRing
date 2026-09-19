@@ -1,0 +1,23 @@
+CORRECTION-REVIEW EVIDENCE (completed 2026-09-19 on exact 8199e46)
+
+NOTE: this is correction-REVIEW evidence. It does not substitute for
+the R2 integrated Tier-A run, which restarts from cell 1 after R2
+freezes.
+
+- Focused regression:
+    tests/test_m15_recovery.py::test_two_pi_transitions_backup_verification
+    PASS (1 passed in 1.86s)
+- Focused recovery suites:
+    test_m15_recovery + test_m16_recovery + test_m16_recovery_domains
+    + test_m16_recovery_proposals + test_m16_recovery_coherence
+    30/30 PASS
+- All 18 boundary/proof-map validators on the correction head: PASS
+- Full backend suite on exact 8199e46:
+    2491 passed / 7 skipped / 0 failed in 37:48 (2268.86s)
+    — exec_08 GREEN in-suite (the correction unblocks every
+    PI-transition recovery path)
+
+Independent reproduction of the defect on the published baseline (Run1
+record): direct _verify_m13_world_state call on a copy of the
+accumulated R1 database (5 PI transitions) -> UnboundLocalError; the
+same call on the corrected tree passes.

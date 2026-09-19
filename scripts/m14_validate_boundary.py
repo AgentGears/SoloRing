@@ -16,6 +16,13 @@ REPO = Path(__file__).resolve().parents[1]
 BASELINE = "20429b3bf2ead3ca6c1d2402d5028e500bd4f9e8"
 
 ALLOWED_PATTERNS = [
+    # post-M16 R3 evidence-only publication (frozen R3 §23): frozen
+    # regression freeze set + external certifying harness + the closed
+    # R3 specification record. Evidence material; no production code.
+    r"^post-m16-r3-freeze/",
+    r"^post-m16-integrated-r3-evidence/harness/",
+    r"^SoloRing-Post-M16-Integrated-Sequence-Regression-R3-CLOSED"
+    r"\.md$",
     r"^docs/SoloRing-M14-[^/]+\.md$",
     r"^scripts/m14_validate_[a-z0-9_]+\.py$",
     r"^tests/fixtures/m14/[^/]+$",

@@ -1,0 +1,121 @@
+# v1.0 ↔ v1.6 reconciliation review (R1 §2.3)
+
+Left  (scenario): Full-Sequence-Pressure-Test-v1.0
+       SHA-256 d25116eb0d61eaac2012e15872bf6e22c45c0644466669af3c913ca65cfec996 (70529 B)
+Right (interpretation): Full-Sequence-Pressure-Test-Rerun-v1.6
+       SHA-256 215ee3e5037690d82ccec15925999f7d1cea2b2bb890138995c90d82724971e9 (52021 B)
+
+Scenario premises carried into the rerun (v1.0 §§3-5):
+  §3 production scenario framing; §4 initial production state
+  (characters, location, reusable set components, addressable
+  instances, initial persistent state); §5 editorial presentation
+  order vs narrative order — the narrative-order premise that the
+  flashback case (v1.0 §14) exercises is defined here.
+
+Complete top-level correspondence map:
+  v1.0 section                       -> v1.6 section
+  §3/§4/§5 scenario premises         -> carried (see above; rerun §0)
+  §6 Shot matrix (33 rows)           -> §4 + §5-§16 distributed rows
+  §7 detailed cases Shots 21-28+40   -> §4 (10 subsections)
+  §8 production update (Rev3/Comp9)  -> §5 (3 subsections)
+  §9 Shot 51                         -> §6
+  §10 Shots 52/53 control bandwidth  -> §7
+  §11 chandelier/54/Composition 10   -> §8
+  §12 generated invention            -> §9
+  §13 contact Shot 58                -> §10
+  §14 flashback Shot 59              -> §11
+  §15 candidate-world ingestion      -> §12 (+ Shot 61)
+  §16 performance candidate          -> §13 (+13A v1.4 dialogue/
+                                         lip-sync; 13B v1.5 editorial/
+                                         conform/finishing; 13C v1.6
+                                         deterministic editorial
+                                         materialization — additions)
+  §17 simulation Shots 63/64         -> §14
+  §18 executor replacement 65/66     -> §15 (15.1/15.2)
+  §19 historical isolation 67/fault  -> §16 (16.1/16.2)
+  §20 negatives N-01..N-24           -> §17 (unchanged table)
+  §21 CR-1..CR-5 register            -> §2 correction-closure trace
+  §22 CL-1..CL-5 clarifications      -> §3 clarification closure
+  §23 capability gaps                -> §19 residual capability gaps
+  §24 filmmaker UX                   -> §20 filmmaker UX rerun
+  §25 cross-sequence invariants      -> §18 invariant rerun (5 fam.)
+  §26 architecture correction gate   -> §23 final verdict structure
+  §27 final verdict                  -> §23/§24 disposition+planning
+  ALL v1.0 top-level sections (§3-§27) have a v1.6 counterpart.
+  v1.6 additions only: §13A/13B/13C, §20-§22 additive appendix
+  (QT-1..8) — additive, no scenario rewrite detected mechanically.
+
+Semantic question for the reviewer (NOT answered mechanically):
+  Does the v1.6 rerun preserve the unchanged v1.0 scenario
+  requirements, or does any reinterpretation materially change what
+  the scenario demands?
+
+FINAL DISPOSITION (signed 2026-09-19)
+
+Disposition: v1.6 preserves the unchanged scenario
+
+The v1.6 rerun preserves the original v1.0 pressure-test
+requirements rather than rewriting them to obtain a PASS. The
+review specifically confirms preservation of the load-bearing
+scenario requirements:
+
+* Shot 24 still requires chair-07 to begin upright, change inside
+  the Shot, and persist as fallen only through an explicit
+  downstream handoff/adoption.
+* Shot 25 still requires Eva to begin uninjured, acquire the injury
+  at the authored intra-Shot time, and expose fresh as the later
+  persistent state without marking the whole Shot injured at frame
+  zero.
+* chair-07 and other continuity-significant Production Instances
+  still require durable identity/state subjects rather than
+  display-name, hierarchy-path, or proximity retargeting.
+* Composition publication still must preserve surviving occurrence
+  identity.
+* Composition Revision <-> SpatialWorldRevision agreement remains a
+  mechanically provable binding requirement.
+* Production Revision replacement remains compatibility-gated
+  rather than silently substituting current/latest realization.
+* Shot 51 still requires the same durable chair-07, its existing
+  fallen state, the newer compatible chair realization, the new
+  Composition, exact spatial binding, a new camera, and unchanged
+  earlier captured history.
+* Shot 58 remains explicitly blocked by the known
+  Performance/contact capability gap; v1.6 does not falsely declare
+  that capability implemented or solved.
+* Shot 59 still resolves by earlier canonical narrative position
+  rather than production order, edit order, or current/latest
+  state.
+* Candidate-world, simulation, reconstruction, and generated
+  results remain candidate evidence until explicit adoption by the
+  owning authority domain.
+* An executor that cannot satisfy hard requirements still fails
+  rather than weakening the Shot; a compatible alternative executor
+  may create a new Generation without redefining the Shot.
+* Historical Shot 22 still requires resolution solely from its
+  exact captured historical graph, and missing required historical
+  closure still fails closed.
+* All 24 original adversarial negatives remain represented with
+  fail-safe behavior.
+* The original identity, temporal, authority, historical, and
+  execution invariant families remain preserved.
+* Later dialogue/performance, editorial/finishing, deterministic
+  editorial-resolution, and QT cases are explicitly additive
+  extensions rather than modifications of the v1.0 scenario.
+
+The v1.6 architecture therefore changes the ANSWERS to the v1.0
+findings, principally by closing CR-1 through CR-5 and clarifying
+their authority contracts, without materially changing what the
+original scenario demands.
+
+Material contradiction: none found.
+
+Non-blocking editorial note: the v1.6 rerun's §0 architecture-flow
+diagram contains a terminal "Product & Production Architecture
+v1.5" label even though the document header, architecture identity,
+and surrounding text identify Architecture v1.6. This is an
+internal editorial/version-label inconsistency in the rerun
+artifact; it does not alter the v1.0 scenario requirements, the
+pinned architecture identity, or this reconciliation disposition.
+
+Reviewer: ChatGPT
+Review date: 2026-09-19

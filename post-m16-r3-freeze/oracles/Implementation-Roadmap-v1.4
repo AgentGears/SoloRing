@@ -1,0 +1,1543 @@
+# SoloRing Implementation Roadmap
+
+**Document:** SoloRing Implementation Roadmap  
+**Version:** 1.4  
+**Date:** 2026-09-13  
+**Status:** Step-3 roadmap — M11–M16 and the post-M16 Performance program preserved; G12 refined for deterministic editorial resolution and conform/composition materialization without assigning a milestone or reordering current work; not an implementation plan and not implementation authorization  
+**Current published implementation baseline:** M14 @ `89298e793c651e9e8b9164912c76e3595867a60a` (tree `3c4fec0bdb11732f0c77c22acc65d3ba882df393`, tag object `ff4c6107876ddd991ec626b3605deb143ec7daf9`)  
+**Normative foundation:** Architecture Pattern Register v2.5 (`1da9fe2b957a19015d275b076732bc1c42c7f0cf789dc4b05647fcf0914a69a0`); Product & Production Architecture v1.6 (`d93125ceed1e24dcbc86e88e5dfb42b02d7352bec5240ef9d75a5423c1a24077`); Capability & Ownership Map v1.6 (`e6411f8725f706f11168585490e5fd9525a63e85a5756552964745eec6e51d88`); Gap & Dependency Graph v1.6 (`b3ec6ee1b2bddeec9ba18ce393da87e041592bb42fa9a478980c28666031457c`); Full-Sequence Product Pressure Test v1.6 deterministic editorial-resolution regression rerun (`215ee3e5037690d82ccec15925999f7d1cea2b2bb890138995c90d82724971e9`, PASS)
+**Purpose:** Convert the accepted architecture, ownership map, and mechanically acyclic dependency graph into a product-first implementation sequence. This roadmap chooses the first slice, gate order, source-gate boundaries, product-completeness thresholds, parallel/deferred roots, and deliberate exclusions. It does not freeze tables, APIs, file formats, executor technology, or milestone implementation details.
+
+---
+
+
+## v1.4 roadmap delta
+
+Version 1.4 preserves the accepted M11→M16 critical path, REMEMBER/SHOOT completeness thresholds, qualification/reference/correction side branches, and the M17A→M19 Performance program. M11–M14 remain published; M15/M16 and all later milestones remain separately unauthorized.
+
+The v1.6 architecture preserves the future **Editorial / Conform / Finishing Co-Design** gate (`G12`) downstream of explicit Take approval/select and sharpens its contract: meaning-bearing editorial choices must resolve deterministically before executor planning, and preservation conform, composition rendering, or mixed materialization remain downstream strategies rather than editorial authority. This roadmap does **not** assign that branch a milestone number. The current M15→M16→Performance ordering is unchanged.
+
+The post-M16 candidate program is now:
+
+```text
+G8  Performance / Dialogue Co-Design
+        ↓
+M17A  Performance Temporal + Dialogue/Vocal Foundation
+        ↓
+M17B  Body + Facial Performance Revisions
+        ↓
+M17C  Dialogue-Bound Facial Performance + Capture
+        ↓
+M18   Physical Interaction / Contact Authority
+        ↓
+M19   Performance QC + Targeted Correction
+```
+
+These milestone labels express roadmap dependency order only. Each still requires its own source-fit, reviewed/frozen implementation plan, and explicit implementation authorization.
+
+# 0. Executive decision
+
+The reusable-production critical path remains authoritative. M11–M14 are now published; the current roadmap frontier is M15→M16, after which the corrected Performance program begins only if G8 closes.
+
+The roadmap is:
+
+```text
+M11  Publish Reusable Production Revisions
+        ↓
+M12  Compose Stable Production Occurrences
+        ↓
+M13  Authority-Complete Reusable World
+        ↓
+      REMEMBER THE WORLD
+        ↓
+M14  World Observation + Execution Enforcement
+        ↓
+      SHOOT THE WORLD
+        ↓
+M15  Safe Reusable-Revision Evolution
+        ↓
+M16  Intra-Shot Persistent Consequences
+```
+
+After M16 and the integrated sequence rerun, G8 must close before the Performance program can freeze. The M17A→M17C sequence below is the preferred next continuity program; it remains separately unauthorised implementation work.
+
+The **current planned frontier** is therefore:
+
+```text
+M15  Safe Reusable-Revision Evolution
+        ↓
+M16  Intra-Shot Persistent Consequences
+        ↓
+post-M16 integrated sequence rerun
+        ↓
+G8 Performance / Dialogue Co-Design
+        ↓
+M17A / M17B / M17C Performance program
+```
+
+M11–M14 already established the reusable physical production identity, Composition/occurrence model, authority-complete world capture, and real production-world execution path. M15/M16 are not authorized merely because they are next in this roadmap.
+
+The roadmap still deliberately avoids speculative universal rigging, full Sound Post, candidate-world reconstruction, or generalized representation expansion before a concrete consumer requires them.
+
+---
+
+# 1. Roadmap rules
+
+## 1.1 Product truth before execution convenience
+
+Each milestone starts from the filmmaker-visible production decision it must preserve, then defines durable authority, historical behavior, failure semantics, and only then downstream execution behavior.
+
+```text
+filmmaker decision
+    ↓
+production authority
+    ↓
+immutable publication/capture
+    ↓
+observation/materialization
+    ↓
+execution
+```
+
+No milestone may reverse this direction.
+
+## 1.2 Every milestone must be independently source-gateable
+
+A milestone boundary is valid only when its central product claim can be proven without assuming a later milestone.
+
+Examples:
+
+```text
+M11 may prove immutable reusable Production Revision publication
+without Composition existing.
+
+M13 may prove that SoloRing remembers an exact reusable world
+without final execution of that world being implemented yet.
+
+M14 must prove that the newly captured reusable world reaches execution;
+it may not relabel M13's memory-only state as renderability.
+```
+
+## 1.3 Design gates close before milestone-plan freeze
+
+A roadmap design gate is not an implementation task hidden inside a milestone.
+
+For each milestone:
+
+```text
+open design question
+    ↓
+focused design decision
+    ↓
+source-fit against current baseline
+    ↓
+frozen milestone plan
+    ↓
+separate implementation authorization
+```
+
+If a design gate exposes a substantive architecture contradiction rather than an implementation choice, affected milestone planning stops and the architecture artifact is corrected first.
+
+## 1.4 Historical closure is part of product completion
+
+Current-state success alone never closes a production-authority milestone.
+
+Any new identity that can enter captured history must also have:
+
+```text
+immutable capture
+captured-graph-only read path
+fail-closed missing-history behavior
+Exact Rerun isolation
+no current/latest substitution
+```
+
+before the milestone claims that identity as production-ready.
+
+## 1.5 UI is a projection of the same authority
+
+Each filmmaker-facing surface must consume the same resolver/publication/readiness contracts used by capture and execution. UI behavior never becomes a parallel authority interpretation.
+
+## 1.6 No speculative platform completion
+
+A milestone implements only the abstraction required by its declared product slice.
+
+Examples:
+
+```text
+one usable retained representation
+    before
+universal multi-representation lifecycle
+
+one minimum immutable Performance representation
+    before
+universal rig/editor architecture
+
+one camera-only candidate adoption route
+    before
+universal candidate-world ingestion
+```
+
+---
+
+# 2. The seven roadmap decisions
+
+## 2.1 Decision 1 — first slice
+
+**Decision:** implement **S1 / Bundle A** first.
+
+```text
+RP-01  Production Object + immutable Production Revision identity/lifecycle
+RP-03  minimum consumption closure + publish-readiness
+```
+
+Required product proof:
+
+> A filmmaker can approve/publish one exact reusable production realization, close its declared consumption dependencies, retain it, inspect its provenance, and use its immutable identity later without depending on the process that originally created it.
+
+Why this is first:
+
+1. Every reusable Composition depends on exact Production Revision identity.
+2. It closes the oldest P0 reusable-production orphan without introducing Composition or renderer complexity prematurely.
+3. It directly establishes the principle needed for “build once, approve/freeze, reuse later.”
+4. The dependency graph explicitly proves that a generalized representation registry is not required first.
+5. It creates the narrowest source gate for distinguishing production identity, byte identity, and derivation identity.
+
+## 2.2 Decision 2 — design-gate sequencing
+
+The roadmap freezes gate order as follows:
+
+```text
+Before M11: G1
+Before M12: G2
+Before M13: G3 + G7
+Before M14: G6, then remaining execution part of G7
+Before M15: G4
+Before M16: G5
+Before M17A / first Performance milestone: G8 (Performance / Dialogue Co-Design)
+
+Non-reordering side branches:
+G9  targeted correction / delta realization after OB-03 exists
+G10 profile-scoped qualification after RP-03 exists
+G11 property-scoped reference evidence independent of reusable-production spine
+```
+
+Gate work may be researched early, but a later gate cannot silently redefine an earlier frozen production identity.
+
+## 2.3 Decision 3 — source-gate boundaries
+
+Source gates sit at product cut points rather than at arbitrary implementation-module boundaries:
+
+```text
+M11 gate  first publishable reusable Production Revision
+M12 gate  stable occurrence identity and scoped composition editing
+M13 gate  immutable authority-complete reusable world + history
+M14 gate  production-world observation + pre-queue enforcement
+M15 gate  compatibility-gated reusable revision evolution
+M16 gate  intra-Shot event → explicit persistent consequence handoff
+```
+
+Each source gate must test its historical negative cases before broader UI or convenience behavior is accepted.
+
+## 2.4 Decision 4 — REMEMBER THE WORLD completeness threshold
+
+**REMEMBER THE WORLD closes at M13, not M12 and not M14.**
+
+The threshold requires the dependency-complete equivalent of Bundle C:
+
+```text
+published Production Revisions
++ published Composition Revision
++ stable addressable occurrences
++ identity survival across Composition revisions
++ instance-bound world-state resolution
++ instance-bound spatial resolution
++ exact Composition↔Spatial binding
++ coherent Shot capture
++ historical reusable-production closure
+```
+
+Product claim after M13:
+
+> SoloRing can remember which exact reusable world a Shot used, which occurrence was which, what persistent state applied, how that world was bound to spatial authority, and can reproduce the historical production graph without consulting current mutable state.
+
+M13 does **not** claim that every executor can yet render this world.
+
+## 2.5 Decision 5 — SHOOT THE WORLD completeness threshold
+
+**SHOOT THE WORLD closes at M14.**
+
+The threshold requires the dependency-complete equivalent of Bundle D:
+
+```text
+REMEMBER THE WORLD
++ generalized observation contract
++ production-world observation support
++ property-level preservation/trust contract
++ pre-queue capability negotiation
++ one declared production-capable retained representation/materialization path
+```
+
+Product claim after M14:
+
+> A captured persistent reusable world can be translated into one supported production execution path, while any executor path unable to honor a hard captured requirement fails before queueing rather than silently weakening the Shot.
+
+## 2.6 Decision 6 — parallel roots
+
+The graph exposes eight independent roots, but the roadmap deliberately chooses **focus over parallel implementation** until SHOOT THE WORLD closes.
+
+Before M14:
+
+```text
+IMPLEMENTATION PRIORITY
+RP-01 reusable-production root only
+
+ALLOWED IN PARALLEL
+focused research/source-fit/design preparation for G5, G6, G8
+
+DEFERRED IMPLEMENTATION
+EV-01 intra-Shot events
+PF-01 Performance Revision
+RL-01 physical relationships
+RV-03 QC
+CW-01 candidate-world ingestion
+VI-01 property-scoped reference evidence
+```
+
+Rationale:
+
+- the reusable-world spine is the defining current product gap;
+- parallel implementation would create more integration surfaces before the core production identity model stabilizes;
+- the independent roots remain genuinely independent and therefore lose no architectural validity by waiting;
+- design preparation can proceed without allowing those branches to shape M11–M13 authority prematurely.
+
+After M14, the roadmap prioritizes safe world evolution and persistent consequences before optional candidate-producer expansion.
+
+
+Additional allowed side-branch design after M11 publication capability exists:
+
+```text
+G9 targeted correction/delta-realization design
+G10 qualification contract design
+G11 property-scoped reference-claim design
+```
+
+Neither branch may delay M12/M13 merely to complete a generalized qualification or reference platform. Qualification becomes a hard execution gate only for a realization policy that explicitly requires applicable evidence.
+
+## 2.7 Decision 7 — deliberate exclusions
+
+The first reusable-world program deliberately excludes capabilities that are not required to prove the two core completeness thresholds.
+
+Excluded from M11–M14 unless a source gate proves a specific hard need:
+
+```text
+RP-02 generalized multi-representation registry
+RP-04 broad derivation framework beyond minimum provenance required for publication
+RP-06 general fork operation
+CO-04 bulk/procedural population and promotion
+RV-02 generated-detail promotion
+PF-01/PF-02 Performance Revision
+RL-01/RL-02 physical relationships/contact
+CW-01/CW-02/CW-03 candidate-world ingestion
+simulation/physical prediction producer integration
+universal rig/deformation system
+continuous story-clock domain
+editorial/finishing domains
+multi-user collaboration
+agent-driven production workflows
+```
+
+A capability may enter an earlier milestone only if its owning milestone source-fit demonstrates that the declared product slice is otherwise impossible to close. Convenience is not enough.
+
+---
+
+# 3. Milestone M11 — Reusable Production Revision Foundation
+
+## 3.1 Filmmaker-facing problem
+
+Today SoloRing can preserve semantic, visual, spatial, Shot, Generation, Take, and historical execution identities, but it still lacks one explicit reusable production identity that says:
+
+> This exact physical/production realization is approved. Keep it. Reuse it later. Do not recreate it from the original generator or working process.
+
+M11 closes that gap.
+
+## 3.2 Roadmap scope
+
+Primary graph nodes:
+
+```text
+RP-01
+RP-03
+```
+
+Minimum product surface:
+
+```text
+create/adopt candidate reusable production content
+inspect minimum provenance
+publish immutable Production Revision
+inspect exact retained consumption closure
+resolve the published revision by stable identity
+```
+
+## 3.3 Required pre-plan design gate
+
+**G1 — Minimal publishable revision** must close before an M11 implementation plan freezes.
+
+It must decide:
+
+1. Production Object identity versus Production Revision identity.
+2. The minimum immutable revision manifest/record shape.
+3. The exact retained usable representation/byte closure for the first declared consumer.
+4. Required interpretation metadata for that consumer.
+5. Publication-readiness semantics.
+6. Historical retention/liveness semantics.
+7. Whether semantically identical concurrent publish attempts converge and under what identity rule.
+
+The gate must preserve:
+
+```text
+Production Revision identity ≠ representation identity
+Production Revision identity ≠ derivation identity
+byte identity ≠ provenance identity
+```
+
+## 3.4 Explicit non-scope
+
+M11 does not require:
+
+```text
+generalized representation registry
+Composition
+Production Instance identity
+world-state integration
+spatial binding
+a new executor path
+revision substitution/update workflow
+fork/bulk population
+```
+
+## 3.5 Source-gate proof boundary
+
+M11 closes only when source evidence proves at minimum:
+
+- a published revision is immutable;
+- required consumption bytes/identities are retained and integrity-checked;
+- publication cannot depend on mutable unpublished working state;
+- path/name/location is not production identity;
+- two distinct derivations do not collapse merely because they share bytes where provenance must remain distinct;
+- historical consumption uses retained published state rather than rerunning the creator;
+- missing required closure fails closed;
+- current mutable work cannot reinterpret a published revision;
+- the first product UI displays unresolved/readiness state honestly.
+
+## 3.6 Product exit statement
+
+> SoloRing can publish and retain one immutable reusable Production Revision that survives loss or replacement of its original creation process.
+
+This is S1 / Bundle A complete.
+
+---
+
+# 4. Milestone M12 — Composition and Stable Production Occurrences
+
+## 4.1 Filmmaker-facing problem
+
+A reusable chair is not yet a reusable lobby. SoloRing needs to assemble exact Production Revisions into a persistent set and know which occurrence is which.
+
+M12 gives the filmmaker a reusable Composition with durable addressable occurrences.
+
+## 4.2 Roadmap scope
+
+Primary graph nodes:
+
+```text
+CO-01
+CO-02
+CO-03
+minimum CO-05
+minimum CO-06
+```
+
+Minimum product surface:
+
+```text
+create Composition working state
+add exact Production Revisions
+mint durable addressable occurrences
+publish immutable Composition Revision
+edit one occurrence with explicit scope
+publish a later Composition Revision while surviving occurrences retain identity
+```
+
+## 4.3 Required pre-plan design gate
+
+**G2 — Composition/occurrence/scope family** must close before M12 plan freeze.
+
+It must decide:
+
+1. How occurrence identities are minted.
+2. How one occurrence identity is referenced across Composition Revisions.
+3. Which publication changes preserve identity by default.
+4. Which operations explicitly change identity.
+5. What affected-state diagnostics must exist for remove/replace/split/merge/fork operations.
+6. The minimum typed override vocabulary needed for the first slice.
+7. How API/UI exposes consequential edit scope without asking unnecessary questions.
+8. How published Composition Revision closure pins exact Production Revisions and nested dependencies.
+
+## 4.4 Explicit non-scope
+
+M12 does not yet claim:
+
+```text
+instance-bound world state
+instance-bound spatial authority
+Composition↔Spatial binding
+historical Shot capture of the reusable world
+production-world rendering
+bulk/procedural populations
+safe automatic update offering
+```
+
+## 4.5 Source-gate proof boundary
+
+M12 closes only when source evidence proves:
+
+- occurrence identity is not a display name, hierarchy path, representation object ID, array position, or filesystem location;
+- publishing a new Composition Revision preserves every surviving occurrence identity by default;
+- changing a referenced compatible Production Revision does not automatically mint a new occurrence;
+- identity-changing operations are explicit and lineage-bearing;
+- Shot-local/source-substitution override semantics cannot silently become Composition-global edits;
+- ambiguous edit scope is surfaced before consequential mutation;
+- historical Composition Revisions remain immutable;
+- no Composition transform becomes a competing authority for facts already owned by spatial authority.
+
+## 4.6 Product exit statement
+
+> SoloRing can publish a reusable set assembly whose addressable occurrences remain the same production occurrences across Composition evolution unless the filmmaker explicitly changes their identity.
+
+This is S2 / Bundle B complete.
+
+---
+
+# 5. Milestone M13 — Authority-Complete Reusable World
+
+## 5.1 Filmmaker-facing problem
+
+M12 can say “this is chair-07,” but SoloRing still must connect that occurrence to persistent story state, spatial continuity, exact world binding, Shot capture, and historical reproduction.
+
+M13 is the milestone that turns reusable set assembly into **production memory**.
+
+## 5.2 Roadmap scope
+
+Primary graph nodes:
+
+```text
+IS-01
+IS-02
+BD-01
+SH-01
+SH-02
+HI-01
+```
+
+It consumes M11/M12 and existing semantic/continuity/spatial/capture/history foundations.
+
+## 5.3 Required pre-plan design gates
+
+M13 requires **G3 + G7**.
+
+### G3 — Composition↔Spatial binding
+
+Must decide:
+
+1. Pinned immutable binding identity versus pinned immutable inputs + versioned deterministic reconstruction.
+2. Completeness proof.
+3. Uniqueness proof.
+4. Exact basis/origin/orientation/units interpretation.
+5. One mapping for preview, capture, and final observation.
+6. Which revision-level compatibility facts are native binding requirements rather than delegated to the later general compatibility system.
+
+### G3.1 — explicit bindability-eligibility sub-question
+
+M13 planning may not proceed while the following phrase remains implicit:
+
+> **What mechanically makes a specific Composition Revision and a specific SpatialWorldRevision eligible to bind in the first place?**
+
+The design gate must freeze an eligibility predicate before schema/API design.
+
+The candidate direction to evaluate is:
+
+```text
+same Project
++ same applicable location/world lineage resolution
++ exact selected location/entity revision compatibility where applicable
++ no conflicting authority ownership
+```
+
+This candidate is **not** frozen by the roadmap. G3 must prove or replace it with a mechanically testable SoloRing-native rule.
+
+### G7 — Production-world capture/history
+
+Must decide:
+
+1. Exact resolved-context extension shape.
+2. Readiness failure taxonomy for missing/duplicate/incompatible subjects and bindings.
+3. Capture-schema evolution under the no-empty-higher-schema rule.
+4. Historical normalized projection/closure.
+5. Exact Rerun read behavior with current resolvers unavailable.
+6. Query-shape strategy at feature-film scale.
+7. What immutable binding/translation evidence must be captured versus deterministically reconstructible from pinned historical inputs.
+
+## 5.4 Source-gate proof boundary
+
+M13 is the most important authority source gate after M10F. It closes only when source evidence proves the complete S3 workflow:
+
+```text
+published set
+    ↓
+stable chair-07 occurrence
+    ↓
+chair-07 recognized as one durable state/spatial authority subject
+    ↓
+exact Composition↔Spatial binding
+    ↓
+current Shot resolution
+    ↓
+immutable ShotRevision capture
+    ↓
+historical read / Exact Rerun from captured graph only
+```
+
+Required negative proofs include:
+
+- a stateful occurrence without one recognized subject blocks readiness;
+- duplicate or conflicting subject mappings block readiness;
+- incomplete/duplicate Composition↔Spatial binding blocks publication/capture;
+- preview and capture cannot use different mappings;
+- Composition-owned transforms cannot override spatial authority silently;
+- a removed occurrence with live state/spatial references cannot disappear through heuristic retargeting;
+- current Composition/revision/state updates do not change historical Shot meaning;
+- missing historical Production Revision/Composition/binding closure fails closed;
+- historical read remains valid with current-state resolvers made unavailable;
+- feature-film-scale growth changes rows/bytes, not query round trips per occurrence.
+
+## 5.5 Product exit statement — REMEMBER THE WORLD
+
+M13 is complete only when this statement is mechanically true:
+
+> **SoloRing can remember an exact reusable production world across Shots and across current production evolution, including stable occurrence identity, persistent state, spatial authority, exact binding, captured history, and fail-closed historical reproduction.**
+
+This is S3 / Bundle C complete and closes **REMEMBER THE WORLD**.
+
+---
+
+# 6. Milestone M14 — World Observation and Execution Enforcement
+
+## 6.1 Filmmaker-facing problem
+
+Remembering the world is not enough. The world must be observed by an executor without re-inventing its identity/state and without silently dropping hard production requirements.
+
+M14 closes the execution boundary for the production world.
+
+## 6.2 Roadmap scope
+
+Primary graph nodes:
+
+```text
+OB-01
+OB-02
+OB-03
+EX-01
+```
+
+It consumes M13 captured production-world state and the M11/RP-03 publication semantics. M14 must add or select one production-capable retained representation/materialization path under those semantics; that path does not have to be part of the initial M11 consumer scope.
+
+## 6.3 Required pre-plan design gate
+
+**G6 — Observation contract** must close before the main M14 plan freezes.
+
+It must decide:
+
+1. Versioned World Observation specification boundary.
+2. How existing specialized observation inputs project into that boundary.
+3. Preservation/trust vocabulary, at least enough to distinguish hard, structural, identity/appearance, bounded, and inferable properties.
+4. How Shot-level generative freedom is represented without transferring authority to execution.
+5. Relationship between observation specification and the existing durable execution specification.
+6. How capability negotiation reports unsupported hard requirements before queueing.
+7. How observation artifacts are versioned and proven disposable/rebuildable without becoming authority.
+
+The remaining execution-facing portion of **G7** must also close: exact new production-world inputs captured by M13 must project into OB-02 without current-state lookup.
+
+## 6.4 Two-stage implementation structure
+
+M14 should preserve the graph's OB-01/OB-02 distinction.
+
+### M14A — observation/trust contract over existing captured domains
+
+Equivalent to S8:
+
+```text
+OB-01 + OB-03 + EX-01
+```
+
+This proves the generalized contract and pre-queue failure semantics without claiming reusable-world support yet.
+
+### M14B — production-world observation support
+
+Adds:
+
+```text
+OB-02
++ exact M13 captured Production/Composition/Instance/state/binding inputs
++ one production-capable retained representation/materialization path
+```
+
+Only M14B may close SHOOT THE WORLD.
+
+## 6.5 Source-gate proof boundary
+
+M14 closes only when source evidence proves:
+
+- observations derive only from immutable captured state for historical execution;
+- current resolvers are not consulted by Exact Rerun observation materialization;
+- preview/inspection and final execution consume the same captured authority/binding semantics;
+- changing observation format/version does not change production identity;
+- unsupported hard requirements fail before queueing;
+- unknown execution dependency classes fail safe rather than being dropped;
+- executor/materializer output cannot write production authority as a side effect;
+- one real retained production representation path produces the required structural/identity controls for the declared test workflow;
+- the same M13 reusable world can be shot from a new camera without creating a new world identity;
+- a lower-control Shot may allow more inference without changing the underlying world authority.
+
+## 6.6 Product exit statement — SHOOT THE WORLD
+
+> **SoloRing can compile an exact captured reusable world into a supported production execution path, preserve declared hard constraints, and reject incompatible execution before expensive work.**
+
+This is S4 / Bundle D complete and closes **SHOOT THE WORLD**.
+
+---
+
+# 7. Milestone M15 — Safe Reusable-Revision Evolution
+
+## 7.1 Filmmaker-facing problem
+
+A feature production evolves. A chair, desk, hair realization, or other reusable component may improve after many Shots already exist.
+
+The filmmaker must be able to accept a newer revision into current work without rewriting history or silently breaking spatial/performance/contact/observation assumptions.
+
+## 7.2 Roadmap scope
+
+Primary graph nodes:
+
+```text
+CM-01
+RP-05
+```
+
+Consumes:
+
+```text
+RP-03
+CO-03
+BD-01 where spatial binding is relevant
+OB-03/OB-02 where observation requirements are relevant
+```
+
+## 7.3 Required pre-plan design gate
+
+**G4 — Revision compatibility** must close.
+
+It must decide:
+
+1. Persistence/identity of compatibility evidence and verdicts.
+2. First consumer-specific evaluator dimensions.
+3. The four verdict behaviors:
+   - COMPATIBLE_AS_IS
+   - COMPATIBLE_VIA_DETERMINISTIC_TRANSLATION
+   - REQUIRES_REVIEW
+   - INCOMPATIBLE
+4. Versioned identity of deterministic translations.
+5. Which translations are execution-only versus publication-relevant.
+6. How update offering determines affected current compositions/Shots without touching history.
+7. Which changes invalidate state, spatial binding, performance, relationship, or observation contracts.
+
+## 7.4 Source-gate proof boundary
+
+M15 closes only when the central pressure-test update is mechanically provable:
+
+```text
+chair-07 → Chair Revision 2
+chair-07 state = fallen
+        ↓
+Chair Revision 3 approved
+        ↓
+compatibility verdict
+        ↓
+current Lobby update accepted
+        ↓
+chair-07 remains same occurrence
+chair-07 remains fallen
+historical Shots remain on Revision 2
+future compatible Shots use Revision 3
+```
+
+Required failures:
+
+- incompatible revision cannot enter current composition through a tracking/latest shortcut;
+- deterministic translation is pinned/versioned when materially determinative;
+- current compatibility decision never rewrites historical source bytes/identity;
+- `REQUIRES_REVIEW` cannot be treated as compatible automatically;
+- occurrence identity cannot be replaced just to avoid compatibility work;
+- affected-current-work reporting is diagnostic and cannot rewrite captures.
+
+## 7.5 Product exit statement
+
+> **SoloRing can evolve reusable production assets during a film while preserving occurrence identity, persistent state, consuming contracts, and immutable historical Shots.**
+
+This is S7 / Bundle F complete.
+
+---
+
+# 8. Milestone M16 — Intra-Shot Persistent Consequences
+
+## 8.1 Filmmaker-facing problem
+
+Feature-film continuity must express facts that change during a Shot, not only between Shots.
+
+Examples:
+
+```text
+injury appears at 3100 ms
+chair falls during the Shot
+vase breaks during the Shot
+item leaves a character's possession during the Shot
+```
+
+SoloRing must preserve the true Shot-start state, represent when the change happens, and make downstream persistence an explicit separate adoption decision.
+
+## 8.2 Roadmap scope
+
+Primary graph nodes:
+
+```text
+EV-01
+EV-02
+SH-03
+RV-01
+```
+
+Instance-bound cases additionally consume `IS-01` from M13.
+
+## 8.3 Required pre-plan design gate
+
+**G5 — Intra-Shot event handoff** must close.
+
+It must decide:
+
+1. Shot-relative timing representation.
+2. Authoritative Shot-duration source and validation.
+3. Boundary semantics for event-at-start versus genuine intra-Shot event.
+4. Terminal-state equality rule.
+5. Readiness versus capture-fence responsibility.
+6. Persistent-consequence adoption workflow independent of Take approval.
+7. Provenance when event timing or consequences are proposed by downstream analysis/generation rather than authored directly.
+
+## 8.4 Source-gate proof boundary
+
+M16 closes only when these cases are proven:
+
+### Entity-bound
+
+```text
+Eva uninjured at Shot/start
+cut event occurs at t
+Take may be approved
+persistent consequence reviewed separately
+Shot/end transition = fresh injury only if adopted
+later Shot resolves fresh injury
+```
+
+### Instance-bound
+
+```text
+chair-07 upright at Shot/start
+fall event occurs at t
+persistent consequence adopted
+Shot/end chair-07 = fallen
+later Shot resolves same chair-07 as fallen
+```
+
+Required failures:
+
+- terminal state cannot be projected backward to Shot/start;
+- Take approval cannot silently create persistent state;
+- an intra-Shot persistent event without agreeing Shot/end transition blocks capture/readiness;
+- event and handoff cannot target different durable subjects;
+- time-zero duplicate event cannot compete with canonical Shot/start transition;
+- missing/invalid duration blocks a genuinely time-addressed event.
+
+## 8.5 Product exit statement
+
+> **SoloRing can represent a state-changing event inside a Shot and explicitly hand its adopted consequence into downstream story-time continuity without making generated pixels the author of production state.**
+
+This is Bundle E complete for both entity-bound and instance-bound targets.
+
+---
+
+# 9. Post-M16 and non-reordering side branches
+
+The following capabilities remain valid and valuable, but the roadmap does not assign them automatic implementation priority before M11–M16 close.
+
+## 9.0 Corrected capability frontier
+
+The post-M16 frontier is no longer allowed to treat lip sync as a self-contained animation/executor feature. The production ordering is:
+
+```text
+1. DIALOGUE & VOCAL PERFORMANCE
+   • Dialogue Line identity/revisions (A1)
+   • speaker + exact wording + language
+   • recorded/generated/imported vocal candidates
+   • Vocal Performance adoption (A7)
+   • immutable retained audio + exact timebase
+   • derived word/phoneme/viseme alignment
+   • dialogue replacement / compatibility / historical isolation
+
+                ↓
+
+2. PERFORMANCE & ACTING
+   • body performance
+   • facial performance
+   • expression / articulation
+   • dialogue-bound lip sync
+   • Performance Revisions
+   • retargeting / compatibility
+
+                ↓
+
+3. PHYSICAL INTERACTION
+   • contact
+   • grasping
+   • support
+   • handling
+
+                ↓
+
+4. SOUND POST / FINISHING
+   • Foley / ambience / SFX
+   • music
+   • final dialogue edit / processing
+   • mix / re-recording / mastering
+```
+
+An ADR/dialogue edit that materially changes the acting/timing used by animation crosses back into step 1 as a new Vocal Performance candidate; Sound Post cannot silently replace A7 synchronization authority.
+
+## 9.1 Basic advisory QC — RV-03
+
+The graph proves QC is an independent root over already-captured authority.
+
+Recommended entry condition:
+
+```text
+SHOOT THE WORLD closed
++ enough real Takes exist to define useful evidence classes
+```
+
+Reason to wait:
+
+- QC is more valuable after the world/observation contracts it will inspect are stable;
+- early QC risks optimizing evaluation around temporary execution behavior.
+
+First scope should remain advisory. QC evidence never becomes production authority.
+
+## 9.2 Perform the World — Dialogue + Performance program
+
+Performance becomes the next major continuity frontier after persistent world/state workflows, but dialogue-bound facial animation cannot be treated as a self-contained executor feature.
+
+Before the first Performance milestone plan, **G8 — Performance / Dialogue Co-Design** must freeze together:
+
+```text
+A1 Dialogue Line revision identity
+A7 Vocal Performance revision + retained audio closure
+exact audio / Performance / Shot temporal mapping
+derived dialogue alignment evidence contract
+one minimum body/facial Performance representation
+vocal↔facial synchronization + compatibility semantics
+Shot capture / historical closure
+```
+
+Do not make the program contingent on solving a universal rig/deformation/editor system or full Sound Post. Do not allow it to begin from an arbitrary audio file with no approved vocal-performance identity.
+
+### 9.2.1 M17A — Performance Temporal + Dialogue/Vocal Foundation
+
+Filmmaker-visible exit: an exact semantic line can have one or more candidate vocal takes, one adopted Vocal Performance Revision, retained speech bytes, exact timebase/segment mapping, derived alignment evidence, and explicit replacement/compatibility semantics without facial animation yet.
+
+Primary capability set: `DL-01 + PT-01 + VP-01 + DA-01`.
+
+### 9.2.2 M17B — Body + Facial Performance Revisions
+
+Filmmaker-visible exit: body/facial acting can be created/imported/generated as candidates, reviewed/adopted into immutable Performance Revisions, retargeted only under explicit compatibility, and historically resolved independently of the tool that created it.
+
+Primary capability set: `PF-01` plus the minimum retarget/compatibility surface required by the chosen G8 representation.
+
+### 9.2.3 M17C — Dialogue-Bound Facial Performance + Capture
+
+Filmmaker-visible exit: the adopted facial performance binds an exact Vocal Performance Revision and exact temporal mapping; dialogue analysis remains derived evidence; Shot capture pins the vocal/facial identities and segment; Exact Rerun uses historical closure; one real production execution path proves the approved vocal timing drives the submitted facial controls.
+
+Primary capability set: `PF-03 + PF-02`, consuming M17A/M17B.
+
+## 9.3 Physical relationships — RL-01/RL-02
+
+Relationship authority should follow a real production need such as support, attachment, grounding, containment, or exact contact.
+
+It should not be implemented merely because simulation technology is available.
+
+## 9.4 Candidate-world ingestion — CW-01/CW-02/CW-03
+
+Candidate-world ingestion should begin route-by-route.
+
+Recommended first route:
+
+```text
+camera extraction/evidence
+    ↓
+existing spatial/cinematic review/adoption
+```
+
+Object/geometry identity matching should wait for the M11–M13 reusable-production identities it adopts into.
+
+Candidate extraction never bypasses explicit adoption.
+
+---
+
+
+## 9.5 Targeted correction / delta realization — DX-01
+
+Recommended earliest entry condition:
+
+```text
+OB-03 preservation/trust contract exists
++ real accepted Takes expose a bounded correction need
+```
+
+Correction produces a new candidate Take from an immutable source Take under explicit change and preservation requirements. It does not mutate the source Take or upstream production authority.
+
+Pre-plan gate: **G9**.
+
+## 9.6 Profile-scoped Production Revision qualification — QL-01/QL-02
+
+Recommended earliest entry condition:
+
+```text
+M11 publication capability exists
++ stable immutable realization-profile identity exists
++ one real production criterion needs qualification evidence
+```
+
+This branch may be implemented in parallel with M12/M13 if it does not perturb the reusable-world spine. It is not required to close REMEMBER THE WORLD.
+
+Before a production realization profile is declared generally usable for expensive Shot execution, its milestone/source gate may require applicable qualification evidence for the revisions it consumes. That policy decision belongs to the owning realization/observation milestone; no universal `locked` flag is introduced.
+
+Pre-plan gate: **G10**.
+
+## 9.7 Property-scoped reference evidence — VI-01
+
+This is an independent visual-authority extension over existing approved visual identity.
+
+Recommended trigger:
+
+```text
+a real production needs multiple references with different property roles
+or explicit anti-reference/prohibited-property evidence
+```
+
+Pre-plan gate: **G11**.
+
+It should not be implemented as a renderer-specific negative-prompt or reference-bundle feature. The production claim must remain upstream and renderer-independent.
+
+
+## 9.8 Editorial / Conform / Finishing Co-Design — G12, no milestone assigned
+
+This is a **future design gate**, not a scheduled implementation milestone. Recommended scheduling is after the currently defined Performance priorities unless a concrete delivery need justifies an earlier standalone design exercise. It must not interrupt M15/M16.
+
+Before any authoritative editorial implementation plan freezes, G12 must answer together:
+
+```text
+future editorial/edit revision identity
+exact approved Take/source-media/stream identity
+canonical editorial timebase and exact source-range addressing
+trim / order / reuse / first transition semantics
+deterministic resolution boundary for defaults, inference, stochastic choices, and meaning-bearing parameters
+playback proxy ↔ authoritative source mapping
+proof that preview and final realization consume the same resolved editorial meaning
+media-preservation classes:
+  BYTE_EXACT / STREAM_EXACT / ESSENCE_EXACT / BOUNDARY_REENCODE / FULL_REENCODE
+materialization selection:
+  preservation conform / composition rendering / mixed strategy
+capability negotiation + explicit unsupported/fallback behavior
+exact source/output lineage for materialized outputs, including selected materialization mode
+interchange/project files as representations, not authority
+```
+
+The first future slice should prove **deterministic preservation-safe editorial/materialization foundation** (`S14 / Bundle J`), not a universal NLE, grading suite, Sound Post system, or mastering platform.
+
+LosslessCut, FFmpeg, NLE project formats, and similar tools may inform implementation or serve as downstream operators, but none becomes SoloRing authority by adoption shortcut.
+
+# 10. Deferred reusable-production expansions
+
+Several capabilities are deliberately held until concrete consumers prove their need.
+
+## 10.1 Generalized representation registry — RP-02
+
+Trigger it when at least two real consumer representations require first-class selection, lifecycle, compatibility, or replacement semantics.
+
+Do not build it merely because the architecture permits multiple representations.
+
+## 10.2 General derivation provenance — RP-04
+
+M11 needs enough provenance to distinguish creation history from production identity. A broader derivation graph should expand only when candidate creation/import/repair workflows require it.
+
+## 10.3 Fork / lineage — RP-06
+
+Implement when filmmakers need a reusable object to diverge permanently from its source identity while retaining lineage.
+
+## 10.4 Bulk/procedural instance model — CO-04
+
+Implement only when real production sets require large repeated populations and one repeated element needs promotion into an addressable occurrence.
+
+## 10.5 Generated-detail promotion — RV-02
+
+Implement after Production Object publication exists and a real Take-review workflow needs to promote a generated invention into reusable production authority.
+
+---
+
+# 11. Product-completeness ladder
+
+The roadmap defines explicit product checkpoints so later work cannot overclaim completion.
+
+| Checkpoint | Milestone | Product claim |
+|---|---|---|
+| **Reusable Object** | M11 | One approved production realization can be published, retained, and reused by immutable identity. |
+| **Reusable Set** | M12 | Exact revisions can be assembled with stable addressable occurrence identity and explicit edit scope. |
+| **REMEMBER THE WORLD** | M13 | Persistent world/instance/state/spatial/binding facts are coherently captured and historically reproducible. |
+| **SHOOT THE WORLD** | M14 | The captured reusable world constrains a supported execution path with pre-queue hard-capability enforcement. |
+| **EVOLVE THE WORLD** | M15 | New reusable revisions can enter current work through explicit compatibility without rewriting history. |
+| **CHANGE DURING THE SHOT** | M16 | Intra-Shot state changes can hand off explicit persistent consequences into downstream continuity. |
+
+These claims are cumulative.
+
+A separate non-cumulative readiness checkpoint may exist alongside the ladder:
+
+| Side checkpoint | Earliest basis | Product claim |
+|---|---|---|
+| **QUALIFIED REALIZATION** | M11 + QL-01/QL-02 + stable realization profile | One exact Production Revision has retained evidence that it satisfies a declared qualification protocol for one exact realization profile. |
+
+`QUALIFIED REALIZATION` does not replace publication, approval, REMEMBER THE WORLD, or SHOOT THE WORLD. It becomes mandatory only when a production-use policy requires it.
+
+M14 cannot close if M13 is incomplete. M15 cannot claim safe evolution if compatibility is only advisory. M16 cannot claim persistent consequences if Take approval still creates state implicitly.
+
+---
+
+# 12. Milestone source-gate matrix
+
+| Milestone | Design gate | Primary cut point | Critical historical proof | Filmmaker-visible closure |
+|---|---|---|---|---|
+| **M11** | G1 | RP-03 | published closure retained; creator/current state unavailable | publish one reusable revision |
+| **M12** | G2 | CO-02/CO-03 | old Composition Revision immutable; occurrence identity survives publication | same occurrence across set revisions |
+| **M13** | G3 + G7 | BD-01/SH-02/HI-01 | captured graph only; missing closure fails closed; Exact Rerun independent of current | same world remembered across Shots |
+| **M14** | G6 + execution part of G7 | OB-02 | historical observations derive from captured graph only | same world shot through supported execution |
+| **M15** | G4 | CM-01/RP-05 | update/translation cannot mutate captured history | update component safely |
+| **M16** | G5 | EV-02/SH-03 | Shot-start truth preserved; persistent handoff pinned | state changes during Shot and persists only if adopted |
+| **Correction side branch** | G9 | DX-01 | source Take remains immutable; correction lineage/preservation evidence retained | bounded correction produces a new candidate Take |
+| **Qualification side branch** | G10 | QL-01/QL-02 | prior qualification evidence remains immutable; applicability changes create new result/policy state | revision is qualified for exact profile/protocol, not globally |
+| **Reference-evidence side branch** | G11 | VI-01 | reference claim/evidence identity retained; no prompt-only authority | each reference/prohibition has explicit property scope |
+| **Future editorial/conform design branch** | G12 | ED-02 / ED-04 | approved source Takes remain immutable; accepted editorial meaning resolves deterministically; preview/final and executor changes cannot reinterpret it; exact source/output lineage retained | trim/reorder approved Takes by exact source ranges, resolve meaning-bearing choices, then materialize via preservation conform, composition rendering, or a mixed strategy |
+
+Every milestone also inherits the established source-gate rules for deterministic canonicalization, explicit transaction/read coherence, forced race proofs where concurrency matters, bounded query shape where cardinality grows, honest evidence provenance, and artifact fidelity.
+
+---
+
+# 13. Required pressure-test excerpts by milestone
+
+The full unchanged pressure test remains the architecture-level acceptance suite. Milestone source gates should reuse only the relevant scenario fragment until the complete reusable-world program is ready for an integrated rerun.
+
+## 13.1 M11 fragment
+
+```text
+approve one reusable chair/desk/lobby-shell realization
+retain exact published revision
+original creation mechanism unavailable
+published revision still consumable
+```
+
+## 13.2 M12 fragment
+
+```text
+Lobby Composition 8 contains chair-07
+publish later Lobby Composition 9
+chair-07 survives as same occurrence
+Shot-local change remains local
+```
+
+## 13.3 M13 fragment
+
+```text
+chair-07 state = fallen
+world/composition binding exact
+later Shot resolves same chair-07
+historical earlier Shot remains pinned
+Exact Rerun uses captured graph only
+```
+
+This fragment is the first milestone where the central Chair-7 continuity case must pass without execution-memory assistance.
+
+## 13.4 M14 fragment
+
+```text
+same captured lobby
+new camera
+observation compiled from captured world
+executor satisfies required hard controls
+Take candidate produced
+world authority unchanged
+```
+
+## 13.5 M15 fragment
+
+```text
+Chair Revision 3 approved
+compatibility verdict
+Lobby Composition update
+same chair-07 identity/state
+historical Shots remain Revision 2
+future Shots use Revision 3 where accepted
+```
+
+## 13.6 M16 fragment
+
+```text
+Eva cut appears during Shot
+chair falls during Shot
+persistent consequences reviewed separately from Take approval
+later Shots inherit only adopted Shot/end state
+```
+
+After M16, rerun the complete full-sequence test against the implemented product model before promoting the next major architecture domain.
+
+---
+
+
+## 13.7 Correction side-branch fragment
+
+```text
+accepted source Take remains immutable
+one bounded change is requested
+protected properties are explicit
+correction produces a new candidate Take
+review checks requested change + preservation evidence
+```
+
+## 13.8 Qualification side-branch fragment
+
+```text
+same published Production Revision
+profile A qualification → PASS
+profile B qualification → FAIL or REVIEW
+both evidence histories retained
+Production Revision unchanged
+change profile/protocol → old result not silently reused
+```
+
+## 13.9 Reference-evidence side-branch fragment
+
+```text
+reference A governs face identity
+reference B governs wardrobe construction
+anti-reference C forbids one explicit surface property
+compiled renderer instructions preserve those roles
+reference bundle never becomes universal all-property authority
+```
+
+# 14. Migration and compatibility policy
+
+This roadmap does not freeze migration shapes, but every future milestone plan must obey the following evolution policy.
+
+## 14.1 Do not backfill invented production decisions
+
+If older Projects lack a new reusable-production concept, migration must not invent:
+
+```text
+Production Revision approval
+Composition occurrence identity
+Composition↔Spatial binding
+compatibility verdict
+persistent consequence
+Performance Revision
+```
+
+Older data remains valid under its historical schema until the filmmaker creates/adopts the new content.
+
+## 14.2 New historical schemas only when new semantic content exists
+
+A Shot without reusable-production content must not acquire a higher historical schema merely because the software version changed.
+
+## 14.3 Preserve old captured bytes/meaning
+
+Compatibility layers may translate execution views. They may not rewrite historical source identity or bytes to resemble the current model.
+
+## 14.4 Fail closed on missing retained closure
+
+If an old captured Shot says it used a published reusable revision and its required retained closure is missing/corrupt, historical execution fails. It does not substitute the current revision or regenerate an approximation.
+
+---
+
+# 15. UX sequencing
+
+The user experience should expand only as the underlying authority becomes real.
+
+## M11 UI
+
+```text
+Production Library — minimal
+candidate → review → publish
+revision history
+readiness/provenance/closure inspection
+```
+
+## M12 UI
+
+```text
+World/Set workspace — minimal
+assemble exact revisions
+addressable occurrence list
+scope-aware edits
+publish Composition Revision
+identity-history inspection
+```
+
+## M13 UI
+
+```text
+World/Set workspace — authority integration
+stateful occurrence status
+Composition↔Spatial binding/readiness
+Shot resolved-world inspector
+historical Shot world provenance
+```
+
+## M14 UI
+
+```text
+Shot execution readiness
+profile-scoped qualification status when policy requires it
+property preservation requirements
+unsupported-capability explanation
+observation provenance in advanced inspector
+```
+
+## M15 UI
+
+```text
+Update available
+impact summary
+compatibility verdict
+accept/review/block
+historical work unchanged message
+```
+
+## M16 UI
+
+```text
+Shot-local event timing
+persistent consequence review
+adopt/ignore each consequence
+Story-State downstream preview
+```
+
+The UI should not expose table IDs, storage paths, representation internals, or executor-specific graph details unless an advanced diagnostic view materially requires them.
+
+---
+
+# 16. Roadmap risks and mitigations
+
+## 16.1 Risk — M11 becomes a universal asset platform
+
+Mitigation: freeze G1 around one declared downstream consumption path; explicitly retain the RP-02 non-edge.
+
+## 16.2 Risk — M12 creates scene-file identity instead of production identity
+
+Mitigation: source-gate occurrence identity after representation/file renames and hierarchy changes; identity must remain stable.
+
+## 16.3 Risk — M13 duplicates spatial authority
+
+Mitigation: G3 must define binding, not a second transform winner. Conflicting authority blocks readiness.
+
+## 16.4 Risk — G3 bindability remains a vague phrase
+
+Mitigation: G3.1 is a mandatory plan-freeze question. M13 cannot freeze while eligibility is implicit.
+
+## 16.5 Risk — historical closure postponed until M14
+
+Mitigation: HI-01 is M13 scope and part of REMEMBER THE WORLD. Renderer work cannot be used to justify incomplete historical production memory.
+
+## 16.6 Risk — M14 becomes a wrapper with no new-domain execution
+
+Mitigation: M14A and M14B are distinct. Only OB-02 plus one real production-world representation path closes SHOOT THE WORLD.
+
+## 16.7 Risk — compatibility treated as “same object means safe”
+
+Mitigation: M15 requires explicit consumer-specific verdicts and versioned translations where needed.
+
+## 16.8 Risk — Take approval starts mutating world state
+
+Mitigation: M16 keeps Take approval and persistent consequence adoption separate product actions.
+
+## 16.9 Risk — independent roots distract from core world loop
+
+Mitigation: M14 is now closed; future parallelism must still be justified by product evidence and explicit authorization rather than by an independent-root label alone.
+
+## 16.10 Risk — roadmap milestone number becomes authorization
+
+Mitigation: milestone numbering here expresses dependency order only. Every milestone requires a separately reviewed/frozen implementation plan and explicit implementation authorization.
+
+---
+
+# 17. Post-M16 roadmap program
+
+After M16 and the integrated sequence rerun, the default next program is **PERFORM THE WORLD**, subject to G8 closure and separate milestone authorization:
+
+```text
+M17A  Performance Temporal + Dialogue/Vocal Foundation
+M17B  Body + Facial Performance Revisions
+M17C  Dialogue-Bound Facial Performance + Performance Capture
+M18   Physical Interaction / Contact Authority
+M19   Performance QC + Targeted Correction
+```
+
+This sequence corrects one dependency rather than expanding scope indiscriminately: lip sync requires durable dialogue/vocal authority before facial synchronization. Full soundtrack production is still later. G12 editorial/conform design is a separate downstream branch and does not alter this sequence.
+
+M18 should pull `RL-01/RL-02` from actual contact/grasp/support/handling needs exposed by M17. M19 may combine advisory `RV-03` evidence with `DX-01` targeted correction once real Performance Takes expose bounded correction needs; neither QC nor correction becomes authority.
+
+Other independent roots remain candidates after or alongside this program only when production evidence justifies them:
+
+```text
+CW-01/CW-03 camera-only candidate-world route
+CW-02 richer object/entity matching
+VI-01 property-scoped reference claims
+QL-01/QL-02 qualification expansion
+RP-02/RP-04/RP-06/CO-04/RV-02 reusable-production expansion
+ED-01→ED-05 editorial/conform branch only after G12 scheduling decision
+```
+
+---
+
+# 18. Explicit future domains outside this roadmap program
+
+The following remain outside M11–M16 and are not automatically scheduled by completion of this roadmap:
+
+```text
+universal character rig/deformation/editor system
+continuous story-clock domain
+full simulation production authority
+editorial authority — exact schema still future; G12 deterministic-resolution/materialization perimeter now defined
+compositing authority
+color-management/creative-grade authority
+Sound Post authority beyond A7 dialogue/vocal performance
+mastering/delivery authority
+multi-user collaboration semantics
+agent-authored production flows
+```
+
+Dialogue/vocal performance is **not** in that deferred Sound Post line. The boundary is:
+
+```text
+A7 Dialogue/Vocal Performance      future Sound Post
+acting speech used by animation   Foley / ambience / SFX / music
+retained vocal take + timebase     dialogue processing/editing
+facial sync source                 mix / mastering / delivery
+```
+
+If a later dialogue edit/ADR changes words, timing, phrasing, or acting and is intended to drive animation, it re-enters A7 as a new Vocal Performance candidate/revision.
+
+They remain legitimate future product domains. Their existence does not weaken the M11–M16 claims, provided those claims remain scoped exactly as stated.
+
+---
+
+# 19. Roadmap acceptance criteria
+
+This roadmap is internally coherent only if all of the following remain true:
+
+1. M11 can close without M12.
+2. M12 can close without claiming persistent world-state/spatial integration.
+3. M13 closes historical reusable-world memory before M14 execution expansion.
+4. M14 cannot close SHOOT THE WORLD through an observation wrapper that ignores new reusable-world inputs.
+5. M15 compatibility cannot rewrite M11–M14 history.
+6. M16 consequence adoption remains separate from Take approval.
+7. No post-M16 lip-sync milestone may freeze unless G8 has assigned semantic line, approved vocal performance, exact temporal mapping, derived alignment, facial Performance, synchronization, and Sound Post boundaries explicitly.
+7. No milestone before M14 is blocked by generalized representation registry, simulation, universal rigging, candidate-world ingestion, or QC.
+8. Entity-bound event design remains independent of reusable Production Instances; instance-bound events consume M13 subject support only when needed.
+9. G3.1 bindability eligibility is explicitly resolved before M13 plan freeze.
+10. Every new historical identity is captured and reproducible from immutable provenance before its milestone claims production completeness.
+11. Every milestone has a filmmaker-visible exit claim, not only schema completion.
+12. Milestone numbering remains planning order, not implementation authorization.
+13. No editorial/conform milestone is assigned until G12 closes; approved Takes remain immutable, proxies remain non-authoritative, and executor syntax cannot become the edit.
+
+---
+
+# 20. Handoff to first future milestone planning
+
+The next artifact after this roadmap is accepted should be a standalone **M11 implementation plan** for:
+
+```text
+Reusable Production Revision Foundation
+
+primary scope:
+RP-01 + RP-03
+
+pre-plan gate:
+G1
+
+product slice:
+S1 / Bundle A
+
+exit claim:
+one immutable reusable Production Revision can be published,
+retained, inspected, and consumed later without recreating it.
+```
+
+Before that plan freezes, it must perform a source-fit audit against the actual M10F baseline and answer G1 using current repository contracts rather than assuming new storage/schema shapes.
+
+The M11 plan must explicitly list which existing contracts remain unchanged, which are extended, what migration/historical compatibility is required, the exact source-gate proof matrix, and which tempting adjacent capabilities remain out of scope.
+
+No M11 implementation is authorized by this roadmap.
+
+---
+
+# 21. Summary invariant
+
+The roadmap is intentionally simple at its core:
+
+```text
+FIRST
+make an approved production thing reusable
+
+THEN
+compose reusable things into stable occurrences
+
+THEN
+make SoloRing remember that exact world across story state, space, Shots, and history
+
+THEN
+make execution observe that world without weakening hard production requirements
+
+THEN
+let the world evolve safely
+
+THEN
+let persistent facts change inside a Shot without making generated pixels the authority
+
+LATER, UNDER A SEPARATE G12 DESIGN GATE
+let approved Takes enter editorial/conform by exact retained source identity, with replaceable proxies, explicit media-preservation classes, and executor-independent edit authority
+```
+
+That sequence converts SoloRing from a strong vertical Shot-continuity system into the persistent reusable production system required for feature-film-scale filmmaking while preserving the historical, authority, provenance, and execution-isolation invariants already earned by the M10F baseline.

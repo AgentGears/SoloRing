@@ -1,0 +1,36 @@
+R2 TIER-A RUN1 FAILURE IDENTITY (immutable lineage)
+====================================================
+
+Run1 evidence archive (SoloRing-Post-M16-R2-TierA-Run1-2026-09-19.zip):
+  bytes   = 396506
+  sha256  = 829f0b0666e29a1750066c661235f4fef476e827cfde41197744bc7339a1ff89
+
+Run1 MANIFEST.json:
+  bytes   = 19178
+  sha256  = 3d55aa59f13e736751ca230e6aa387d5e3c7f37116d176df530ec0091bdfa460  (103 entries)
+
+Guards: pre-guard PASS (guard_exit=0) and post-guard PASS
+(guard_exit=0), both frozen R2 section 6.4 wrappers verbatim and
+contemporaneous. R2 Run1 WAS certifying evidence.
+
+Ledger: 59 REQUIRED PASS / 5 REQUIRED NOT_EXECUTED /
+3 OPTIONAL NOT_EXECUTED (67-cell universe).
+
+R2 disposition: FAIL.
+Failure surface: frozen CORE-3 fixture incompatible with whole-history
+recovery.
+Product defect: NO (ruled 2026-09-19).
+
+Preservation: PM16:RECOVERY:01 itself is NOT_EXECUTED (fixture/
+harness incompatibility encountered while entering it); the thrown
+exception is the HARNESS: FAIL record in the evidence ledger. Neither
+is rewritten retrospectively.
+
+Root cause: the frozen R2 section 13.2.1 fixture inserted a Generation
+whose minimal WorkflowSpec lacked "inputs" and whose manifest/template
+identities were 64 zeros; the certified recovery liveness enumeration
+correctly refused that history (fail-closed). A recovery exemption for
+fixture rows was REJECTED; R3 makes the fixture a valid historical
+citizen instead (same product baseline).
+
+No R2 result may be promoted into an R3 PASS result.

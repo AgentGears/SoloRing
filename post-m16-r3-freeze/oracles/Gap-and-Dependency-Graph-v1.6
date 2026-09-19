@@ -1,0 +1,1480 @@
+# SoloRing Gap & Dependency Graph
+
+**Document:** SoloRing Gap & Dependency Graph  
+**Version:** 1.6  
+**Date:** 2026-09-13  
+**Status:** Step-2 planning artifact — v1.5 dependency topology preserved; deterministic editorial resolution and conform/composition materialization semantics refined without reordering current milestones; not an implementation roadmap, implementation plan, or implementation authorization  
+**Current published implementation baseline:** M14 @ `89298e793c651e9e8b9164912c76e3595867a60a` (tree `3c4fec0bdb11732f0c77c22acc65d3ba882df393`)  
+**Normative foundation:** Architecture Pattern Register v2.5 (`1da9fe2b957a19015d275b076732bc1c42c7f0cf789dc4b05647fcf0914a69a0`); Product & Production Architecture v1.6 (`d93125ceed1e24dcbc86e88e5dfb42b02d7352bec5240ef9d75a5423c1a24077`); Capability & Ownership Map v1.6 (`e6411f8725f706f11168585490e5fd9525a63e85a5756552964745eec6e51d88`); unchanged Full-Sequence Product Pressure Test v1.0 plus v1.6 deterministic editorial-resolution architecture regression rerun (`215ee3e5037690d82ccec15925999f7d1cea2b2bb890138995c90d82724971e9`, PASS)
+**Supersedes:** Gap & Dependency Graph v1.5  
+**Purpose:** Convert the accepted capability inventory into an evidence-grounded dependency graph that distinguishes prerequisite strength, dependency reason, authority versus execution class, independent branches, focused design gates, and filmmaker-complete slices without assigning milestone numbers or freezing implementation schemas.
+
+---
+
+## v1.6 revision record
+
+Version 1.6 preserves the complete v1.5 graph topology: the reusable-production spine, dialogue/performance branch, qualification/reference branches, delta-realization branch, REMEMBER/SHOOT completeness distinction, and the five-node future editorial/conform/finishing branch. M11–M14 remain the published implementation baseline; M15/M16 and the Performance program remain on their existing roadmap path and are not authorized by this graph.
+
+The v1.6 refinement changes **semantics, not topology**:
+
+1. `ED-02` now explicitly includes deterministic resolution of meaning-bearing editorial choices before materialization planning;
+2. `ED-04` now explicitly covers preservation conform, composition rendering, and mixed materialization beneath the same resolved editorial meaning;
+3. preview/final realizations remain projections of the same resolved edit rather than independent interpreters;
+4. `G12`, `F19`, `S14`, and Bundle J now require this resolution/materialization separation;
+5. node count, HARD-edge count, independent roots, milestone ordering, and authorization state are unchanged.
+
+The HARD gap edges remain `ED-01 → ED-02`, `ED-01 → ED-03`, `ED-01 → ED-04`, `ED-02 → ED-04`, and `ED-04 → ED-05`. `BASE-TAKE-SELECT → ED-01` and `BASE-HISTORY → ED-05` remain implemented-foundation dependencies and are excluded from the HARD gap-edge count.
+
+---
+
+# 0. Executive result
+
+SoloRing still has one dominant reusable-production dependency spine, but the revised graph shows more clearly that several high-value branches can advance independently.
+
+The dominant authority spine is:
+
+```text
+minimal publishable Production Revision
+        ↓
+Composition Revision
+        ↓
+stable addressable Production Instance
+        ↓
+identity preservation across Composition Revision evolution
+        ↓
+instance-bound world-state + spatial integration
+        ↓
+Composition ↔ Spatial binding
+        ↓
+coherent Shot production-context capture
+        ↓
+historical reusable-production closure
+        ↓
+production-world observation support
+```
+
+Two completeness thresholds remain load-bearing:
+
+```text
+AUTHORITY-COMPLETE REUSABLE WORLD
+SoloRing can remember the exact reusable world, occurrences, state, spatial bindings,
+and historical Shot usage without consulting current mutable state.
+
+RENDERABLE REUSABLE WORLD
+That captured world can additionally be compiled into executor-facing observations,
+with hard preservation requirements rejected before queueing when unsupported.
+```
+
+The revised graph also proves four important independence statements:
+
+- entity-bound intra-Shot consequences do not depend on the reusable-production spine;
+- the generalized observation contract can be designed from existing specialized compilation foundations before new production-world inputs exist;
+- basic QC can evaluate Takes against existing captured authority before the generalized trust vocabulary exists;
+- camera-only candidate-world adoption can target existing spatial/cinematic authority without solving reusable object identity first.
+
+Deferred universal rigging, simulation, candidate-world ingestion, broad Sound Post, editorial, collaboration, and continuous-story-clock work remain outside the reusable-world spine. Dialogue/vocal performance is no longer classified as broad Sound Post: it is an A1/A7 prerequisite of production-grade lip sync.
+
+---
+
+# 1. Method and graph semantics
+
+## 1.1 Source and evidence discipline
+
+Nodes are derived from Capability & Ownership Map v1.5 capability rows whose posture is `DEFINED — DESIGN REQUIRED`, `DEFINED — UNIMPLEMENTED`, `IMPLEMENTED — EXTEND`, or an execution-only unimplemented capability where it materially affects dependency reasoning.
+
+Implemented-status claims are refreshed against the published M14 baseline where M11–M14 directly closed the capability. This graph does not promote an architecture principle into an `IMPLEMENTED` capability merely because the principle is already binding.
+
+Every material dependency is grounded in at least one of:
+
+```text
+Architecture Pattern Register v2.4
+Product & Production Architecture v1.6
+Capability & Ownership Map v1.5
+accepted full-sequence pressure-test result
+```
+
+Edges are never justified only by implementation convenience.
+
+## 1.2 Dependency strength
+
+### HARD
+
+```text
+A ──HARD──▶ B
+```
+
+B cannot be implemented and source-gated correctly in the declared scope until A exists.
+
+### CONDITIONAL
+
+```text
+A ──CONDITIONAL──▶ B
+```
+
+B does not require A in every case, but any B path that claims or consumes A's domain must satisfy the integration contract.
+
+### SURFACE
+
+```text
+A ──SURFACE──▶ UI
+```
+
+The user surface depends on A but owns no new production truth.
+
+## 1.3 Dependency reason
+
+Strength and reason are orthogonal.
+
+| Reason | Meaning |
+|---|---|
+| **IDENTITY** | The consumer is defined in terms of an upstream durable identity. |
+| **CONTRACT** | A design/validation contract must exist before the consumer can be completed safely. |
+| **CO-DESIGN** | Two capabilities must freeze coherently; the HARD projection uses one direction only to keep the graph acyclic. |
+| **HISTORICAL-MIRROR** | Historical/read-side support must land with or after the capture-side extension it mirrors. |
+
+`INDEPENDENT` is an explicit audit assertion, not an edge.
+
+## 1.4 Dependency class
+
+| Class | Meaning |
+|---|---|
+| **AUTHORITY** | The dependency constrains identity, production truth, adoption, publication, readiness, or immutable capture. |
+| **EXECUTION** | The dependency is downstream of captured authority: observation, materialization, QC evidence, or executor behavior. |
+
+A coordination or execution capability may own an operation or artifact without becoming a production-truth authority.
+
+## 1.5 Co-design without graph cycles
+
+A co-design pair is not represented as two opposing HARD arrows. Instead:
+
+```text
+one directional HARD edge
++
+CO-DESIGN reason / shared design gate
+```
+
+The directional edge represents prerequisite flow for mechanical validation; the gate requires the two contracts to freeze together where architecture demands it.
+
+## 1.6 Implemented foundations
+
+```text
+BASE-SEMANTIC
+    semantic identity, narrative topology, canonical ordering
+
+BASE-CONTINUITY
+    boundary transitions, random-access effective state, coherent current resolution
+
+BASE-VISUAL
+    approved visual identity and capture
+
+BASE-SPATIAL
+    SpatialWorld revisions, spatial tracks, Shot camera/staging plans,
+    deterministic spatial realization inputs
+
+BASE-CAPTURE
+    immutable ShotRevision capture and readiness framework
+
+BASE-EXECUTION
+    durable Generation lifecycle, deterministic materialization seams,
+    output import, Take candidacy
+
+BASE-TAKE-SELECT
+    Take approval/rejection, explicit approved/select boundary, Shot canon pointer
+
+BASE-HISTORY
+    Exact Rerun isolation, fail-closed provenance, recovery, bounded-query proofs
+```
+
+These are foundations, not graph gaps.
+
+M11–M14 also closed several nodes that were gaps in v1.3. They remain visible below as **IMPLEMENTED / CLOSED** nodes so successor dependencies and historical cut points remain mechanically reviewable; v1.4 does not delete a node merely because its prerequisite was implemented.
+
+---
+
+# 2. Capability-node inventory (closed + open)
+
+## 2.1 Reusable production — A5
+
+| ID | Capability | Current posture | Binding foundation |
+|---|---|---|---|
+| **RP-01** | Production Object + immutable Production Revision identity/lifecycle | IMPLEMENTED / CLOSED — M11 | APR-080–083 |
+| **RP-02** | Generalized representation registry independent of Production Revision identity | DEFINED — DESIGN REQUIRED | APR-081 |
+| **RP-03** | Minimum consumption closure + publish-readiness, including retained usable representation identity/bytes and interpretation metadata required by declared consumers | IMPLEMENTED / CLOSED — M11 | APR-083, APR-095 |
+| **RP-04** | General derivation provenance for reusable production content | DEFINED — DESIGN REQUIRED | APR-082 |
+| **RP-05** | Working tracking references + compatibility-gated explicit update acceptance | DEFINED — DESIGN REQUIRED | APR-098, APR-104 |
+| **RP-06** | Production Object fork / lineage operations | DEFINED — DESIGN REQUIRED | APR-082, APR-087 |
+
+### v1.2-preserved publication refinement
+
+The first publishable Production Revision requires **enough retained representation identity/bytes and interpretation metadata to satisfy its declared consumption closure**. It does not require the full generalized `RP-02` multi-representation registry first.
+
+This keeps the first publication slice narrow while preserving APR-081:
+
+```text
+Production Revision identity
+    ≠
+any one representation
+```
+
+`RP-02` remains required when the product needs first-class multiple consumer representations, selection, replacement, compatibility, or representation-specific lifecycle.
+
+---
+
+## 2.2 Composition and stable occurrence identity — A6
+
+| ID | Capability | Current posture | Binding foundation |
+|---|---|---|---|
+| **CO-01** | Composition working state + immutable Composition Revision publication | IMPLEMENTED / CLOSED — M12 | APR-085 |
+| **CO-02** | Stable addressable Production Instance occurrence identity | IMPLEMENTED / CLOSED — M12 | APR-086, APR-100 |
+| **CO-03** | Occurrence identity preservation across publication (first production slice); broader identity-changing authoring remains extension work | IMPLEMENTED / CLOSED CORE — M12/M13 | APR-103 |
+| **CO-04** | Bulk/procedural instances + promotion to addressable occurrence | DEFINED — DESIGN REQUIRED | APR-086 |
+| **CO-05** | Typed Shot/composition overrides, including source substitution while preserving occurrence identity by default | DEFINED — DESIGN REQUIRED | APR-087–088, Architecture v1.6 §11.2 |
+| **CO-06** | Consequential edit-scope disambiguation | DEFINED — UNIMPLEMENTED | APR-087, Architecture v1.6 §3.2/§11.1 |
+
+`CO-05` and `CO-06` are separate product capabilities. An override is an authority-bounded operation; edit-scope disambiguation is the decision surface that determines which authority scope the operation is allowed to affect.
+
+---
+
+## 2.3 Instance-bound state and spatial integration — A2/A4 extensions
+
+| ID | Capability | Current posture | Binding foundation |
+|---|---|---|---|
+| **IS-01** | Existing world-state resolver accepts durable instance-bound authority subjects | IMPLEMENTED / CLOSED — M13 | APR-100 |
+| **IS-02** | Existing spatial resolver/tracks accept durable instance-bound authority subjects | IMPLEMENTED / CLOSED — M13 | APR-100 |
+
+---
+
+## 2.4 Cross-domain publication contracts — C2
+
+| ID | Capability | Current posture | Binding foundation |
+|---|---|---|---|
+| **BD-01** | Versioned immutable Composition Revision ↔ SpatialWorldRevision binding + readiness validation | IMPLEMENTED / CLOSED — M13 | APR-101 |
+| **CM-01** | Production Revision substitution compatibility assessment + four-verdict contract + deterministic translation rules | DEFINED — DESIGN REQUIRED | APR-104, APR-099 |
+
+`BD-01` does **not** require the entire future `CM-01` system before it can exist. It requires the specific interpretation/compatibility facts its own binding proof consumes, especially basis, origin, orientation, units/scale, and exact Production Revision applicability. Those facts must be available from the published revision/binding contract. Once `CM-01` exists, `BD-01` may consume its relevant verdict/evidence rather than duplicating evaluation.
+
+---
+
+## 2.5 Shot resolution and historical closure — C1/C6
+
+| ID | Capability | Current posture | Binding foundation |
+|---|---|---|---|
+| **SH-01** | Resolved Shot context captures exact Production/Composition identities and exact Composition↔Spatial binding | IMPLEMENTED / CLOSED — M13 | APR-012–015, APR-020, APR-101 |
+| **SH-02** | Resolved Shot context/readiness captures instance-bound state and spatial authority | IMPLEMENTED / CLOSED — M13 | APR-100–101, APR-103 |
+| **HI-01** | Historical reusable-production graph closure + Exact Rerun extension | IMPLEMENTED / CLOSED — M13/M14 | APR-013, APR-023, APR-025, APR-083, APR-098–104 |
+
+---
+
+## 2.6 Intra-Shot persistent state change — A7/A2/C5
+
+| ID | Capability | Current posture | Binding foundation |
+|---|---|---|---|
+| **EV-01** | Sparse Shot-relative state-changing event timing | DEFINED — DESIGN REQUIRED | APR-102, A7 side |
+| **EV-02** | Explicit persistent Shot/end handoff + terminal agreement | DEFINED — DESIGN REQUIRED | APR-102, A2 side |
+| **SH-03** | Capture/readiness for event + handoff agreement | IMPLEMENTED — EXTEND | APR-012, APR-102 |
+| **RV-01** | Persistent-consequence review/adoption separate from Take approval | DEFINED — UNIMPLEMENTED | APR-080, APR-102 |
+
+`EV-01` and `EV-02` are one co-design unit. Performance timing owns **when** the Shot changes; world-state authority owns **what persistent terminal state subsequent narrative boundaries inherit**.
+
+---
+
+## 2.7 Dialogue and Performance — A1/A7
+
+| ID | Capability | Current posture | Binding foundation |
+|---|---|---|---|
+| **DL-01** | Dialogue Line immutable semantic revision: speaker, exact wording, language, narrative identity | DEFINED — DESIGN REQUIRED | Architecture v1.6 §7.12.2/§13.6 |
+| **PT-01** | Exact Performance temporal coordinate + audio-sample/Performance/Shot mapping | DEFINED — DESIGN REQUIRED | Architecture v1.6 §13.7 |
+| **VP-01** | Vocal Performance candidate → adoption → immutable revision with retained audio/timebase/provenance and exact Dialogue Line link | DEFINED — DESIGN REQUIRED | Architecture v1.6 §7.12.2/§13.6–13.7; APR-080/090 |
+| **DA-01** | Dialogue alignment / word / phoneme / viseme timing as derived evidence keyed to exact Vocal Performance Revision | DEFINED — DESIGN REQUIRED (derived, non-authoritative) | Architecture v1.6 §7.12.3/§13.8 |
+| **PF-01** | Body/facial Performance Revision candidate → adoption → immutable lifecycle, using one minimum concrete representation sufficient for the first slice | DEFINED — DESIGN REQUIRED | APR-080, APR-090; Architecture v1.6 §13 |
+| **PF-03** | Dialogue-bound facial synchronization contract: exact source Vocal Performance + temporal mapping + adoption/compatibility/validation semantics | DEFINED — DESIGN REQUIRED | Architecture v1.6 §13.9–13.10 |
+| **PF-02** | Performance-to-Shot resolution/capture integration, including root/local precedence and exact vocal/facial segment mapping when used | DEFINED — UNIMPLEMENTED / capture extension | APR-012, APR-020, APR-090; Architecture v1.6 §13.12 |
+
+The first Performance program does **not** require solving a universal rig, deformation system, general animation editor, or full soundtrack pipeline. It **does** require `DL-01/PT-01/VP-01/PF-01/PF-03` to freeze coherently so lip sync never degenerates into an arbitrary audio file interpreted by an executor.
+
+---
+
+## 2.8 Physical relationships — A8
+
+| ID | Capability | Current posture | Binding foundation |
+|---|---|---|---|
+| **RL-01** | Relationship status semantics: inferred / validated / authoritative | DEFINED — UNIMPLEMENTED | APR-090 |
+| **RL-02** | Relationship-to-Shot readiness/capture integration | IMPLEMENTED — EXTEND when relationship domain exists | APR-012, APR-020, APR-090 |
+
+Simulation or physical prediction is an optional candidate producer. `RL-01`, `EV-02`, or `PF-01` never depend on a simulator existing.
+
+---
+
+## 2.9 Observation and execution boundary — C3/C4
+
+| ID | Capability | Current posture | Binding foundation |
+|---|---|---|---|
+| **OB-01** | General World Observation Compiler boundary + versioned observation specification over already-supported captured domains | IMPLEMENTED / CLOSED — M14 | APR-091–093 |
+| **OB-02** | Production-world observation support consuming newly captured Production Revision / Composition / Instance / state inputs | IMPLEMENTED / CLOSED — M14 | APR-091–093 |
+| **OB-03** | Property-level preservation / trust contract | IMPLEMENTED / CLOSED CORE — M14 | APR-093–095 |
+| **EX-01** | Generalized pre-queue executor capability negotiation for hard property requirements | IMPLEMENTED / CLOSED CORE — M14 | APR-015, APR-045, APR-094 |
+| **DX-01** | Targeted correction / delta realization from an existing Take or realized result under explicit preservation requirements | DEFINED — DESIGN REQUIRED | Architecture v1.6 §18.5–18.6; APR-107–108/111 |
+
+`OB-01` and `OB-02` remain distinct even though M14 closed both for the first production path:
+
+```text
+OB-01 = generalized observation contract/boundary
+OB-02 = actual retained reusable-production world observation support
+```
+
+That distinction is what prevented a wrapper around predecessor inputs from being mislabeled as completion of the production-world observation problem.
+
+The adjustable generative-freedom envelope remains part of the `OB-03`/Shot contract design surface for this dependency graph; the roadmap may split it into a separate implementation slice if product UX evidence warrants that granularity.
+
+`DX-01` is downstream of `OB-03`: a correction path must know both what may change and what must remain preserved. The correction result is a new Take candidate; the source Take and upstream production authority remain immutable.
+
+---
+
+## 2.10 Review, promotion, and QC — C5
+
+| ID | Capability | Current posture | Binding foundation |
+|---|---|---|---|
+| **RV-02** | Generated-detail promotion into candidate reusable Production Object state | DEFINED — UNIMPLEMENTED | APR-080, APR-097 |
+| **RV-03** | Continuity/adherence QC evidence against captured authority | DEFINED — DESIGN REQUIRED | APR-041, Architecture v1.6 §18.3 |
+
+Basic `RV-03` is independent of the future generalized `OB-03` trust vocabulary. It can compare Takes with already-captured camera, spatial, visual, and continuity authority. `OB-03` later enables richer property-level generalized QC, but is an enhancement rather than a prerequisite for the first QC capability.
+
+---
+
+## 2.11 Candidate-world ingestion — C7
+
+| ID | Capability | Current posture | Binding foundation |
+|---|---|---|---|
+| **CW-01** | Candidate-world extraction + evidence packaging | DEFINED — DESIGN REQUIRED | APR-080, APR-096–097 |
+| **CW-02** | Candidate identity matching routes for object/entity adoption | DEFINED — DESIGN REQUIRED | APR-096 |
+| **CW-03** | Domain-granular adoption orchestration | DEFINED — DESIGN REQUIRED | APR-080, APR-096–097 |
+
+The ingestion branch is **route-granular**:
+
+```text
+camera trajectory candidate
+    → existing spatial/cinematic adoption path
+    → does not require CW-02 object identity matching
+
+geometry/object candidate
+    → reusable Production Object / Composition / occurrence identities as applicable
+    → identity matching required when claiming an existing identity
+
+performance candidate
+    → PF-01 adoption path
+
+relationship candidate
+    → RL-01 adoption path
+```
+
+No candidate-world route gains authority merely because extraction succeeded.
+
+---
+
+
+## 2.12 Qualification and reference-evidence extensions
+
+| ID | Capability | Current posture | Binding foundation |
+|---|---|---|---|
+| **VI-01** | Property-scoped reference claims + explicit prohibited-property claims over existing visual/production authority | DEFINED — DESIGN REQUIRED | APR-112–113; Architecture v1.6 §10.9/§17.11 |
+| **QL-01** | Immutable realization-profile-scoped Production Revision qualification protocol/result/evidence | DEFINED — DESIGN REQUIRED | APR-114–117; Architecture v1.6 §10.7–10.10 |
+| **QL-02** | Qualification applicability/requalification + policy gate before production use when the selected profile requires it | DEFINED — DESIGN REQUIRED | APR-114–117; Architecture v1.6 §10.10/§17.12 |
+
+`VI-01` is independently useful over existing visual authority and therefore is a new independent gap root. It does not block the reusable-production spine.
+
+`QL-01` is not a new truth owner. It depends on an already-published Production Revision (`RP-03`) and an existing immutable realization-profile identity. `QL-02` consumes immutable qualification results and determines whether current production policy permits the selected revision/profile pairing; it does not mutate either one.
+
+## 2.13 Future editorial / conform / finishing preservation branch
+
+| ID | Capability | Current posture | Binding foundation |
+|---|---|---|---|
+| **ED-01** | Exact approved-source media inspection/addressing: retained media identity, stream identity, source timebase/sample-frame basis, exact source intervals | DEFINED — DESIGN REQUIRED | APR-021, APR-119, APR-122; Architecture v1.6 §18.10.1 |
+| **ED-02** | Authoritative editorial decision model over approved-source ranges, including deterministic resolution of meaning-bearing timing/transition/default/inference choices before execution | FUTURE DOMAIN — DESIGN REQUIRED | APR-066, APR-122, APR-124–125; Architecture v1.6 §18.10/§27.10 |
+| **ED-03** | Playback proxy/mezzanine generation + exact mapping back to authoritative source | DEFINED — DESIGN REQUIRED | APR-123; Architecture v1.6 §18.10.3 |
+| **ED-04** | Preservation-classified conform, composition rendering, or mixed materialization compiled from resolved editorial meaning | DEFINED — DESIGN REQUIRED | APR-121, APR-124–126; Architecture v1.6 §18.10.2/.4–.7 |
+| **ED-05** | Exact source/output lineage and historical reconstruction of materialized editorial/delivery artifacts | DEFINED — DESIGN REQUIRED | APR-122, APR-124; Architecture v1.6 §18.10 |
+
+`ED-02` intentionally does **not** assign the future edit to C4 execution or C5 Take approval. C5 establishes which source Takes are eligible for downstream editorial consumption; the future editorial domain must separately own trim/order/sequence decisions. `ED-03` is convenience representation only. `ED-04` selects/records downstream materialization mode(s), reports the strongest media-preservation class actually achieved, and never substitutes for editorial or production-property review.
+
+---
+
+## 2.14 Product surfaces
+
+| ID | Surface | Underlying capability dependency |
+|---|---|---|
+| **UI-01** | Production Library | reusable revisions, updates, provenance |
+| **UI-02** | World/Set workspace | compositions, occurrences, publication, binding review, scope |
+| **UI-03** | Story-State workspace extensions | instance-bound state; intra-Shot consequence review/conflicts |
+| **UI-04** | Review workspace extensions | consequence review, promotion, QC |
+| **UI-05** | Qualification / Reference inspector | scoped reference claims, qualification evidence/verdict, applicability and requalification |
+
+These are SURFACE nodes and are excluded from independent root-gap counts.
+
+---
+
+# 3. Evidence-grounded edge register
+
+The table records the material graph edges. Implemented `BASE-*` foundations are cited where they matter but are not counted as gap nodes.
+
+## 3.1 Reusable-production spine
+
+| Edge | Strength | Reason | Class | Ground |
+|---|---|---|---|---|
+| RP-01 → RP-03 | HARD | CO-DESIGN | AUTHORITY | APR-083: a published revision and its consumption closure are one publication contract; Architecture v1.6 §10.1–10.2 |
+| RP-01 → RP-02 | HARD | IDENTITY | AUTHORITY | APR-081: representations realize an exact Production Revision |
+| RP-01 → RP-04 | HARD | IDENTITY | AUTHORITY | APR-082: derivation attaches as provenance without defining revision identity |
+| RP-01 → RP-06 | HARD | IDENTITY | AUTHORITY | Architecture v1.6 §11.4: fork preserves lineage from an existing production identity |
+| RP-03 → CM-01 | HARD | CONTRACT | AUTHORITY | APR-104 compatibility compares approved reusable revisions and their consuming contracts |
+| RP-03 → RP-05 | HARD | IDENTITY | AUTHORITY | APR-098: working update references track approved immutable revisions |
+| CM-01 → RP-05 | HARD | CONTRACT | AUTHORITY | APR-104: consequential substitution requires compatibility evidence |
+| RP-03 → CO-01 | HARD | IDENTITY | AUTHORITY | APR-085: Composition Revisions pin exact publishable Production Revisions |
+| CO-01 → CO-02 | HARD | CO-DESIGN | AUTHORITY | APR-085/086: addressable occurrences exist in a reusable composition lineage |
+| CO-02 → CO-03 | HARD | CO-DESIGN | AUTHORITY | APR-103: surviving occurrence identity is evaluated across composition publication |
+| CO-02 → CO-04 | HARD | IDENTITY | AUTHORITY | APR-086: bulk promotion creates an addressable occurrence identity |
+| CO-02 → CO-05 | HARD | IDENTITY | AUTHORITY | APR-087/088: typed instance override targets an exact occurrence |
+| CO-01 → CO-06 | HARD | CO-DESIGN | AUTHORITY | APR-087: composition scope must be distinguishable from Shot/state/reusable-object scope |
+| CO-02 → IS-01 | HARD | IDENTITY | AUTHORITY | APR-100: instance-bound world state targets durable occurrence identity |
+| CO-03 → IS-01 | HARD | CONTRACT | AUTHORITY | APR-103: persistent state must survive composition evolution without retargeting heuristics |
+| CO-02 → IS-02 | HARD | IDENTITY | AUTHORITY | APR-100: instance-bound spatial continuity targets durable occurrence identity |
+| CO-03 → IS-02 | HARD | CONTRACT | AUTHORITY | APR-103: spatial subject identity must survive publication |
+| RP-03 → BD-01 | HARD | CONTRACT | AUTHORITY | APR-101 requires exact revision interpretation metadata/binding inputs |
+| CO-01 → BD-01 | HARD | IDENTITY | AUTHORITY | APR-101 binds an exact Composition Revision |
+| CO-02 → BD-01 | HARD | IDENTITY | AUTHORITY | APR-101 binds exact authority-bound occurrences |
+| BASE-SPATIAL → BD-01 | HARD | CONTRACT | AUTHORITY | APR-101 joins composition to existing spatial authority without duplicating it |
+| RP-03 → SH-01 | HARD | IDENTITY | AUTHORITY | APR-020/083: Shot capture pins exact reusable revision identities |
+| CO-01 → SH-01 | HARD | IDENTITY | AUTHORITY | Architecture v1.6 §16.2: resolved context includes exact Composition Revisions |
+| CO-02 → SH-01 | HARD | IDENTITY | AUTHORITY | Architecture v1.6 §16.2: resolved context includes exact addressable instances |
+| BD-01 → SH-01 | HARD | CONTRACT | AUTHORITY | APR-101: preview/capture/final must resolve the same exact binding |
+| SH-01 → SH-02 | HARD | CONTRACT | AUTHORITY | reusable-production capture is the carrier for instance-bound state/spatial capture |
+| IS-01 → SH-02 | HARD | IDENTITY | AUTHORITY | APR-100/012: current resolver must resolve the exact state subject before capture |
+| IS-02 → SH-02 | HARD | IDENTITY | AUTHORITY | APR-100/012: current resolver must resolve the exact spatial subject before capture |
+| SH-02 → HI-01 | HARD | HISTORICAL-MIRROR | AUTHORITY | APR-013/023: historical reads mirror the exact captured production graph and fail closed |
+| RP-03 → HI-01 | HARD | CONTRACT | AUTHORITY | APR-083: retained consumption closure is required for historical use |
+
+### Explicit non-edge: generalized Representation Registry → first publication
+
+There is **no HARD `RP-02 → RP-03` edge**. A minimal publication may retain one exact usable representation/byte closure and required interpretation metadata without first generalizing representation lifecycle across multiple consumers. The generalized registry remains downstream of `RP-01` and becomes necessary when actual consumers require multiple first-class representations.
+
+## 3.2 Compatibility and binding
+
+| Relationship | Strength | Reason | Class | Ground |
+|---|---|---|---|---|
+| CM-01 → existing-composition source update | CONDITIONAL | CONTRACT | AUTHORITY | APR-104 substitution verdicts |
+| CM-01 → spatial-binding reuse | CONDITIONAL | CONTRACT | AUTHORITY | APR-104; only relevant compatibility dimensions are consumed |
+| CM-01 → performance reuse/translation | CONDITIONAL | CONTRACT | AUTHORITY | Architecture v1.6 §10.6/§13.4 |
+| CM-01 → physical-relationship reuse | CONDITIONAL | CONTRACT | AUTHORITY | contact/attachment interfaces may invalidate substitution |
+| CM-01 → observation representation reuse | CONDITIONAL | CONTRACT | EXECUTION | required representations/observation expectations may change |
+
+`BD-01` and `CM-01` share a design seam but not a bidirectional prerequisite. `BD-01` must define the interpretation facts it requires even before the full compatibility-evaluator family exists.
+
+## 3.3 Intra-Shot persistent change
+
+| Edge | Strength | Reason | Class | Ground |
+|---|---|---|---|---|
+| EV-01 → EV-02 | HARD | CO-DESIGN | AUTHORITY | APR-102: Shot-relative event timing and persistent terminal handoff form one semantic contract |
+| EV-02 → SH-03 | HARD | CONTRACT | AUTHORITY | APR-102: capture/readiness must verify event terminal state agrees with Shot/end state |
+| EV-02 → RV-01 | HARD | CONTRACT | AUTHORITY | Architecture v1.6 §12.7: persistent consequence adoption is separate from Take approval |
+| IS-01 → EV-02 | CONDITIONAL | IDENTITY | AUTHORITY | required only when the persistent subject is an instance-bound Production Instance; entity-bound subjects already have A1 identity |
+
+**Independent assertion:** For an existing CreativeEntity such as Eva, `EV-01/EV-02/RV-01` have no reusable-production spine prerequisite.
+
+## 3.4 Dialogue, Performance, and physical relationships
+
+| Edge | Strength | Reason | Class | Ground |
+|---|---|---|---|---|
+| DL-01 → VP-01 | HARD | IDENTITY | AUTHORITY | an adopted vocal performance must identify the exact semantic line/speaker/language it realizes |
+| PT-01 → VP-01 | HARD | TEMPORAL | AUTHORITY | retained vocal bytes are insufficient without exact duration/timebase semantics |
+| VP-01 → DA-01 | HARD | DERIVATION | DERIVED | dialogue alignment evidence must identify the exact vocal source it analyzes |
+| PT-01 → PF-01 | HARD | TEMPORAL | AUTHORITY | adopted body/facial performance needs one exact temporal domain before capture/synchronization |
+| VP-01 → PF-03 | HARD | CONTRACT | AUTHORITY | dialogue-bound facial performance must bind the exact approved vocal revision |
+| PF-01 → PF-03 | HARD | CONTRACT | AUTHORITY | synchronization is a contract over an adopted facial/body Performance representation, not an executor-only result |
+| DA-01 → PF-03 | CONDITIONAL | EVIDENCE | DERIVED | alignment may materially determine/validate a facial candidate but never becomes the authority source |
+| PF-01 → PF-02 | HARD | CONTRACT | AUTHORITY | APR-090/020: adopted immutable Performance Revision must be resolvable/capturable before a Shot claims it |
+| PF-03 → PF-02 | CONDITIONAL | CONTRACT | AUTHORITY | when dialogue-bound facial performance is used, capture must pin the exact vocal/facial synchronization identities and segment mapping |
+| PF-02 → SH-01/SH-02 | CONDITIONAL | CONTRACT | AUTHORITY | Architecture v1.6 §16.2: capture exact Performance Revision only when the Shot uses one |
+| RL-01 → RL-02 | HARD | CONTRACT | AUTHORITY | APR-090/020: relationship status/identity must exist before capture integration |
+| RL-02 → SH-01/SH-02 | CONDITIONAL | CONTRACT | AUTHORITY | Architecture v1.6 §16.2: capture authoritative relationships only when required |
+
+**Independent assertions:** Simulation/physical prediction is not a prerequisite of `EV-02`, `VP-01`, `PF-01`, or `RL-01`. A future simulator depends on these adoption targets, not the reverse. Full Sound Post is not a prerequisite of `VP-01/PF-03`; only the authoritative dialogue/vocal subset is.
+
+## 3.5 Observation and execution
+
+| Edge | Strength | Reason | Class | Ground |
+|---|---|---|---|---|
+| BASE-EXECUTION → OB-01 | HARD | CONTRACT | EXECUTION | APR-091: compiler exists at the captured-authority/executor boundary |
+| BASE-CAPTURE → OB-01 | HARD | CONTRACT | EXECUTION | APR-091: observations derive from coherent captured production state |
+| OB-01 → OB-03 | HARD | CO-DESIGN | EXECUTION | Architecture v1.6 §17.3/§17.5: versioned observation spec carries the preservation contract |
+| OB-03 → EX-01 | HARD | CONTRACT | EXECUTION | Architecture v1.6 §17.5–17.6: negotiation needs declared hard/structural/free properties |
+| OB-03 → DX-01 | HARD | CONTRACT | EXECUTION | Architecture v1.6 §18.5–18.6; APR-107–108: correction requires explicit change/preservation semantics before execution |
+| OB-01 → OB-02 | HARD | CONTRACT | EXECUTION | OB-02 is the new-domain implementation of the general observation boundary |
+| SH-02 → OB-02 | HARD | HISTORICAL-MIRROR | EXECUTION | production-world observations require the exact newly captured production-world graph |
+| HI-01 → OB-02 | HARD | HISTORICAL-MIRROR | EXECUTION | historical observation/materialization must consume retained captured closure, not current state |
+
+**Independent assertion:** `OB-01`/`OB-03` can be designed over implemented visual/spatial/realization inputs before `OB-02` is source-gate complete.
+
+## 3.6 Review, promotion, and QC
+
+| Edge | Strength | Reason | Class | Ground |
+|---|---|---|---|---|
+| RP-01 → RV-02 | HARD | IDENTITY | AUTHORITY | Architecture v1.6 §18.4: promotion creates candidate reusable production identity |
+| captured authority → RV-03 | IMPLEMENTED FOUNDATION | CONTRACT | EXECUTION | Architecture v1.6 §18.3: QC compares Take evidence against captured production authority |
+| OB-03 → RV-03 | CONDITIONAL | CONTRACT | EXECUTION | generalized trust vocabulary can enrich property-level QC but does not gate basic QC |
+| DX-01 → RV-03 correction-preservation route | CONDITIONAL | CONTRACT | EXECUTION | correction-specific review/QC compares requested change and declared protected properties; basic QC remains independently useful |
+
+`RV-03` is therefore an independent gap root over implemented captured authority.
+
+## 3.7 Candidate-world ingestion
+
+| Relationship | Strength | Reason | Class | Ground |
+|---|---|---|---|---|
+| CW-01 → CW-02 | HARD | CONTRACT | EXECUTION | identity matching requires extracted candidate entities/objects/evidence |
+| CW-01 → CW-03 | HARD | CONTRACT | EXECUTION | domain-granular adoption consumes extracted candidate outputs |
+| CW-02 → CW-03 object/entity route | CONDITIONAL | IDENTITY | AUTHORITY | required only when adoption claims an existing/new object/entity identity |
+| CW-03 camera route → BASE-SPATIAL | CONDITIONAL | CONTRACT | AUTHORITY | candidate camera trajectory adopts through existing spatial/cinematic authority; no reusable object identity prerequisite |
+| CW-03 geometry/object route → RP-01/CO-01/CO-02 | CONDITIONAL | IDENTITY | AUTHORITY | reusable geometry/object adoption needs reusable production/composition targets |
+| CW-03 performance route → PF-01 | CONDITIONAL | CONTRACT | AUTHORITY | candidate performance adopts through Performance authority |
+| CW-03 relationship route → RL-01 | CONDITIONAL | CONTRACT | AUTHORITY | candidate physical relation adopts through relationship authority |
+
+There is no global `CW-02 → CW-03` HARD edge because camera-only or other non-identity routes can be adopted without solving object identity matching.
+
+## 3.8 Qualification and property-scoped reference evidence
+
+| Edge / relationship | Strength | Reason | Class | Ground |
+|---|---|---|---|---|
+| RP-03 → QL-01 | HARD | IDENTITY | EXECUTION | APR-114–115: qualification attaches to an exact published Production Revision and never invents/replaces that identity |
+| QL-01 → QL-02 | HARD | CONTRACT | EXECUTION | APR-114–117: applicability/production-use gating consumes an immutable scoped qualification result |
+| BASE-REALIZATION-PROFILE → QL-01 | IMPLEMENTED FOUNDATION | CONTRACT | EXECUTION | APR-114: qualification scope includes exact realization-profile identity/version |
+| VI-01 → QL-01 | CONDITIONAL | CONTRACT | EXECUTION | reference claims may provide qualification evidence for identity/appearance protocols, but qualification is not globally blocked on reference claims |
+| QL-02 → EX-01 | CONDITIONAL | CONTRACT | EXECUTION | a selected production policy may require applicable qualification before pre-queue execution; not every executor/profile requires the same qualification policy |
+
+`VI-01` is an independent root because property-scoped reference semantics improve existing visual-authority workflows without requiring reusable Production Revisions. `QL-01/QL-02` remain a dependent branch after `RP-03`.
+
+## 3.9 Product surfaces
+
+| Edge | Strength | Reason | Class | Ground |
+|---|---|---|---|---|
+| RP-03 → UI-01 | SURFACE | CONTRACT | EXECUTION | Production Library exposes published revisions/history |
+| CO-01/CO-02/BD-01/CO-06 → UI-02 | SURFACE | CONTRACT | EXECUTION | World/Set workspace exposes composition, occurrences, binding, scope |
+| IS-01/EV-02/RV-01 → UI-03 | SURFACE | CONTRACT | EXECUTION | Story-State workspace exposes persistent state/consequence/conflicts |
+| RV-01/RV-02/RV-03 → UI-04 | SURFACE | CONTRACT | EXECUTION | Review workspace exposes independent consequence/promotion/QC decisions |
+
+
+## 3.10 Future editorial / conform / finishing
+
+| Edge / relationship | Strength | Reason | Class | Ground |
+|---|---|---|---|---|
+| BASE-TAKE-SELECT → ED-01 | IMPLEMENTED FOUNDATION | IDENTITY | AUTHORITY | APR-119/122: editorial source addressing begins from explicit approved/select media |
+| ED-01 → ED-02 | HARD | IDENTITY | AUTHORITY | APR-122: edit decisions must reference exact retained source identity + temporal range |
+| ED-01 → ED-03 | HARD | CONTRACT | EXECUTION | APR-123: proxy mappings resolve back to exact authoritative source |
+| ED-01 → ED-04 | HARD | CONTRACT | EXECUTION | APR-121/122: conform needs exact source media and addressing basis |
+| ED-02 → ED-04 | HARD | CONTRACT | EXECUTION | APR-124–126: resolved editorial meaning compiles to preservation conform, composition rendering, or mixed execution without semantic reinterpretation |
+| ED-04 → ED-05 | HARD | HISTORICAL-MIRROR | EXECUTION | APR-124: materialized output retains exact execution/source lineage |
+| BASE-HISTORY → ED-05 | IMPLEMENTED FOUNDATION | HISTORICAL-MIRROR | EXECUTION | existing provenance/history discipline extends to editorial outputs |
+| ED-03 → ED-02 | NON-EDGE | — | — | proxy availability is not a prerequisite for edit authority |
+
+**Independent assertions:** media-preservation class and production-property preservation remain orthogonal; `STREAM_EXACT` does not prove the right edit, and `FULL_REENCODE` does not by itself prove production-property loss. FFmpeg/NLE/interchange syntax remains downstream of `ED-02`.
+
+---
+
+# 4. Findings
+
+## F1 — The reusable-production spine remains the dominant authority chain
+
+The central identity flow is:
+
+```text
+RP-01 → RP-03 → CO-01 → CO-02 → CO-03 → {IS-01, IS-02} → SH-02 → HI-01
+```
+
+`BD-01` joins before Shot capture. Some adjacent capabilities are co-designed, so this is a dominant authority/identity spine rather than literally one homogeneous edge type.
+
+## F2 — First publication is thinner than a generalized representation system
+
+A first Production Revision can be valid with one retained usable representation/byte closure plus the interpretation metadata its declared consumers require. `RP-02` is not a hard predecessor of `RP-03`.
+
+This reduces the risk of inventing a universal representation subsystem before Composition provides the first concrete consumer.
+
+## F3 — Composition publication, occurrence identity, identity survival, overrides, and scope are one design family
+
+`CO-01`, `CO-02`, `CO-03`, `CO-05`, and `CO-06` should freeze coherently. Their implementations may be sliced, but their semantics cannot be designed independently without risking divergent answers to:
+
+```text
+what occurrence changed?
+which identity survives?
+which authority scope changed?
+is this source substitution the same occurrence or a new one?
+```
+
+## F4 — Intra-Shot consequence is spine-independent for entity-bound subjects
+
+For an existing CreativeEntity, the missing branch is:
+
+```text
+EV-01 + EV-02 + RV-01 (+ SH-03 capture extension)
+```
+
+No Production Object/Composition identity is required. The instance-bound dependency appears only when the event targets a Production Instance such as `chair-07`.
+
+## F5 — Compatibility stages after first creation
+
+`RP-01/RP-03` can create the first immutable reusable revision without `CM-01`. Compatibility becomes load-bearing when a current consumer is asked to accept a replacement revision. Safe update acceptance then requires `CM-01` plus the consumer's stable identity rules.
+
+## F6 — Observation generalization is two different completion claims
+
+```text
+OB-01/OB-03
+= general observation boundary + trust contract over already-supported captured domains
+
+OB-02
+= actual support for the newly captured reusable-production world
+```
+
+Only the second closes the product claim that new Production/Composition/Instance state constrains final execution.
+
+## F7 — Executor negotiation follows the trust contract
+
+Without `OB-03`, generalized pre-queue capability negotiation would have to invent its own meaning of “hard,” “structural,” “identity,” or “free,” violating the single observation contract.
+
+## F8 — Historical closure mirrors capture
+
+`HI-01` must cover exactly the new identities/bindings/state captured by `SH-01/SH-02`, and must fail closed when retained consumption closure is missing. No current resolver may be used to repair historical absence.
+
+## F9 — Candidate-world ingestion is route-granular
+
+Camera adoption can use existing spatial/cinematic authority. Geometry/object adoption waits for reusable production/composition targets. Performance and relationship candidates wait for their own authority domains. The extraction pipeline therefore does not force an all-or-nothing dependency on reusable-world identity.
+
+## F10 — Basic QC is an independent execution/evidence branch
+
+`RV-03` can compare current Takes against already-captured authority today. `OB-03` later adds richer property-level trust semantics but does not block the first useful QC classes.
+
+## F11 — Simulation creates candidates; it never sits above adoption targets
+
+The dependency direction is:
+
+```text
+state / performance / relationship adoption contract
+        ← candidate proposed by optional simulation execution
+```
+
+not:
+
+```text
+simulation required
+        ↓
+authority exists
+```
+
+## F12 — Performance lifecycle can start with a minimum concrete representation, but lip sync requires dialogue/vocal co-design
+
+The architecture intentionally does not require a universal rig or deformation system before `PF-01`. The first body/facial Performance Revision needs one concrete immutable representation sufficient to prove its declared use. However, a dialogue-bound facial slice cannot freeze independently: `DL-01`, `PT-01`, `VP-01`, and `PF-03` must be co-designed so exact semantic line, approved speech, temporal mapping, derived alignment evidence, and adopted facial articulation remain distinguishable.
+
+---
+
+## F13 — Delta realization is downstream execution, not a new authority branch
+
+`DX-01` can preserve an otherwise-good Take while realizing a bounded authoritative change, but it depends on the existing observation/preservation contract and produces only a new candidate.
+
+```text
+source Take + captured change + preservation contract
+        ↓
+DX-01
+        ↓
+new Take candidate
+```
+
+The source Take, ShotRevision, and production facts remain immutable.
+
+## F14 — Generalization should prove the old supported subset before claiming new capability
+
+`OB-01/OB-03`, compatibility adapters, and future execution translations should define the predecessor subset on which the new path must remain semantically equivalent. This is a source-gate obligation, not a new graph root.
+
+## F15 — Mutable discovery and agent context are operational projections
+
+Live capability discovery may inform certification/readiness, and task-context compilation may support agents, but neither becomes production truth. A production/historical dependency requires a frozen/captured contract; task-context compilation remains a future capability until a concrete authorized workflow needs it.
+
+## F16 — A completed operation can still have a non-pass domain verdict
+
+Future QC/capability/correction APIs must keep process completion separate from `SUPPORTED`, `UNSUPPORTED`, `UNKNOWN`, `NOT_MEASURABLE`, `REQUIRES_REVIEW`, or other domain verdicts. This is a cross-cutting contract, not a dependency root.
+
+---
+
+
+## F17 — Qualification is a dependent evidence branch, not a new production authority root
+
+A Production Revision can exist without qualification. Qualification becomes meaningful only after exact Production Revision identity exists and is scoped to a realization profile/protocol/evidence set.
+
+Therefore:
+
+```text
+RP-03 → QL-01 → QL-02
+```
+
+Qualification does not block `M12`/`M13` world-authority construction. It may become a production-use gate for a particular realization profile before expensive execution.
+
+## F18 — Property-scoped reference claims are independently useful but do not own visual truth
+
+`VI-01` can improve already-implemented visual identity workflows without waiting for reusable Production Objects. It is therefore an independent gap root.
+
+A reference claim remains a constraint/evidence mechanism over the authority that owns the property. It never grants a reference image universal authority over the subject.
+
+
+## F19 — Editorial authority is downstream of Take select and upstream of deterministic resolution/materialization execution
+
+The future branch has one required direction:
+
+```text
+approved Take/select
+        ↓
+ED-01 exact source-media identity/time addressing
+        ↓
+ED-02 future editorial decision authority
+        ↓
+ED-04 preservation-classified conform / composition / mixed materialization
+        ↓
+ED-05 exact source/output lineage
+```
+
+`ED-03` proxy media is lateral convenience, not authority and not a required predecessor of `ED-02`. Media-preservation classes describe handling of the media, not whether the filmmaker selected the correct Take/interval or whether production properties were preserved.
+
+# 5. Focused design-gate register
+
+These are pre-implementation design questions. They are not frozen schema decisions.
+
+| Gate | Nodes | Required decision before implementation planning for those nodes |
+|---|---|---|
+| **G1 — Minimal publishable revision** | RP-01, RP-03 | Production Revision identity shape; minimum retained usable representation/byte closure; interpretation metadata required for the first consumer; publication readiness and historical retention semantics. |
+| **G2 — Composition/occurrence/scope family** | CO-01, CO-02, CO-03, CO-05, CO-06 | Occurrence identity minting; survival across publication; explicit identity-changing operations; typed override vocabulary for the first slice; how UI/API makes consequential scope explicit. |
+| **G3 — Composition↔Spatial binding** | BD-01 | Pinned binding identity versus pinned immutable inputs + versioned deterministic reconstruction; completeness/uniqueness proof; exact basis/origin/orientation/units interpretation; one preview/capture/final mapping. |
+| **G4 — Revision compatibility** | CM-01, RP-05 | Verdict persistence; first consumer-specific compatibility dimensions; deterministic-translation identity/versioning; when update is automatic, review-required, or blocked. |
+| **G5 — Intra-Shot event handoff** | EV-01, EV-02, SH-03 | Shot-relative timing representation; authoritative Shot duration; terminal-state equality rule; readiness/capture fence; interaction with Shot/start transitions. |
+| **G6 — Observation contract** | OB-01, OB-03, EX-01 | Versioned observation specification; preservation/trust vocabulary; interaction with existing workflow/execution specs; capability-negotiation failure contract; shared-subset equivalence against specialized predecessor paths; mutable discovery → immutable capability/environment snapshot; typed operational/domain verdict separation. |
+| **G7 — Production-world capture/history** | SH-01, SH-02, HI-01, OB-02 | Resolved-context extension shape; readiness failure taxonomy; historical closure projection; no-empty-higher-schema rule; query-shape/source-gate strategy. |
+| **G8 — Performance / Dialogue Co-Design** | DL-01, PT-01, VP-01, DA-01, PF-01, PF-03, PF-02 | Freeze together: minimum body/facial representation; Dialogue Line identity; Vocal Performance retained-audio closure; exact integer/rational timebase and Shot mapping; derived alignment evidence contract; vocal↔facial synchronization/compatibility; root/local precedence; capture semantics. Explicitly do **not** require a universal rig/editor or full Sound Post. |
+| **G10 — Production qualification** | QL-01, QL-02 | Qualification scope identity; profile/protocol versioning; immutable evidence/verdict; applicability/invalidation; cheap-before-expensive evidence; proof that one revision may diverge across profiles without mutation. |
+| **G11 — Reference-claim semantics** | VI-01 | Property scope; positive/prohibited role; evidence identity; conflict resolution; adoption into existing authority; proof that reference bundles do not become all-property authority. |
+| **G9 — Delta realization / correction** | DX-01 | Source-Take lineage; authoritative change scope; preservation contract; executor selection/fallback; correction result as new candidate; measurable versus not-measurable preservation evidence; no free-form instruction as production authority. |
+| **G12 — Editorial / Conform / Finishing Co-Design** | ED-01, ED-02, ED-03, ED-04, ED-05 | Freeze together: authoritative edit/revision identity; exact approved-source/stream/timebase/range addressing; canonical editorial timebase; trim/order/reuse/transition semantics; deterministic resolution boundary for defaults/inference/stochastic choices; proxy/source mapping and preview/final semantic equivalence; media-preservation class semantics; preservation-conform vs composition-render vs mixed materialization selection; capability/failure contract; source/output lineage; interchange as representation rather than authority. Do **not** require universal grading/Sound Post/mastering, and do not assign a milestone before the gate closes. |
+
+---
+
+# 6. Hard-dependency graph
+
+Only HARD gap-node edges are shown. Conditional, surface, and implemented `BASE-*` edges are omitted for readability.
+
+```text
+ROOT A — reusable production
+
+RP-01 Production Object / Revision
+ ├────────▶ RP-02 generalized representation registry
+ ├────────▶ RP-04 derivation provenance
+ ├────────▶ RP-06 fork / lineage
+ └────────▶ RP-03 minimum closure / publish-readiness
+              ├────────▶ CM-01 compatibility assessment
+              │            └────────▶ RP-05 safe update acceptance
+              └────────▶ CO-01 Composition Revision
+                           ├────────▶ CO-06 edit-scope disambiguation
+                           └────────▶ CO-02 stable occurrence identity
+                                      ├────────▶ CO-04 bulk/promotion
+                                      ├────────▶ CO-05 typed overrides/source substitution
+                                      └────────▶ CO-03 cross-revision occurrence identity
+                                                   ├────────▶ IS-01 instance world state
+                                                   └────────▶ IS-02 instance spatial subject
+
+RP-03 + CO-01 + CO-02 + BASE-SPATIAL
+                    ↓
+                  BD-01 Composition↔Spatial binding
+                    ↓
+RP-03 + CO-01 + CO-02 + BD-01
+                    ↓
+                  SH-01 reusable-production Shot capture
+                    ↓
+SH-01 + IS-01 + IS-02
+                    ↓
+                  SH-02 stateful reusable-world Shot capture
+                    ↓
+                  HI-01 historical closure
+                    ↓
+                  OB-02 production-world observation support
+```
+
+```text
+ROOT B — intra-Shot persistent change
+
+EV-01 Shot-relative event timing
+   ↓   [CO-DESIGN with EV-02]
+EV-02 persistent Shot/end handoff
+   ├────────▶ SH-03 capture/readiness
+   └────────▶ RV-01 persistent-consequence review
+```
+
+```text
+ROOT C — performance
+
+PF-01 Performance Revision
+   ↓
+PF-02 Shot integration
+```
+
+```text
+ROOT D — physical relationships
+
+RL-01 relationship authority/status
+   ↓
+RL-02 Shot integration
+```
+
+```text
+ROOT E — observation contract
+
+OB-01 generalized observation boundary
+ ├────────▶ OB-03 preservation/trust contract
+ │            ├────────▶ EX-01 pre-queue capability negotiation
+ │            └────────▶ DX-01 targeted correction / delta realization
+ └────────▶ OB-02 production-world observation support
+              ▲
+              └──── SH-02 + HI-01
+```
+
+```text
+ROOT F — candidate-world ingestion
+
+CW-01 extraction/evidence
+ ├────────▶ CW-02 identity matching
+ └────────▶ CW-03 domain-granular adoption
+
+CW-02 is CONDITIONAL, not globally HARD, on object/entity adoption routes.
+```
+
+
+
+```text
+ROOT G — property-scoped reference evidence
+
+VI-01 typed reference / prohibited-property claims
+    extends existing visual/production authority
+    no HARD dependency on reusable-production spine
+```
+
+```text
+DEPENDENT BRANCH — Production Revision qualification
+
+RP-03 published Production Revision
+   ↓
+QL-01 profile-scoped qualification protocol/result/evidence
+   ↓
+QL-02 applicability / requalification / production-use gate
+```
+
+```text
+ROOT H — basic QC
+
+RV-03 continuity/adherence QC evidence
+    consumes implemented captured authority
+    OB-03 may enrich it later but is not a prerequisite
+```
+
+
+```text
+ROOT I — future editorial / conform / finishing
+
+ED-01 exact approved-source media addressing
+ ├────────▶ ED-02 future editorial decision authority
+ ├────────▶ ED-03 non-authoritative proxy mapping
+ └────────▶ ED-04 conform / composition / mixed materialization
+              ▲
+              └──── ED-02
+              ↓
+            ED-05 exact source/output lineage
+```
+
+---
+
+# 7. Mechanical graph validation
+
+The HARD projection was mechanically checked over the 55 gap/extension/surface nodes defined in this document. SURFACE nodes are included in the node inventory but have no HARD edges and are excluded from the independent gap-root count.
+
+Result:
+
+```text
+node count:                 55
+HARD edge count:             56
+hard-dependency cycles:       0
+independent full-graph roots: 10
+```
+
+Independent roots in the full dependency projection (closed roots remain shown for successor lineage):
+
+```text
+RP-01  reusable Production Object/Revision                 [CLOSED M11]
+EV-01  sparse Shot-relative event timing                   [OPEN]
+PT-01  exact Performance temporal contract                 [OPEN]
+DL-01  Dialogue Line semantic revision                     [OPEN]
+RL-01  physical-relationship authority/status              [OPEN]
+OB-01  generalized observation contract                    [CLOSED M14]
+RV-03  basic continuity/adherence QC evidence               [OPEN]
+CW-01  candidate-world extraction/evidence                  [OPEN]
+VI-01  property-scoped reference evidence                  [OPEN]
+ED-01  exact approved-source media addressing                [OPEN]
+```
+
+The v1.4 Performance roots remain unchanged. Version 1.5 added `ED-01` as one independent future root over the implemented Take-select boundary; Version 1.6 changes no roots or edges. `ED-02` is not a root because authoritative editorial decisions require exact approved-source addressing first. Qualification remains dependent on published Production Revision authority.
+
+The hard graph deliberately does **not** require:
+
+```text
+generalized representation registry before first Production Revision publication
+compatibility machinery before first Production Revision creation
+candidate identity matching before camera-only candidate-world adoption
+World Observation Compiler before reusable-world capture
+basic QC before/after the generalized trust contract
+simulation before state, performance, or relationship authority
+universal rigging or full Sound Post before the first co-designed Dialogue/Performance slice
+targeted correction/delta execution before REMEMBER THE WORLD or SHOOT THE WORLD
+task-context compilation before the reusable-production critical path
+live discovery as a substitute for captured capability/runtime identity
+Production Revision qualification before Composition/world-authority construction
+global asset `locked` state as a substitute for profile-scoped qualification evidence
+playback proxy availability as a prerequisite for editorial authority
+FFmpeg/NLE/interchange syntax as the authoritative edit
+media-preservation class as a substitute for production-property preservation
+```
+
+---
+
+# 8. Dependency cut points
+
+## 8.1 RP-03 — first publishable reusable revision
+
+Before `RP-03`, SoloRing may retain candidate/working content but lacks an immutable consumption-closed reusable production revision suitable for Composition or historical capture.
+
+`RP-03` no longer means “the generalized representation registry is complete.” It means the first declared downstream use can consume the exact retained revision deterministically.
+
+## 8.2 CO-02 — durable occurrence identity
+
+Before `CO-02`, the production cannot reliably say:
+
+> This is the exact same Chair 7 occurrence later in the film.
+
+## 8.3 CO-03 — occurrence continuity across publication
+
+Before `CO-03`, persistent state or spatial continuity attached to an occurrence is unsafe under Composition Revision evolution.
+
+## 8.4 BD-01 — exact composition/spatial agreement
+
+Before `BD-01`, Composition and spatial authority may each be internally valid while disagreeing about occurrence↔subject mapping or realization interpretation.
+
+## 8.5 SH-02 — resolved stateful reusable-world Shot
+
+Before `SH-02`, the current world may be coherent but its Production/Composition/Instance/state/spatial combination is not yet immutable Shot history.
+
+## 8.6 HI-01 — historical reusable-production closure
+
+Before `HI-01`, new reusable-world identities can be captured without proving retained closure and current-state independence.
+
+## 8.7 OB-02 — renderable production world
+
+Before `OB-02`, SoloRing can remember/capture the reusable world but has not yet proven that the new reusable-production facts constrain final execution through the generalized observation path.
+
+---
+
+
+## 8.8 ED-02 — authoritative editorial decision boundary
+
+Before `ED-02`, SoloRing may have approved source Takes and exact media inspection, but it cannot yet say which exact source intervals, order, and editorial placements constitute an authoritative edit independent of proxy or executor syntax.
+
+---
+
+# 9. Smallest filmmaker-visible slices for roadmap evaluation
+
+These are evaluation candidates, not milestone decisions.
+
+## S1 — minimum reusable production object
+
+```text
+RP-01 + RP-03
++ minimal publication/history surface
+```
+
+Filmmaker value:
+
+> Publish one exact reusable production realization and retain it for later consumption without depending on its original creator.
+
+A generalized multi-representation registry is explicitly not required for this first slice.
+
+## S2 — reusable composition with stable occurrence identity
+
+```text
+S1
++ CO-01 + CO-02 + CO-03
++ CO-05/CO-06 minimum co-designed operation/scope contract
++ minimal World/Set authoring surface
+```
+
+Filmmaker value:
+
+> Publish a set assembly with durable addressable occurrences whose identity survives later composition publication and whose local edits have explicit scope.
+
+## S3 — authority-complete reusable world
+
+```text
+S2
++ IS-01 + IS-02
++ BD-01
++ SH-01 + SH-02 + HI-01
+```
+
+Filmmaker value:
+
+> Reuse the same set across Shots, preserve the exact same continuity-significant occurrences and their state/spatial authority, capture exact Composition↔Spatial agreement, and leave historical Shots unchanged when current work evolves.
+
+This closes **REMEMBER THE WORLD**.
+
+## S4 — renderable reusable world
+
+```text
+S3
++ OB-01 + OB-02 + OB-03 + EX-01
++ one production-capable retained representation/materialization path declared by RP-03
+```
+
+Filmmaker value:
+
+> Shoot the captured persistent world through a compatible executor and fail before queueing when hard preservation requirements cannot be honored.
+
+This closes **SHOOT THE WORLD**.
+
+## S5 — entity-bound intra-Shot consequence
+
+```text
+EV-01 + EV-02 + SH-03 + RV-01
+```
+
+Filmmaker value:
+
+> Author/adopt “the cut appears at this moment” or another state change inside a Shot, preserve the true Shot-start state, and separately decide whether the consequence persists afterward.
+
+No reusable-production spine dependency exists for existing CreativeEntity targets.
+
+## S6 — instance-bound intra-Shot consequence
+
+```text
+S5
++ IS-01 for the target Production Instance
+```
+
+Filmmaker value:
+
+> Apply the same event/handoff model to `chair-07`, `vase-main`, or another stateful Production Instance.
+
+## S7 — safe reusable-revision update
+
+```text
+RP-03 + CM-01 + RP-05
++ CO-03 for stable composition occurrences
++ consumer-specific compatibility evidence as required
+```
+
+Filmmaker value:
+
+> Accept a newer reusable revision into current work without losing occurrence identity/state or silently invalidating spatial, performance, contact, or observation assumptions.
+
+## S8 — observation trust/negotiation contract over existing inputs
+
+```text
+OB-01 + OB-03 + EX-01
+```
+
+Filmmaker value:
+
+> Declare hard versus structurally preserved versus inferable properties and reject an incompatible execution path before expensive execution.
+
+This slice can be designed before `OB-02`; it does not yet prove new reusable-world inputs are observed.
+
+## S9 — basic QC
+
+```text
+RV-03
++ existing captured authority / Review surface
+```
+
+Filmmaker value:
+
+> Receive advisory evidence about identity, camera, spatial, continuity, or appearance adherence without making QC authority.
+
+## S10 — camera-only candidate-world adoption
+
+```text
+CW-01 + CW-03 camera route
++ existing spatial/cinematic adoption/review path
+```
+
+Filmmaker value:
+
+> Extract a candidate camera trajectory from source media and adopt only that camera result without accepting inferred geometry or identity matches.
+
+---
+
+## S11 — targeted correction of an otherwise-good Take
+
+```text
+OB-03 + DX-01
++ existing source Take / ShotRevision
++ Review surface
+```
+
+Filmmaker value:
+
+> Keep an otherwise-good Take, change only a bounded production property, preserve explicitly protected camera/performance/identity/staging properties, and review the result as a new candidate rather than regenerating everything.
+
+This slice is downstream of the observation/preservation contract and does not block the reusable-world spine.
+
+---
+
+
+## S12 — profile-scoped Production Revision qualification
+
+```text
+RP-03
++ QL-01 + QL-02
++ existing immutable realization-profile identity
+```
+
+Filmmaker value:
+
+> Know whether an exact published Production Revision has evidence-backed production qualification for the exact realization profile about to be used, without mutating the revision or pretending the result is universal.
+
+This slice is parallel to M12/M13 world-authority work. It becomes a hard production-use gate only when the selected realization policy declares qualification mandatory.
+
+## S13 — property-scoped reference claims
+
+```text
+VI-01
++ existing visual identity / review authority
+```
+
+Filmmaker value:
+
+> State exactly what each approved reference controls, and exactly what an anti-reference forbids, instead of asking the renderer to infer reference roles.
+
+This slice is independent of reusable-production publication and can be designed from existing visual-authority behavior.
+
+
+## S14 — deterministic preservation-safe editorial/materialization foundation
+
+```text
+ED-01 + ED-02 + ED-04 + ED-05
++ ED-03 when a proxy workflow is included
++ existing approved Take/select boundary
+```
+
+Filmmaker value:
+
+> Trim/reorder approved Takes by exact retained source intervals, resolve every meaning-bearing editorial choice deterministically, preview through replaceable proxies, and materialize via preservation conform, composition rendering, or a mixed strategy with explicit lineage and preservation claims without mutating the source Takes.
+
+This is a future design slice only. It is not assigned a milestone and does not reorder the Performance program.
+
+# 10. Dependency-complete bundles for roadmap construction
+
+The v1.0 A–F bundles remain useful at a larger granularity, with the following corrections.
+
+## Bundle A — publish one reusable Production Revision
+
+```text
+RP-01
+RP-03
++ minimal retained usable representation/byte closure
++ minimal publication surface
+```
+
+`RP-02` generalized representation registry is **not** a hard prerequisite.
+
+## Bundle B — reusable Composition with stable occurrences
+
+```text
+Bundle A
++ CO-01 + CO-02 + CO-03
++ minimum CO-05/CO-06 contract
++ World/Set surface
+```
+
+## Bundle C — authority-complete reusable world
+
+```text
+Bundle B
++ IS-01 + IS-02
++ BD-01
++ SH-01 + SH-02 + HI-01
+```
+
+## Bundle D — renderable reusable world
+
+```text
+Bundle C
++ OB-01 + OB-02 + OB-03 + EX-01
++ one declared production-capable representation path
+```
+
+## Bundle E — persistent change inside a Shot
+
+```text
+EV-01 + EV-02 + SH-03 + RV-01
++ IS-01 only for instance-bound targets
+```
+
+## Bundle F — safe reusable-revision updates
+
+```text
+RP-03 + CM-01 + RP-05
++ CO-03 for stable occurrences
++ relevant consumer-specific compatibility checks
+```
+
+## Bundle G — targeted correction / delta realization
+
+```text
+OB-03 + DX-01
++ source Take / ShotRevision lineage
++ preservation-aware review/QC route
+```
+
+This bundle is a downstream execution option after the preservation contract exists. It does not become part of REMEMBER THE WORLD and is not required to close SHOOT THE WORLD.
+
+The roadmap should evaluate the smaller S-slices and larger A–G bundles together: slices expose early filmmaker value; bundles expose dependency-complete product thresholds.
+
+---
+
+
+## Bundle H — profile-scoped production qualification
+
+```text
+RP-03 + QL-01 + QL-02
++ immutable realization-profile identity
+```
+
+This bundle proves qualification as evidence/readiness, not as a mutation of Production Revision authority.
+
+## Bundle I — typed visual reference evidence
+
+```text
+VI-01
++ existing A3 visual identity/review contracts
+```
+
+This bundle proves property-scoped reference/prohibition semantics without making attached media universal authority.
+
+
+## Bundle J — deterministic editorial / conform / composition foundation
+
+```text
+BASE-TAKE-SELECT
++ ED-01 + ED-02 + ED-04 + ED-05
++ ED-03 for proxy-backed interaction
+```
+
+This bundle proves only the first editorial/materialization authority perimeter: exact source addressing, immutable source Takes, deterministic resolution of accepted edit meaning, proxy separation, preservation-classified conform/composition/mixed materialization, and exact lineage. It does not claim universal transitions, grading, Sound Post, mastering, or delivery-format coverage.
+
+# 11. Existing M10F contracts each branch must preserve
+
+```text
+IS-01/IS-02 extend the existing random-access continuity/spatial resolvers;
+    no parallel story-time or placement model is introduced.
+
+SH-01/SH-02 extend the ONE coherent current-state resolver/canonical builder;
+    UI, capture, preview, and execution do not independently reinterpret state.
+
+HI-01 extends captured-graph-only historical reads and fail-closed provenance;
+    current approvals/latest revisions cannot repair missing history.
+
+OB-01/OB-02 generalize existing specialized compilation precedents without
+    promoting observation artifacts into production authority.
+
+Generalized adapter/compiler paths preserve the shared already-supported subset
+    or explicitly disclose a behavior change; APR-106 forbids silent semantic drift.
+
+EX-01 extends pre-queue readiness/capability failure rather than weakening
+    captured production requirements.
+
+DX-01 derives new candidates from immutable source Takes/ShotRevisions;
+    free-form correction instructions and corrected pixels never author upstream truth.
+
+CM-01 generalizes execution/history compatibility discipline: deterministic
+    translations never rewrite historical source identity.
+
+ED-01/ED-02/ED-04/ED-05 preserve approved source Take/media immutability; proxies remain
+    replaceable representations, and executor syntax remains downstream provenance.
+
+All capture extensions obey APR-016: no empty higher-schema history is created
+for Shots that contain none of the new semantic content.
+```
+
+---
+
+# 12. Dependency risks
+
+## 12.1 Overbuilding reusable-production representation
+
+Do not turn `RP-02` into a speculative universal asset/representation framework before a real Composition/observation consumer proves the need. The first source gate should prove `RP-01/RP-03` consumption closure for one real downstream path.
+
+## 12.2 Treating Composition as a scene-file wrapper
+
+Occurrence identity must live in SoloRing authority, not only inside one representation hierarchy or namespace.
+
+## 12.3 Duplicating spatial authority in Composition
+
+`BD-01` maps authority-bound occurrences to A4 spatial truth. It does not grant Composition a competing placement authority.
+
+## 12.4 Hiding binding compatibility inside CM-01
+
+`BD-01` must state its own required interpretation facts. A future compatibility service may supply reusable evidence, but binding correctness cannot depend on an undefined monolithic compatibility engine.
+
+## 12.5 Delaying historical closure until renderer work
+
+`HI-01` must close before `OB-02` can claim historical production-world observation. Otherwise reusable production becomes a current-state convenience layer.
+
+## 12.6 Calling a wrapper a generalized observation compiler
+
+`OB-01` can be designed early; `OB-02` is the proof that new Production/Composition/Instance state actually reaches execution.
+
+## 12.7 Requiring generalized trust semantics before useful QC
+
+Basic QC should exploit existing captured authority now. The future trust vocabulary should enrich it, not delay it.
+
+## 12.8 Reversing candidate-producer dependencies
+
+Simulation, reconstruction, generation, and other candidate producers depend on adoption targets; production authorities never depend on those producers existing.
+
+## 12.9 Forcing candidate identity matching onto every ingestion route
+
+Camera-only or other domain-specific candidate adoption must not be blocked by object identity matching that is irrelevant to the chosen domain.
+
+## 12.10 Over-gating Performance on universal rigging — or under-gating lip sync on arbitrary audio
+
+The first body/facial Performance Revision requires one exact immutable representation sufficient for its declared workflow, not a completed universal character-animation system. Conversely, dialogue-bound facial performance must not be under-specified as `wav → lip-sync model → video`: G8 must close Dialogue Line, Vocal Performance, exact timebase, derived-alignment, synchronization, and historical-capture semantics before the first lip-sync milestone plan freezes.
+
+## 12.11 Conflating Take approval with persistent consequence or reusable promotion
+
+`RV-01` and `RV-02` remain explicit separate adoption actions. Generated pixels do not author upstream truth automatically.
+
+---
+
+## 12.12 Treating a correction prompt as the production contract
+
+`DX-01` must compile authoritative change scope plus preservation requirements. A text instruction by itself cannot define what is allowed to change or what must remain fixed.
+
+## 12.13 Regenerating accepted work by default
+
+When a bounded correction path can preserve accepted camera/performance/staging/identity more reliably or cheaply, the system should be able to realize the delta rather than requiring a whole-Shot regeneration. This is an execution choice, never an authority change.
+
+## 12.14 Calling a successful operation a passed production verdict
+
+Process completion and domain verdict remain separate. `UNKNOWN`, `NOT_MEASURABLE`, and `REQUIRES_REVIEW` must not collapse into success.
+
+## 12.15 Letting live discovery reinterpret history
+
+Capability/environment discovery is mutable evidence. Readiness/history must depend on a captured/versioned snapshot or contract, not on whatever the environment reports today.
+
+## 12.16 Treating qualification as a global asset flag
+
+A global `locked`/`qualified` flag destroys realization-profile and protocol scope. Qualification must retain the exact revision/profile/protocol/evidence tuple and may diverge across profiles.
+
+## 12.17 Treating attached references as universal authority
+
+Reference media must carry explicit property scope when production-significant. The renderer is not allowed to infer which reference owns which property and then silently promote that inference into production truth.
+
+---
+
+
+## 12.18 Treating “lossless” as one undifferentiated guarantee
+
+Media preservation must disclose whether the claim is byte-exact, stream-exact, decoded-essence-exact, boundary re-encode, or full re-encode. None of those claims proves that the correct Take/interval or production property was selected.
+
+## 12.19 Letting proxies or executor syntax become editorial authority
+
+A playback proxy may disappear without changing edit meaning, and FFmpeg/NLE/interchange artifacts may change when the executor changes. If either becomes the only durable definition of the edit, the authority direction has inverted.
+
+## 12.20 Scheduling editorial implementation before G12 closes
+
+The v1.6 branch remains intentionally a design boundary, not a milestone. Do not freeze timeline/edit schemas opportunistically inside correction, Sound Post, Performance, or delivery work.
+
+---
+
+# 13. Roadmap handoff
+
+The Implementation Roadmap should consume:
+
+```text
+§2 node inventory
+§3 evidence-grounded edges
+§5 design gates
+§7 cut points
+§9 smallest slices
+§10 dependency-complete bundles
+§12 risks
+G9 delta-realization gate
+G10 qualification gate
+G11 reference-claim gate
+S11 / Bundle G as downstream future options
+S12 / Bundle H and S13 / Bundle I as non-reordering side branches
+G12 + S14 / Bundle J as a future editorial/conform design branch downstream of approved Take/select
+```
+
+It must decide, rather than merely inherit:
+
+1. which smallest filmmaker-visible slice is implemented first;
+2. which design gates must close before each implementation slice;
+3. where source-gate boundaries sit so history/identity correctness is proven before broader UX or execution expansion;
+4. when `REMEMBER THE WORLD` is considered product-complete;
+5. when `SHOOT THE WORLD` is considered product-complete;
+6. which independent roots should proceed in parallel or remain deferred;
+7. which later capability is intentionally excluded so early slices do not become speculative platform-building exercises;
+8. when/if targeted correction becomes worth scheduling after the preservation/observation contract exists;
+9. when the Editorial / Conform / Finishing co-design gate should be scheduled after the current Performance priorities, without assigning an implementation milestone prematurely.
+
+The roadmap may assign milestone numbers. This graph does not.
+
+---
+
+# 14. Explicit non-goals
+
+```text
+no milestone numbering or ordering decision
+no implementation authorization
+no migration/table/API/file-format freeze
+no renderer or candidate-producer selection
+no publication/tagging/release authorization
+no change to Architecture v1.6 or its accepted pressure-test result beyond the dependencies recorded here
+no promotion of capability/coordination boundaries into production-truth authorities
+```
+
+---
+
+# 15. Summary
+
+The revised dependency model can be reduced to six production rules:
+
+```text
+1. Publish a minimal immutable reusable production revision without first
+   overbuilding a generalized representation system.
+
+2. Assemble revisions into compositions whose addressable occurrences have
+   durable identity, explicit edit scope, and identity survival across publication.
+
+3. Join those occurrences to existing world-state/spatial authority and capture
+   the exact reusable world into immutable historical Shot state.
+
+4. Keep observation-contract design separate from proof that the new reusable
+   world actually reaches execution; only the latter closes SHOOT THE WORLD.
+
+5. Let independent branches remain independent: entity-bound intra-Shot events,
+   basic QC, camera-only ingestion, performance identity, and relationships do not
+   need to wait for the full reusable-world spine when their own authority contracts
+   are already satisfied.
+
+6. Keep future editorial decisions downstream of explicit Take select and upstream of
+   conform execution: exact sources are immutable, proxies are replaceable, preservation
+   classes are explicit, and executor syntax never becomes the edit.
+```
+
+The roadmap can now choose implementation order without rediscovering these dependencies inside milestone plans.
+
+Targeted correction remains a downstream option once preservation semantics exist. The new editorial/conform branch is likewise future downstream work and is not a prerequisite for the persistent reusable-world loop or the current Performance program.

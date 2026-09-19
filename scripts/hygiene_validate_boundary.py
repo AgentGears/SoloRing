@@ -22,6 +22,12 @@ BASE = "384a46d3a5c68d7d81784befc338aa8621b93fbd"
 # The reviewed hygiene change surface (frozen R2 §3-§8) plus explicitly
 # authorized successor milestone surfaces.
 ALLOWLIST = (
+    # post-M16 R3 evidence-only publication (frozen R3 §23): frozen
+    # regression freeze set + external certifying harness + the closed
+    # R3 specification record. Evidence material; no production code.
+    "post-m16-r3-freeze/",
+    "post-m16-integrated-r3-evidence/harness/",
+    "SoloRing-Post-M16-Integrated-Sequence-Regression-R3-CLOSED.md",
     "tests/conftest.py",
     "tests/test_m13_races.py",
     "tests/test_m13_corrections.py",

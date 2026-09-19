@@ -1,0 +1,28 @@
+R2 FROZEN IDENTITY (immutable lineage; R3 inherits from it)
+============================================================
+
+R2 frozen Part I:
+  part_i_byte_count = 70102
+  part_i_sha256     = 5ad51e1dbe5bbe68753d1112c14a4eb66e4f526325331bbb2df63eea61682dad
+
+R2 final freeze archive (SoloRing-Post-M16-R2-Freeze-Set-2026-09-19-FROZEN.zip):
+  bytes   = 209232
+  sha256  = e7800cb227403f82e62f7983a4b11d0c6c5bb9b4346ec9d0c860e46694be1a4c
+
+R2 precursor whole-file (five boxes ticked, Part II section A blank):
+  bytes   = 71593
+  sha256  = 84535e34060ad38fc1a0d1e916ab26fbe730cf3aa6863fb04ae8be7194cdf1e3
+
+R2 final specification (freeze-populated section A):
+  bytes   = 71733
+  sha256  = 8b0b9a31eb51a294ccbf4472fbabf1734f15629284bf6a222d64c5e837f7bcad
+
+R2 CLOSED specification (Part II execution results; Part I unchanged):
+  bytes   = 73134
+  sha256  = d6c5285e2e00f8eb6bc65a367d4923845c216a094e1ce7dcbd53e8e2ecd8b163
+
+R2 bound the certifying identity to the SAME product baseline R3 pins
+(CERTIFYING_COMMIT 8199e46da6b8592f606725059601b402ab2874b0 /
+CERTIFYING_TREE 941d14cda84d0186431a80c0f9cbdc3fa978296b / PARENT
+488031a2b7d0070d23425bbe04b86d9f9f16e0bd; full evidence in
+correction/correction-head-identity.txt).
