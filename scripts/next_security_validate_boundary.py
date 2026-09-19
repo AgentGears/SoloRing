@@ -58,6 +58,7 @@ ALLOWLIST = (
     "scripts/next_security_validate_boundary.py",
     "scripts/m14_validate_boundary.py",
     "scripts/m16_validate_boundary.py",
+    "tests/m17a_seed.py",
     "tests/test_m17a_migration.py",
     "tests/test_m17a_dialogue.py",
     "tests/test_m17a_vocal.py",
@@ -286,6 +287,14 @@ ALLOWLIST = (
     "README.md",
 )
 
+# M17A (frozen R5): the dialogue/vocal foundation backend surface
+M17A_BACKEND_PATHS = frozenset({
+    "server/soloring/performance/",
+    "server/soloring/api/performance.py",
+    "server/soloring/api/schemas/performance.py",
+    "server/soloring/recovery/m17a_verifier.py",
+})
+
 POST_M15_REMEDIATION_BACKEND_PATHS = frozenset({
     "server/soloring/executors/comfy/translate.py",
     "server/soloring/spatial/package3.py",
@@ -482,6 +491,11 @@ def main(repo: Path = REPO) -> int:
             or m15_owned(f)
             or post_m15_remediation_backend(f)
             or m16_a_backend(f)
+            or f in M17A_BACKEND_PATHS
+            or f.startswith(
+                "server/soloring/performance/")
+            or f.startswith(
+                "server/alembic/versions/0018_")
         ):
             errors.append(f"backend change outside the security slice: {f}")
         if (f.startswith("server/alembic/")
@@ -489,6 +503,8 @@ def main(repo: Path = REPO) -> int:
                     "server/alembic/versions/0015_m14_world_observation_execution.py",
                     "server/alembic/versions/0016_m15_revision_compatibility.py",
                     "server/alembic/versions/0017_m16_intra_shot_consequences.py",
+                    # M17A (frozen R5): the dialogue/vocal migration
+                    "server/alembic/versions/0018_m17a_dialogue_vocal_foundation.py",
                 )):
             errors.append(f"alembic change outside the security slice: {f}")
         if not path_allowed(f, allowlist):
@@ -531,7 +547,11 @@ def main(repo: Path = REPO) -> int:
             "hygiene_validate_boundary.py",
         )):
             continue
-        if m14_owned(f) or post_m15_remediation_backend(f) or m16_a_backend(f):
+        if (m14_owned(f) or post_m15_remediation_backend(f)
+                or m16_a_backend(f)
+                or f in M17A_BACKEND_PATHS
+                or f.startswith(
+                    "server/soloring/performance/")):
             continue
         src = p.read_text(encoding="utf-8", errors="replace")
         for pattern, what in M14_PATTERNS:

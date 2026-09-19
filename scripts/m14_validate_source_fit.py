@@ -66,6 +66,25 @@ REVIEWED_SUCCESSOR_PATHS = frozenset({
     "server/soloring/domain/shots.py",
     "server/soloring/db/models.py",
     "server/soloring/errors.py",
+    # M17A (frozen R5): the performance package owns the
+    # dialogue/vocal vocabulary lawfully
+    "server/soloring/performance/audio_inspection.py",
+    "server/soloring/performance/models.py",
+    "server/soloring/performance/dialogue.py",
+    "server/soloring/performance/vocal.py",
+    "server/soloring/performance/temporal.py",
+    "server/soloring/performance/mapping.py",
+    "server/soloring/performance/alignment.py",
+    "server/soloring/performance/compatibility.py",
+    "server/soloring/performance/__init__.py",
+    "server/soloring/api/performance.py",
+    "server/soloring/api/schemas/performance.py",
+    "server/soloring/recovery/m17a_verifier.py",
+    "server/soloring/recovery/backup.py",
+    "server/soloring/recovery/successor_semantics.py",
+    "server/soloring/api/main.py",
+    "server/soloring/db/models.py",
+    "server/soloring/errors.py",
 })
 
 FORBIDDEN_PATTERNS: list[tuple[str, str]] = [

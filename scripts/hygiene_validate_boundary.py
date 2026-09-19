@@ -45,6 +45,7 @@ ALLOWLIST = (
     "scripts/next_security_validate_boundary.py",
     "scripts/m14_validate_boundary.py",
     "scripts/m16_validate_boundary.py",
+    "tests/m17a_seed.py",
     "tests/test_m17a_migration.py",
     "tests/test_m17a_dialogue.py",
     "tests/test_m17a_vocal.py",

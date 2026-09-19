@@ -38,6 +38,7 @@ ALLOWED_PATTERNS = [
     r"^server/alembic/versions/0018_m17a_dialogue_vocal_foundation"
     r"\.py$",
     r"^scripts/(hygiene|next_security|m14|m16)_validate_boundary\.py$",
+    r"^tests/m17a_seed\.py$",
     r"^tests/test_m17a_[a-z_]+\.py$",
     r"^docs/SoloRing-M14-[^/]+\.md$",
     r"^scripts/m14_validate_[a-z0-9_]+\.py$",

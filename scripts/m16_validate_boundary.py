@@ -87,6 +87,7 @@ M16_SURFACE = (
     r"^server/soloring/recovery/m17a_verifier\.py$",
     r"^server/alembic/versions/0018_m17a_dialogue_vocal_foundation"
     r"\.py$",
+    r"^tests/m17a_seed\.py$",
     r"^tests/test_m17a_[a-z_]+\.py$",
     # reviewed successor carves from the M16 correction rounds:
     # predecessor-test era head-pins/migration expectations, the m10f
