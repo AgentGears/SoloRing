@@ -317,6 +317,11 @@ def install_successor_semantics(recovery: ModuleType) -> None:
     recovery._verify_m15_compatibility_state = verify_m15_compatibility_state
     recovery._verify_m16_intra_shot_state = (
         semantic_successors.verify_m16_intra_shot_state)
+    from soloring.recovery.m17a_verifier import (
+        verify_m17a_dialogue_vocal_state,
+    )
+    recovery._verify_m17a_dialogue_vocal_state = (
+        verify_m17a_dialogue_vocal_state)
 
     def _verify_head_semantics(staged_db: Path, head: str) -> None:
         if head not in recovery.SUPPORTED_RESTORE_ALEMBIC_HEADS:
@@ -339,6 +344,9 @@ def install_successor_semantics(recovery: ModuleType) -> None:
         if head == recovery.M15_ALEMBIC_HEAD:
             return
         recovery._verify_m16_intra_shot_state(staged_db)
+        if head == recovery.M16_ALEMBIC_HEAD:
+            return
+        recovery._verify_m17a_dialogue_vocal_state(staged_db)
 
     recovery._verify_head_semantics = _verify_head_semantics
 
@@ -348,12 +356,17 @@ def install_successor_semantics(recovery: ModuleType) -> None:
                                             expected_columns=None):
         head = recovery._staged_db_head(staged_db)
         if head in (recovery.M14_ALEMBIC_HEAD, recovery.M15_ALEMBIC_HEAD,
-                    recovery.M16_ALEMBIC_HEAD):
+                    recovery.M16_ALEMBIC_HEAD,
+                    getattr(recovery, "M17A_ALEMBIC_HEAD", None)):
             recovery._verify_m14_observation_state(staged_db)
-        if head in (recovery.M15_ALEMBIC_HEAD, recovery.M16_ALEMBIC_HEAD):
+        if head in (recovery.M15_ALEMBIC_HEAD, recovery.M16_ALEMBIC_HEAD,
+                    getattr(recovery, "M17A_ALEMBIC_HEAD", None)):
             recovery._verify_m15_compatibility_state(staged_db)
-        if head == recovery.M16_ALEMBIC_HEAD:
+        if head in (recovery.M16_ALEMBIC_HEAD,
+                    getattr(recovery, "M17A_ALEMBIC_HEAD", None)):
             recovery._verify_m16_intra_shot_state(staged_db)
+        if head == getattr(recovery, "M17A_ALEMBIC_HEAD", None):
+            recovery._verify_m17a_dialogue_vocal_state(staged_db)
         return original_enumerate(staged_db, expected_columns)
 
     recovery._enumerate_liveness = _enumerate_with_successor_semantics

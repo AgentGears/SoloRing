@@ -218,15 +218,16 @@ def test_hyg_art_03_no_repo_root_residue_after_focus():
 @pytest.mark.asyncio
 async def test_hyg_base_02_migration_head_unchanged(tmp_path, monkeypatch):
     """HYG-BASE:02 (M16-A succession, authorized 2026-09-15): the
-    Alembic head is exactly 0017_m16_intra_shot_consequences and nothing
+    Alembic head is exactly 0018_m17a_dialogue_vocal_foundation and nothing
     beyond the one frozen M16-A migration exists."""
     from pathlib import Path
 
     versions = (Path(__file__).resolve().parents[1] / "server"
                 / "alembic" / "versions")
     files = sorted(p.name for p in versions.glob("0*.py"))
-    assert files[-1] == "0017_m16_intra_shot_consequences.py"
-    assert not any(f >= "0018" for f in files)
+    assert files[-1] == "0018_m17a_dialogue_vocal_foundation.py"
+    assert not any(f > "0018_m17a_dialogue_vocal_foundation.py"
+                   for f in files)
 
 
 # ---------------------------------------------------------------------------

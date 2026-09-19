@@ -606,7 +606,7 @@ def test_migration_files_and_head_is_0009():
     to 0009 only with M8A's visual-identity migration."""
     versions = BASE_DIR / "server" / "alembic" / "versions"
     files = sorted(p.name for p in versions.glob("*.py"))
-    assert files[-1] == "0017_m16_intra_shot_consequences.py"
+    assert files[-1] == "0018_m17a_dialogue_vocal_foundation.py"
     assert len(files) == 17  # M16-A added 0017
 
 

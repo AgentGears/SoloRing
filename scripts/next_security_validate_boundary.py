@@ -41,6 +41,31 @@ ALLOWLIST = (
     "post-m16-r3-freeze/",
     "post-m16-integrated-r3-evidence/harness/",
     "SoloRing-Post-M16-Integrated-Sequence-Regression-R3-CLOSED.md",
+    # M17A implementation (frozen R5): the dialogue/vocal foundation
+    # surface — performance package, migration, API, recovery
+    # verifier, boundary validators, and the M17A tests.
+    "server/soloring/performance/",
+    "server/soloring/api/performance.py",
+    "server/soloring/api/schemas/performance.py",
+    "server/soloring/api/main.py",
+    "server/soloring/db/models.py",
+    "server/soloring/errors.py",
+    "server/soloring/recovery/backup.py",
+    "server/soloring/recovery/successor_semantics.py",
+    "server/soloring/recovery/m17a_verifier.py",
+    "server/alembic/versions/0018_m17a_dialogue_vocal_foundation.py",
+    "scripts/hygiene_validate_boundary.py",
+    "scripts/next_security_validate_boundary.py",
+    "scripts/m14_validate_boundary.py",
+    "scripts/m16_validate_boundary.py",
+    "tests/test_m17a_migration.py",
+    "tests/test_m17a_dialogue.py",
+    "tests/test_m17a_vocal.py",
+    "tests/test_m17a_temporal.py",
+    "tests/test_m17a_alignment.py",
+    "tests/test_m17a_compatibility.py",
+    "tests/test_m17a_recovery.py",
+    "tests/test_m17a_source_gate.py",
     "apps/web/package.json",
     "apps/web/package-lock.json",
     "apps/web/next-env.d.ts",
@@ -475,15 +500,17 @@ def main(repo: Path = REPO) -> int:
     admitted_0015 = "0015_m14_world_observation_execution.py"
     admitted_0016 = "0016_m15_revision_compatibility.py"
     admitted_0017 = "0017_m16_intra_shot_consequences.py"
+    # M17A (frozen R5): the dialogue/vocal foundation migration
+    admitted_0018 = "0018_m17a_dialogue_vocal_foundation.py"
     mig_beyond = [
         p.name for p in versions.glob("*.py")
         if p.stem >= "0015" and p.name not in (
-            admitted_0015, admitted_0016, admitted_0017)
+            admitted_0015, admitted_0016, admitted_0017, admitted_0018)
     ]
     if mig_beyond:
         errors.append(
-            "migration at/beyond 0015 beyond the frozen M14/M15/M16-A "
-            f"migrations exists: {mig_beyond}"
+            "migration at/beyond 0015 beyond the frozen M14/M15/M16-A/"
+            f"M17A migrations exists: {mig_beyond}"
         )
 
     pkg = json.loads(
@@ -518,8 +545,9 @@ def main(repo: Path = REPO) -> int:
     print(
         f"Next-security boundary clean (mode={mode}, base={base[:12]}…): "
         f"{'security-slice' if mode == 'predecessor' else 'post-M13 union'} "
-        "allowlist scoped; M14 0015, M15 0016, and exact M16-A 0017 are "
-        "the latest admitted migrations; Next major exactly 15"
+        "allowlist scoped; M14 0015, M15 0016, exact M16-A 0017, and "
+        "exact M17A 0018 are the latest admitted migrations; "
+        "Next major exactly 15"
         + ("; checked-in predecessor evidence exact."
            if mode == "published" else ".")
     )

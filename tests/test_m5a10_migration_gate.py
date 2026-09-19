@@ -109,7 +109,7 @@ def test_populated_0004_to_head_defaults_and_integrity(
     finally:
         con.close()
 
-    assert rev[0] == "0017_m16_intra_shot_consequences"
+    assert rev[0] == "0018_m17a_dialogue_vocal_foundation"
     assert "soft_cancel_selected_at" in cols
     # Documented defaults for pre-existing rows: submission not_started, no
     # attempt, no job, no soft cancel, no artifact.

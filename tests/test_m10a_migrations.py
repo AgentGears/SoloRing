@@ -45,7 +45,7 @@ def test_migrations_present_and_chained():
     files = sorted(p.name for p in VERSIONS.glob("0*.py"))
     assert files[-3:] == ["0015_m14_world_observation_execution.py",
                           "0016_m15_revision_compatibility.py",
-                          "0017_m16_intra_shot_consequences.py"]
+                          "0018_m17a_dialogue_vocal_foundation.py"]
     m10 = (VERSIONS / "0010_m10_spatial_cinematic_continuity.py").read_text()
     assert 'down_revision: Union[str, None] = "0009_m8_visual_identity"' in m10
     m11 = (VERSIONS / "0011_m10_derived_spatial_execution.py").read_text()

@@ -23,6 +23,22 @@ ALLOWED_PATTERNS = [
     r"^post-m16-integrated-r3-evidence/harness/",
     r"^SoloRing-Post-M16-Integrated-Sequence-Regression-R3-CLOSED"
     r"\.md$",
+    # M17A implementation (frozen R5): the dialogue/vocal foundation
+    # surface — performance package, migration, API, recovery
+    # verifier, boundary validators, and the M17A tests.
+    r"^server/soloring/performance/",
+    r"^server/soloring/api/performance\.py$",
+    r"^server/soloring/api/schemas/performance\.py$",
+    r"^server/soloring/api/main\.py$",
+    r"^server/soloring/db/models\.py$",
+    r"^server/soloring/errors\.py$",
+    r"^server/soloring/recovery/backup\.py$",
+    r"^server/soloring/recovery/successor_semantics\.py$",
+    r"^server/soloring/recovery/m17a_verifier\.py$",
+    r"^server/alembic/versions/0018_m17a_dialogue_vocal_foundation"
+    r"\.py$",
+    r"^scripts/(hygiene|next_security|m14|m16)_validate_boundary\.py$",
+    r"^tests/test_m17a_[a-z_]+\.py$",
     r"^docs/SoloRing-M14-[^/]+\.md$",
     r"^scripts/m14_validate_[a-z0-9_]+\.py$",
     r"^tests/fixtures/m14/[^/]+$",

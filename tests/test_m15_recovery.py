@@ -43,7 +43,7 @@ async def _assess_and_apply(client, base):
     return result
 
 
-async def _stamp_alembic(client, head="0017_m16_intra_shot_consequences"):
+async def _stamp_alembic(client, head="0018_m17a_dialogue_vocal_foundation"):
     """The conftest engine builds schema via create_all (no
     alembic_version); the backup machinery requires the table."""
     engine = client._transport.app.state.engine
@@ -125,7 +125,7 @@ async def test_0016_backup_restore_preserves_m15_rows_and_hashes(
     await backup(settings, backup_root)
     manifest = json.loads((backup_root / "backup-manifest.json")
                           .read_text(encoding="utf-8"))
-    assert manifest["alembic_version"] == "0017_m16_intra_shot_consequences"
+    assert manifest["alembic_version"] == "0018_m17a_dialogue_vocal_foundation"
 
     # M16-C certified the 0017 head, so the live backup runs there; the
     # REC:01 proof stays pinned to the 0016 posture via the REC:02
@@ -144,7 +144,17 @@ async def test_0016_backup_restore_preserves_m15_rows_and_hashes(
                       "shot_intra_shot_events",
                       "shot_revision_intra_shot_events",
                       "shot_revision_intra_shot_specs",
-                      "shot_intra_shot_event_proposals"):
+                      "shot_intra_shot_event_proposals",
+                      # M17A tables carry three Blob-FK paths; the exact
+                      # 0016 eight-path posture drops them (empty, as
+                      # the create_all seed wrote no dialogue rows)
+                      "dialogue_alignments",
+                      "shot_vocal_segment_mappings",
+                      "vocal_performance_selections",
+                      "vocal_performance_revisions",
+                      "vocal_candidates",
+                      "dialogue_line_revisions",
+                      "dialogue_lines"):
             n = con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
             assert n == 0, (
                 f"{table} has {n} rows — not a lawful 0016 posture")
@@ -235,7 +245,15 @@ async def test_0015_backup_restores_without_inventing_m15_state(client,
                       "production_update_operations",
                       "production_compatibility_uses",
                       "production_compatibility_assessments",
-                      "composition_occurrence_revision_tracking"):
+                      "composition_occurrence_revision_tracking",
+                      # M17A: exact 0015 eight-path posture drops them
+                      "dialogue_alignments",
+                      "shot_vocal_segment_mappings",
+                      "vocal_performance_selections",
+                      "vocal_performance_revisions",
+                      "vocal_candidates",
+                      "dialogue_line_revisions",
+                      "dialogue_lines"):
             n = con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
             assert n == 0, (
                 f"{table} has {n} rows — not a lawful 0015 posture")
