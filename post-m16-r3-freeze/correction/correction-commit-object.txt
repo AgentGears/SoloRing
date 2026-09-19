@@ -1,0 +1,26 @@
+tree 941d14cda84d0186431a80c0f9cbdc3fa978296b
+parent 488031a2b7d0070d23425bbe04b86d9f9f16e0bd
+author Nabeel Alghamdi <xjeddah@hotmail.com> 1789785245 +0300
+committer Nabeel Alghamdi <xjeddah@hotmail.com> 1789785245 +0300
+
+Recovery correction: remove vestigial PI-transition loop locals + two-transition regression (child of 488031a; R1 Run1 correction review PASS)
+
+Product defect (R1 Tier-A Run1, PM16:RECOVERY:01 FAIL): backup.py
+_verify_m13_pi_state (via _verify_m13_world_state) executed
+'del coord, active' inside the transition loop — the once-bound
+'active' was deleted on the first iteration, so any database with
+>= 2 production_instance_feature_transitions failed backup with
+UnboundLocalError. Predecessor recovery fixtures carried at most one
+PI transition; the first accumulated R1 history (5 transitions)
+iterated the loop twice and exposed it.
+
+Correction per the approved review: remove the vestigial locals
+cleanly — 'active: set = set()', the unused 'coord = (...)', and the
+'del coord, active' — leaving the set/clear grammar validation and
+the structural-uniqueness comment intact. No behavioral change for
+valid databases beyond no longer raising.
+
+Regression: test_two_pi_transitions_backup_verification builds a real
+M13 PI world, inserts two lawful transitions (Shot/start upright +
+Shot/end fallen) directly, proves _verify_m13_pi_state passes, and
+runs the real backup() end to end.

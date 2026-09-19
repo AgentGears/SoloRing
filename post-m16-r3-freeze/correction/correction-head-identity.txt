@@ -1,0 +1,34 @@
+R2 CERTIFYING BASELINE (the approved recovery correction)
+========================================================
+
+published M16 baseline (parent):
+  commit = 488031a2b7d0070d23425bbe04b86d9f9f16e0bd
+  tree   = a2a3c3e480d20b10e472812505e4370a865a8d6d
+
+R2 correction commit (branch m16-r1-recovery-fix):
+  commit            = 8199e46da6b8592f606725059601b402ab2874b0
+  tree              = 941d14cda84d0186431a80c0f9cbdc3fa978296b
+  commit-object sha256 = 2c6c7d32ba5f51a0d7730241715cc60380690f78ae2d8f68f6e5196189c534de
+  parent(8199e46)   = 488031a2b7d0070d23425bbe04b86d9f9f16e0bd (verified)
+
+Exact delta names (exactly two):
+  server/soloring/recovery/backup.py
+  tests/test_m15_recovery.py
+
+Exact delta blob identities at the correction head:
+  server/soloring/recovery/backup.py
+      blob sha256 = 6df5f96a82b06c6af1eb3be07dc39bc890cea6d49f2c2e72e74f231007e537c4
+  tests/test_m15_recovery.py
+      blob sha256 = 41fd58ba50a96531a67ffa0b7bbe51e680b6de465223d26e5b5bf0d677c5ed6d
+
+Exact patch (git diff 488031a2..8199e46, stored as
+correction/correction.patch):
+  bytes  = 4554
+  sha256 = aa566c793d91a3a12c0e828b08ca4f35a36c0ee1b68a4c2e0380ddf7de1f1bb5
+
+Reproducibility: the branch is currently LOCAL (unpushed). The commit
+identity is reconstructable from any clone of the repository at
+488031a2 plus correction.patch (git apply) — commit-object identity
+depends on the author/committer stamp recorded in correction/correction-commit-object.txt. Publication of the branch
+is a separate authorization; this file + the patch are the durable
+byte evidence.

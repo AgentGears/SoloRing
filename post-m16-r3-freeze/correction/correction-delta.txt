@@ -1,0 +1,24 @@
+CORRECTION-SCOPE PROOF (what changed semantically)
+==================================================
+
+server/soloring/recovery/backup.py ::_verify_m13_pi_state:
+  REMOVED three vestigial loop locals —
+    - `active: set = set()` (bound once before the loop; deleted by
+      the first iteration's `del` ever since the line landed)
+    - `coord = (t[1], t[2], t[3], t[4])` (computed and never used)
+    - `del coord, active` (the defect: executed every iteration)
+  KEPT — the set/clear grammar validation per transition row and the
+  structural-uniqueness comment (uniqueness is enforced by PK/unique
+  indexes and schema parity, exactly as the retained comment states).
+
+tests/test_m15_recovery.py:
+  ADDED test_two_pi_transitions_backup_verification — a real M13 PI
+  world (production _pi_world machinery), two lawful PI feature
+  transitions (Shot/start upright + Shot/end fallen) inserted on one
+  feature, the focused _verify_m13_pi_state passes, and the real
+  backup() path runs end-to-end.
+
+NOT CHANGED: no schema, no migration, no M16 authority/event/
+adoption semantics, no compatibility (M15) semantics, no capture, no
+executor, no API surface, no Shot semantics. The two-file delta above
+is the complete correction.

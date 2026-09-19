@@ -1,0 +1,21 @@
+R1 FROZEN IDENTITY (immutable lineage; R2 inherits from it)
+============================================================
+
+R1 frozen Part I:
+  part_i_byte_count = 65827
+  part_i_sha256     = 93c72e2ade77434ea07f5ac4aaa99f14f526ed0eb40b7f445024d3526969d5ff
+
+R1 final freeze archive (SoloRing-Post-M16-R1-Freeze-Set-2026-09-19-FROZEN.zip):
+  bytes   = 200050
+  sha256  = 7feaf0139e513b130a6ad7c4aea73c0e437e83bc649fb4a88cd323abfb994272
+
+R1 whole final specification:
+  bytes   = 67220
+  sha256  = ceb13a243af8ea0e89636f1c87755b9641f7e1415c53e484b7e4116c0ecf61e6
+
+R1 precursor whole-file (boxes ticked, Part II §A blank):
+  sha256  = 880a4e73ddab59b088c22a5b45ef47d2a2bab97973139639b3eafc721c9b7501
+
+R1 specification bound the certifying identity to the published M16
+baseline 488031a2b7d0070d23425bbe04b86d9f9f16e0bd /
+a2a3c3e480d20b10e472812505e4370a865a8d6d.

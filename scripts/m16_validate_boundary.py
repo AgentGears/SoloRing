@@ -66,6 +66,14 @@ M16_SURFACE = (
     # post-closure publication refresh (separately authorized): the
     # README status refresh to M16/0017. Documentation only.
     r"^README\.md$",
+    # post-M16 R3 evidence-only publication (frozen R3 §23): the frozen
+    # regression freeze set (spec/oracles/reviews/lineage/correction +
+    # manifest), the external certifying harness, and the closed R3
+    # specification record. Evidence material; no production code.
+    r"^post-m16-r3-freeze/",
+    r"^post-m16-integrated-r3-evidence/harness/",
+    r"^SoloRing-Post-M16-Integrated-Sequence-Regression-R3-CLOSED"
+    r"\.md$",
     # reviewed successor carves from the M16 correction rounds:
     # predecessor-test era head-pins/migration expectations, the m10f
     # 0016-posture fixtures, and boundary-validator carve entries

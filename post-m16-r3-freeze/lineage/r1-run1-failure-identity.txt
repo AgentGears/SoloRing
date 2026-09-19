@@ -1,0 +1,26 @@
+R1 RUN1 FAILURE IDENTITY (immutable lineage)
+============================================
+
+Run1 evidence archive (SoloRing-Post-M16-R1-TierA-Run1-2026-09-19.zip):
+  bytes   = 102212
+  sha256  = ed5b9926c5323a750846c10a175174dcf601c6d31c5a7a46546099634dc79d44
+
+Disposition (user ruling, 2026-09-19):
+  PRODUCT DEFECT CONFIRMED — independently reproduced on the exact
+  published M16 source.
+  RUN1 IS NON-CERTIFYING — contemporaneous §6.4 identity-guard
+  transcripts (identity-guard-tier-a-{pre,post}.log) were not produced
+  during the run; they cannot be recreated afterward and represented
+  as contemporaneous evidence.
+
+Failing cell: PM16:RECOVERY:01
+Defect: server/soloring/recovery/backup.py ::_verify_m13_pi_state
+  (via _verify_m13_world_state) — `del coord, active` inside the
+  transition loop deleted the once-bound `active` on the first
+  iteration; any database with >= 2
+  production_instance_feature_transitions rows failed backup with
+  UnboundLocalError. Predecessor recovery fixtures carried at most one
+  PI transition, so no earlier milestone ever iterated the loop twice.
+
+Run1 ledger at close: 54 PASS / 1 FAIL (frozen-cell naming);
+no R1 result may be promoted into an R2 PASS result.

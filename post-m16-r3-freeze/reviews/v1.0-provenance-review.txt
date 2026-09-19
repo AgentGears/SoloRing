@@ -1,0 +1,47 @@
+# v1.0 provenance review (R1 §2.3)
+
+Candidate: post-m16-r1-freeze/oracles/Full-Sequence-Pressure-Test-v1.0
+Retrieval: D:/Downloads/SoloRing-Full-Sequence-Product-Pressure-Test-v1.md
+           (byte-identical copy also at repo docs/, untracked)
+
+Mechanical facts:
+  byte count : 70529
+  line count : 1959   (LF-terminated lines; the file ends in LF)
+  SHA-256    : d25116eb0d61eaac2012e15872bf6e22c45c0644466669af3c913ca65cfec996
+  title      : "SoloRing Full-Sequence Product Pressure Test"
+  version    : v1.0 (header, no revision suffix)
+
+Provenance evidence gathered:
+  1. Two byte-identical copies at distinct locations (Downloads
+     and repo docs/).
+  2. The certified v1.6 rerun declares itself a rerun OF the
+     unchanged v1.0 scenario and its case inventory (Shots 20-28,
+     40, 51-67, CR-1..CR-5, N-01..N-24) — 100% section
+     correspondence with the candidate.
+  3. The v1.1 non-authoritative rerun (same directory lineage)
+     references the same scenario and predates v1.4/v1.6.
+  4. No other file claiming v1.0 identity exists in Downloads/docs.
+
+FINAL DISPOSITION (signed 2026-09-19)
+
+Disposition: VERIFIED_ORIGINAL
+
+Basis: The candidate Full-Sequence-Pressure-Test-v1.0 identifies
+itself as SoloRing Full-Sequence Product Pressure Test Version 1.0
+and has SHA-256
+d25116eb0d61eaac2012e15872bf6e22c45c0644466669af3c913ca65cfec996.
+The supplied evidence contains byte-identical copies at distinct
+locations. More importantly, the v1.1 Architecture Rerun
+independently identifies the unchanged SoloRing Full-Sequence
+Product Pressure Test v1.0 by this exact SHA-256, and the certified
+v1.6 rerun independently identifies the unchanged v1.0
+pressure-test specification by the same exact SHA-256. The
+scenario/case structure of the candidate corresponds to the cases
+those reruns explicitly rerun.
+
+For the purpose of the R1 oracle set, this establishes that the
+supplied candidate is the exact v1.0 byte artifact referenced by
+the later SoloRing regression lineage.
+
+Reviewer: ChatGPT
+Review date: 2026-09-19

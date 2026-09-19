@@ -1,0 +1,632 @@
+# SoloRing Capability & Ownership Map
+
+**Document:** SoloRing Capability & Ownership Map  
+**Version:** 1.6  
+**Date:** 2026-09-13  
+**Status:** Step-1 capability/ownership map — v1.5 ownership preserved; deterministic editorial resolution and conform/composition materialization capabilities classified without assigning a premature editorial authority owner; not an implementation plan and not implementation authorization  
+**Current published implementation baseline:** M14 @ `89298e793c651e9e8b9164912c76e3595867a60a` (tree `3c4fec0bdb11732f0c77c22acc65d3ba882df393`)  
+**Normative foundation:** Architecture Pattern Register v2.5 (`1da9fe2b957a19015d275b076732bc1c42c7f0cf789dc4b05647fcf0914a69a0`); Product & Production Architecture v1.6 (`d93125ceed1e24dcbc86e88e5dfb42b02d7352bec5240ef9d75a5423c1a24077`); unchanged Full-Sequence Product Pressure Test v1.0 (`d25116eb0d61eaac2012e15872bf6e22c45c0644466669af3c913ca65cfec996`) plus v1.6 deterministic editorial-resolution architecture regression rerun (`215ee3e5037690d82ccec15925999f7d1cea2b2bb890138995c90d82724971e9`, PASS)
+**Purpose:** Prove that every production truth has one authoritative owner, distinguish those truth owners from capability/coordination boundaries, and classify the capabilities required by Architecture v1.6 against the published M14 baseline without promoting execution, agent context, discovery evidence, proxies, conform commands, composition renderers, or unresolved defaults into authority.
+
+---
+
+## v1.6 correction record
+
+Version 1.6 preserves every v1.5 owner and adds no new production-truth authority domain. The dialogue/lip-sync ownership correction remains unchanged: exact wording/language/speaker stay in A1, adopted spoken/facial acting stays in A7, and alignment remains derived evidence. Full Sound Post and the exact editorial authority model remain future.
+
+The v1.6 refinement keeps exact source-media inspection, proxy generation, media-preservation evidence, materialization, and delivery lineage outside editorial truth ownership. It additionally classifies deterministic editorial resolution as part of the future ED-02 authority contract and distinguishes preservation conform, composition rendering, and mixed materialization as ED-04 execution capabilities beneath that authority. Authoritative editorial decisions remain **FUTURE DOMAIN — DESIGN REQUIRED** until G12 closes. No M15, M16, Performance, Editorial, Sound Post, or Finishing implementation is authorized by this map.
+
+---
+
+# 0. Method
+
+## 0.1 Two separate ownership tests
+
+This map deliberately distinguishes **production-truth authority** from **capability ownership**.
+
+For every production fact:
+
+> **Who owns this truth?**
+
+The answer must be exactly one production-authority domain. Two truth owners or no truth owner is an architecture defect.
+
+For every capability:
+
+> **Which subsystem/domain is responsible for implementing, validating, compiling, coordinating, reviewing, or reproducing it?**
+
+A capability boundary may coordinate multiple authority domains without becoming the owner of the production facts it validates.
+
+The governing distinction is:
+
+```text
+production authority
+        ≠
+capability owner
+        ≠
+coordination boundary
+        ≠
+execution boundary
+```
+
+## 0.2 Status vocabulary
+
+```text
+IMPLEMENTED
+    Exists, is gated, and is proven within the published M14 baseline scope.
+
+IMPLEMENTED — EXTEND
+    Real implementation exists, but Architecture v1.6 requires it to accept or
+    coordinate additional production-world concepts.
+
+DEFINED — UNIMPLEMENTED
+    Architecture defines the authority/lifecycle/failure semantics strongly enough
+    to implement without inventing core product meaning, but no implementation exists.
+
+DEFINED — DESIGN REQUIRED
+    Architecture defines the boundary and invariants, but the persistent schema,
+    exact format, evaluator, or algorithm still requires deliberate design.
+
+EXECUTION-ONLY — UNIMPLEMENTED
+    A downstream candidate/execution capability is legitimate but absent; it owns
+    no production truth and must remain below the adoption boundary.
+
+FUTURE DOMAIN
+    Deliberately deferred. Architecture reserves the boundary but does not make it
+    a near-term implementation requirement.
+```
+
+## 0.3 Evidence discipline
+
+- Every `IMPLEMENTED` or `IMPLEMENTED — EXTEND` claim is pinned to the published M14 implementation baseline or an explicit predecessor milestone, not inferred from Architecture v1.6 alone.
+- Milestone/source anchors identify the implemented precedent or extension seam.
+- `DEFINED — UNIMPLEMENTED` and `DEFINED — DESIGN REQUIRED` rows cite the Architecture v1.6 section and/or binding APR that owns the contract.
+- A principle being binding does **not** make a missing integration `IMPLEMENTED`.
+- Execution or candidate-generation techniques are never promoted to authority merely because their behavior is useful.
+- This map awards no milestone number and freezes no future table/schema/format names.
+
+## 0.4 Register companion status
+
+Architecture Pattern Register v2.5 preserves APR-100 through APR-124 and adds two editorial-resolution/materialization laws after the existing preservation perimeter:
+
+```text
+APR-105  test capability reuse/adaptation before inventing new subsystem machinery
+APR-106  preserve shared-subset semantics across adapters/generalizations
+APR-107  delta realization/correction as downstream execution
+APR-108  explicit change + preservation contracts
+APR-109  compiled task/agent context remains non-authoritative
+APR-110  mutable discovery freezes before production/history depends on it
+APR-111  operation status and domain verdict remain separate typed outcomes
+APR-121  explicit media-preservation classes orthogonal to production-property preservation
+APR-122  immutable approved-source media + exact temporal addressing for editorial decisions
+APR-123  playback/proxy media remain non-authoritative representations
+APR-124  editorial/conform authority compiles to executor syntax rather than being defined by it
+APR-125  editorial meaning resolves deterministically before materialization
+APR-126  preservation conform and composition rendering remain replaceable execution modes beneath one resolved edit
+```
+
+These patterns add **no new production-truth authority domain**. They refine capability design, execution, automation/context projection, certification, review semantics, and the future editorial/finishing preservation perimeter.
+
+---
+
+# 1. Ownership domains
+
+## 1.1 Production-truth authority domains
+
+Only these domains own canonical production facts.
+
+| ID | Authority domain | Owns | Does not own |
+|---|---|---|---|
+| A1 | Semantic / story authority | who/what exists; narrative facts; Entity revisions; story-meaning relationships; canonical narrative topology | renderer implementation; physical representation bytes |
+| A2 | World-state / continuity authority | persistent story-time facts; boundary transitions; effective state at narrative position | approved appearance; local performance timing |
+| A3 | Visual identity authority | approved continuity-critical appearance identity | world placement; physical representation identity |
+| A4 | Spatial / cinematic authority | reusable world-space facts; continuity-significant placement/trajectory; camera; staging/blocking | mesh/representation bytes; local articulation |
+| A5 | Production-realization authority | Production Objects/Revisions; reusable physical/look/rig/etc. realizations; representations; consumption closure | story identity; world placement |
+| A6 | Composition / instance authority | reusable assemblies; durable addressable occurrence identity; composition-owned placement/configuration; nested composition membership | persistent state on occurrences; higher spatial truth |
+| A7 | Performance authority | local time-varying pose/articulation/deformation/expression; explicitly assigned non-spatial trajectories; Shot-relative event timing | semantic identity; persistent downstream state |
+| A8 | Physical-relationship authority | support/contact/attachment/containment/grounding facts and their production status | simulation outcome merely because it was produced |
+
+## 1.2 Capability and coordination boundaries
+
+These boundaries own operations, validation, derived artifacts, or historical procedures. They are **not additional production-truth authorities**.
+
+| ID | Capability boundary | Responsible for | Must not become |
+|---|---|---|---|
+| C1 | Shot resolution & capture | coherent current resolution, readiness, immutable ShotRevision capture | an independent source of semantic/world/spatial truth |
+| C2 | Publication/readiness coordination | cross-domain publication checks, Composition↔Spatial binding validation, revision-substitution compatibility verdicts | owner of either side of the contract it validates |
+| C3 | Observation compilation | deterministic derivation of renderer-facing observation specifications from captured authority | production-world identity |
+| C4 | Execution / materialization | execution adapters, runtime identity, transport, materialization, output import, execution-only compatibility views | canonical film state |
+| C5 | Take / review / approval | candidate Take identity, approval/rejection, Shot canon pointer, consequence/promotion review surfaces | automatic owner of world state or reusable production assets |
+| C6 | Historical reproducibility | captured-graph reads, Exact Rerun isolation, recovery, fail-closed historical validation | current-state reinterpretation of history |
+| C7 | Candidate-world ingestion | candidate extraction/matching/evidence packaging and domain-granular adoption workflow | authority merely because reconstruction/import succeeded |
+
+---
+
+# 2. Who owns this truth
+
+Rows intentionally separate facts that are often conflated.
+
+| Production fact or derived result | Owner / boundary |
+|---|---|
+| Eva exists as the selected story entity revision | **A1** semantic/story |
+| Eva has a forehead cut | **A2** world-state/continuity |
+| The cut persists after the applicable boundary | **A2** world-state/continuity |
+| The cut appears at 3100 ms inside a Shot | **A7** performance timing; **A2** owns any adopted persistent terminal state |
+| What the cut is approved to look like | **A3** visual identity |
+| The reusable makeup/geometry/texture realization used to depict the cut | **A5** production realization |
+| Eva's exact reusable body/face realization | **A5** production realization |
+| Where Eva stands in the persistent world | **A4** spatial |
+| Eva's continuity-significant root trajectory | **A4** spatial |
+| Eva's explicitly assigned local/non-continuity trajectory | **A7** performance, only where no higher A4 contract owns it |
+| Eva's local pose/deformation/expression | **A7** performance |
+| `chair-07` exists as one durable addressable occurrence | **A6** composition/instance |
+| `chair-07` is the durable subject for persistent state because it is instance-bound | **A6** owns occurrence identity; **A2** owns the state applied to that subject; APR-100 prevents duplicate subjects |
+| `chair-07` is fallen | **A2** world-state |
+| Which Production Revision realizes `chair-07` in a published composition | **A6** composition pins the reference; **A5** owns the referenced revision itself |
+| Compatibility verdict for substituting Chair Revision 3 for Revision 2 | **C2** coordination result under APR-104; it does not become a new production authority |
+| Exact Composition Revision ↔ SpatialWorldRevision binding | underlying facts remain **A6 + A4**; the binding contract is validated/coordinated by **C2** under APR-101 |
+| Authority-bound desk transform | **A4** spatial; any representation-local transform is downstream materialization |
+| Decorative-lamp arrangement owned only by the reusable set | **A6** composition |
+| Bulk/procedural placement rule | **A6** composition |
+| Camera focal length and Shot camera path | **A4** cinematic |
+| Depth/mask/structural observation given to an executor | **C3** derived observation; no production truth ownership |
+| Generated/rendered video bytes | **C4** execution output; imported as a **C5** Take candidate |
+| Approval of a Take as the Shot's canon | **C5** owns the approval/canon record; it does not thereby adopt generated world-state consequences |
+| Future editorial trim/order/transition/placement decision over approved Takes | **FUTURE EDITORIAL AUTHORITY — DESIGN REQUIRED**; it must reference exact approved source media, resolve meaning-bearing choices deterministically, and cannot be inferred from C4 commands or C5 approval alone |
+| Playback proxy for an approved Take | **C4** derived representation/evidence; no production/editorial truth ownership |
+| Media-preservation class and selected conform/composition materialization mode | **C4** execution/provenance result under APR-121/126; neither proves editorial or production-property correctness |
+| Exact source/output lineage of a materialized edit/delivery | **C6/C4** historical/execution provenance over future editorial authority; lineage does not become the editorial decision itself |
+| A distinctive generated prop appearing only in a Take | candidate only; becomes **A5/A6** only through explicit promotion/publication/adoption |
+| Simulation predicts a lamp fall | candidate/execution evidence only; **A8/A2/A7** change only after explicit adoption in the relevant domain |
+| `lamp-main supported_by desk-main` | **A8** physical relationship |
+| Reconstructed label suggesting an existing occurrence match | **C7** candidate evidence; actual identity remains **A1/A6** after review |
+| Confidence score on a candidate | evidence only; owns no production truth |
+| Human-readable `22:05` annotation | annotation only; canonical ordering remains **A1** topology |
+| What historical Shot 22 actually used | **C6** reads immutable captured history; the captured facts remain the exact historical A1–A8 identities |
+| Whether Shot 22 can rerun today | **C6** historical readiness; any compatibility materialization is **C4** execution-only |
+
+---
+
+# 3. Current implementation baseline
+
+All implementation claims below are scoped to the published milestone baseline:
+
+```text
+M14 @ 89298e793c651e9e8b9164912c76e3595867a60a
+tree 3c4fec0bdb11732f0c77c22acc65d3ba882df393
+```
+
+The existing vertical spine provides:
+
+```text
+M1–M5   storage/blob identity, provenance assets, Shot/Generation history,
+        durable execution lifecycle, candidate Takes, approval/rejection
+
+M6/M7   semantic identity, narrative topology, random-access continuity state,
+        controlled relations, coherent capture, Exact Rerun isolation
+
+M8      approved visual identity and visual readiness/capture
+
+M9      model-specific realization profiles, compiler/readiness, runtime capture
+
+M10A–E  spatial/cinematic authority, Shot spatial plans, spatial observation/
+        materialization contracts, derived execution artifacts
+
+M10F    recovery, corruption/fault proofs, historical compatibility views,
+        scale/query-shape proofs, source-gate proof-map discipline
+
+M11–M14 reusable Production Revisions, stable Composition/occurrence identity,
+        authority-complete reusable-world capture, generalized World Observation
+        compilation, retained production-world execution, and real GPU source gate
+```
+
+The M14 baseline now contains both the vertical authority→capture→execution→history spine and the reusable-production/world-observation path. The next architecture gap before Performance is durable dialogue/vocal identity plus the first concrete Performance representation; M15/M16 remain separately planned continuity work.
+
+---
+
+# 4. Capability inventory
+
+## 4.1 Semantic / story authority — A1
+
+| Capability | Status | Anchor |
+|---|---|---|
+| CreativeEntity + EntityRevision identity | IMPLEMENTED | M6/M7 |
+| Canonical narrative topology / ordering | IMPLEMENTED | M1–M7 |
+| Semantic dependencies + coherent capture pinning | IMPLEMENTED | M6C |
+| Dialogue Line revision identity: speaker + exact wording + language + narrative identity | DEFINED — DESIGN REQUIRED | Architecture v1.6 §7.12.2/§13.6 |
+
+## 4.2 World-state / continuity authority — A2
+
+| Capability | Status | Anchor |
+|---|---|---|
+| Continuity features + boundary transitions + random-access effective state | IMPLEMENTED | M6/M7; APR-010–014 |
+| Boundary inclusion/exclusion semantics | IMPLEMENTED | M7; APR-011 |
+| Controlled semantic relationships + readiness | IMPLEMENTED | M7 |
+| Persistent state on instance-bound Production Instance subjects | IMPLEMENTED — EXTEND | Existing continuity resolver + Architecture v1.6 §4.11/§7.10.1; APR-100 |
+| Persistent terminal state handoff for genuine intra-Shot changes | DEFINED — DESIGN REQUIRED | Architecture v1.6 §4.13/§12.6; APR-102 |
+| Persistent-consequence adoption separate from Take approval | DEFINED — UNIMPLEMENTED | Architecture v1.6 §12.7 |
+
+## 4.3 Visual identity authority — A3
+
+| Capability | Status | Anchor |
+|---|---|---|
+| Approved visual identity revisions / packs / canonical resolver | IMPLEMENTED | M8; APR-061 |
+| Visual readiness + immutable capture | IMPLEMENTED | M8 |
+| Property-scoped reference claims + explicit prohibited-property claims | DEFINED — DESIGN REQUIRED | Architecture v1.6 §10.9/§17.11; APR-112–113 |
+
+## 4.4 Spatial / cinematic authority — A4
+
+| Capability | Status | Anchor |
+|---|---|---|
+| Spatial world revisions | IMPLEMENTED | M10B; APR-063 |
+| Shot spatial plan: staging/blocking/camera + immutable capture | IMPLEMENTED | M10D |
+| Camera/staging canonical grammars | IMPLEMENTED | M10A |
+| Spatial execution materialization and derived artifacts | IMPLEMENTED | M10E |
+| Spatial continuity on instance-bound durable subjects | IMPLEMENTED | M13; Architecture v1.6 §4.11; APR-100 |
+
+## 4.5 Production-realization authority — A5
+
+| Capability | Status | Anchor |
+|---|---|---|
+| Immutable byte identity + provenance Asset identity | IMPLEMENTED | M1–M5; APR-021/024 |
+| Production Object + immutable Production Revision lifecycle | IMPLEMENTED | M11; Architecture v1.6 §7.2–7.3; APR-080–083 |
+| Consumption-closure publication/readiness | IMPLEMENTED | M11; Architecture v1.6 §7.6/§10.2; APR-083 |
+| Representation registry independent of Production Revision identity | DEFINED — DESIGN REQUIRED | Architecture v1.6 §7.4; APR-081 |
+| General production derivation records | DEFINED — DESIGN REQUIRED | Architecture v1.6 §7.5; APR-082 |
+| Working tracking references + explicit update offering | DEFINED — DESIGN REQUIRED | Architecture v1.6 §10.3–10.4; APR-098 |
+| Fork / lineage operations | DEFINED — DESIGN REQUIRED | Architecture v1.6 §11.4 |
+
+## 4.6 Composition / instance authority — A6
+
+| Capability | Status | Anchor |
+|---|---|---|
+| Composition + immutable Composition Revision lifecycle | IMPLEMENTED | M12; Architecture v1.6 §7.8–7.9; APR-085 |
+| Stable addressable Production Instance identity | IMPLEMENTED | M12; Architecture v1.6 §7.10; APR-086/100 |
+| Bulk/procedural instance model + promotion to addressable occurrence | DEFINED — DESIGN REQUIRED | Architecture v1.6 §7.10; APR-086 |
+| Surviving occurrence identity across Composition Revision publication | IMPLEMENTED | M12/M13; Architecture v1.6 §4.14/§10.5; APR-103 |
+| Explicit identity-changing operations and affected-state diagnostics | DEFINED — DESIGN REQUIRED | Architecture v1.6 §7.10.2; APR-103 |
+| Shot-local typed overrides / source substitution | DEFINED — DESIGN REQUIRED | Architecture v1.6 §11.2; APR-087–088 |
+| Consequential edit-scope disambiguation | DEFINED — UNIMPLEMENTED | Architecture v1.6 §3.2/§11.1; APR-087 |
+
+## 4.7 Performance authority — A7
+
+| Capability | Status | Anchor |
+|---|---|---|
+| Performance Revision candidate → adoption → immutable lifecycle | DEFINED — DESIGN REQUIRED | Architecture v1.6 §7.12/§13 |
+| Root/world trajectory vs local performance decomposition | DEFINED — UNIMPLEMENTED | Architecture v1.6 §8.6/§13.2; APR-090 |
+| Sparse Shot-relative state-changing event timing | DEFINED — DESIGN REQUIRED | Architecture v1.6 §7.12.1; APR-102 |
+| Vocal Performance Revision: exact adopted speech bytes + dialogue link + provenance | DEFINED — DESIGN REQUIRED | Architecture v1.6 §7.12.2/§13.6 |
+| Exact vocal/performance/Shot temporal mapping | DEFINED — DESIGN REQUIRED | Architecture v1.6 §13.7 |
+| Dialogue alignment / phoneme / viseme analysis as derived evidence | DEFINED — DESIGN REQUIRED | Architecture v1.6 §7.12.3/§13.8 |
+| Facial Performance Revision bound to exact Vocal Performance Revision | DEFINED — DESIGN REQUIRED | Architecture v1.6 §13.9 |
+| Vocal↔facial synchronization validation/capture contract | DEFINED — DESIGN REQUIRED | Architecture v1.6 §13.9–13.10 |
+| Dialogue/vocal/facial replacement compatibility + readiness projection | DEFINED — DESIGN REQUIRED | Architecture v1.6 §13.10 |
+| Multi-Shot dialogue segment mapping / J-cut / L-cut / off-screen speech | DEFINED — DESIGN REQUIRED | Architecture v1.6 §13.12 |
+| First concrete body/facial/vocal performance representation / authoring format | DEFINED — DESIGN REQUIRED | Architecture v1.6 §13.5–13.9; G8 co-design required |
+| Reusable rig / deformation implementation | FUTURE DOMAIN | Architecture v1.6 §13.5 |
+
+## 4.8 Physical-relationship authority — A8
+
+| Capability | Status | Anchor |
+|---|---|---|
+| Relationship status semantics: inferred / validated / authoritative | DEFINED — UNIMPLEMENTED | Architecture v1.6 §7.13/§14; APR-090 |
+| Exact production relationship vocabulary | FUTURE DOMAIN | Architecture v1.6 §25.5 |
+| Simulation or other physical prediction as candidate source | EXECUTION-ONLY — UNIMPLEMENTED | Architecture v1.6 §14.3; APR-080/097 |
+
+## 4.9 Shot resolution & capture — C1
+
+| Capability | Status | Anchor |
+|---|---|---|
+| One coherent current-state resolver + readiness for implemented domains | IMPLEMENTED | M6C → M10; APR-012/015/031 |
+| ShotRevision capture + pinned historical identities | IMPLEMENTED | M1 → M10; APR-014/020 |
+| Resolved production context for Production Revisions, Composition Revisions, stable instances, and reusable-world bindings | IMPLEMENTED | M13 |
+| Resolved production context extended with performances, dialogue/vocal/facial bindings, relationships, events, and handoffs | IMPLEMENTED — EXTEND | Architecture v1.6 §16.2 |
+| Reusable-world readiness failures: missing subject/binding/occurrence closure | IMPLEMENTED | M13/M14; APR-100–103 |
+| Performance/event/relationship readiness failures | IMPLEMENTED — EXTEND | Architecture v1.6 §16.3 |
+
+## 4.10 Publication/readiness coordination — C2
+
+| Capability | Status | Anchor |
+|---|---|---|
+| Composition↔Spatial versioned immutable binding | IMPLEMENTED | M13; Architecture v1.6 §4.12/§9.4–9.6; APR-101 |
+| Production Revision substitution compatibility assessment | DEFINED — DESIGN REQUIRED | Architecture v1.6 §4.15/§10.6; APR-104 |
+| Four compatibility verdicts | DEFINED — UNIMPLEMENTED | APR-104 |
+| Deterministic execution-only historical translation precedent | IMPLEMENTED | M10F; APR-099 |
+| Profile-scoped Production Revision qualification protocol/result/evidence | DEFINED — DESIGN REQUIRED | Architecture v1.6 §10.7–10.10; APR-114–117 |
+| Qualification applicability / requalification readiness after revision-profile-protocol change | DEFINED — DESIGN REQUIRED | Architecture v1.6 §10.10/§17.12; APR-114–115 |
+
+## 4.11 Observation compilation — C3
+
+| Capability | Status | Anchor |
+|---|---|---|
+| Specialized observation-compilation foundations for visual/spatial/realization inputs | IMPLEMENTED — EXTEND | M8–M10E; Architecture v1.6 §17 treats them as precedents |
+| General World Observation Compiler boundary + versioned observation specification | IMPLEMENTED | M14; Architecture v1.6 §17.1–17.3/§25.7; APR-091–093 |
+| Property-level preservation/trust contract | IMPLEMENTED | M14; Architecture v1.6 §17.4–17.5; APR-093–094 |
+| Adjustable generative-freedom envelope per Shot/property | DEFINED — UNIMPLEMENTED | Architecture v1.6 §4.9; APR-094–095 |
+| Shared-subset equivalence proof for generalized compiler/adapter paths | IMPLEMENTED | M14; Architecture v1.6 §4.17/§17.8; APR-106 |
+| Immutable capability/environment snapshot after mutable discovery | IMPLEMENTED | M14 production package/runtime closure; Architecture v1.6 §4.21/§17.10; APR-110 |
+
+The generalized compiler is now implemented for the M14 production-world observation slice. This does not imply every future authority property is supported. Live discovery remains evidence only until captured/certified into an immutable contract.
+
+## 4.12 Execution / materialization — C4
+
+| Capability | Status | Anchor |
+|---|---|---|
+| Durable Generation lifecycle, queue, attempts, cancellation/recovery | IMPLEMENTED | M4–M6/M10F |
+| Test executor + primary production execution adapter + versioned workflow specifications | IMPLEMENTED | M4–M9 |
+| Runtime/model-byte identity and attestation closure | IMPLEMENTED | M5/M9/M10 |
+| Deterministic derived-input transport + durable output import | IMPLEMENTED | M10E/M10F |
+| Historical compatibility translation views | IMPLEMENTED | M10F; APR-099 |
+| Pre-queue hard-capability failure for generalized property contracts in the M14 observation profile | IMPLEMENTED | M14; Architecture v1.6 §17.6 |
+| Targeted correction / delta realization from an existing Take under explicit preservation requirements | DEFINED — DESIGN REQUIRED | Architecture v1.6 §4.18–4.19/§18.5; APR-107–108 |
+| Typed operation status separate from execution/domain verdict | DEFINED — DESIGN REQUIRED | Architecture v1.6 §4.22/§18.7; APR-111 |
+| Parent-linked execution-attempt delta lineage for controlled iteration | DEFINED — DESIGN REQUIRED | Architecture v1.6 §18.8; APR-118 |
+
+## 4.13 Take / review / approval — C5
+
+| Capability | Status | Anchor |
+|---|---|---|
+| Take candidates + explicit approval/rejection + Shot canon | IMPLEMENTED | M1–M6 |
+| Continuity/adherence QC evidence classes | DEFINED — DESIGN REQUIRED | Architecture v1.6 §18.3 |
+| Generated-detail promotion surface: Take-local invention → candidate Production Object | DEFINED — UNIMPLEMENTED | Architecture v1.6 §18.4/§21.17; APR-080/097 |
+| Persistent-consequence review surface: adopt/ignore independently of Take approval | DEFINED — UNIMPLEMENTED | Architecture v1.6 §12.7/§21.6; APR-102 |
+| Preservation-aware correction review: requested change + protected-property evidence | DEFINED — DESIGN REQUIRED | Architecture v1.6 §18.6/§20.12; APR-108/111 |
+| Qualification evidence inspection/review without mutating Production Revision authority | DEFINED — DESIGN REQUIRED | Architecture v1.6 §10.8/§23.7; APR-114–115 |
+| Explicit raw-candidate → approved-select boundary for editorial/finishing consumers | IMPLEMENTED — EXTEND | Existing Take approval + Architecture v1.6 §18.9; APR-119 |
+
+## 4.14 Historical reproducibility — C6
+
+| Capability | Status | Anchor |
+|---|---|---|
+| Captured-graph-only historical reads | IMPLEMENTED | M6C → M10; APR-013/023 |
+| Exact Rerun isolation from current resolvers | IMPLEMENTED | M6P → M10; APR-025 |
+| Graded reproducibility claims | IMPLEMENTED | APR-026; implemented milestone contracts |
+| Fail-closed storage recovery / historical liveness | IMPLEMENTED | M10F |
+| Adversarial corruption/fault coverage | IMPLEMENTED | M10F |
+| Feature-film-scale bounded query-shape proof | IMPLEMENTED | M10F; APR-044 |
+| Historical reusable-production + observation closure | IMPLEMENTED | M13/M14; APR-083/098–104 |
+
+## 4.15 Candidate-world ingestion — C7
+
+| Capability | Status | Anchor |
+|---|---|---|
+| Import media as candidate world with domain-granular adoption | DEFINED — DESIGN REQUIRED | Architecture v1.6 §15; APR-096–097 |
+| Identity matching routes: match existing / create candidate / ignore | DEFINED — DESIGN REQUIRED | Architecture v1.6 §15.2 |
+| Evidence-topology metadata granularity | FUTURE DOMAIN | Architecture v1.6 §25.6 |
+
+## 4.16 Product surfaces
+
+Product surfaces project authoritative state and capability workflows; they do not become independent authority.
+
+| Surface | Status | Anchor |
+|---|---|---|
+| Project/Shot workspaces; continuity authoring/state/provenance; visual and spatial inspectors | IMPLEMENTED | M7–M10; APR-050–051 |
+| Production Library for Production Objects/Revisions, updates, provenance | DEFINED — DESIGN REQUIRED | Architecture v1.6 §23.1 |
+| World/Set workspace for compositions, instances, publication, binding review | DEFINED — DESIGN REQUIRED | Architecture v1.6 §23.2 |
+| Story-State workspace extensions for off-screen consequences/conflicts | IMPLEMENTED — EXTEND | Existing continuity UI + Architecture v1.6 §23.3 |
+| Review workspace extensions for consequence review, promotion, QC | DEFINED — DESIGN REQUIRED | Architecture v1.6 §23.5 |
+| Qualification / Reference inspector for scoped claims, protocol/profile evidence, verdict, and requalification need | DEFINED — DESIGN REQUIRED | Architecture v1.6 §23.7 |
+
+## 4.17 Explicit future domains
+
+| Capability | Status | Anchor |
+|---|---|---|
+| Dialogue / vocal performance needed for acting and lip sync | DEFINED — DESIGN REQUIRED under A1/A7, **not** a separate Sound authority | Architecture v1.6 §7.12.2–.3/§13.6–13.12 |
+| Foley / ambience / SFX / music / final dialogue edit / mix / mastering authority | FUTURE DOMAIN | Architecture v1.6 §13.11/§25.10; APR-066 |
+| Continuous story-clock domain | FUTURE DOMAIN | Architecture v1.6 §7.11 |
+| Multi-user / collaborative production semantics | FUTURE DOMAIN | Architecture v1.6 §25.11 |
+| Agent-authored candidate flows | FUTURE DOMAIN | APR-052 |
+| Task-specific agent/context compiler and permission projection | FUTURE DOMAIN | Architecture v1.6 §17.9; APR-109 |
+| Authoritative editorial decision model: sequence/edit revision, exact approved-source ranges, ordering, transitions, editorial timebase, deterministic resolution of meaning-bearing defaults/inference | FUTURE DOMAIN — DESIGN REQUIRED; owner intentionally unassigned until G12 | Architecture v1.6 §18.10/§27.10; APR-066, APR-122, APR-124–125 |
+| Exact source-media inspection/fingerprinting: retained media, stream identity, source timebase/sample-frame basis | DEFINED — DESIGN REQUIRED execution/evidence capability | Architecture v1.6 §18.10.1; APR-021, APR-122 |
+| Playback proxy/mezzanine generation and mapping | DEFINED — DESIGN REQUIRED; non-authoritative C4 representation | Architecture v1.6 §18.10.3/.7; APR-123, APR-125–126 |
+| Preservation-classified conform / composition rendering / mixed materialization compiled from resolved editorial meaning | DEFINED — DESIGN REQUIRED C4 capability | Architecture v1.6 §18.10.2/.4–.7; APR-121, APR-124–126 |
+| Delivery/source lineage and historical reconstruction of materialized editorial outputs | DEFINED — DESIGN REQUIRED C6/C4 provenance capability | Architecture v1.6 §18.10; APR-122, APR-124–126 |
+
+---
+
+# 4.18 Cross-cutting construction/execution disciplines
+
+These are not new truth owners and do not create graph roots by themselves unless a concrete capability requires implementation.
+
+| Discipline | Classification | Architectural effect |
+|---|---|---|
+| Reuse-before-invention capability ladder | BINDING DESIGN DISCIPLINE | New foundational subsystem proposals must first test representation/projection/adapter reuse where plausible. |
+| Shared-subset equivalence | BINDING SOURCE-GATE RULE | New generalized adapters preserve already-supported semantics or disclose the behavior change explicitly. |
+| Delta realization | EXECUTION CAPABILITY | A bounded correction may derive a new Take from a source Take without mutating either the source or upstream production truth. |
+| Change + preservation contract | EXECUTION/REVIEW CONTRACT | Correction success requires both intended change and declared protected properties. |
+| Task-context projection | FUTURE AUTOMATION CAPABILITY | Agents receive minimal authoritative context; prompts/context remain disposable. |
+| Discovery → immutable snapshot | CERTIFICATION/READINESS CONTRACT | Mutable environment knowledge must be frozen before production/history depends on it. |
+| Typed operation/domain verdicts | CROSS-CUTTING API CONTRACT | Completion, production verdict, and evidence remain separate. |
+| Profile-scoped qualification | READINESS/EVIDENCE CONTRACT | `qualified` applies to revision × profile × protocol × evidence, never to an asset globally. |
+| Cheap-before-expensive qualification | PRODUCTION-ECONOMICS DISCIPLINE | Use the cheapest sufficient evidence to falsify a requirement before costly execution. |
+| Attempt-delta lineage | EXECUTION/REVIEW DISCIPLINE | Preserve prior attempts and record the exact intentional change. |
+| Candidate/select separation | REVIEW/EDITORIAL DISCIPLINE | Raw outputs never become editorial inputs without explicit approval/select. |
+| State over variant cross-products | AUTHORITY DISCIPLINE | Independent persistent facts stay composable state; variants are realization packages, not replacement identity. |
+| Production-vs-media preservation separation | EDITORIAL/EXECUTION DISCIPLINE | Property preservation and media handling are orthogonal claims; neither substitutes for the other. |
+| Immutable approved-source addressing | EDITORIAL/HISTORY DISCIPLINE | Future edit decisions resolve exact approved Take/source/time ranges; trims/reorders never mutate source Takes. |
+| Proxy/source separation | EXECUTION/UI DISCIPLINE | Playback proxies may change without changing source identity or edit meaning. |
+| Editorial authority → conform compiler | EXECUTION BOUNDARY DISCIPLINE | FFmpeg/NLE/interchange syntax is derived execution provenance, not the editorial decision. |
+
+---
+
+# 5. Authority-seam audit
+
+The audit below tests truth ownership separately from coordination responsibility.
+
+| Seam | Potential confusion | Resolution | Truth owner(s) |
+|---|---|---|---|
+| Injury appearance vs physical realization | one visible result appears to be one fact | approved appearance and physical realization are distinct facts | A3 / A5 |
+| Stateful `chair-07` | composition identity vs world state | A6 owns occurrence identity; A2 owns state targeting that one durable subject; APR-100 forbids duplicate subjects | A6 identity; A2 state |
+| Composition ↔ Spatial binding | coordinator mistaken for third authority | C2 validates one exact A6↔A4 binding; C2 owns no placement truth | A6 + A4 |
+| Revision substitution | compatibility verdict mistaken for new asset authority | C2 produces verdict; A5 owns revisions; consuming authorities retain their facts | A5 plus relevant consumer authority |
+| Publication vs qualification | one global “locked” state hides scope | A5 owns published revision; C2/C5 own profile-scoped qualification evidence/verdict; current-use selection remains separate | A5 + C2/C5 |
+| Reference evidence vs visual truth | image attachment treated as all-property authority | adopted property-scoped claim constrains existing owner; reference itself remains evidence | A3 or other owning property authority |
+| Raw candidate vs edit/select | file existence mistaken for production acceptance | C5 approval/select controls downstream editorial consumption | C5 |
+| Approved source vs editorial decision | Take approval mistaken for the edit itself | C5 selects source eligibility; future editorial authority owns trims/order/sequence decisions over exact source ranges | C5 + future editorial domain |
+| Proxy vs authoritative source | playback/transcode convenience treated as the source | C4 proxy remains derived; future edit resolves retained approved source unless explicit re-adoption creates new source identity | C4 + future editorial domain |
+| Media preservation vs production preservation | “lossless” media handling treated as proof that the right film properties were preserved | APR-121 keeps media class separate from property-level preservation/review | C4 evidence + owning production authorities |
+| Editorial decision vs conform command | FFmpeg/NLE syntax treated as the edit | authoritative edit compiles to executor plan; syntax is retained provenance only | future editorial domain + C4 |
+| Character trajectory | A4 and A7 both appear able to own motion | continuity-significant/root/world placement stays A4; explicitly assigned local/non-spatial motion is A7 | A4 or A7, never both for the same fact |
+| Intra-Shot event vs persistent state | one event appears to own both timing and downstream truth | A7 owns Shot-relative timing; A2 owns persistent terminal/downstream state; APR-102 requires agreement | A7 timing / A2 state |
+| Shot-start event | duplicate time-zero event vs boundary state | canonical Shot/start transition owns state; redundant event is invalid | A2 |
+| Authority-bound instance placement | composition transform vs spatial transform | A4 owns placement; A6 representation transform must agree/derive | A4 |
+| Historical representation on current executor | compatibility view appears to replace history | C4 translation is execution-only; C6 reads immutable captured source | no new truth owner |
+| Human clock labels | label appears to become chronology | canonical narrative topology remains A1 | A1 |
+| Candidate confidence | score appears to decide truth | confidence only prioritizes review; adoption remains explicit | none until relevant A-domain adopts |
+
+**Audit verdict:** no unresolved two-owner or no-owner production fact remains in the accepted pressure-test scope.
+
+---
+
+# 6. Capability-shape summary
+
+The baseline remains a deep vertical spine:
+
+```text
+story / semantic authority
+        ↓
+continuity + visual + spatial authority
+        ↓
+coherent Shot capture
+        ↓
+specialized observation/materialization
+        ↓
+execution + Take review
+        ↓
+historical isolation / recovery
+```
+
+The missing mass is the horizontal production-world layer:
+
+```text
+Production Objects / Revisions
+        ↓
+Composition Revisions
+        ↓
+stable addressable occurrences
+        ↓
+instance-bound persistent state + spatial continuity
+        ↓
+Composition ↔ Spatial binding
+        ↓
+revision-substitution compatibility
+        ↓
+Shot-resolution extension
+```
+
+Parallel missing branches include:
+
+```text
+within-Shot event timing + persistent handoff
+performance revisions
+physical relationships/contact
+candidate-world ingestion
+World Observation Compiler generalization
+review-side consequence/promotion/QC surfaces
+targeted correction / delta realization under preservation contracts
+future approved-source editorial/conform branch with explicit media-preservation classes
+proxy/source separation + exact source/output lineage
+shared-subset equivalence + immutable capability snapshots for generalized execution
+```
+
+Nothing in this map replaces the implemented M1–M14 authority/capture/execution/history spine. The dialogue/performance capabilities extend it; M15/M16 remain separately planned. The editorial/conform branch is a future downstream design family and does not reorder the current frontier.
+
+---
+
+# 7. Handoff to the Gap & Dependency Graph
+
+The Gap & Dependency Graph should consume the following dependency facts without assigning milestone numbers yet:
+
+```text
+1. Production Revision → Composition → stable occurrence identity →
+   instance-bound state/spatial continuity → Shot-resolution extension.
+
+2. Composition ↔ Spatial binding requires minimal Composition capability plus the
+   already-implemented spatial authority; it does not require every A5 feature first.
+
+3. APR-103 stable occurrence identity is required before persistent state can safely
+   survive Composition Revision evolution.
+
+4. APR-104 compatibility gates later reusable-revision substitution; it is not required
+   merely to create the first immutable Production Revision.
+
+5. Intra-Shot persistent changes split into A7 timing and A2 terminal state.
+   The A2 side depends on APR-100 durable authority subjects; capture requires APR-102 agreement.
+
+6. Dialogue semantics (A1) → Vocal Performance (A7) → optional derived alignment →
+   dialogue-bound Facial Performance (A7) is the required authority direction for production-grade lip sync.
+
+7. Exact Performance temporal mapping is a co-prerequisite of both Vocal Performance and
+   body/facial Performance; broad Sound Post is not.
+
+8. The World Observation Compiler is implemented for the M14 production-world slice and
+   remains the downstream execution boundary; later Performance properties extend it rather
+   than moving authority into executor-specific controls.
+
+9. Review-side consequence adoption, generated-detail promotion, and QC depend on their
+   upstream authorities but do not depend on one another.
+
+10. Candidate-world ingestion is an independent candidate-source branch and must not block
+    the dialogue/performance program.
+
+11. Delta realization/correction is downstream of captured authority and the property-level
+    preservation contract; it must not become a new production-truth owner.
+
+12. Generalized adapter/compiler work must carry an explicit shared-subset equivalence proof
+    wherever a predecessor path already defines supported semantics.
+
+13. Task-context compilation and live capability discovery remain future operational/context
+    capabilities unless a concrete authorized milestone requires them; they do not reorder the
+    authority program.
+
+14. Future editorial/conform design begins only after explicit Take approval/select and must co-design
+    exact source-media/timebase addressing, deterministic resolution of meaning-bearing editorial choices,
+    proxy/source separation, media-preservation classes, conform/composition/mixed materialization planning,
+    and delivery lineage without assigning executor syntax or renderer behavior editorial authority.
+```
+
+The next unresolved filmmaker-complete design slice on the current roadmap remains the **Performance / Dialogue co-design family**. The dependency graph should also add a separate future **Editorial / Conform / Finishing** branch downstream of approved Take/select, but that branch must not reorder the current Performance program:
+
+```text
+Dialogue Line identity (A1)
+        +
+exact Performance temporal mapping
+        ↓
+Vocal Performance revision (A7)
+        +
+minimum body/facial Performance representation (A7)
+        ↓
+vocal↔facial synchronization + Shot capture
+```
+
+A separate future branch must also preserve:
+
+```text
+approved Take/select
+        ↓
+exact source media + temporal identity
+        ↓
+future editorial decision authority
+        ↓
+deterministic resolved editorial projection
+        ↓
+preservation-aware conform / composition / mixed materialization
+        ↓
+derived delivery + exact lineage
+```
+
+This is a dependency handoff, not implementation authorization or a schema freeze.
+
+---
+
+# 8. Explicit non-goals
+
+```text
+no milestone numbers or roadmap ordering decisions
+no future schema/table/format freeze
+no implementation authorization
+no repository publication/tagging/release authorization
+no assumption that an execution/candidate technique is production authority
+```
+
+The revised planning artifact is the **SoloRing Gap & Dependency Graph v1.6**. Architecture Pattern Register v2.5 and Architecture v1.6 should be cited directly; no current milestone ordering changes merely because the future editorial/conform branch is now bounded more precisely.
