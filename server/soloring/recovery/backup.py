@@ -2019,12 +2019,13 @@ def _verify_m13_pi_state(con) -> None:
             raise RecoveryCorruption(
                 f"PI feature {r[0]} lacks a production_instance adoption "
                 "for its occurrence (provenance incoherent)")
-    # transitions: set/clear grammar + active-coordinate uniqueness
+    # transitions: set/clear grammar; tombstone-inclusive uniqueness
+    # is structural (PK/unique); the active-coordinate partial unique
+    # is validated by schema parity
     trows = con.execute(
         "SELECT id, feature_id, anchor_type, anchor_id, boundary, "
         "operation, value_json, value_hash FROM "
         "production_instance_feature_transitions").fetchall()
-    active: set = set()
     for t in trows:
         if t[3] is None:
             raise RecoveryCorruption(
@@ -2042,10 +2043,7 @@ def _verify_m13_pi_state(con) -> None:
             raise RecoveryCorruption(
                 f"PI feature transition {t[0]}: operation outside "
                 "set|clear")
-        coord = (t[1], t[2], t[3], t[4])
-        # tombstone-inclusive uniqueness is structural (PK/unique); the
-        # active-coordinate partial unique is validated by schema parity
-        del coord, active
+
 
 
 def _verify_m13_pi_spatial(con) -> None:

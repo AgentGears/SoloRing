@@ -343,3 +343,59 @@ async def test_unsupported_future_restore_head_fails_closed(client, tmp_path):
     with pytest.raises(BackupManifestInvalid, match="alembic_version"):
         await restore(backup_root, dest)
     assert not dest.exists()
+
+
+async def test_two_pi_transitions_backup_verification(
+        client, tmp_path):
+    """R1-correction regression: a valid database with TWO or more PI
+    feature transition rows passes _verify_m13_pi_state and the real
+    backup() path. The published baseline deleted the loop-local
+    `active` on the first iteration (UnboundLocalError on the
+    second); predecessor fixtures carried at most one transition, so
+    only an accumulated history ever iterated the loop twice."""
+    from soloring.recovery.backup import backup, _verify_m13_pi_state
+    import sqlite3 as _sq
+
+    engine = client._transport.app.state.engine
+    # a real M13 world with a PI occurrence + feature (the baseline's
+    # own machinery), then TWO lawful PI feature transitions on one
+    # feature (Shot/start upright + Shot/end fallen)
+    from tests.test_m13_shot_capture import _full_m13_world
+    from tests.test_m16_instance import _pi_world
+    b, sel, fid = await _pi_world(client, tag=b"m15-pi2")
+    occ = sel["occurrence_id"]
+    import json as _json
+    from soloring.domain.canonical import canonical_hash
+    from soloring.db.timeutil import DB_NOW_SQL as NOW
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            f"INSERT INTO production_instance_feature_transitions "
+            "(id, feature_id, anchor_type, anchor_id, boundary, "
+            "operation, value_json, value_hash, created_at, updated_at)"
+            f" VALUES (:t1, :f, 'shot', :s, 'start', 'set', :vj, :vh, "
+            f"{NOW}, {NOW}), (:t2, :f, 'shot', :s, 'end', 'set', :vj2, "
+            f":vh2, {NOW}, {NOW})"),
+            {"t1": "00000000-0000-4000-8000-0000000000e3",
+             "t2": "00000000-0000-4000-8000-0000000000e4",
+             "f": fid, "s": b["shot"],
+             "vj": _json.dumps("upright"),
+             "vh": canonical_hash("upright"),
+             "vj2": _json.dumps("fallen"),
+             "vh2": canonical_hash("fallen")})
+    # the focused verifier passes with two transitions
+    import shutil as _sh
+    import tempfile as _tf
+    tmpdb = Path(_tf.mkdtemp()) / "soloring.db"
+    settings = client._transport.app.state.settings
+    _sh.copy(settings.data_dir / "soloring.db", tmpdb)
+    con = _sq.connect(str(tmpdb))
+    con.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    con.close()
+    con = _sq.connect(str(tmpdb))
+    con.row_factory = _sq.Row
+    _verify_m13_pi_state(con)
+    con.close()
+    # and the real backup path succeeds end to end
+    await _stamp_alembic(client)
+    await backup(settings, tmp_path / "bk2")
+    assert (tmp_path / "bk2" / "backup-manifest.json").exists()
