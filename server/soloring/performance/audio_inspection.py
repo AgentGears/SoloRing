@@ -47,6 +47,13 @@ def inspect_wave(data: bytes) -> dict:
         body = data[pos + 8: pos + 8 + chunk_size]
         if len(body) < chunk_size:
             raise _reject(f"truncated chunk {chunk_id!r}")
+        advance = 8 + chunk_size + (chunk_size & 1)
+        if chunk_size & 1 and pos + advance > len(data):
+            # the mandatory RIFF pad byte after an odd-sized chunk is
+            # physically absent — malformed/truncated container (second
+            # source review, finding 6)
+            raise _reject(
+                f"odd-sized chunk {chunk_id!r} lacks its RIFF pad byte")
         if chunk_id == b"fmt ":
             if chunk_size < 16:
                 raise _reject("fmt chunk too small")
@@ -65,7 +72,14 @@ def inspect_wave(data: bytes) -> dict:
             fmt_seen = True
         elif chunk_id == b"data":
             data_bytes = chunk_size
-        pos += 8 + chunk_size + (chunk_size & 1)
+        pos += advance
+    if pos != len(data):
+        # the walk must terminate EXACTLY at the declared RIFF boundary
+        # (riff_size + 8 == physical length is already enforced); any
+        # residue is unaccounted trailing bytes
+        raise _reject(
+            f"chunk walk ends at {pos} != physical container end "
+            f"{len(data)}")
     if not fmt_seen:
         raise _reject("missing fmt chunk")
     if data_bytes is None:

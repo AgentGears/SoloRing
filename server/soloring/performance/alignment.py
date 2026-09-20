@@ -155,6 +155,9 @@ async def put_dialogue_alignment(
                     ("analyzer_version", analyzer_version),
                     ("model_identity", model_identity),
                     ("runtime_identity", runtime_identity)):
+        # whitespace is tested ONLY for emptiness: the derivation-basis
+        # coordinates are persisted EXACTLY as supplied — never
+        # silently rewritten (second source review, finding 5)
         if not isinstance(v, str) or not v.strip():
             raise SoloRingError(
                 ErrorCode.ALIGNMENT_PROVENANCE_INCOMPLETE,
@@ -231,10 +234,10 @@ async def put_dialogue_alignment(
                          created_at=await db_now(session)))
     row = DialogueAlignment(
         id=new_uuid(), vocal_performance_revision_id=vp.id,
-        analyzer_id=analyzer_id.strip(),
-        analyzer_version=analyzer_version.strip(),
-        model_identity=model_identity.strip(),
-        runtime_identity=runtime_identity.strip(),
+        analyzer_id=analyzer_id,
+        analyzer_version=analyzer_version,
+        model_identity=model_identity,
+        runtime_identity=runtime_identity,
         parameters_sha256=parameters_sha256,
         alignment_schema_version=1,
         retained_blob_hash=retained_sha, retained_sha256=retained_sha,

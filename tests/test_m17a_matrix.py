@@ -205,6 +205,23 @@ async def test_unsupported_media_and_invalid_audio_bytes_typed(client):
     assert r.status_code == 422
     assert r.json()["error_code"] == "INVALID_AUDIO_BYTES"
 
+    # odd-sized trailing chunk: lawful WITH its RIFF pad byte,
+    # malformed WITHOUT (the pad is physically required by the layout)
+    body = b"INFOabc"  # 7 bytes, odd
+    padded = bytearray(wave_bytes(48000, 48000))
+    padded += b"LIST" + struct.pack("<I", len(body)) + body + b"\x00"
+    struct.pack_into("<I", padded, 4, len(padded) - 8)
+    h4 = await place_blob(client, bytes(padded))
+    _, r = await _candidate(client, pid, eid, lid, h4)
+    assert r.status_code == 201, r.text
+    stripped = padded[:-1]
+    struct.pack_into("<I", stripped, 4, len(stripped) - 8)
+    h5 = await place_blob(client, bytes(stripped))
+    _, r = await _candidate(client, pid, eid, lid, h5)
+    assert r.status_code == 422
+    assert r.json()["error_code"] == "INVALID_AUDIO_BYTES"
+    assert "pad" in r.json()["message"]
+
 
 # ----------------------------------------------------------- B06 trim
 
@@ -232,6 +249,12 @@ async def test_provenance_closed_schema_negatives(client):
         "schema_version": 1, "source_kind": "recorded",
         "unexpected": "field"})
     assert r.status_code == 422, r.text  # pydantic extra=forbid
+    # an EXPLICIT null must remain visible to the closed-schema
+    # validator (exclude_unset, never exclude_none)
+    _, r = await _candidate(client, pid, eid, lid, h, source_provenance={
+        "schema_version": 1, "source_kind": "recorded",
+        "generator_id": None})
+    assert r.status_code == 422, r.text
     _, r = await _candidate(client, pid, eid, lid, h, source_provenance={
         "schema_version": 2, "source_kind": "recorded"})
     assert r.status_code == 422
@@ -314,18 +337,22 @@ async def test_same_run_different_bytes_fails_closed(client):
     assert r.json()["error_code"] == "ALIGNMENT_RUN_CONFLICT"
 
 
-# ----------------------------------------------- E06/E07 rational grammar
+# ------------------------- E06 canonicalization (frozen: reduce)
 
 @pytest.mark.asyncio
-async def test_e06_noncanonical_rational_rejected(client):
+async def test_e06_reducible_rational_canonicalizes(client):
     pid, eid, lid, vp = await _selected_vp(client)
     shot = await make_shot(client, pid, 2000)
     r = await _map(client, shot, 0, vp["id"], pnum=2, pden=4)
-    assert r.status_code == 422, r.text
-    assert r.json()["error_code"] == "INVALID_RATIONAL"
-    r = await _map(client, shot, 0, vp["id"], anum=0, aden=4)
-    assert r.status_code == 422
-    assert r.json()["error_code"] == "INVALID_RATIONAL"
+    assert r.status_code == 200, r.text
+    r = await _map(client, shot, 1, vp["id"], pnum=0, pden=99)
+    assert r.status_code == 200, r.text
+    listed = (await client.get(f"/shots/{shot}/vocal-segments")).json()
+    by_pos = {m["position"]: m for m in listed}
+    assert by_pos[0]["performance_origin_ms"] == {"num": 1, "den": 2}
+    assert by_pos[1]["performance_origin_ms"] == {"num": 0, "den": 1}
+    # the latent §6.1 -2/-4 note notwithstanding, the mandatory matrix
+    # ruling is: den <= 0 rejects
     r = await _map(client, shot, 0, vp["id"], anum=1, aden=-2)
     assert r.status_code == 422
     assert r.json()["error_code"] == "INVALID_RATIONAL"
@@ -366,22 +393,47 @@ async def test_e08_zero_duration_shot_rejects_mapping(client):
     assert r.json()["error_code"] == "SHOT_DURATION_REQUIRED"
 
 
-# --------------------------------- E14 simultaneous speaker positions
+# ---------------- E14 simultaneous speakers are LAWFUL (frozen table
+# design: overlapping speakers / multiple vocal segments allowed)
 
 @pytest.mark.asyncio
-async def test_e14_simultaneous_positions_rejected(client):
-    pid, eid, lid, vp = await _selected_vp(client)
+async def test_e14_two_simultaneous_speakers_at_positions_0_1(client):
+    # two INDEPENDENT lines, each with its own speaker and explicitly
+    # selected VP
+    pid = await make_project(client)
+    performers = []
+    for i in range(2):
+        eid = await make_entity(client, pid, name=f"Speaker{i}")
+        lid = (await client.post(f"/projects/{pid}/dialogue-lines",
+                                 json={})).json()["id"]
+        _, r = await _candidate(client, pid, eid, lid,
+                                await place_blob(client,
+                                                 wave_bytes(48000, 96000)))
+        assert r.status_code == 201, r.text
+        vp = (await client.post(
+            f"/vocal-candidates/{r.json()['id']}/adopt",
+            json={"adopted_by": "director"})).json()
+        r = await client.put(
+            f"/dialogue-line-revisions/{vp['dialogue_line_revision_id']}"
+            "/vocal-selection",
+            json={"vocal_performance_revision_id": vp["id"],
+                  "selected_by": "director"})
+        assert r.status_code == 200, r.text
+        performers.append(vp)
     shot = await make_shot(client, pid, 2000)
-    # position 0: [0, 1000) ms (samples [0,48000) @ 48 kHz)
-    r = await _map(client, shot, 0, vp["id"], s=0, e=48000, anum=0)
-    assert r.status_code == 200, r.text
-    # position 1 overlapping position 0 in shot-domain time -> rejected
-    r = await _map(client, shot, 1, vp["id"], s=24000, e=72000, anum=500)
-    assert r.status_code == 422, r.text
-    assert "simultaneous" in r.json()["message"]
-    # an ADJACENT second position is lawful (no shared shot-domain time)
-    r = await _map(client, shot, 1, vp["id"], s=48000, e=96000, anum=1000)
-    assert r.status_code == 200, r.text
+    # position 0: [0, 1000) ms; position 1: [500, 1500) ms — the
+    # Shot-domain intervals OVERLAP: two simultaneous speakers, which
+    # the frozen design explicitly allows
+    r0 = await _map(client, shot, 0, performers[0]["id"],
+                    s=0, e=48000, anum=0)
+    assert r0.status_code == 200, r0.text
+    r1 = await _map(client, shot, 1, performers[1]["id"],
+                    s=24000, e=72000, anum=500)
+    assert r1.status_code == 200, r1.text
+    listed = (await client.get(f"/shots/{shot}/vocal-segments")).json()
+    assert [m["position"] for m in listed] == [0, 1]
+    assert all(m["current_readiness"]["readiness"] == "CURRENT"
+               for m in listed)
 
 
 # ------------------------------------------- E16 observable STALE result
@@ -538,3 +590,48 @@ async def test_f09_missing_alignment_bytes_fail_recovery(
     with pytest.raises(Exception) as exc_info:
         await backup(settings, tmp_path / "bk")
     assert "missing" in str(exc_info.value)
+
+
+# ------------------- readiness fail-closed on structural corruption
+
+@pytest.mark.asyncio
+async def test_readiness_fails_closed_on_missing_selection_row(client):
+    pid, eid, lid, vp = await _selected_vp(client)
+    shot = await make_shot(client, pid, 2000)
+    r = await _map(client, shot, 0, vp["id"])
+    assert r.status_code == 200, r.text
+    engine = client._transport.app.state.engine
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "DELETE FROM vocal_performance_selections WHERE "
+            "dialogue_line_revision_id = :d"),
+            {"d": vp["dialogue_line_revision_id"]})
+    r = await client.get(f"/shots/{shot}/vocal-segments")
+    assert r.status_code == 500, r.text
+    assert "INTERNAL_INVARIANT_VIOLATION" in r.text or \
+        r.json()["error_code"] == "INTERNAL_INVARIANT_VIOLATION"
+
+
+# ---------------- analyzer identity preserved EXACTLY (no rewriting)
+
+@pytest.mark.asyncio
+async def test_analyzer_identity_preserved_exactly_no_cap(client):
+    pid, eid, lid, vp = await _selected_vp(client, frames=48000)
+    h = vp["retained_audio_blob_hash"]
+    words = [{"start_sample": 0, "end_sample_exclusive": 120,
+              "label": "You"}]
+    long_identity = "X" * 300  # no unfrozen 255 cap on identity fields
+    body = _al(vp["id"], h, words)
+    body["analyzer_id"] = "  padded-analyzer  "
+    body["model_identity"] = long_identity
+    r = await client.post(
+        f"/vocal-performance-revisions/{vp['id']}/alignments", json=body)
+    assert r.status_code == 201, r.text
+    created = r.json()
+    assert created["analyzer_id"] == "  padded-analyzer  ", (
+        "the derivation-basis coordinate is persisted EXACTLY as "
+        "supplied — whitespace tests emptiness only, never rewrites")
+    assert created["model_identity"] == long_identity
+    listed = (await client.get(
+        f"/vocal-performance-revisions/{vp['id']}/alignments")).json()
+    assert listed[0]["analyzer_id"] == "  padded-analyzer  "

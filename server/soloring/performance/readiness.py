@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from soloring.errors import SoloRingError
 from soloring.performance.models import (ShotVocalSegmentMapping,
                                          VocalPerformanceRevision,
                                          VocalPerformanceSelection)
@@ -26,24 +27,41 @@ STALE = "STALE"
 async def project_mapping_readiness(
         session: AsyncSession,
         mapping: ShotVocalSegmentMapping) -> dict:
-    """The current-readiness diagnosis for one mapping row."""
+    """The current-readiness diagnosis for one mapping row.
+
+    The frozen selection lifecycle is strictly UNSET | an exact VP id,
+    and every DialogueLineRevision carries exactly one selection row:
+    an unresolvable VP or a MISSING selection row is structural
+    corruption and fails closed — it is NEVER normalized into a third
+    readiness posture (second source review, finding 4). STALE covers
+    only lawful states: an UNSET selection or a different explicitly
+    selected VP.
+    """
     vp = await session.get(
         VocalPerformanceRevision,
         mapping.vocal_performance_revision_id)
+    if vp is None:
+        raise SoloRingError(
+            "INTERNAL_INVARIANT_VIOLATION",
+            f"mapping {mapping.shot_id}@{mapping.position} references a "
+            "missing VocalPerformanceRevision — corruption", status_code=500)
     selection = await session.get(
-        VocalPerformanceSelection,
-        vp.dialogue_line_revision_id) if vp is not None else None
-    selected = (selection.selected_vocal_performance_revision_id
-                if selection is not None else None)
-    state = (CURRENT if selected == mapping.vocal_performance_revision_id
-             else STALE)
+        VocalPerformanceSelection, vp.dialogue_line_revision_id)
+    if selection is None:
+        raise SoloRingError(
+            "INTERNAL_INVARIANT_VIOLATION",
+            f"DialogueLineRevision {vp.dialogue_line_revision_id} has no "
+            "selection row — every revision is created with one; this "
+            "is corruption, not a readiness state", status_code=500)
+    selected = selection.selected_vocal_performance_revision_id
+    state = CURRENT if selected == mapping.vocal_performance_revision_id \
+        else STALE
     return {"readiness": state,
             "mapped_vocal_performance_revision_id":
             mapping.vocal_performance_revision_id,
             "selected_vocal_performance_revision_id": selected,
             "selection_state":
-            ("UNSET" if selection is not None and selected is None
-             else ("SELECTED" if selected is not None else "MISSING"))}
+            "UNSET" if selected is None else "SELECTED"}
 
 
 def stale_readiness(mapping: ShotVocalSegmentMapping,

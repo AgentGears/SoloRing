@@ -305,6 +305,9 @@ def upgrade() -> None:
                            name="ck_da_alignment_schema"),
         sa.CheckConstraint("length(parameters_sha256) = 64",
                            name="ck_da_parameters_hash_len"),
+        sa.CheckConstraint(
+            "parameters_sha256 NOT GLOB '*[^0-9a-f]*'",
+            name="ck_da_parameters_hash_hex"),
         sa.CheckConstraint("length(retained_blob_hash) = 64",
                            name="ck_da_blob_hash_len"),
         sa.CheckConstraint("length(retained_sha256) = 64",

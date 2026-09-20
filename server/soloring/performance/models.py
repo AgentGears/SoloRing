@@ -306,6 +306,8 @@ class DialogueAlignment(Base):
                         name="ck_da_alignment_schema"),
         CheckConstraint("length(parameters_sha256) = 64",
                         name="ck_da_parameters_hash_len"),
+        CheckConstraint("parameters_sha256 NOT GLOB '*[^0-9a-f]*'",
+                        name="ck_da_parameters_hash_hex"),
         CheckConstraint("length(retained_blob_hash) = 64",
                         name="ck_da_blob_hash_len"),
         CheckConstraint("length(retained_sha256) = 64",

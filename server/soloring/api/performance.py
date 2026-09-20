@@ -106,8 +106,12 @@ async def create_vocal_candidate(revision_id: str,
         session, request.app.state.settings,
         dialogue_line_revision_id=revision_id,
         retained_audio_blob_hash=body.retained_audio_blob_hash,
+        # exclude_unset (not exclude_none): an explicitly supplied null
+        # must REMAIN VISIBLE so the closed-schema validator rejects it
+        # — exclude_none would silently delete caller-supplied fields
+        # before canonical hashing (second source review, finding 3)
         source_provenance=body.source_provenance.model_dump(
-            exclude_none=True),
+            exclude_unset=True),
         trim_start_sample=body.trim_start_sample,
         trim_end_sample_exclusive=body.trim_end_sample_exclusive)
     await session.commit()

@@ -369,3 +369,10 @@ def _verify_alignments(con: sqlite3.Connection,
             if not isinstance(r[f], str) or not r[f].strip():
                 raise _corrupt(
                     f"alignment {r['id']} provenance incomplete")
+        # the externally supplied SHA coordinate carries the full frozen
+        # grammar — 64 LOWERCASE HEX — not merely a length (second
+        # source review, finding 5)
+        if not re.fullmatch(r"[0-9a-f]{64}", r["parameters_sha256"]):
+            raise _corrupt(
+                f"alignment {r['id']} parameters_sha256 is not 64 "
+                "lowercase hex")

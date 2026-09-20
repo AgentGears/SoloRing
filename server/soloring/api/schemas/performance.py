@@ -154,10 +154,13 @@ class AlignmentDocumentIn(_Closed):
 
 
 class AlignmentCreate(_Closed):
-    analyzer_id: str = Field(min_length=1, max_length=255)
-    analyzer_version: str = Field(min_length=1, max_length=255)
-    model_identity: str = Field(min_length=1, max_length=255)
-    runtime_identity: str = Field(min_length=1, max_length=255)
+    # identity fields have NO unfrozen length cap and are preserved
+    # exactly (emptiness-only whitespace test in the service); only the
+    # SHA field carries the frozen 64-hex contract
+    analyzer_id: str
+    analyzer_version: str
+    model_identity: str
+    runtime_identity: str
     parameters_sha256: str = Field(min_length=64, max_length=64)
     alignment_document: AlignmentDocumentIn
     derivation_run: DerivationRunIn

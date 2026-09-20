@@ -112,26 +112,12 @@ async def put_shot_vocal_segment_mapping(
             ErrorCode.MAPPING_NO_SHOT_OVERLAP,
             "mapped interval does not intersect the Shot picture "
             "interval (entirely before/after)", status_code=422)
-    # matrix E14 — no simultaneous speaker positions: two mappings in
-    # one Shot may not occupy overlapping shot-domain time (exact
-    # rational comparison; J/L-cut overlap is audio-vs-picture, not
-    # segment-vs-segment)
-    others = (await session.execute(
-        select(ShotVocalSegmentMapping).where(
-            ShotVocalSegmentMapping.shot_id == shot_id,
-            ShotVocalSegmentMapping.position != position))
-    ).scalars().all()
-    for o in others:
-        o_start = Fraction(o.shot_anchor_num, o.shot_anchor_den)
-        o_end = o_start + Fraction(
-            (o.source_end_sample_exclusive - o.source_start_sample)
-            * 1000, o.sample_rate_hz)
-        if start_ms < o_end and o_start < end_ms:
-            raise SoloRingError(
-                ErrorCode.INVALID_SAMPLE_INTERVAL,
-                f"mapping at position {position} overlaps position "
-                f"{o.position} in shot-domain time — a Shot cannot "
-                "carry simultaneous vocal segments", status_code=422)
+    # NOTE (frozen table design + mandatory E14): a Shot MAY carry
+    # simultaneous vocal segments — overlapping speakers at different
+    # positions are lawful; the second source review reversed the
+    # previous overlap refusal. Remaining checks are the frozen
+    # picture-intersection and current-selection working-readiness
+    # laws only.
     doc = {"mapping_schema_version": 1,
            "vocal_performance_revision_id": vp.id,
            "source_start_sample": source_start_sample,
