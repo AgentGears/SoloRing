@@ -62,13 +62,3 @@ async def project_mapping_readiness(
             "selected_vocal_performance_revision_id": selected,
             "selection_state":
             "UNSET" if selected is None else "SELECTED"}
-
-
-def stale_readiness(mapping: ShotVocalSegmentMapping,
-                    selection: VocalPerformanceSelection | None) -> bool:
-    """Boolean form of the same diagnosis (kept for direct row-level
-    checks): True when the mapping's VP is not the current selection."""
-    if selection is None:
-        return True
-    return (selection.selected_vocal_performance_revision_id !=
-            mapping.vocal_performance_revision_id)
