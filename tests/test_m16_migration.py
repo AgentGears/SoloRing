@@ -67,7 +67,8 @@ def test_mig_01(tmp_path, monkeypatch):
     con = _con(tmp_path)
     before = _tables(con)
     con.close()
-    _upgrade(tmp_path, monkeypatch, "head")
+    # pinned to the 0017 era: head (0018) would add the seven M17A tables
+    _upgrade(tmp_path, monkeypatch, "0017")
     con = _con(tmp_path)
     after = _tables(con)
     con.close()
@@ -267,7 +268,9 @@ def test_mig_07(tmp_path, monkeypatch):
     assert len(blob_before) == 8
     con.close()
 
-    _upgrade(tmp_path, monkeypatch, "head")
+    # pinned to the 0017 era: head (0018) raises the Blob-FK inventory
+    # to eleven and its empty downgrade is refused by design
+    _upgrade(tmp_path, monkeypatch, "0017")
     con = _con(tmp_path)
     assert _blob_fk_inventory(con) == blob_before
     con.close()
@@ -276,7 +279,7 @@ def test_mig_07(tmp_path, monkeypatch):
     assert con.execute("SELECT id,name FROM projects WHERE id='p'").fetchone() == before
     assert _blob_fk_inventory(con) == blob_before
     con.close()
-    _upgrade(tmp_path, monkeypatch, "head")
+    _upgrade(tmp_path, monkeypatch, "0017")
     con = _con(tmp_path)
     assert con.execute("SELECT id,name FROM projects WHERE id='p'").fetchone() == before
     assert _blob_fk_inventory(con) == blob_before

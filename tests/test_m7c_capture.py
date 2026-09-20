@@ -607,7 +607,7 @@ def test_migration_files_and_head_is_0009():
     versions = BASE_DIR / "server" / "alembic" / "versions"
     files = sorted(p.name for p in versions.glob("*.py"))
     assert files[-1] == "0018_m17a_dialogue_vocal_foundation.py"
-    assert len(files) == 17  # M16-A added 0017
+    assert len(files) == 18  # M17A added 0018 (M16-A added 0017)
 
 
 # --- Reuse integrity fail-closed ----------------------------------------------------------------
