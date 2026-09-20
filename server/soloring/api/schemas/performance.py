@@ -1,11 +1,22 @@
-"""M17A API request/response schemas (frozen R5 §10)."""
+"""M17A API request/response schemas (frozen R5 §10; source review
+findings 4/5/9). Every request schema is a CLOSED canonical surface:
+`extra="forbid"` so caller fields are rejected — never silently
+discarded before canonical hashing — and declared schema versions are
+exact literals, so a payload claiming another version cannot be
+rewritten into v1."""
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
-class DialogueLineCreate(BaseModel):
+class _Closed(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class DialogueLineCreate(_Closed):
     pass
 
 
@@ -20,10 +31,12 @@ class DialogueLineCollection(BaseModel):
     next_cursor: tuple[str, str] | None = None
 
 
-class DialogueLineRevisionCreate(BaseModel):
+class DialogueLineRevisionCreate(_Closed):
     speaker_subject_id: str
-    wording: str = Field(min_length=1, max_length=20000)
-    language: str = Field(min_length=2, max_length=64)
+    # frozen wording is the EXACT approved Unicode text: no length cap
+    # (the service enforces non-whitespace-only), no trimming here
+    wording: str
+    language: str
 
 
 class DialogueLineRevisionRead(BaseModel):
@@ -37,16 +50,16 @@ class DialogueLineRevisionRead(BaseModel):
     created_at: str
 
 
-class ProvenanceIn(BaseModel):
-    schema_version: int = 1
-    source_kind: str
+class ProvenanceIn(_Closed):
+    schema_version: Literal[1] = 1
+    source_kind: Literal["recorded", "adr", "imported", "generated"]
     generator_id: str | None = None
     generator_version: str | None = None
     workflow_id: str | None = None
     workflow_version: str | None = None
 
 
-class VocalCandidateCreate(BaseModel):
+class VocalCandidateCreate(_Closed):
     retained_audio_blob_hash: str = Field(min_length=64, max_length=64)
     source_provenance: ProvenanceIn
     trim_start_sample: int | None = None
@@ -66,7 +79,7 @@ class VocalCandidateRead(BaseModel):
     created_at: str
 
 
-class AdoptRequest(BaseModel):
+class AdoptRequest(_Closed):
     adopted_by: str = Field(min_length=1, max_length=255)
 
 
@@ -86,7 +99,7 @@ class VocalPerformanceRead(BaseModel):
     adopted_at: str
 
 
-class SelectionPut(BaseModel):
+class SelectionPut(_Closed):
     vocal_performance_revision_id: str | None = None
     selected_by: str = Field(min_length=1, max_length=255)
 
@@ -99,12 +112,12 @@ class SelectionRead(BaseModel):
     selected_at: str | None = None
 
 
-class RationalIn(BaseModel):
+class RationalIn(_Closed):
     num: int
     den: int
 
 
-class SegmentMappingPut(BaseModel):
+class SegmentMappingPut(_Closed):
     vocal_performance_revision_id: str
     source_start_sample: int
     source_end_sample_exclusive: int
@@ -113,32 +126,34 @@ class SegmentMappingPut(BaseModel):
     shot_anchor_ms: RationalIn
 
 
-class InputDigestIn(BaseModel):
+class InputDigestIn(_Closed):
     vocal_performance_revision_id: str
     retained_audio_blob_sha256: str = Field(min_length=64, max_length=64)
 
 
-class DerivationRunIn(BaseModel):
-    schema_version: int = 1
+class DerivationRunIn(_Closed):
+    schema_version: Literal[1] = 1
     run_timestamp_utc: str
     host_context: str = Field(min_length=1, max_length=1024)
     input_digest: InputDigestIn
 
 
-class AlignmentEntryIn(BaseModel):
+class AlignmentEntryIn(_Closed):
     start_sample: int
     end_sample_exclusive: int
     label: str = Field(min_length=1, max_length=256)
 
 
-class AlignmentDocumentIn(BaseModel):
-    schema_version: int = 1
-    words: list[AlignmentEntryIn] = []
-    phonemes: list[AlignmentEntryIn] = []
-    viseme_classes: list[AlignmentEntryIn] = []
+class AlignmentDocumentIn(_Closed):
+    schema_version: Literal[1] = 1
+    # all three arrays are REQUIRED: a closed schema never defaults a
+    # missing array into existence (source review finding 5)
+    words: list[AlignmentEntryIn]
+    phonemes: list[AlignmentEntryIn]
+    viseme_classes: list[AlignmentEntryIn]
 
 
-class AlignmentCreate(BaseModel):
+class AlignmentCreate(_Closed):
     analyzer_id: str = Field(min_length=1, max_length=255)
     analyzer_version: str = Field(min_length=1, max_length=255)
     model_identity: str = Field(min_length=1, max_length=255)
@@ -158,6 +173,7 @@ class AlignmentRead(BaseModel):
     parameters_sha256: str
     retained_sha256: str
     derivation_run_hash: str
+    derivation_run_identity: str
     created_at: str
 
 

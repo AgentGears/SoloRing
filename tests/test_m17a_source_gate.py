@@ -94,7 +94,8 @@ async def test_source_gate(client, tmp_path):
     words = [{"start_sample": 0, "end_sample_exclusive": 12000,
               "label": "You"}]
 
-    def _al(ws):
+    def _al(ws, run_ts="2026-09-19T12:34:56.123456Z",
+            host="worker-7 (CPython 3.12.10)"):
         return {"analyzer_id": "X", "analyzer_version": "1.2.0",
                 "model_identity": "Mx", "runtime_identity": "Rx",
                 "parameters_sha256": "a" * 64,
@@ -103,9 +104,8 @@ async def test_source_gate(client, tmp_path):
                                        "viseme_classes": []},
                 "derivation_run": {
                     "schema_version": 1,
-                    "run_timestamp_utc":
-                        "2026-09-19T12:34:56.123456Z",
-                    "host_context": "worker-7 (CPython 3.12.10)",
+                    "run_timestamp_utc": run_ts,
+                    "host_context": host,
                     "input_digest": {
                         "vocal_performance_revision_id": v1["id"],
                         "retained_audio_blob_sha256": h}}}
@@ -116,16 +116,21 @@ async def test_source_gate(client, tmp_path):
     d1s = (await client.post(
         f"/vocal-performance-revisions/{v1['id']}/alignments",
         json=_al(words))).json()
+    # the variant is a genuinely DISTINCT derivation run R2 (R2 != R1):
+    # one exact run may not carry contradictory outputs (frozen F08)
     d1v = (await client.post(
         f"/vocal-performance-revisions/{v1['id']}/alignments",
         json=_al([
             {"start_sample": 0, "end_sample_exclusive": 6000,
              "label": "You"},
             {"start_sample": 6000, "end_sample_exclusive": 13000,
-             "label": "weren't"}]))).json()
+             "label": "weren't"}],
+            run_ts="2026-09-19T12:41:09.654321Z"))).json()
     assert len({d1["id"], d1s["id"], d1v["id"]}) == 3
     assert d1s["retained_sha256"] == d1["retained_sha256"]
     assert d1v["retained_sha256"] != d1["retained_sha256"]
+    assert d1v["derivation_run_identity"] != d1["derivation_run_identity"]
+    assert d1v["derivation_run_identity"] == d1v["derivation_run_hash"]
     evidence["D1"], evidence["D1_same"], evidence["D1_variant"] = \
         d1, d1s, d1v
     # replacement: Lr2 -> UNSET -> adopt V2 -> explicit select

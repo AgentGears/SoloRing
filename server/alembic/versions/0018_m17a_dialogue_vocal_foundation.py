@@ -299,6 +299,7 @@ def upgrade() -> None:
         sa.Column("retained_sha256", sa.Text(), nullable=False),
         sa.Column("derivation_run_json", sa.Text(), nullable=False),
         sa.Column("derivation_run_hash", sa.Text(), nullable=False),
+        sa.Column("derivation_run_identity", sa.Text(), nullable=False),
         sa.Column("created_at", sa.Text(), nullable=False),
         sa.CheckConstraint("alignment_schema_version = 1",
                            name="ck_da_alignment_schema"),
@@ -312,6 +313,12 @@ def upgrade() -> None:
                            name="ck_da_retained_equals_blob"),
         sa.CheckConstraint("length(derivation_run_hash) = 64",
                            name="ck_da_run_hash_len"),
+        sa.CheckConstraint(
+            "length(derivation_run_identity) = 64",
+            name="ck_da_run_identity_len"),
+        sa.CheckConstraint(
+            "derivation_run_identity = derivation_run_hash",
+            name="ck_da_run_identity_equals_hash"),
         sa.CheckConstraint("length(trim(analyzer_id)) > 0",
                            name="ck_da_analyzer_id_nonempty"),
         sa.CheckConstraint("length(trim(analyzer_version)) > 0",

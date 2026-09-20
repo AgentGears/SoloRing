@@ -12,7 +12,9 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 import sqlite3
+from fractions import Fraction
 from pathlib import Path
 
 from soloring.domain.canonical import canonical_hash, canonical_json_str
@@ -51,36 +53,17 @@ def _read_blob(blob_root: Path, h: str) -> bytes:
 
 
 def _inspect_wave_min(data: bytes) -> tuple[int, int]:
-    """(sample_rate_hz, sample_frame_count) via the same rules as
-    audio_inspection (RIFF/WAVE PCM only)."""
-    import struct
-
-    if len(data) < 12 or data[0:4] != b"RIFF" or data[8:12] != b"WAVE":
-        raise _corrupt("retained audio blob is not RIFF/WAVE")
-    pos, fmt, data_bytes, channels, rate, bits = 12, False, None, \
-        None, None, None
-    while pos + 8 <= len(data):
-        cid = data[pos:pos + 4]
-        (size,) = struct.unpack_from("<I", data, pos + 4)
-        body = data[pos + 8: pos + 8 + size]
-        if len(body) < size:
-            raise _corrupt("truncated WAVE chunk")
-        if cid == b"fmt ":
-            (aformat, ch, rt, _, _, bp) = struct.unpack_from(
-                "<HHIIHH", body, 0)
-            if aformat != 1:
-                raise _corrupt("retained audio blob is not PCM")
-            channels, rate, bits = ch, rt, bp
-            fmt = True
-        elif cid == b"data":
-            data_bytes = size
-        pos += 8 + size + (size & 1)
-    if not fmt or data_bytes is None:
-        raise _corrupt("WAVE missing fmt/data chunk")
-    fb = (channels * bits) // 8
-    if fb == 0 or data_bytes % fb != 0:
-        raise _corrupt("WAVE data chunk not whole frames")
-    return rate, data_bytes // fb
+    """(sample_rate_hz, sample_frame_count) through the SAME authoritative
+    inspector the service uses (source review finding 8: no parallel
+    re-implementation that can drift) — RIFF size, block_align and
+    byte_rate included."""
+    from soloring.performance.audio_inspection import inspect_wave
+    try:
+        info = inspect_wave(data)
+    except SoloRingError as exc:
+        raise _corrupt(f"retained audio blob fails WAVE inspection: "
+                       f"{exc.message}") from exc
+    return info["sample_rate_hz"], info["sample_frame_count"]
 
 
 def verify_m17a_dialogue_vocal_state(staged_db: Path,
@@ -123,6 +106,16 @@ def _verify_dialogue(con: sqlite3.Connection) -> None:
             raise _corrupt(f"DLR {r['id']} stored spec != row triple")
         if canonical_hash(canonical) != r["spec_hash"]:
             raise _corrupt(f"DLR {r['id']} spec_hash mismatch")
+        # exactness law (finding 4): wording is the EXACT approved
+        # Unicode text (whitespace-only wording is corruption) and the
+        # language tag satisfies the frozen grammar with no repair
+        if not isinstance(r["wording"], str) or not r["wording"].strip():
+            raise _corrupt(f"DLR {r['id']} wording is whitespace-only")
+        if r["language"] != r["language"].lower() or len(
+                r["language"]) > 64 or not re.fullmatch(
+                r"[a-z]{2,8}(-[a-z0-9]{1,8})*", r["language"]):
+            raise _corrupt(f"DLR {r['id']} language violates the "
+                           "frozen grammar")
         speaker = con.execute(
             "SELECT project_id FROM creative_entities WHERE id = ?",
             (r["speaker_subject_id"],)).fetchone()
@@ -140,8 +133,21 @@ def _verify_dialogue(con: sqlite3.Connection) -> None:
 
 def _verify_candidates(con: sqlite3.Connection,
                        blob_root: Path) -> None:
+    from soloring.performance.vocal import _provenance_v1
     for r in con.execute("SELECT * FROM vocal_candidates"):
         prov = json.loads(r["provenance_json"])
+        # recovery repeats the CLOSED-schema validation itself (source
+        # review finding 5) — it must never merely rehash whatever JSON
+        # is present
+        try:
+            _provenance_v1(prov)
+        except SoloRingError as exc:
+            raise _corrupt(f"candidate {r['id']} provenance violates "
+                           f"the closed schema: {exc.message}") from exc
+        if canonical_json_str(prov) != r["provenance_json"]:
+            raise _corrupt(
+                f"candidate {r['id']} provenance_json is not the "
+                "canonical serialization")
         if canonical_hash(prov) != r["provenance_hash"]:
             raise _corrupt(f"candidate {r['id']} provenance rehash fail")
         if prov.get("source_kind") != r["source_kind"]:
@@ -276,14 +282,16 @@ def _verify_mappings(con: sqlite3.Connection) -> None:
         if shot["duration_ms"] is None or shot["duration_ms"] <= 0:
             raise _corrupt("mapping Shot lacks positive duration")
         # picture intersection (readiness invariant restored historically)
-        delta_num = (r["source_end_sample_exclusive"]
-                     - r["source_start_sample"]) * 1000
-        rate = r["sample_rate_hz"]
-        end_ms_num = r["shot_anchor_num"] * rate + delta_num
-        start_ms_num = r["shot_anchor_num"] * rate
-        if not (end_ms_num > 0
-                and start_ms_num < shot["duration_ms"] * rate
-                * r["shot_anchor_den"]):
+        # — EXACT rational arithmetic (source review finding 2): the
+        # anchor carries its own denominator, so the comparison is
+        # Fraction(anchor) + Fraction(delta_ms) vs the picture window;
+        # integer num*rate arithmetic silently drops anchor_den != 1
+        anchor_ms = Fraction(r["shot_anchor_num"], r["shot_anchor_den"])
+        seg_ms = Fraction(
+            (r["source_end_sample_exclusive"]
+             - r["source_start_sample"]) * 1000, r["sample_rate_hz"])
+        if not (anchor_ms + seg_ms > 0
+                and anchor_ms < Fraction(shot["duration_ms"])):
             raise _corrupt("mapping does not intersect Shot picture")
 
 
@@ -302,18 +310,53 @@ def _verify_alignments(con: sqlite3.Connection,
             raise _corrupt(f"alignment {r['id']} blob row missing")
         data = _read_blob(blob_root, r["retained_blob_hash"])
         doc = json.loads(data.decode("utf-8"))
-        if doc.get("schema_version") != 1:
-            raise _corrupt(f"alignment {r['id']} schema != 1")
-        for arr in ("words", "phonemes", "viseme_classes"):
-            for e in doc.get(arr, []):
-                if not (vp["trim_start_sample"] <= e["start_sample"]
-                        < e["end_sample_exclusive"]
-                        <= vp["trim_end_sample_exclusive"]):
-                    raise _corrupt(
-                        f"alignment {r['id']} entry outside VP trim")
+        # recovery repeats the alignment-document validation (closed
+        # schema + trim-bounded entries) through the same validator the
+        # service uses (finding 5)
+        from soloring.performance.alignment import (
+            _validate_alignment_document, _validate_run_provenance)
+        try:
+            _validate_alignment_document(
+                doc, trim_start=vp["trim_start_sample"],
+                trim_end_exclusive=vp["trim_end_sample_exclusive"])
+        except SoloRingError as exc:
+            raise _corrupt(f"alignment {r['id']} document violates the "
+                           f"closed schema: {exc.message}") from exc
+        if hashlib.sha256(
+                canonical_json_str(doc).encode("utf-8")).hexdigest() \
+                != r["retained_sha256"]:
+            raise _corrupt(
+                f"alignment {r['id']} retained bytes != canonical "
+                "reserialization of the stored document")
         run = json.loads(r["derivation_run_json"])
+        try:
+            _validate_run_provenance(run)
+        except SoloRingError as exc:
+            raise _corrupt(f"alignment {r['id']} run violates the "
+                           f"closed schema: {exc.message}") from exc
+        if canonical_json_str(run) != r["derivation_run_json"]:
+            raise _corrupt(
+                f"alignment {r['id']} run_json is not the canonical "
+                "serialization")
         if canonical_hash(run) != r["derivation_run_hash"]:
             raise _corrupt(f"alignment {r['id']} run rehash fail")
+        # run identity law (finding 1): identity == hash, and one exact
+        # run never carries contradictory outputs
+        if r["derivation_run_identity"] != r["derivation_run_hash"] \
+                or len(r["derivation_run_identity"]) != 64:
+            raise _corrupt(f"alignment {r['id']} run identity != hash")
+        contradictory = con.execute(
+            "SELECT COUNT(*) FROM dialogue_alignments WHERE "
+            "vocal_performance_revision_id = ? AND "
+            "derivation_run_identity = ? AND retained_sha256 != ?",
+            (r["vocal_performance_revision_id"],
+             r["derivation_run_identity"], r["retained_sha256"])
+        ).fetchone()[0]
+        if contradictory:
+            raise _corrupt(
+                f"alignment {r['id']} shares its derivation run with a "
+                "row carrying different retained bytes — one exact run "
+                "cannot carry contradictory outputs")
         if run.get("input_digest", {}).get(
                 "vocal_performance_revision_id") != vp["id"] or \
                 run.get("input_digest", {}).get(

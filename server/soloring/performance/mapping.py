@@ -112,6 +112,26 @@ async def put_shot_vocal_segment_mapping(
             ErrorCode.MAPPING_NO_SHOT_OVERLAP,
             "mapped interval does not intersect the Shot picture "
             "interval (entirely before/after)", status_code=422)
+    # matrix E14 — no simultaneous speaker positions: two mappings in
+    # one Shot may not occupy overlapping shot-domain time (exact
+    # rational comparison; J/L-cut overlap is audio-vs-picture, not
+    # segment-vs-segment)
+    others = (await session.execute(
+        select(ShotVocalSegmentMapping).where(
+            ShotVocalSegmentMapping.shot_id == shot_id,
+            ShotVocalSegmentMapping.position != position))
+    ).scalars().all()
+    for o in others:
+        o_start = Fraction(o.shot_anchor_num, o.shot_anchor_den)
+        o_end = o_start + Fraction(
+            (o.source_end_sample_exclusive - o.source_start_sample)
+            * 1000, o.sample_rate_hz)
+        if start_ms < o_end and o_start < end_ms:
+            raise SoloRingError(
+                ErrorCode.INVALID_SAMPLE_INTERVAL,
+                f"mapping at position {position} overlaps position "
+                f"{o.position} in shot-domain time — a Shot cannot "
+                "carry simultaneous vocal segments", status_code=422)
     doc = {"mapping_schema_version": 1,
            "vocal_performance_revision_id": vp.id,
            "source_start_sample": source_start_sample,
@@ -166,12 +186,14 @@ async def delete_shot_vocal_segment_mapping(
 
 async def list_shot_vocal_segment_mappings(
         session: AsyncSession, *, shot_id: str) -> list[dict]:
+    from soloring.performance.readiness import project_mapping_readiness
     rows = (await session.execute(
         select(ShotVocalSegmentMapping).where(
             ShotVocalSegmentMapping.shot_id == shot_id)
         .order_by(ShotVocalSegmentMapping.position))).scalars().all()
     out = []
     for r in rows:
+        readiness = await project_mapping_readiness(session, r)
         out.append({
             "shot_id": r.shot_id, "position": r.position,
             "vocal_performance_revision_id":
@@ -185,5 +207,6 @@ async def list_shot_vocal_segment_mappings(
             "shot_anchor_ms": {"num": r.shot_anchor_num,
                                "den": r.shot_anchor_den},
             "mapping_hash": r.mapping_hash,
+            "current_readiness": readiness,
             "created_at": r.created_at, "updated_at": r.updated_at})
     return out

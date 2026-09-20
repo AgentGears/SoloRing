@@ -106,7 +106,8 @@ async def create_vocal_candidate(revision_id: str,
         session, request.app.state.settings,
         dialogue_line_revision_id=revision_id,
         retained_audio_blob_hash=body.retained_audio_blob_hash,
-        source_provenance=body.source_provenance.model_dump(),
+        source_provenance=body.source_provenance.model_dump(
+            exclude_none=True),
         trim_start_sample=body.trim_start_sample,
         trim_end_sample_exclusive=body.trim_end_sample_exclusive)
     await session.commit()
@@ -138,9 +139,20 @@ async def list_vocal_candidates(revision_id: str,
              response_model=VocalPerformanceRead, status_code=200)
 async def adopt_candidate(candidate_id: str, body: AdoptRequest,
                           session: AsyncSession = Depends(get_session)):
-    vp = await vocal_svc.adopt_vocal_candidate(
-        session, candidate_id=candidate_id, adopted_by=body.adopted_by)
-    await session.commit()
+    from sqlalchemy.exc import IntegrityError
+    try:
+        vp = await vocal_svc.adopt_vocal_candidate(
+            session, candidate_id=candidate_id, adopted_by=body.adopted_by)
+        await session.commit()
+    except IntegrityError:
+        # the UNIQUE(adopted_candidate_id) race can surface at COMMIT
+        # time (the winner commits between our SELECT and our write):
+        # converge by rolling back and re-running — the fresh
+        # transaction sees the committed winner and returns it (C03)
+        await session.rollback()
+        vp = await vocal_svc.adopt_vocal_candidate(
+            session, candidate_id=candidate_id, adopted_by=body.adopted_by)
+        await session.commit()
     return VocalPerformanceRead(
         id=vp.id, dialogue_line_revision_id=vp.dialogue_line_revision_id,
         revision_number=vp.revision_number,
@@ -175,13 +187,9 @@ async def put_selection(revision_id: str, body: SelectionPut,
     return SelectionRead(**result)
 
 
-@router.get("/dialogue-line-revisions/{revision_id}/vocal-performances",
-            response_model=list[VocalPerformanceRead])
-async def list_vocal_performances(revision_id: str,
-                                  session: AsyncSession = Depends(get_session)):
-    rows = (await vocal_svc.list_vocal_performances_full(
-        session, dialogue_line_revision_id=revision_id))
-    return [VocalPerformanceRead(**r) for r in rows]
+# the frozen first API surface carries no collection route for vocal
+# performances (source review drift 2): VP reads go through the
+# per-revision GET below, so the unfrozen listing route is absent
 
 
 @router.get("/vocal-performance-revisions/{revision_id}",
@@ -266,6 +274,7 @@ async def create_alignment(revision_id: str, body: AlignmentCreate,
         parameters_sha256=row.parameters_sha256,
         retained_sha256=row.retained_sha256,
         derivation_run_hash=row.derivation_run_hash,
+        derivation_run_identity=row.derivation_run_identity,
         created_at=row.created_at)
 
 

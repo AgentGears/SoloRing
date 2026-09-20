@@ -9,9 +9,7 @@ from __future__ import annotations
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from soloring.errors import ErrorCode, SoloRingError, not_found
-from soloring.performance.models import (DialogueLineRevision,
-                                         VocalPerformanceSelection,
-                                         ShotVocalSegmentMapping)
+from soloring.performance.models import DialogueLineRevision
 
 EVALUATOR_ID = "soloring.dialogue_vocal_compatibility"
 EVALUATOR_VERSION = 1
@@ -58,13 +56,3 @@ def _verdict(source: DialogueLineRevision,
     if same_triple:
         return REQUIRES_REVIEW
     return INCOMPATIBLE
-
-
-def stale_readiness(mapping: ShotVocalSegmentMapping,
-                    selection: VocalPerformanceSelection | None) -> bool:
-    """Current-readiness diagnosis ONLY: the mapping row and the VP are
-    never mutated by a later selection change (frozen R5 §8.2)."""
-    if selection is None:
-        return True
-    return (selection.selected_vocal_performance_revision_id !=
-            mapping.vocal_performance_revision_id)

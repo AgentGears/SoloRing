@@ -61,16 +61,24 @@ async def test_three_alignments_coexist_no_dedupe(client):
     d1_same = r.json()
     assert d1_same["id"] != d1["id"]
     assert d1_same["retained_sha256"] == d1["retained_sha256"]
-    # F08: same basis + different bytes -> distinct row, different hash
+    # F08: same basis + different bytes -> distinct row, different hash.
+    # The frozen contract makes the variant its own derivation run R2
+    # (R2 != R1): one exact run may not carry contradictory outputs
     body_v = _alignment(vp["id"], h, words=[
         {"start_sample": 0, "end_sample_exclusive": 6000, "label": "You"},
         {"start_sample": 6000, "end_sample_exclusive": 13000,
-         "label": "weren't"}])
+         "label": "weren't"}],
+        run_ts="2026-09-19T12:41:09.654321Z")
     r = await client.post(
         f"/vocal-performance-revisions/{vp['id']}/alignments", json=body_v)
+    assert r.status_code == 201, r.text
     d1_var = r.json()
     assert d1_var["id"] not in (d1["id"], d1_same["id"])
     assert d1_var["retained_sha256"] != d1["retained_sha256"]
+    assert d1_var["derivation_run_identity"] != d1[
+        "derivation_run_identity"]
+    assert d1_var["derivation_run_identity"] == d1_var[
+        "derivation_run_hash"]
     rows = (await client.get(
         f"/vocal-performance-revisions/{vp['id']}/alignments")).json()
     assert len(rows) == 3

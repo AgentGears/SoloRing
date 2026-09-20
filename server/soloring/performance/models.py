@@ -314,6 +314,10 @@ class DialogueAlignment(Base):
                         name="ck_da_retained_equals_blob"),
         CheckConstraint("length(derivation_run_hash) = 64",
                         name="ck_da_run_hash_len"),
+        CheckConstraint("length(derivation_run_identity) = 64",
+                        name="ck_da_run_identity_len"),
+        CheckConstraint("derivation_run_identity = derivation_run_hash",
+                        name="ck_da_run_identity_equals_hash"),
         CheckConstraint("length(trim(analyzer_id)) > 0",
                         name="ck_da_analyzer_id_nonempty"),
         CheckConstraint("length(trim(analyzer_version)) > 0",
@@ -352,5 +356,7 @@ class DialogueAlignment(Base):
     derivation_run_json: Mapped[str] = mapped_column(Text,
                                                       nullable=False)
     derivation_run_hash: Mapped[str] = mapped_column(Text,
-                                                      nullable=False)
+                                                     nullable=False)
+    derivation_run_identity: Mapped[str] = mapped_column(Text,
+                                                         nullable=False)
     created_at: Mapped[str] = mapped_column(Text, nullable=False)

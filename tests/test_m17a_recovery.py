@@ -75,7 +75,7 @@ async def test_backup_restore_round_trip(client, tmp_path):
     words = [{"start_sample": 0, "end_sample_exclusive": 12000,
               "label": "You"}]
 
-    def _al(vpid, audio, ws):
+    def _al(vpid, audio, ws, run_ts="2026-09-19T12:34:56.123456Z"):
         return {"analyzer_id": "X", "analyzer_version": "1.2.0",
                 "model_identity": "Mx", "runtime_identity": "Rx",
                 "parameters_sha256": "a" * 64,
@@ -84,7 +84,7 @@ async def test_backup_restore_round_trip(client, tmp_path):
                                        "viseme_classes": []},
                 "derivation_run": {
                     "schema_version": 1,
-                    "run_timestamp_utc": "2026-09-19T12:34:56.123456Z",
+                    "run_timestamp_utc": run_ts,
                     "host_context": "worker-7",
                     "input_digest": {
                         "vocal_performance_revision_id": vpid,
@@ -99,10 +99,11 @@ async def test_backup_restore_round_trip(client, tmp_path):
     assert r.status_code == 201  # D1_same
     a1v = _al(v1["id"], h1, [
         {"start_sample": 0, "end_sample_exclusive": 6000,
-         "label": "You"}])
+         "label": "You"}],
+        run_ts="2026-09-19T12:41:09.654321Z")  # distinct run R2
     r = await client.post(
         f"/vocal-performance-revisions/{v1['id']}/alignments", json=a1v)
-    assert r.status_code == 201  # D1_variant
+    assert r.status_code == 201, r.text  # D1_variant
     r = await client.post(
         f"/vocal-performance-revisions/{v2['id']}/alignments",
         json=_al(v2["id"], h2, words))

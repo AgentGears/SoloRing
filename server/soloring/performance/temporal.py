@@ -21,7 +21,7 @@ _I64_MAX = 2 ** 63 - 1
 class RationalError(SoloRingError):
     def __init__(self, reason: str):
         super().__init__(
-            ErrorCode.VALIDATION_ERROR,
+            ErrorCode.INVALID_RATIONAL,
             f"INVALID_RATIONAL: {reason}",
             status_code=422,
             details={"reason": reason},
@@ -29,17 +29,20 @@ class RationalError(SoloRingError):
 
 
 def canonical_rational(num: int, den: int) -> tuple[int, int]:
-    """Reduce (num, den) to canonical persisted form; validate."""
+    """Validate that (num, den) IS the canonical persisted form (source
+    review finding 9 / matrix E06): denominator positive, gcd(|num|,den)
+    == 1, and zero is exactly 0/1. Non-canonical input is REJECTED —
+    the persisted rational grammar is never silently repaired."""
     if not isinstance(num, int) or not isinstance(den, int):
         raise RationalError("numerator and denominator must be integers")
     if den <= 0:
         raise RationalError("denominator must be positive")
-    g = math.gcd(abs(num), den)
-    if g != 1:
-        num //= g
-        den //= g
-    if num == 0:
-        den = 1
+    if num == 0 and den != 1:
+        raise RationalError("zero must be expressed as 0/1")
+    if math.gcd(abs(num), den) != 1:
+        raise RationalError(
+            f"{num}/{den} is not canonical (gcd != 1); supply the "
+            "reduced form")
     _check_i64(num, "numerator")
     _check_i64(den, "denominator")
     return num, den

@@ -7,39 +7,49 @@ from __future__ import annotations
 
 import re
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from soloring.domain.now import db_now
 from soloring.domain.canonical import canonical_hash, canonical_json_str
 from soloring.domain.ids import new_uuid
-from soloring.errors import ErrorCode, SoloRingError, not_found, validation_error
+from soloring.errors import (ErrorCode, SoloRingError, not_found,
+                             validation_error)
 from soloring.performance.models import (DialogueLine,
                                          DialogueLineRevision,
                                          VocalPerformanceSelection)
 
 _LANGUAGE_RE = re.compile(r"^[a-z]{2,8}(-[a-z0-9]{1,8})*$")
-_MAX_WORDING = 20000
 
 
 def _validate_language(language: str) -> str:
-    tag = language.strip().lower()
+    # frozen grammar: lowercase only — surrounding whitespace is NOT
+    # repaired away, " en " is rejected exactly like any other ill-formed
+    # tag (source review finding 4)
+    tag = language.lower()
     if not tag or len(tag) > 64 or not _LANGUAGE_RE.match(tag):
-        raise validation_error(
-            f"INVALID_LANGUAGE_TAG: {language!r}",
+        raise SoloRingError(
+            ErrorCode.INVALID_LANGUAGE_TAG,
+            f"INVALID_LANGUAGE_TAG: {language!r}", status_code=422,
             details={"grammar": "primary 2-8 letters, optional "
                                 "'-' + 1-8 letters/digits, <= 64 chars"})
     return tag
 
 
 def _validate_wording(wording: str) -> str:
+    # frozen wording is the EXACT approved Unicode wording: strip() is
+    # used only to test all-whitespace emptiness, never to rewrite what
+    # is persisted and hashed; no length cap exists in the frozen plan
     if not isinstance(wording, str):
-        raise validation_error("INVALID_DIALOGUE_WORDING: not a string")
-    w = wording.strip()
-    if not w or len(w) > _MAX_WORDING:
-        raise validation_error(
-            "INVALID_DIALOGUE_WORDING: empty or over 20000 characters")
-    return w
+        raise SoloRingError(ErrorCode.INVALID_DIALOGUE_WORDING,
+                            "INVALID_DIALOGUE_WORDING: not a string",
+                            status_code=422)
+    if not wording.strip():
+        raise SoloRingError(
+            ErrorCode.INVALID_DIALOGUE_WORDING,
+            "INVALID_DIALOGUE_WORDING: wording is empty or whitespace-only",
+            status_code=422)
+    return wording
 
 
 async def create_dialogue_line(session: AsyncSession, *,
@@ -63,8 +73,13 @@ async def list_dialogue_lines(session: AsyncSession, *, project_id: str,
     stmt = select(DialogueLine).where(
         DialogueLine.project_id == project_id)
     if cursor is not None:
-        stmt = stmt.where(
-            (DialogueLine.created_at, DialogueLine.id) > cursor)
+        # explicit lexicographic (created_at, id) comparison: SQLAlchemy
+        # silently drops the id tie-breaker from a Python tuple compare,
+        # which loses same-timestamp rows across pages (finding 7)
+        stmt = stmt.where(or_(
+            DialogueLine.created_at > cursor[0],
+            and_(DialogueLine.created_at == cursor[0],
+                 DialogueLine.id > cursor[1])))
     stmt = stmt.order_by(DialogueLine.created_at,
                          DialogueLine.id).limit(limit + 1)
     rows = (await session.execute(stmt)).scalars().fetchall()
@@ -104,6 +119,13 @@ async def create_dialogue_line_revision(
     if entity is None:
         raise not_found(ErrorCode.SPEAKER_NOT_FOUND,
                         f"speaker entity {speaker_subject_id!r} not found")
+    if entity.deleted_at is not None:
+        # the frozen speaker law requires an ACTIVE CreativeEntity; a
+        # tombstoned speaker must not author new authority revisions
+        raise SoloRingError(
+            ErrorCode.SPEAKER_DELETED,
+            f"speaker entity {speaker_subject_id!r} is deleted "
+            f"(tombstoned {entity.deleted_at})", status_code=422)
     if entity.project_id != line.project_id:
         raise SoloRingError(
             ErrorCode.SPEAKER_PROJECT_MISMATCH,

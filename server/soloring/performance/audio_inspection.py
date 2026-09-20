@@ -15,13 +15,13 @@ _FMT_PCM = 1
 
 
 def _reject(reason: str) -> SoloRingError:
-    return SoloRingError(ErrorCode.VALIDATION_ERROR,
+    return SoloRingError(ErrorCode.INVALID_AUDIO_BYTES,
                          f"INVALID_AUDIO_BYTES: {reason}",
                          status_code=422, details={"reason": reason})
 
 
 def _unsupported(reason: str) -> SoloRingError:
-    return SoloRingError(ErrorCode.VALIDATION_ERROR,
+    return SoloRingError(ErrorCode.UNSUPPORTED_VOCAL_MEDIA,
                          f"UNSUPPORTED_VOCAL_MEDIA: {reason}",
                          status_code=422, details={"reason": reason})
 
@@ -31,9 +31,15 @@ def inspect_wave(data: bytes) -> dict:
     authoritative sample rate + sample-frame count."""
     if len(data) < 12 or data[0:4] != _RIFF or data[8:12] != _WAVE:
         raise _unsupported("not a RIFF/WAVE container")
+    (riff_size,) = struct.unpack_from("<I", data, 4)
+    if riff_size + 8 != len(data):
+        raise _reject(
+            f"RIFF container size {riff_size} disagrees with the physical "
+            f"byte count {len(data) - 8}")
     pos = 12
     fmt_seen = False
     channels = sample_rate = bits = None
+    block_align = byte_rate = None
     data_bytes = None
     while pos + 8 <= len(data):
         chunk_id = data[pos:pos + 4]
@@ -44,8 +50,8 @@ def inspect_wave(data: bytes) -> dict:
         if chunk_id == b"fmt ":
             if chunk_size < 16:
                 raise _reject("fmt chunk too small")
-            audio_format, ch, rate, _, _, bits_per = struct.unpack_from(
-                "<HHIIHH", body, 0)
+            (audio_format, ch, rate, b_rate, b_align,
+             bits_per) = struct.unpack_from("<HHIIHH", body, 0)
             if audio_format != _FMT_PCM:
                 raise _unsupported(
                     f"audio format {audio_format} is not uncompressed "
@@ -55,6 +61,7 @@ def inspect_wave(data: bytes) -> dict:
             if bits_per % 8 != 0 or bits_per < 8:
                 raise _reject("sample width must be whole bytes >= 1")
             channels, sample_rate, bits = ch, rate, bits_per
+            block_align, byte_rate = b_align, b_rate
             fmt_seen = True
         elif chunk_id == b"data":
             data_bytes = chunk_size
@@ -64,6 +71,14 @@ def inspect_wave(data: bytes) -> dict:
     if data_bytes is None:
         raise _reject("missing data chunk")
     frame_bytes = (channels * bits) // 8
+    if block_align != frame_bytes:
+        raise _reject(
+            f"fmt block_align {block_align} != channels*bits/8 "
+            f"({frame_bytes})")
+    if byte_rate != sample_rate * block_align:
+        raise _reject(
+            f"fmt byte_rate {byte_rate} != sample_rate*block_align "
+            f"({sample_rate * block_align})")
     if frame_bytes == 0 or data_bytes % frame_bytes != 0:
         raise _reject("data chunk is not a whole number of frames")
     if sample_rate < 1:

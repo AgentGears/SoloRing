@@ -1,68 +1,114 @@
 """VocalCandidate / VocalPerformanceRevision / current-selection
-services (frozen R5 §4.3-4.5, §9.2-9.4). Adoption is THE A7 approval
+services (frozen R5 §4.3-4.5, §9.2-§9.4). Adoption is THE A7 approval
 transition: idempotent per candidate (UNIQUE adopted_candidate_id),
 never touches Take approval, and never changes the current selection.
 """
 
 from __future__ import annotations
 
-import hashlib
 from pathlib import Path
 
 from sqlalchemy import func, select
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from soloring.assets.blob_store import BlobStore
 from soloring.domain.now import db_now
 from soloring.domain.canonical import canonical_hash, canonical_json_str
 from soloring.domain.ids import new_uuid
-from soloring.errors import ErrorCode, SoloRingError, not_found, validation_error
+from soloring.errors import (ErrorCode, SoloRingError, not_found,
+                             validation_error)
 from soloring.performance.audio_inspection import inspect_wave
 from soloring.performance.dialogue import get_dialogue_line_revision
-from soloring.performance.models import (VocalCandidate,
+from soloring.performance.models import (DialogueLineRevision,
+                                         VocalCandidate,
                                          VocalPerformanceRevision,
                                          VocalPerformanceSelection)
 
 _SOURCE_KINDS = ("recorded", "adr", "imported", "generated")
+_GENERATED_FIELDS = ("generator_id", "generator_version", "workflow_id",
+                     "workflow_version")
 
 
-def _blob_relative_path(h: str) -> Path:
-    return Path("sha256") / h[:2] / h[2:4] / h
-
-
-def _provenance_v1(source_kind: str, generator: dict | None) -> dict:
-    if source_kind == "generated":
-        doc = {"schema_version": 1, "source_kind": "generated"}
-        for key in ("generator_id", "generator_version", "workflow_id",
-                    "workflow_version"):
-            v = (generator or {}).get(key)
+def _provenance_v1(doc: dict) -> dict:
+    """Canonical CLOSED provenance schema v1 (source review finding 5):
+    exact fields only — caller extras are rejected, never silently
+    discarded before canonical hashing; schema_version must be exactly 1
+    so a different declared version cannot be rewritten into v1."""
+    if not isinstance(doc, dict):
+        raise SoloRingError(ErrorCode.PROVENANCE_SCHEMA_INVALID,
+                            "provenance must be a JSON object",
+                            status_code=422)
+    if doc.get("schema_version") != 1:
+        raise SoloRingError(
+            ErrorCode.PROVENANCE_SCHEMA_INVALID,
+            f"provenance schema_version must be exactly 1 (got "
+            f"{doc.get('schema_version')!r})", status_code=422)
+    kind = doc.get("source_kind")
+    if kind not in _SOURCE_KINDS:
+        raise SoloRingError(
+            ErrorCode.PROVENANCE_SCHEMA_INVALID,
+            f"source_kind must be one of {_SOURCE_KINDS}",
+            status_code=422)
+    if kind == "generated":
+        keys = set(doc) - {"schema_version", "source_kind"}
+        if keys != set(_GENERATED_FIELDS):
+            raise SoloRingError(
+                ErrorCode.PROVENANCE_SCHEMA_INVALID,
+                "generated provenance requires exactly "
+                f"{sorted(_GENERATED_FIELDS)} (got extras "
+                f"{sorted(keys - set(_GENERATED_FIELDS))}, missing "
+                f"{sorted(set(_GENERATED_FIELDS) - keys)})",
+                status_code=422)
+        out = {"schema_version": 1, "source_kind": "generated"}
+        for key in _GENERATED_FIELDS:
+            v = doc[key]
             if not isinstance(v, str) or not v.strip() or len(v) > 255:
-                raise validation_error(
-                    "ALIGNMENT/PROVENANCE: generated provenance requires "
-                    f"nonempty {key} <= 255 code points")
-            doc[key] = v.strip()
-        return doc
-    return {"schema_version": 1, "source_kind": source_kind}
+                raise SoloRingError(
+                    ErrorCode.PROVENANCE_SCHEMA_INVALID,
+                    f"generated provenance {key} must be nonempty "
+                    "<= 255 code points", status_code=422)
+            out[key] = v.strip()
+        return out
+    if set(doc) != {"schema_version", "source_kind"}:
+        raise SoloRingError(
+            ErrorCode.PROVENANCE_SCHEMA_INVALID,
+            f"{kind} provenance carries fields beyond schema_version/"
+            "source_kind — the canonical schema is closed",
+            status_code=422)
+    return {"schema_version": 1, "source_kind": kind}
 
 
 async def _verify_blob(session: AsyncSession, settings, blob_hash: str
                        ) -> dict:
+    """Verify a retained Blob through the established BlobStore seam
+    (source review finding 8): physical bytes are verified by the same
+    primitive the repository uses everywhere — no parallel re-implementation
+    — and failures carry the durable typed codes (finding 9)."""
     from soloring.assets.models import Blob
     row = await session.get(Blob, blob_hash)
     if row is None:
-        raise not_found(ErrorCode.ASSET_NOT_FOUND,
+        raise not_found(ErrorCode.BLOB_NOT_FOUND,
                         f"blob {blob_hash!r} not found")
-    path = settings.blob_dir / _blob_relative_path(blob_hash)
-    if not path.is_file():
-        raise SoloRingError(ErrorCode.BLOB_BYTES_MISSING,
-                            f"blob {blob_hash!r} bytes are missing from "
-                            "the Blob root",
-                            status_code=422)
-    data = path.read_bytes()
-    actual = hashlib.sha256(data).hexdigest()
-    if actual != blob_hash:
-        raise SoloRingError(ErrorCode.BLOB_HASH_MISMATCH,
-                            f"blob {blob_hash!r} bytes hash to {actual}",
-                            status_code=422)
+    store = BlobStore(settings)
+    physical = await store.verify_physical_bytes(
+        blob_hash, expected_size=row.size_bytes)
+    if not physical.ok:
+        if physical.reason == "missing":
+            raise SoloRingError(
+                ErrorCode.BLOB_BYTES_MISSING,
+                f"blob {blob_hash!r} bytes are missing from the Blob "
+                "root", status_code=422)
+        if physical.reason == "hash_mismatch":
+            raise SoloRingError(
+                ErrorCode.BLOB_HASH_MISMATCH,
+                f"blob {blob_hash!r} physical bytes hash to "
+                f"{physical.actual_hash}", status_code=422)
+        raise SoloRingError(
+            ErrorCode.BLOB_HASH_MISMATCH,
+            f"blob {blob_hash!r} physical verification failed "
+            f"({physical.reason})", status_code=422)
+    data = store.path_for_hash(blob_hash).read_bytes()
     return {"row": row, "data": data}
 
 
@@ -75,15 +121,7 @@ async def create_vocal_candidate(
         trim_end_sample_exclusive: int | None = None) -> VocalCandidate:
     rev = await get_dialogue_line_revision(
         session, revision_id=dialogue_line_revision_id)
-    source_kind = source_provenance.get("source_kind")
-    if source_kind not in _SOURCE_KINDS:
-        raise validation_error(
-            f"source_kind must be one of {_SOURCE_KINDS}")
-    prov = _provenance_v1(source_kind,
-                          source_provenance if source_kind ==
-                          "generated" else None)
-    if prov["source_kind"] != source_kind:
-        raise validation_error("provenance source_kind mismatch")
+    prov = _provenance_v1(source_provenance)
     prov_json = canonical_json_str(prov)
     prov_hash = canonical_hash(prov)
     blob = await _verify_blob(session, settings, retained_audio_blob_hash)
@@ -109,7 +147,7 @@ async def create_vocal_candidate(
         native_sample_rate_hz=info["sample_rate_hz"],
         retained_sample_count=count,
         trim_start_sample=ts, trim_end_sample_exclusive=te,
-        source_kind=source_kind,
+        source_kind=prov["source_kind"],
         provenance_schema_version=1,
         provenance_json=prov_json, provenance_hash=prov_hash,
         created_at=await db_now(session))
@@ -146,20 +184,20 @@ async def adopt_vocal_candidate(session: AsyncSession, *,
                                 candidate_id: str,
                                 adopted_by: str
                                 ) -> VocalPerformanceRevision:
+    async def _existing() -> VocalPerformanceRevision | None:
+        return (await session.execute(
+            select(VocalPerformanceRevision).where(
+                VocalPerformanceRevision.adopted_candidate_id == c.id))
+        ).scalar_one_or_none()
+
     c = await get_vocal_candidate(session, candidate_id=candidate_id)
     if not isinstance(adopted_by, str) or not adopted_by.strip():
         raise validation_error("adopted_by must be nonempty")
-    existing = (await session.execute(
-        select(VocalPerformanceRevision).where(
-            VocalPerformanceRevision.adopted_candidate_id == c.id))
-    ).scalar_one_or_none()
+    existing = await _existing()
     if existing is not None:
         return existing
-    rev = await session.get(
-        # local import avoids cycles; only the column is needed
-        __import__("soloring.performance.models", fromlist=[
-            "DialogueLineRevision"]).DialogueLineRevision,
-        c.dialogue_line_revision_id)
+    rev = await session.get(DialogueLineRevision,
+                            c.dialogue_line_revision_id)
     if rev is None:
         raise SoloRingError(ErrorCode.VOCAL_ADOPTION_CORRUPT,
                             "candidate line revision missing",
@@ -198,6 +236,10 @@ async def adopt_vocal_candidate(session: AsyncSession, *,
             "VP speaker != DialogueLineRevision speaker — corruption, "
             "never silently reconciled", status_code=409)
     session.add(vp)
+    # a UNIQUE(adopted_candidate_id) conflict propagates to the caller:
+    # the API route converges it transaction-safely (rollback + re-run
+    # sees the committed winner) — mid-transaction re-query cannot see
+    # the winner under SQLite's read snapshot (source review finding 6)
     await session.flush()
     return vp
 
