@@ -67,6 +67,7 @@ ALLOWLIST = (
     "tests/test_m17a_compatibility.py",
     "tests/test_m17a_recovery.py",
     "tests/test_m17a_source_gate.py",
+    "tests/test_m17a_matrix.py",
     "apps/web/package.json",
     "apps/web/package-lock.json",
     "apps/web/next-env.d.ts",

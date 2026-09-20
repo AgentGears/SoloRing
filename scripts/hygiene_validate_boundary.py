@@ -54,6 +54,7 @@ ALLOWLIST = (
     "tests/test_m17a_compatibility.py",
     "tests/test_m17a_recovery.py",
     "tests/test_m17a_source_gate.py",
+    "tests/test_m17a_matrix.py",
     "tests/conftest.py",
     "tests/test_m13_races.py",
     "tests/test_m13_corrections.py",
