@@ -43,7 +43,7 @@ from soloring.workflows.artifact_store import WorkflowArtifactStore
 # verified through M13 + M14 + M15 + M16 semantics.
 # M17A (frozen R5 §12): the dialogue/vocal verifier advances the
 # expected head to 0018 and adds three physical Blob-FK paths.
-EXPECTED_ALEMBIC_HEAD = "0018_m17a_dialogue_vocal_foundation"
+EXPECTED_ALEMBIC_HEAD = "0019_m17b_performance_revisions"
 BACKUP_MANIFEST_SCHEMA_VERSION = 1
 
 # M13 (frozen R3 §23): restore is head-dispatched across five heads. M14
@@ -58,6 +58,7 @@ M14_ALEMBIC_HEAD = "0015_m14_world_observation_execution"
 M15_ALEMBIC_HEAD = "0016_m15_revision_compatibility"
 M16_ALEMBIC_HEAD = "0017_m16_intra_shot_consequences"
 M17A_ALEMBIC_HEAD = "0018_m17a_dialogue_vocal_foundation"
+M17B_ALEMBIC_HEAD = "0019_m17b_performance_revisions"
 SUPPORTED_RESTORE_ALEMBIC_HEADS = frozenset({
     PRE_M11_ALEMBIC_HEAD,
     M11_ALEMBIC_HEAD,
@@ -74,6 +75,10 @@ SUPPORTED_RESTORE_ALEMBIC_HEADS = frozenset({
     # dialogue/vocal semantic verifier; physical Blob inventory is
     # exactly eleven paths.
     M17A_ALEMBIC_HEAD,
+    # M17B head (frozen R7 §14): restores at 0019 verify through the
+    # performance/retarget semantic verifier; physical Blob inventory
+    # is exactly thirteen paths.
+    M17B_ALEMBIC_HEAD,
 })
 
 ARTIFACT_KINDS = (
@@ -135,6 +140,19 @@ M17A_BLOB_FK_COLUMNS = frozenset(
         ("dialogue_alignments", "retained_blob_hash"),
     }
 )
+# M17B (frozen R7 §14.2): head 0019 adds exactly two physical
+# Blob-FK paths — candidate and revision canonical channel payloads
+# — for an exact thirteen-path inventory. Heads 0018 and earlier
+# keep their exact predecessor policies.
+M17B_BLOB_FK_COLUMNS = frozenset(
+    set(M17A_BLOB_FK_COLUMNS)
+    | {
+        ("performance_candidates",
+         "canonical_channel_payload_blob_hash"),
+        ("performance_revisions",
+         "canonical_channel_payload_blob_hash"),
+    }
+)
 
 
 def _blob_fk_policy_for_head(head: str) -> frozenset:
@@ -150,6 +168,8 @@ def _blob_fk_policy_for_head(head: str) -> frozenset:
         return M14_BLOB_FK_COLUMNS
     if head == M17A_ALEMBIC_HEAD:
         return M17A_BLOB_FK_COLUMNS
+    if head == M17B_ALEMBIC_HEAD:
+        return M17B_BLOB_FK_COLUMNS
     raise RecoveryCorruption(f"unsupported recovery head {head!r}.")
 
 _HEX = set("0123456789abcdef")

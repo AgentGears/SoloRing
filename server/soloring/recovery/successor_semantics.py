@@ -322,6 +322,11 @@ def install_successor_semantics(recovery: ModuleType) -> None:
     )
     recovery._verify_m17a_dialogue_vocal_state = (
         verify_m17a_dialogue_vocal_state)
+    from soloring.recovery.m17b_verifier import (
+        verify_m17b_performance_state,
+    )
+    recovery._verify_m17b_performance_state = (
+        verify_m17b_performance_state)
 
     def _verify_head_semantics(staged_db: Path, head: str) -> None:
         if head not in recovery.SUPPORTED_RESTORE_ALEMBIC_HEADS:
@@ -347,6 +352,9 @@ def install_successor_semantics(recovery: ModuleType) -> None:
         if head == recovery.M16_ALEMBIC_HEAD:
             return
         recovery._verify_m17a_dialogue_vocal_state(staged_db)
+        if head == getattr(recovery, "M17A_ALEMBIC_HEAD", None):
+            return
+        recovery._verify_m17b_performance_state(staged_db)
 
     recovery._verify_head_semantics = _verify_head_semantics
 
@@ -367,6 +375,11 @@ def install_successor_semantics(recovery: ModuleType) -> None:
             recovery._verify_m16_intra_shot_state(staged_db)
         if head == getattr(recovery, "M17A_ALEMBIC_HEAD", None):
             recovery._verify_m17a_dialogue_vocal_state(staged_db)
+        if head in (getattr(recovery, "M17A_ALEMBIC_HEAD", None),
+                    getattr(recovery, "M17B_ALEMBIC_HEAD", None)):
+            recovery._verify_m17a_dialogue_vocal_state(staged_db)
+        if head == getattr(recovery, "M17B_ALEMBIC_HEAD", None):
+            recovery._verify_m17b_performance_state(staged_db)
         return original_enumerate(staged_db, expected_columns)
 
     recovery._enumerate_liveness = _enumerate_with_successor_semantics
