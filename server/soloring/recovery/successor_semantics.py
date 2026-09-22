@@ -371,7 +371,8 @@ def install_successor_semantics(recovery: ModuleType) -> None:
                     getattr(recovery, "M17A_ALEMBIC_HEAD", None)):
             recovery._verify_m15_compatibility_state(staged_db)
         if head in (recovery.M16_ALEMBIC_HEAD,
-                    getattr(recovery, "M17A_ALEMBIC_HEAD", None)):
+                    getattr(recovery, "M17A_ALEMBIC_HEAD", None),
+                    getattr(recovery, "M17B_ALEMBIC_HEAD", None)):
             recovery._verify_m16_intra_shot_state(staged_db)
         if head == getattr(recovery, "M17A_ALEMBIC_HEAD", None):
             recovery._verify_m17a_dialogue_vocal_state(staged_db)
