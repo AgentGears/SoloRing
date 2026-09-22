@@ -134,7 +134,7 @@ def test_c06_start_end_rejects():
     assert "less than end" in str(e)
 
 
-def test_c07_start_rejects():
+def test_c07_start_end_rejects():
     e = _err(candidate_body([channel(SMILE, [kf(0, 1, 0)])],
                             start=(5, 1), end=(4, 1)))
     assert "less than end" in str(e)

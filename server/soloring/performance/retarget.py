@@ -364,27 +364,25 @@ async def create_retarget_candidate(
                        "retarget candidate requires an "
                        "ACCEPT_FOR_NEW_CANDIDATE review")
 
-    # validate the caller-supplied producer provenance grammar
-    probe = {"schema_version": 1, "source_kind": "retargeted",
-             "producer_id": producer_id,
-             "producer_version": producer_version,
-             "source_identity": source_identity,
-             "parameters_sha256": parameters_sha256,
-             "retarget": None}
-    from soloring.performance.revision import build_provenance_envelope
-    envelope = build_provenance_envelope(probe)
-
     # server constructs the exact retarget envelope — the caller
-    # cannot forge source/from/to ids
-    envelope["retarget"] = {
-        "source_performance_revision_id": performance.id,
-        "from_production_revision_id":
-            assessment.from_production_revision_id,
-        "to_production_revision_id":
-            assessment.to_production_revision_id,
-        "compatibility_assessment_id": assessment.id,
-        "accepted_review_id": review.id,
-    }
+    # cannot forge source/from/to ids; the closed grammar (including
+    # the five-key retarget object) is validated as a whole
+    from soloring.performance.revision import build_provenance_envelope
+    envelope = build_provenance_envelope({
+        "schema_version": 1, "source_kind": "retargeted",
+        "producer_id": producer_id,
+        "producer_version": producer_version,
+        "source_identity": source_identity,
+        "parameters_sha256": parameters_sha256,
+        "retarget": {
+            "source_performance_revision_id": performance.id,
+            "from_production_revision_id":
+                assessment.from_production_revision_id,
+            "to_production_revision_id":
+                assessment.to_production_revision_id,
+            "compatibility_assessment_id": assessment.id,
+            "accepted_review_id": review.id,
+        }})
     prov_json = canonical_json_str(envelope)
     prov_hash = canonical_hash(envelope)
 

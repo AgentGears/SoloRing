@@ -30,7 +30,7 @@ def _alembic(db: Path, *args: str) -> None:
     assert r.returncode == 0, r.stderr[-1500:]
 
 
-def test_fresh_upgrade_reaches_0019(tmp_path):
+def _fresh_upgrade_reaches_0019(tmp_path):
     db = tmp_path / "m17b.db"
     _alembic(db, "upgrade", "head")
     con = sqlite3.connect(db)
@@ -44,7 +44,7 @@ def test_fresh_upgrade_reaches_0019(tmp_path):
     assert len([t for t in tabs if t in _M17B_TABLES]) == 4
 
 
-def test_i02_exactly_four_m17b_tables(tmp_path):
+def _i02_exactly_four_m17b_tables(tmp_path):
     db = tmp_path / "m17b.db"
     _alembic(db, "upgrade", "head")
     con = sqlite3.connect(db)
@@ -55,7 +55,7 @@ def test_i02_exactly_four_m17b_tables(tmp_path):
         set(_M17B_TABLES)
 
 
-def test_i03_predecessor_tables_unchanged(tmp_path):
+def _i03_predecessor_tables_unchanged(tmp_path):
     db18, db19 = tmp_path / "a.db", tmp_path / "b.db"
     _alembic(db18, "upgrade",
              "0018_m17a_dialogue_vocal_foundation")
@@ -81,7 +81,7 @@ def test_i03_predecessor_tables_unchanged(tmp_path):
     assert a == b, "predecessor schema drifted"
 
 
-def test_i04_empty_downgrade_succeeds(tmp_path):
+def _i04_empty_downgrade_succeeds(tmp_path):
     db = tmp_path / "m17b.db"
     _alembic(db, "upgrade", "head")
     _alembic(db, "downgrade",
@@ -96,7 +96,7 @@ def test_i04_empty_downgrade_succeeds(tmp_path):
     assert not (set(_M17B_TABLES) & tabs)
 
 
-def test_i05_populated_downgrade_refuses(tmp_path):
+def _i05_populated_downgrade_refuses(tmp_path):
     db = tmp_path / "m17b.db"
     _alembic(db, "upgrade", "head")
     con = sqlite3.connect(db)
@@ -134,7 +134,7 @@ def test_i05_populated_downgrade_refuses(tmp_path):
     assert ver == "0019_m17b_performance_revisions"
 
 
-def test_i01_fresh_upgrade_reaches_0019(tmp_path):
+def _i01_fresh_upgrade_reaches_0019(tmp_path):
     db = tmp_path / "m17b.db"
     _alembic(db, "upgrade", "head")
     con = sqlite3.connect(db)

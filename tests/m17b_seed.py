@@ -66,7 +66,7 @@ async def seed_production_revision(client, pobj: str, tag: bytes,
     closure = RetainedBlobClosure(
         blob_hash=bh, size_bytes=len(tag), media_type=None)
     engine = client._transport.app.state.engine
-    prid = new_uuid()
+    prid, aid = new_uuid(), new_uuid()
     async with engine.begin() as conn:
         await conn.execute(text(
             "INSERT OR IGNORE INTO blobs (hash, path, size_bytes, "
@@ -81,6 +81,22 @@ async def seed_production_revision(client, pobj: str, tag: bytes,
             ":n)"),
             {"r": prid, "o": pobj, "n2": number, "sj": sj(closure),
              "sh": sh(closure), "n": NOW})
+        await conn.execute(text(
+            "INSERT INTO production_revision_closures "
+            "(production_revision_id, contract_key, "
+            "contract_version, blob_hash, size_bytes, media_type) "
+            "VALUES (:r, 'retained_blob', 1, :bh, :s, NULL)"),
+            {"r": prid, "bh": bh, "s": len(tag)})
+        await conn.execute(text(
+            "INSERT INTO assets (id, project_id, blob_hash, kind, "
+            "created_at) SELECT :a, po.project_id, :h, 'reference', "
+            ":n FROM production_objects po WHERE po.id = :o"),
+            {"a": aid, "h": bh, "n": NOW, "o": pobj})
+        await conn.execute(text(
+            "INSERT INTO production_revision_source_assets "
+            "(production_revision_id, asset_id, created_at) VALUES "
+            "(:r, :a2, :n)"),
+            {"r": prid, "a2": aid, "n": NOW})
     return {"production_revision_id": prid,
             "production_object_id": pobj, "snapshot_hash":
                 sh(closure)}
