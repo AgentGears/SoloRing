@@ -59,7 +59,7 @@ def test_alembic_upgrade_creates_worker_leases(tmp_path: Path, monkeypatch) -> N
     assert names == ["name", "worker_id", "acquired_at", "heartbeat_at"]
     assert len(pk_row) == 1 and pk_row[0][1] == "name", "name must be the primary key"
     # head advanced through M1/M3C/M11; worker_leases is created by 0001 and remains.
-    assert rev is not None and rev[0] == "0017_m16_intra_shot_consequences"
+    assert rev is not None and rev[0] == "0018_m17a_dialogue_vocal_foundation"
 
 
 def test_migrated_database_is_already_wal(tmp_path: Path, monkeypatch) -> None:

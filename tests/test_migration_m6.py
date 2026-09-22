@@ -258,7 +258,7 @@ def test_populated_0005_to_0006_preserves_state_and_zero_inference(
         assert raised, "uq_shots_scene_position not enforced"
 
         assert con.execute("SELECT version_num FROM alembic_version"
-                           ).fetchone()[0] == "0017_m16_intra_shot_consequences"
+                           ).fetchone()[0] == "0018_m17a_dialogue_vocal_foundation"
     finally:
         con.close()
 

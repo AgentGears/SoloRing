@@ -74,6 +74,21 @@ M16_SURFACE = (
     r"^post-m16-integrated-r3-evidence/harness/",
     r"^SoloRing-Post-M16-Integrated-Sequence-Regression-R3-CLOSED"
     r"\.md$",
+    # M17A implementation (frozen R5): the dialogue/vocal foundation
+    # surface — performance package, migration, API, recovery
+    # verifier, boundary validators, and the M17A tests.
+    r"^server/soloring/performance/",
+    r"^server/soloring/api/performance\.py$",
+    r"^server/soloring/api/schemas/performance\.py$",
+    r"^server/soloring/api/main\.py$",
+    r"^server/soloring/db/models\.py$",
+    r"^server/soloring/errors\.py$",
+    r"^server/soloring/recovery/backup\.py$",
+    r"^server/soloring/recovery/m17a_verifier\.py$",
+    r"^server/alembic/versions/0018_m17a_dialogue_vocal_foundation"
+    r"\.py$",
+    r"^tests/m17a_seed\.py$",
+    r"^tests/test_m17a_[a-z_]+\.py$",
     # reviewed successor carves from the M16 correction rounds:
     # predecessor-test era head-pins/migration expectations, the m10f
     # 0016-posture fixtures, and boundary-validator carve entries

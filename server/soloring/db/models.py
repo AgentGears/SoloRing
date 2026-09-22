@@ -149,6 +149,15 @@ from soloring.compatibility.models import (  # noqa: E402,F401
     ProductionUpdateOperation,
     ProductionUpdateItem,
 )
+from soloring.performance.models import (  # noqa: E402,F401
+    DialogueLine,
+    DialogueLineRevision,
+    VocalCandidate,
+    VocalPerformanceRevision,
+    VocalPerformanceSelection,
+    ShotVocalSegmentMapping,
+    DialogueAlignment,
+)
 
 __all__ = [
     "WorkerLease",

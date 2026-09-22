@@ -41,7 +41,9 @@ from soloring.workflows.artifact_store import WorkflowArtifactStore
 # M16-C (frozen R6 §16.2/§21): the full M16-depth verifier is
 # installed, so 0017 is admitted as the certified recovery head —
 # verified through M13 + M14 + M15 + M16 semantics.
-EXPECTED_ALEMBIC_HEAD = "0017_m16_intra_shot_consequences"
+# M17A (frozen R5 §12): the dialogue/vocal verifier advances the
+# expected head to 0018 and adds three physical Blob-FK paths.
+EXPECTED_ALEMBIC_HEAD = "0018_m17a_dialogue_vocal_foundation"
 BACKUP_MANIFEST_SCHEMA_VERSION = 1
 
 # M13 (frozen R3 §23): restore is head-dispatched across five heads. M14
@@ -55,6 +57,7 @@ M13_ALEMBIC_HEAD = "0014_m13_authority_complete_world"
 M14_ALEMBIC_HEAD = "0015_m14_world_observation_execution"
 M15_ALEMBIC_HEAD = "0016_m15_revision_compatibility"
 M16_ALEMBIC_HEAD = "0017_m16_intra_shot_consequences"
+M17A_ALEMBIC_HEAD = "0018_m17a_dialogue_vocal_foundation"
 SUPPORTED_RESTORE_ALEMBIC_HEADS = frozenset({
     PRE_M11_ALEMBIC_HEAD,
     M11_ALEMBIC_HEAD,
@@ -67,6 +70,10 @@ SUPPORTED_RESTORE_ALEMBIC_HEADS = frozenset({
     # M16 head (frozen R6 §16.2): restores at 0017 verify through the
     # full M16-depth intra-Shot verifier installed by M16-C.
     M16_ALEMBIC_HEAD,
+    # M17A head (frozen R5 §12): restores at 0018 verify through the
+    # dialogue/vocal semantic verifier; physical Blob inventory is
+    # exactly eleven paths.
+    M17A_ALEMBIC_HEAD,
 })
 
 ARTIFACT_KINDS = (
@@ -116,6 +123,19 @@ M14_BLOB_FK_COLUMNS = frozenset(
     | {("derived_observation_artifacts", "blob_hash")}
 )
 
+# M17A (frozen R5 §12.1): head 0018 adds exactly three physical
+# Blob-FK paths — candidate audio, VP audio, and alignment retained
+# evidence — for an exact eleven-path inventory. Heads 0015-0017 keep
+# the exact published M14 eight-path policy.
+M17A_BLOB_FK_COLUMNS = frozenset(
+    set(M14_BLOB_FK_COLUMNS)
+    | {
+        ("vocal_candidates", "retained_audio_blob_hash"),
+        ("vocal_performance_revisions", "retained_audio_blob_hash"),
+        ("dialogue_alignments", "retained_blob_hash"),
+    }
+)
+
 
 def _blob_fk_policy_for_head(head: str) -> frozenset:
     """Exact head-specific Blob-FK inventory (frozen §§14.2/16.2/23.2/§23)."""
@@ -128,6 +148,8 @@ def _blob_fk_policy_for_head(head: str) -> frozenset:
         # M15/M16 add no Blob FK (frozen R4 §11.6 / R6 §16.2): heads
         # 0015-0017 share the exact published M14 inventory (8 paths).
         return M14_BLOB_FK_COLUMNS
+    if head == M17A_ALEMBIC_HEAD:
+        return M17A_BLOB_FK_COLUMNS
     raise RecoveryCorruption(f"unsupported recovery head {head!r}.")
 
 _HEX = set("0123456789abcdef")
@@ -534,10 +556,13 @@ def _enumerate_liveness(staged_db: Path, expected_columns: frozenset | None = No
             )
 
         blob_hashes: set[str] = set()
-        for table, _col in sorted(expected_columns):
-            for row in con.execute(f'SELECT DISTINCT blob_hash FROM "{table}"'):
+        for table, col in sorted(expected_columns):
+            # M17A (frozen R5 §12.1): Blob-FK columns are no longer
+            # uniformly named blob_hash; read the declared column.
+            for row in con.execute(
+                    f'SELECT DISTINCT "{col}" FROM "{table}"'):
                 blob_hashes.add(_hex_or_corrupt(
-                    row[0], f"{table}.blob_hash entry"))
+                    row[0], f"{table}.{col} entry"))
 
         # R6 §7.5/PD-2: canonical relative rows everywhere; the ONLY legacy
         # exception is the known M10E D0-writer absolute form (row reachable

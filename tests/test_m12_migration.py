@@ -252,8 +252,8 @@ def test_migration_head_is_exactly_0013(tmp_path, monkeypatch):
     ver = con.execute("SELECT version_num FROM alembic_version").fetchone()[0]
     files = sorted(p.name for p in VERSIONS.glob("0*.py"))
     con.close()
-    assert ver == "0017_m16_intra_shot_consequences"  # M15A advanced to 0016; M16-A advances the head
-    assert files[-1] == "0017_m16_intra_shot_consequences.py"
+    assert ver == "0018_m17a_dialogue_vocal_foundation"  # M15A advanced to 0016; M16-A advances the head
+    assert files[-1] == "0018_m17a_dialogue_vocal_foundation.py"
 
 
 def test_0012_predecessor_database_upgrades_cleanly_to_0013(tmp_path, monkeypatch):

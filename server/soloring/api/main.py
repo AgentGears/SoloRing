@@ -34,6 +34,7 @@ from soloring.api.spatial_plans import router as spatial_plans_router
 from soloring.api.production_world import router as production_world_router
 from soloring.api.takes import router as takes_router
 from soloring.api.visual import router as visual_router
+from soloring.api.performance import router as performance_router
 from soloring.db.engine import create_soloring_engine, create_session_factory
 from soloring.settings import Settings, get_settings
 
@@ -93,6 +94,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(spatial_tracks_router)
     app.include_router(spatial_plans_router)
     app.include_router(production_world_router)
+    app.include_router(performance_router)
 
     return app
 

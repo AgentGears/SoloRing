@@ -140,10 +140,10 @@ def test_migration_head_is_0015_before_m15() -> None:
     assert pre[-1] == f"{MIGRATION_PREDECESSOR}.py"
     head = _migration_names("HEAD")
     assert head, "current migration listing empty"
-    assert head[-1] == "0017_m16_intra_shot_consequences.py", (
+    assert head[-1] == "0018_m17a_dialogue_vocal_foundation.py", (
         f"current migration head is not the frozen 0017: {head[-1:]}")
     beyond = [m for m in head
-              if m > "0017_m16_intra_shot_consequences.py"]
+              if m > "0018_m17a_dialogue_vocal_foundation.py"]
     assert not beyond, f"migrations beyond 0017 exist: {beyond}"
 
 

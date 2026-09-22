@@ -128,7 +128,7 @@ async def test_migration_upgrade_creates_exact_schema(tmp_path, monkeypatch):
     conn = _connect(db)
     head = conn.execute(
         "SELECT version_num FROM alembic_version").fetchone()[0]
-    assert head == "0017_m16_intra_shot_consequences"
+    assert head == "0018_m17a_dialogue_vocal_foundation"
 
     tables = {r[0] for r in conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table'")}
@@ -368,6 +368,8 @@ async def test_recovery_blob_fk_inventory_eight_paths(
         M11_BLOB_FK_COLUMNS,
         M14_BLOB_FK_COLUMNS,
         M14_ALEMBIC_HEAD,
+        M17A_ALEMBIC_HEAD,
+        M17A_BLOB_FK_COLUMNS,
         SUPPORTED_RESTORE_ALEMBIC_HEADS,
         _blob_fk_policy_for_head,
     )
@@ -388,11 +390,14 @@ async def test_recovery_blob_fk_inventory_eight_paths(
         # M16-C admits 0017 with the same inventory (no M16 Blob FK)
         "0016_m15_revision_compatibility",
         "0017_m16_intra_shot_consequences",
+        "0018_m17a_dialogue_vocal_foundation",
     }), SUPPORTED_RESTORE_ALEMBIC_HEADS
     assert _blob_fk_policy_for_head(
         "0016_m15_revision_compatibility") == M14_BLOB_FK_COLUMNS
+    assert _blob_fk_policy_for_head(
+        M17A_ALEMBIC_HEAD) == M17A_BLOB_FK_COLUMNS
 
-    # the physical 0015 schema carries the eighth FK path
+    # the physical 0018 schema carries the frozen eleven FK paths
     db = tmp_path / "soloring.db"; _upgrade(tmp_path, monkeypatch)
     conn = _connect(db)
     physical = set()
@@ -404,7 +409,7 @@ async def test_recovery_blob_fk_inventory_eight_paths(
         for row in conn.execute(f'PRAGMA foreign_key_list("{quoted}")'):
             if row["table"] == "blobs":
                 physical.add((table, row["from"]))
-    policy = set(M14_BLOB_FK_COLUMNS) - {
+    policy = set(M17A_BLOB_FK_COLUMNS) - {
         ("generation_derived_observation_inputs", "blob_hash")}
     assert policy <= physical, (
         "policy paths missing from the physical schema",
