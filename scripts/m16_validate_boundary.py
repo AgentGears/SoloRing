@@ -89,6 +89,20 @@ M16_SURFACE = (
     r"\.py$",
     r"^tests/m17a_seed\.py$",
     r"^tests/test_m17a_[a-z_]+\.py$",
+    # M17B reviewed successor surface (frozen R7)
+        r"^server/soloring/recovery/m17b_verifier\.py$",
+    r"^server/soloring/performance/profile\.py$",
+    r"^server/soloring/performance/revision\.py$",
+    r"^server/soloring/performance/retarget\.py$",
+    r"^server/alembic/versions/0019_m17b_performance_revisions"
+    r"\.py$",
+    r"^tests/m17b_seed\.py$",
+    r"^tests/test_m17b_[a-z_]+\.py$",
+    r"^docs/SoloRing-M17B-Proof-Map\.md$",
+    r"^scripts/m17b_validate_proof_map\.py$",
+    r"^server/soloring/api/m17b_performance\.py$",
+    r"^server/soloring/api/schemas/m17b_performance\.py$",
+
     # reviewed successor carves from the M16 correction rounds:
     # predecessor-test era head-pins/migration expectations, the m10f
     # 0016-posture fixtures, and boundary-validator carve entries

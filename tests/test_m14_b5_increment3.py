@@ -174,7 +174,7 @@ async def test_m14_hist_09_backup_restore_roundtrip(client, tmp_path):
             "DELETE FROM alembic_version"))
         await conn.execute(text(
             "INSERT INTO alembic_version (version_num) VALUES ("
-            "'0018_m17a_dialogue_vocal_foundation')"))
+            "'0019_m17b_performance_revisions')"))
         await conn.commit()
 
     # real backup + restore
@@ -216,7 +216,7 @@ async def test_m14_hist_09_backup_restore_roundtrip(client, tmp_path):
 
         head = con.execute(
             "SELECT version_num FROM alembic_version").fetchone()[0]
-        assert head == "0018_m17a_dialogue_vocal_foundation"
+        assert head == "0019_m17b_performance_revisions"
     finally:
         con.close()
 

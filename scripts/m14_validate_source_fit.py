@@ -77,9 +77,17 @@ REVIEWED_SUCCESSOR_PATHS = frozenset({
     "server/soloring/performance/alignment.py",
     "server/soloring/performance/compatibility.py",
     "server/soloring/performance/__init__.py",
+    # M17B (frozen R7): the performance package lawfully owns
+    # the PerformanceRevision vocabulary
+    "server/soloring/performance/profile.py",
+    "server/soloring/performance/revision.py",
+    "server/soloring/performance/retarget.py",
     "server/soloring/api/performance.py",
     "server/soloring/api/schemas/performance.py",
+    "server/soloring/api/m17b_performance.py",
+    "server/soloring/api/schemas/m17b_performance.py",
     "server/soloring/recovery/m17a_verifier.py",
+    "server/soloring/recovery/m17b_verifier.py",
     "server/soloring/recovery/backup.py",
     "server/soloring/recovery/successor_semantics.py",
     "server/soloring/api/main.py",

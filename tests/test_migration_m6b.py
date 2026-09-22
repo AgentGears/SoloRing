@@ -161,7 +161,7 @@ def test_0007_rebuild_preserves_populated_rows_exactly(
         assert raised, "active-only uniqueness not enforced"
 
         assert con.execute("SELECT version_num FROM alembic_version"
-                           ).fetchone()[0] == "0018_m17a_dialogue_vocal_foundation"
+                           ).fetchone()[0] == "0019_m17b_performance_revisions"
     finally:
         con.close()
 

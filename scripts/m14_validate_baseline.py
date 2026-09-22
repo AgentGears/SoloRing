@@ -134,13 +134,15 @@ def check_base03() -> list[str]:
         "0017_m16_intra_shot_consequences.py",
         # M17A (frozen R5): the dialogue/vocal foundation migration
         "0018_m17a_dialogue_vocal_foundation.py",
+        # M17B (frozen R7): the performance-revisions migration
+        "0019_m17b_performance_revisions.py",
     }
     if not migrations or migrations[-1] not in admitted:
         errors.append(
             "current migration head is not an admitted frozen head: "
             f"{migrations[-1:]}")
     beyond = [m for m in migrations
-              if m > "0018_m17a_dialogue_vocal_foundation.py"]
+              if m > "0019_m17b_performance_revisions.py"]
     if beyond:
         errors.append(f"migrations beyond exact M16-A 0017 exist: {beyond}")
     m16_named = [m for m in migrations if m.startswith("0017_")]
