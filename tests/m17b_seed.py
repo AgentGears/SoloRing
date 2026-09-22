@@ -130,8 +130,7 @@ def candidate_body(channels: list[dict], start=(0, 1), end=(4500, 1),
                 "schema_version": 1, "source_kind": source_kind,
                 "producer_id": producer, "producer_version": "1",
                 "source_identity": source_identity,
-                "parameters_sha256": parameters_sha256,
-                "retarget": None}}
+                "parameters_sha256": parameters_sha256}}
     body.update(over)
     return body
 
@@ -157,5 +156,9 @@ async def stamp_alembic(client, head: str =
     engine = client._transport.app.state.engine
     async with engine.begin() as conn:
         await conn.execute(text(
-            "UPDATE alembic_version SET version_num = :h"),
+            "CREATE TABLE IF NOT EXISTS alembic_version ("
+            "version_num VARCHAR(32) NOT NULL PRIMARY KEY)"))
+        await conn.execute(text("DELETE FROM alembic_version"))
+        await conn.execute(text(
+            "INSERT INTO alembic_version (version_num) VALUES (:h)"),
             {"h": head})

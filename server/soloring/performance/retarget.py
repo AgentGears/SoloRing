@@ -192,7 +192,7 @@ async def assess_physical_retarget(
             PerformanceRetargetAssessment.evaluator_version ==
             EVALUATOR_VERSION,
             PerformanceRetargetAssessment.scope_hash == scope_hash)
-    ).scalar_one_or_none())
+    )).scalar_one_or_none()
     if existing is not None:
         _assert_deterministic(existing, report_json, report_hash,
                               verdict)
@@ -227,7 +227,7 @@ async def assess_physical_retarget(
                 PerformanceRetargetAssessment.evaluator_version ==
                 EVALUATOR_VERSION,
                 PerformanceRetargetAssessment.scope_hash == scope_hash)
-        ).scalar_one_or_none())
+        )).scalar_one_or_none()
         if winner is None:
             raise
         _assert_deterministic(winner, report_json, report_hash, verdict)

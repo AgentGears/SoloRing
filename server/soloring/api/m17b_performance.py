@@ -117,8 +117,7 @@ async def create_performance_candidate(
         temporal_end_num=body.temporal_end.num,
         temporal_end_den=body.temporal_end.den,
         channels=[ch.model_dump() for ch in body.channels],
-        source_provenance=body.source_provenance.model_dump(
-            exclude_unset=True))
+        source_provenance={**body.source_provenance.model_dump(exclude_unset=True), "retarget": None})
     await session.commit()
     return PerformanceCandidateRead(**_candidate_view(candidate))
 
