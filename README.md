@@ -6,7 +6,7 @@ spatial, and assembly decision is captured as immutable, mechanically
 verified state that can be reproduced exactly later — on this machine,
 without any cloud dependency.
 
-What exists through M16:
+What exists through M17B:
 
 - **Story World & continuity (M6–M8)** — CreativeEntities with immutable
   kind-specific design revisions, explicit approvals, narrative structure
@@ -39,21 +39,38 @@ What exists through M16:
   grammar), schema-7 Shot capture with immutable companions, historical
   re-fold, fail-closed generation fence for schema-7 authority, 0017
   recovery verification, and the Shot event-timeline / review UI.
+- **Dialogue & vocal foundation (M17A)** — dialogue lines with immutable
+  revisions, vocal candidates → vocal performance revisions → explicit
+  selections, dialogue alignments over exact rational temporal domains,
+  and 0018 recovery verification.
+- **Body/facial performance revisions (M17B)** — an immutable,
+  tool-independent performance authority: canonical dual-hash payload
+  candidates under frozen profile/1 (13 face/body channels), adoption as
+  an immutable semantic closure, and reviewed retarget-compatibility
+  assessments that re-express the exact adopted performance semantics on
+  a changed physical ProductionRevision (byte-identical semantic copy,
+  provenance-only change); recovery inventory at 0019 with 13 physical
+  Blob-FK paths.
 
 Generation/executor support (ComfyUI binding, durable provenance, Exact
 Rerun) exists and is exercised live through the M14 observation path;
 M16 deliberately refuses to execute schema-7 (event-bearing) authority —
-event-aware execution is downstream of a future contract.
+event-aware execution is downstream of a future contract. M17B
+performance authority is backend/API only; performance-aware
+generation, capture, and synchronization are downstream milestones
+(M17C+).
 
-Status: **M16 — Intra-Shot Persistent Consequences — CLOSED** at
-certified head `9e703806304063110a07458c3d3e0b0124c6ab14`
-(frozen plan R7, CI #149, migration head
-`0017_m16_intra_shot_consequences`); merge/publication of the branch is
-a separate pending gate. Earlier milestones M0–M15 are closed and
-published — the M13 hygiene baseline remains
+Status: **M17B — Body/Facial Performance Revisions — CLOSED** at
+certified head `b6ec16a104125b5d618565a36521df8c2b044b7b`
+(frozen plan R7, §19 certification 2649×2 + GPU gate 9/9, migration
+head `0019_m17b_performance_revisions`); merge/publication of the
+branch is a separate pending gate. Earlier milestones M0–M16 are closed
+and published — the M13 hygiene baseline remains
 **M13 — Authority-Complete Reusable World — CLOSED + PUBLISHED**
 at `M13 @ 384a46d3a5c68d7d81784befc338aa8621b93fbd`, then M14 @
-`89298e7…` and M15 @ `30ea135f…`; the M1-era audit record lives in
+`89298e7…`, M15 @ `30ea135f…`, M16 @ `9e703806…` (published main
+`488031a…`), and M17A @ `325a13b…` (published main `41a1df5…`, PR
+#24); the M1-era audit record lives in
 `docs/AUDIT_REMEDIATION.md` and the live deployment contract in
 `docs/EXECUTOR_PROFILE.md`.
 
@@ -66,8 +83,9 @@ apps/web/              Next.js frontend (project/shot editors, Story World,
                        intra-Shot event timeline + consequence review)
 server/soloring/       Python package (api, db, domain, continuity,
                        narrative, generation, executors, worker, assets,
-                       production, composition, production_world)
-server/alembic/        migrations (head: 0017_m16_intra_shot_consequences)
+                       production, composition, production_world,
+                       performance, recovery)
+server/alembic/        migrations (head: 0019_m17b_performance_revisions)
 workflows/             ComfyUI workflow contracts (M4/M5)
 data/                  runtime SQLite db, blobs, staging, tmp (gitignored)
 tests/                 test suite (milestone proof maps + hygiene gates)
@@ -78,8 +96,9 @@ docs/                  plans, proof maps, hygiene baseline, evidence
 ### Package versioning note
 
 The `soloring` package version in `pyproject.toml` is independent of the
-milestone numbering: milestones are immutable tagged baselines
-(`M7`…`M15`), and the package semver is **deliberately left at 0.1.0**
+milestone numbering: milestone publication identities are independent
+of package semver, and some published milestones also carry annotated
+milestone tags. The package semver is **deliberately left at 0.1.0**
 until an explicit package-release policy exists. No package release is
 implied by any milestone publication.
 
