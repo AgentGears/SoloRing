@@ -15,6 +15,7 @@ UNIQUE(adopted_candidate_id) with full winner revalidation.
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 
 from sqlalchemy import select
@@ -28,7 +29,11 @@ from soloring.domain.now import db_now
 from soloring.errors import ErrorCode, SoloRingError, not_found
 from soloring.performance.models import (PerformanceCandidate,
                                          PerformanceRevision)
-from soloring.performance.profile import PROFILE_ID, build_canonical_payload
+from soloring.performance.profile import (
+    PROFILE_ID,
+    build_canonical_payload,
+    validate_temporal_domain,
+)
 
 SOURCE_KINDS = ("authored", "performance_capture", "tracking",
                 "reconstruction", "generated", "simulated", "procedural",
@@ -42,12 +47,195 @@ _RETARGET_KEYS = {"source_performance_revision_id",
                   "to_production_revision_id",
                   "compatibility_assessment_id", "accepted_review_id"}
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
-_PATH_FORMS = re.compile(
-    r"^(file://|/|\./|\.\./|[A-Za-z]:[\\/]|\\\\)")
+_PATH_FORMS = re.compile(r"^(?i:file)://|/|\./|\.\.\/|[A-Za-z]:[/\\]|\\")
 
 
 def _invalid(code: ErrorCode, message: str) -> SoloRingError:
     return SoloRingError(code, message, status_code=422)
+
+
+_UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-"
+    r"[0-9a-f]{12}$")
+
+
+def validate_adoption_metadata(*, adoption_id, adopted_by,
+                               adopted_at) -> None:
+    """Shared persisted adoption-metadata grammar (correction CR-B/
+    CR-D): exact UUID for adoption_id, nonblank exact adopted_by
+    <= 255 code points, adopted_at present."""
+    if not isinstance(adoption_id, str) or not _UUID_RE.fullmatch(
+            adoption_id):
+        raise _invalid(
+            ErrorCode.PERFORMANCE_PAYLOAD_INVALID,
+            "adoption_id must be an exact UUID")
+    if not isinstance(adopted_by, str) or not adopted_by.strip() \
+            or len(adopted_by) > 255:
+        raise _invalid(
+            ErrorCode.PERFORMANCE_PAYLOAD_INVALID,
+            "adopted_by must be nonempty (whitespace test) exact "
+            "UTF-8 <= 255 code points")
+    if not isinstance(adopted_at, str) or not adopted_at:
+        raise _invalid(
+            ErrorCode.PERFORMANCE_PAYLOAD_INVALID,
+            "adopted_at must be present")
+
+
+def validate_review_metadata(*, decision, reviewed_by, rationale) -> None:
+    """Shared persisted review-metadata grammar (correction CR-D)."""
+    if decision not in ("ACCEPT_FOR_NEW_CANDIDATE", "REJECT"):
+        raise _invalid(
+            ErrorCode.PERFORMANCE_PAYLOAD_INVALID,
+            "review decision must be ACCEPT_FOR_NEW_CANDIDATE or "
+            "REJECT")
+    if not isinstance(reviewed_by, str) or not reviewed_by.strip() \
+            or len(reviewed_by) > 255:
+        raise _invalid(
+            ErrorCode.PERFORMANCE_PAYLOAD_INVALID,
+            "reviewed_by must be nonempty (whitespace test) exact "
+            "UTF-8 <= 255 code points")
+    if rationale is not None and (not isinstance(rationale, str)
+                                   or len(rationale) > 4096):
+        raise _invalid(
+            ErrorCode.PERFORMANCE_PAYLOAD_INVALID,
+            "rationale must be null or exact UTF-8 free text <= 4096 "
+            "code points")
+
+
+async def verify_candidate_integrity(
+        session: AsyncSession, settings, candidate: PerformanceCandidate,
+        *, row_lookup=None, blob_reader=None) -> dict:
+    """Full immutable candidate-closure integrity (correction CR-B).
+
+    Verifies temporal canonicality, profile/kind row fields, the
+    physical retained Blob (bytes + dual-hash agreement), the exact
+    closed payload grammar with byte-identical canonical re-emission,
+    the closed provenance grammar + canonical hash, and alignment
+    provenance integrity. Pure with respect to CURRENT state: only
+    immutable candidate fields and immutable referenced rows are read.
+
+    ``row_lookup``/``blob_reader`` let the recovery verifier inject
+    its own staged-DB readers (sqlite3 rows + root path) without
+    importing transport behavior into recovery.
+    """
+    from soloring.performance.revision import (
+        build_provenance_envelope)
+
+    if candidate.performance_profile_id != PROFILE_ID:
+        raise _invalid(
+            ErrorCode.PERFORMANCE_PROFILE_UNSUPPORTED,
+            "candidate profile id is not performance-profile/1")
+    if candidate.payload_schema_version != 1 or \
+            candidate.provenance_schema_version != 1:
+        raise _invalid(
+            ErrorCode.PERFORMANCE_PAYLOAD_INVALID,
+            "candidate schema versions must be 1")
+    validate_temporal_domain(
+        candidate.temporal_start_num, candidate.temporal_start_den,
+        candidate.temporal_end_num, candidate.temporal_end_den)
+
+    # physical retained bytes + dual-hash agreement
+    if candidate.canonical_channel_payload_sha256 != \
+            candidate.canonical_channel_payload_blob_hash:
+        raise _invalid(
+            ErrorCode.BLOB_HASH_MISMATCH,
+            "candidate dual payload hash columns disagree")
+    payload_hash = candidate.canonical_channel_payload_blob_hash
+    if row_lookup is not None:
+        data = blob_reader(payload_hash)
+    else:
+        from soloring.assets.models import Blob
+        if await session.get(Blob, payload_hash) is None:
+            raise _invalid(
+                ErrorCode.BLOB_NOT_FOUND,
+                f"candidate payload blob row {payload_hash!r} missing")
+        store = BlobStore(settings)
+        data = store.path_for_hash(payload_hash).read_bytes()
+    actual = hashlib.sha256(data).hexdigest()
+    if actual != payload_hash:
+        raise _invalid(
+            ErrorCode.BLOB_HASH_MISMATCH,
+            f"candidate payload physical bytes hash to {actual}")
+
+    # exact closed payload grammar + canonical re-emission equality
+    try:
+        doc = json.loads(data.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        raise _invalid(
+            ErrorCode.PERFORMANCE_PAYLOAD_INVALID,
+            "retained payload is not UTF-8 JSON")
+    rebuilt, _ = build_canonical_payload(
+        doc, performance_kind=candidate.performance_kind,
+        performance_profile_id=candidate.performance_profile_id,
+        start_num=candidate.temporal_start_num,
+        start_den=candidate.temporal_start_den,
+        end_num=candidate.temporal_end_num,
+        end_den=candidate.temporal_end_den)
+    if rebuilt != data:
+        raise _invalid(
+            ErrorCode.PERFORMANCE_PAYLOAD_INVALID,
+            "retained payload is not the canonical serialization of "
+            "its own document")
+
+    # closed provenance grammar + canonical hash
+    try:
+        prov_doc = json.loads(candidate.provenance_json)
+    except json.JSONDecodeError:
+        raise _invalid(
+            ErrorCode.PERFORMANCE_PROVENANCE_INVALID,
+            "candidate provenance is not JSON")
+    envelope = build_provenance_envelope(prov_doc)
+    if envelope.get("source_kind") != candidate.source_kind:
+        raise _invalid(
+            ErrorCode.PERFORMANCE_PROVENANCE_INVALID,
+            "candidate provenance/column source_kind disagree")
+    if canonical_json_str(envelope) != candidate.provenance_json or \
+            canonical_hash(envelope) != candidate.provenance_hash:
+        raise _invalid(
+            ErrorCode.PERFORMANCE_PROVENANCE_INVALID,
+            "candidate provenance bytes/hash do not recompute")
+
+    # alignment provenance integrity (same immutable law as creation)
+    if row_lookup is None:
+        from soloring.performance.revision import (
+            _verify_alignment_provenance)
+        await _verify_alignment_provenance(
+            session, subject_id=candidate.subject_id, channels=doc[
+                "channels"])
+    return {"payload_document": doc, "envelope": envelope}
+
+_CLOSURE_FIELDS = (
+    "project_id", "subject_id", "performance_kind",
+    "performance_profile_id", "temporal_start_num",
+    "temporal_start_den", "temporal_end_num", "temporal_end_den",
+    "canonical_channel_payload_blob_hash",
+    "canonical_channel_payload_sha256", "payload_schema_version",
+    "source_kind", "provenance_schema_version", "provenance_json",
+    "provenance_hash")
+
+
+def closure_matches(revision: PerformanceRevision,
+                    candidate: PerformanceCandidate) -> bool:
+    """Frozen R7 §4.2: the revision's copied closure is byte/scalar
+    identical to its adopted candidate."""
+    return all(getattr(revision, f) == getattr(candidate, f)
+               for f in _CLOSURE_FIELDS)
+
+
+def revalidate_winner(revision: PerformanceRevision,
+                      candidate: PerformanceCandidate) -> None:
+    """Duplicate-adoption winner revalidation: fail closed on any
+    copied-closure divergence; a uniqueness conflict alone is not
+    proof of a valid winner."""
+    if not closure_matches(revision, candidate):
+        raise SoloRingError(
+            ErrorCode.INTERNAL_INVARIANT_VIOLATION,
+            "adopted PerformanceRevision closure does not reproduce "
+            "its candidate closure — corruption, never repaired",
+            status_code=500)
+    validate_adoption_metadata(adoption_id=revision.adoption_id,
+                               adopted_by=revision.adopted_by,
+                               adopted_at=revision.adopted_at)
 
 
 def build_provenance_envelope(provenance: dict) -> dict:
@@ -287,40 +475,80 @@ async def create_performance_candidate(
     return candidate
 
 
-_CLOSURE_FIELDS = (
-    "project_id", "subject_id", "performance_kind",
-    "performance_profile_id", "temporal_start_num",
-    "temporal_start_den", "temporal_end_num", "temporal_end_den",
-    "canonical_channel_payload_blob_hash",
-    "canonical_channel_payload_sha256", "payload_schema_version",
-    "source_kind", "provenance_schema_version", "provenance_json",
-    "provenance_hash")
 
+async def create_performance_candidate(
+        session: AsyncSession, settings, *, subject_id: str,
+        performance_kind: str, performance_profile_id: str,
+        temporal_start_num: int, temporal_start_den: int,
+        temporal_end_num: int, temporal_end_den: int,
+        channels: dict, source_provenance: dict) -> PerformanceCandidate:
+    """Frozen R7 §9: validate, canonicalize, BlobStore-place, persist —
+    or leave nothing. Caller hashes and caller filesystem paths are
+    never accepted. Repeated identical submissions are distinct lawful
+    evidence rows (no semantic dedupe)."""
+    from soloring.continuity.models import CreativeEntity
+    entity = await session.get(CreativeEntity, subject_id)
+    if entity is None:
+        raise not_found(ErrorCode.PERFORMANCE_SUBJECT_NOT_FOUND,
+                        f"subject entity {subject_id!r} not found")
+    await _verify_subject(session, subject_id=subject_id,
+                          project_id=entity.project_id)
 
-def closure_matches(revision: PerformanceRevision,
-                    candidate: PerformanceCandidate) -> bool:
-    """Frozen R7 §4.2: the revision's copied closure is byte/scalar
-    identical to its adopted candidate."""
-    return all(getattr(revision, f) == getattr(candidate, f)
-               for f in _CLOSURE_FIELDS)
+    envelope = build_provenance_envelope(source_provenance)
+    if envelope["source_kind"] == "retargeted":
+        raise _invalid(
+            ErrorCode.PERFORMANCE_PROVENANCE_INVALID,
+            "retargeted candidates are created only through the "
+            "retarget-candidate service")
 
+    payload = {"schema_version": 1,
+               "performance_profile_id": performance_profile_id,
+               "channels": channels}
+    body, normalized = build_canonical_payload(
+        payload, performance_kind=performance_kind,
+        performance_profile_id=performance_profile_id,
+        start_num=temporal_start_num, start_den=temporal_start_den,
+        end_num=temporal_end_num, end_den=temporal_end_den)
+    payload_sha = hashlib.sha256(body).hexdigest()
+    from soloring.performance.profile import validate_temporal_domain
+    sn, sd, en, ed = validate_temporal_domain(
+        temporal_start_num, temporal_start_den,
+        temporal_end_num, temporal_end_den)
 
-def revalidate_winner(revision: PerformanceRevision,
-                      candidate: PerformanceCandidate) -> None:
-    """Duplicate-adoption winner revalidation: fail closed on any
-    copied-closure divergence; a uniqueness conflict alone is not
-    proof of a valid winner."""
-    if not closure_matches(revision, candidate):
-        raise SoloRingError(
-            ErrorCode.INTERNAL_INVARIANT_VIOLATION,
-            "adopted PerformanceRevision closure does not reproduce "
-            "its candidate closure — corruption, never repaired",
-            status_code=500)
-    if not revision.adoption_id or not revision.adopted_by.strip():
-        raise SoloRingError(
-            ErrorCode.INTERNAL_INVARIANT_VIOLATION,
-            "adopted PerformanceRevision has invalid adoption "
-            "metadata — corruption", status_code=500)
+    await _verify_alignment_provenance(
+        session, subject_id=subject_id, channels=normalized)
+
+    store = BlobStore(settings)
+    tmp = store.tmp_path()
+    tmp.write_bytes(body)
+    await store.place(payload_sha, tmp)
+    from soloring.assets.models import Blob
+    if await session.get(Blob, payload_sha) is None:
+        session.add(Blob(hash=payload_sha,
+                         path=store.relative_path_for_hash(payload_sha),
+                         size_bytes=len(body),
+                         detected_media_type="application/json",
+                         created_at=await db_now(session)))
+
+    prov_json = canonical_json_str(envelope)
+    prov_hash = canonical_hash(envelope)
+    candidate = PerformanceCandidate(
+        id=new_uuid(), project_id=entity.project_id,
+        subject_id=subject_id,
+        performance_kind=performance_kind,
+        performance_profile_id=PROFILE_ID,
+        temporal_start_num=sn, temporal_start_den=sd,
+        temporal_end_num=en, temporal_end_den=ed,
+        canonical_channel_payload_blob_hash=payload_sha,
+        canonical_channel_payload_sha256=payload_sha,
+        payload_schema_version=1,
+        source_kind=envelope["source_kind"],
+        provenance_schema_version=1,
+        provenance_json=prov_json, provenance_hash=prov_hash,
+        created_at=await db_now(session))
+    session.add(candidate)
+    await session.flush()
+    return candidate
 
 
 async def get_performance_candidate(session: AsyncSession, *,
@@ -348,11 +576,11 @@ async def get_performance_revision(session: AsyncSession, *,
 async def adopt_performance_candidate(
         session: AsyncSession, *, candidate_id: str,
         adopted_by: str) -> PerformanceRevision:
-    """Frozen R7 §10. Sequential duplicates return the winner with
-    original adoption metadata; concurrent duplicates converge
-    through UNIQUE(adopted_candidate_id) — the loser rolls back and
-    re-reads the winner (route-level retry handles the transaction
-    boundary exactly as M17A adoption does)."""
+    """Frozen R7 §10 as corrected (CR-E/CR-B): the existing winner
+    returns FIRST regardless of later subject soft deletion — activity
+    is a first-admission rule, not an eternal historical-validity
+    rule — and every authority transition (first or replay) verifies
+    full candidate integrity before inserting or returning."""
     candidate = await get_performance_candidate(
         session, candidate_id=candidate_id)
     if not isinstance(adopted_by, str) or not adopted_by.strip() \
@@ -360,21 +588,30 @@ async def adopt_performance_candidate(
         raise _invalid(ErrorCode.PERFORMANCE_PAYLOAD_INVALID,
                        "adopted_by must be nonempty (whitespace test) "
                        "<= 255 code points, persisted exactly")
-    from soloring.continuity.models import CreativeEntity
-    entity = await session.get(CreativeEntity, candidate.subject_id)
-    if entity is not None and entity.deleted_at is not None:
-        raise _invalid(
-            ErrorCode.PERFORMANCE_SUBJECT_DELETED,
-            "subject is deleted — first adoption requires an active "
-            "subject")
 
     existing = (await session.execute(
         select(PerformanceRevision).where(
             PerformanceRevision.adopted_candidate_id == candidate.id))
     ).scalar_one_or_none()
     if existing is not None:
+        # historical replay: winner + source-candidate integrity,
+        # never vetoed by current subject state
+        await verify_candidate_integrity(
+            session, _settings_of(session), candidate)
         revalidate_winner(existing, candidate)
         return existing
+
+    # first adoption: active-subject admission + full integrity
+    from soloring.continuity.models import CreativeEntity
+    entity = await session.get(CreativeEntity, candidate.subject_id)
+    if entity is None or entity.deleted_at is not None:
+        raise _invalid(
+            ErrorCode.PERFORMANCE_SUBJECT_DELETED,
+            "subject is deleted — first adoption requires an active "
+            "subject; later soft deletion never invalidates adopted "
+            "history")
+    await verify_candidate_integrity(
+        session, _settings_of(session), candidate)
 
     revision = PerformanceRevision(
         id=new_uuid(), **{f: getattr(candidate, f)
@@ -392,3 +629,11 @@ async def adopt_performance_candidate(
         # its snapshot before re-reading the committed winner
         raise
     return revision
+
+
+def _settings_of(session: AsyncSession):
+    """Settings bound to the session's app (routes bind
+    app.state.settings to the same data root the engine uses)."""
+    from soloring.settings import get_settings
+    return get_settings()
+

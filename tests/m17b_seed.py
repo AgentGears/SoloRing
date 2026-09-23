@@ -139,8 +139,9 @@ def candidate_body(channels: list[dict], start=(0, 1), end=(4500, 1),
                 else "BODY" if domains == {"body"} else "BODY_FACIAL")
     body = {"performance_kind": kind,
             "performance_profile_id": profile,
-            "temporal_start": {"num": start[0], "den": start[1]},
-            "temporal_end": {"num": end[0], "den": end[1]},
+            "temporal_domain": {
+                "start": {"num": start[0], "den": start[1]},
+                "end": {"num": end[0], "den": end[1]}},
             "channels": channels,
             "source_provenance": {
                 "schema_version": 1, "source_kind": source_kind,

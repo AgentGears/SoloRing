@@ -107,18 +107,39 @@ async def create_performance_candidate(
         subject_id: str, body: PerformanceCandidateCreate,
         request: Request,
         session: AsyncSession = Depends(get_session)):
-    candidate = await revision_svc.create_performance_candidate(
-        session, request.app.state.settings,
-        subject_id=subject_id,
-        performance_kind=body.performance_kind,
-        performance_profile_id=body.performance_profile_id,
-        temporal_start_num=body.temporal_start.num,
-        temporal_start_den=body.temporal_start.den,
-        temporal_end_num=body.temporal_end.num,
-        temporal_end_den=body.temporal_end.den,
-        channels=[ch.model_dump() for ch in body.channels],
-        source_provenance={**body.source_provenance.model_dump(exclude_unset=True), "retarget": None})
-    await session.commit()
+    try:
+        candidate = await revision_svc.create_performance_candidate(
+            session, request.app.state.settings,
+            subject_id=subject_id,
+            performance_kind=body.performance_kind,
+            performance_profile_id=body.performance_profile_id,
+            temporal_start_num=body.temporal_domain.start.num,
+            temporal_start_den=body.temporal_domain.start.den,
+            temporal_end_num=body.temporal_domain.end.num,
+            temporal_end_den=body.temporal_domain.end.den,
+            channels=[ch.model_dump() for ch in body.channels],
+            source_provenance={**body.source_provenance.model_dump(exclude_unset=True), "retarget": None})
+        await session.commit()
+    except IntegrityError:
+        # concurrent first submissions of IDENTICAL canonical
+        # bytes can both attempt the same Blob PK (correction
+        # CR-F): physical placement is content-addressed and
+        # idempotent, so rollback + rerun converges on the
+        # winner Blob row and still creates THIS request's
+        # distinct lawful candidate evidence row
+        await session.rollback()
+        candidate = await revision_svc.create_performance_candidate(
+            session, request.app.state.settings,
+            subject_id=subject_id,
+            performance_kind=body.performance_kind,
+            performance_profile_id=body.performance_profile_id,
+            temporal_start_num=body.temporal_domain.start.num,
+            temporal_start_den=body.temporal_domain.start.den,
+            temporal_end_num=body.temporal_domain.end.num,
+            temporal_end_den=body.temporal_domain.end.den,
+            channels=[ch.model_dump() for ch in body.channels],
+            source_provenance={**body.source_provenance.model_dump(exclude_unset=True), "retarget": None})
+        await session.commit()
     return PerformanceCandidateRead(**_candidate_view(candidate))
 
 
@@ -228,11 +249,27 @@ async def list_performance_revisions(
 async def create_retarget_assessment(
         revision_id: str, body: RetargetAssessmentCreate,
         session: AsyncSession = Depends(get_session)):
-    a = await retarget_svc.assess_physical_retarget(
-        session, performance_revision_id=revision_id,
-        from_production_revision_id=body.from_production_revision_id,
-        to_production_revision_id=body.to_production_revision_id)
-    await session.commit()
+    try:
+        a = await retarget_svc.assess_physical_retarget(
+            session, performance_revision_id=revision_id,
+            from_production_revision_id=(
+                body.from_production_revision_id),
+            to_production_revision_id=(
+                body.to_production_revision_id))
+        await session.commit()
+    except IntegrityError:
+        # concurrent first creation converges through the unique
+        # assessment coordinate (CR-A; status contract CR-H): 
+        # rollback + rerun returns the exact committed winner; 201
+        # on both paths is the pinned contract
+        await session.rollback()
+        a = await retarget_svc.assess_physical_retarget(
+            session, performance_revision_id=revision_id,
+            from_production_revision_id=(
+                body.from_production_revision_id),
+            to_production_revision_id=(
+                body.to_production_revision_id))
+        await session.commit()
     return _assessment_view(a)
 
 

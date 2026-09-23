@@ -1,0 +1,584 @@
+"""M17B correction-round proof battery (correction plan R1 §14).
+
+X1 true first-creation assessment race; X2 poisoned-session
+discipline; X3 candidate-integrity corruption before adoption; X4
+corrupt-winner replay; X5 adoption lifecycle ordering; X6 HTTP scalar
+strictness; X7 frozen create-body grammar; X8 concurrent first
+candidate Blob race; X9 recovery grammar corruptions; X10 F05 real
+immutability surface; X11 A03 corrected structural ownership.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import json
+
+import pytest
+from sqlalchemy import text
+
+from tests.m17b_seed import (SMILE, candidate_body, channel, kf,
+                             seed_production_object,
+                             seed_production_revision)
+
+
+async def _subject(client, name="CR"):
+    from tests.m17b_seed import make_entity, make_project
+    pid = await make_project(client, name=name)
+    eid = await make_entity(client, pid)
+    return pid, eid
+
+
+def _post(client, eid, body):
+    return client.post(
+        f"/creative-entities/{eid}/performance-candidates", json=body)
+
+
+def _body(value=None, num=None):
+    ch = channel(SMILE, [kf(0, 1, value if value is not None else 0)])
+    if num is not None:
+        ch["keyframes"][0]["time_ms"]["num"] = num
+    return candidate_body([ch])
+
+
+# --------------------------- X1/X2 ---------------------------------
+
+async def _race_world(client, tag: bytes):
+    from tests.m17b_seed import make_entity, make_project
+    pid = await make_project(client, name=f"X1 {tag!r}")
+    eid = await make_entity(client, pid)
+    c = (await _post(client, eid, _body())).json()
+    rev = (await client.post(f"/performance-candidates/{c['id']}/"
+                             "adopt",
+                             json={"adopted_by": "d"})).json()
+    obj = await seed_production_object(client, pid, "X1 obj", tag)
+    pr1 = await seed_production_revision(client, obj, tag + b"1", 1)
+    pr2 = await seed_production_revision(client, obj, tag + b"2", 2)
+    return pid, eid, rev, pr1, pr2
+
+
+@pytest.mark.asyncio
+async def test_x1_retarget_true_first_creation_race_converges(client):
+    """Two concurrent identical POSTs with ZERO preexisting rows:
+    both succeed, one row, same id/scope/report/verdict, no
+    PendingRollbackError escapes."""
+    _, _, rev, pr1, pr2 = await _race_world(client, b"x1")
+    url = f"/performance-revisions/{rev['id']}/retarget-assessments"
+    payload = {"from_production_revision_id":
+               pr1["production_revision_id"],
+               "to_production_revision_id":
+               pr2["production_revision_id"]}
+    r1, r2 = await asyncio.gather(client.post(url, json=payload),
+                                  client.post(url, json=payload))
+    assert r1.status_code == 201, r1.text
+    assert r2.status_code == 201, r2.text
+    assert r1.json()["id"] == r2.json()["id"]
+    assert r1.json()["scope_hash"] == r2.json()["scope_hash"]
+    assert r1.json()["report_hash"] == r2.json()["report_hash"]
+    assert r1.json()["overall_verdict"] == \
+        r2.json()["overall_verdict"] == "REQUIRES_REVIEW"
+    engine = client._transport.app.state.engine
+    async with engine.connect() as conn:
+        n = (await conn.execute(text(
+            "SELECT COUNT(*) FROM performance_retarget_assessments "
+            "WHERE performance_revision_id = :r"),
+            {"r": rev["id"]})).scalar()
+    assert n == 1
+
+
+@pytest.mark.asyncio
+async def test_x1b_sequential_convergence_and_201_status_pinned(client):
+    """Sequential identical requests converge; 201 is the pinned
+    status on BOTH the newly-inserted and convergence paths."""
+    _, _, rev, pr1, pr2 = await _race_world(client, b"x1b")
+    url = f"/performance-revisions/{rev['id']}/retarget-assessments"
+    payload = {"from_production_revision_id":
+               pr1["production_revision_id"],
+               "to_production_revision_id":
+               pr2["production_revision_id"]}
+    r1 = await client.post(url, json=payload)
+    r2 = await client.post(url, json=payload)
+    assert r1.status_code == 201 and r2.status_code == 201
+    assert r1.json()["id"] == r2.json()["id"]
+
+
+def test_x2_poisoned_session_discipline(tmp_path):
+    """A forced ORM-flush unique conflict (via the PRODUCT model)
+    followed by any query on the same session raises
+    PendingRollbackError — proving the production convergence must
+    (and now does) happen at the route boundary. Core text() INSERT
+    failures do NOT poison the session; only the ORM flush path
+    does (independent-review empirical nuance)."""
+    from sqlalchemy import text
+    from sqlalchemy.exc import IntegrityError, PendingRollbackError
+    from sqlalchemy.ext.asyncio import (async_sessionmaker,
+                                        create_async_engine)
+    from soloring.db.base import Base
+    from soloring.db import models  # noqa: register tables
+    from soloring.db.engine import create_soloring_engine
+    from soloring.settings import Settings
+
+    async def go():
+        settings = Settings(data_dir=tmp_path / "d")
+        settings.data_dir.mkdir(parents=True, exist_ok=True)
+        eng = create_soloring_engine(settings)
+        async with eng.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+            now = "2026-01-01T00:00:00.000Z"
+            await conn.execute(text(
+                "INSERT INTO projects (id,name,created_at,updated_at)"
+                " VALUES ('p','P','" + now + "','" + now + "')"))
+            await conn.execute(text(
+                "INSERT INTO blobs (hash, path, size_bytes, "
+                "detected_media_type, created_at) VALUES ('"
+                + "a" * 64 + "','sha256/aa/aa/" + "a" * 64
+                + "',1,NULL,'" + now + "')"))
+            await conn.execute(text(
+                "INSERT INTO creative_entities (id, project_id, "
+                "kind, name, created_at, updated_at) VALUES "
+                "('p','p','character','S','" + now + "','" + now
+                + "')"))
+            await conn.execute(text(
+                "INSERT INTO performance_candidates (id,project_id,"
+                "subject_id,performance_kind,"
+                "performance_profile_id,temporal_start_num,"
+                "temporal_start_den,temporal_end_num,"
+                "temporal_end_den,"
+                "canonical_channel_payload_blob_hash,"
+                "canonical_channel_payload_sha256,"
+                "payload_schema_version,source_kind,"
+                "provenance_schema_version,provenance_json,"
+                "provenance_hash,created_at) VALUES "
+                "('c','p','p','FACIAL',"
+                "'performance-profile/1',0,1,4500,1,'"
+                + "a" * 64 + "','" + "a" * 64
+                + "',1,'authored',1,'{}','" + "b" * 64
+                + "','" + now + "')"))
+        from soloring.performance.models import (
+            PerformanceCandidate)
+        S = async_sessionmaker(bind=eng, expire_on_commit=False)
+        async with S() as s:
+            s.add(PerformanceCandidate(
+                id="c", project_id="p", subject_id="p",
+                performance_kind="FACIAL",
+                performance_profile_id="performance-profile/1",
+                temporal_start_num=0, temporal_start_den=1,
+                temporal_end_num=4500, temporal_end_den=1,
+                canonical_channel_payload_blob_hash="a" * 64,
+                canonical_channel_payload_sha256="a" * 64,
+                payload_schema_version=1, source_kind="authored",
+                provenance_schema_version=1, provenance_json="{}",
+                provenance_hash="b" * 64,
+                created_at="2026-01-01T00:00:00.000Z"))
+            try:
+                await s.flush()
+                raise AssertionError("conflict missing")
+            except IntegrityError:
+                pass
+            with pytest.raises(PendingRollbackError):
+                await s.execute(text("SELECT 1"))
+        await eng.dispose()
+
+    asyncio.run(go())
+
+
+# --------------------------- X3/X4 ---------------------------------
+
+async def _corrupt_payload_blob(client, c):
+    settings = client._transport.app.state.settings
+    p = (settings.blob_dir / "sha256" /
+         c["canonical_channel_payload_blob_hash"][:2] /
+         c["canonical_channel_payload_blob_hash"][2:4] /
+         c["canonical_channel_payload_blob_hash"])
+    p.write_bytes(b"corrupted-payload-bytes")
+
+
+async def _corrupt_provenance(client, c, prov_doc):
+    engine = client._transport.app.state.engine
+    from soloring.domain.canonical import (canonical_hash,
+                                           canonical_json_str)
+    j = canonical_json_str(prov_doc)
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "UPDATE performance_candidates SET provenance_json = :j, "
+            "provenance_hash = :h WHERE id = :i"),
+            {"j": j, "h": canonical_hash(prov_doc), "i": c["id"]})
+
+
+@pytest.mark.asyncio
+async def test_x3a_physical_blob_corruption_before_adoption_rejects(client):
+    pid, eid = await _subject(client, "X3a")
+    c = (await _post(client, eid, _body())).json()
+    await _corrupt_payload_blob(client, c)
+    r = await client.post(f"/performance-candidates/{c['id']}/adopt",
+                          json={"adopted_by": "d"})
+    assert r.status_code == 422, r.text
+    engine = client._transport.app.state.engine
+    async with engine.connect() as conn:
+        n = (await conn.execute(text(
+            "SELECT COUNT(*) FROM performance_revisions"),
+            )).scalar()
+    assert n == 0
+
+
+@pytest.mark.asyncio
+async def test_x3b_dual_hash_disagreement_rejects(client):
+    pid, eid = await _subject(client, "X3b")
+    c = (await _post(client, eid, _body())).json()
+    engine = client._transport.app.state.engine
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "UPDATE performance_candidates SET "
+            "canonical_channel_payload_sha256 = '" + "c" * 64 +
+            "' WHERE id = :i"), {"i": c["id"]})
+    r = await client.post(f"/performance-candidates/{c['id']}/adopt",
+                          json={"adopted_by": "d"})
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_x3c_noncanonical_payload_rejects(client):
+    from tests.m17b_seed import JAW
+    pid, eid = await _subject(client, "X3c")
+    two = candidate_body([channel(SMILE, [kf(0, 1, 0)]),
+                          channel(JAW, [kf(0, 1, 100)])])
+    c = (await _post(client, eid, two)).json()
+    settings = client._transport.app.state.settings
+    h = c["canonical_channel_payload_blob_hash"]
+    p = (settings.blob_dir / "sha256" / h[:2] / h[2:4] / h)
+    doc = json.loads(p.read_bytes())
+    assert len(doc["channels"]) == 2
+    doc["channels"].reverse()  # 2-channel reversal is NONcanonical
+    from soloring.domain.canonical import canonical_json_str
+    noncanon = canonical_json_str(doc).encode("utf-8")
+    p.write_bytes(noncanon)
+    nh = hashlib.sha256(noncanon).hexdigest()
+    engine = client._transport.app.state.engine
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "INSERT OR IGNORE INTO blobs (hash, path, size_bytes, "
+            "detected_media_type, created_at) VALUES (:h, :p, :s, "
+            "NULL, '2026-01-01T00:00:00.000Z')"),
+            {"h": nh,
+             "p": f"sha256/{nh[:2]}/{nh[2:4]}/{nh}", "s": len(noncanon)})
+        await conn.execute(text(
+            "UPDATE performance_candidates SET "
+            "canonical_channel_payload_blob_hash = :h, "
+            "canonical_channel_payload_sha256 = :h WHERE id = :i"),
+            {"h": nh, "i": c["id"]})
+    np_ = (settings.blob_dir / "sha256" / nh[:2] / nh[2:4] / nh)
+    np_.parent.mkdir(parents=True, exist_ok=True)
+    np_.write_bytes(noncanon)
+    r = await client.post(f"/performance-candidates/{c['id']}/adopt",
+                          json={"adopted_by": "d"})
+    assert r.status_code == 422, r.text
+
+
+@pytest.mark.asyncio
+async def test_x3d_provenance_hash_drift_rejects(client):
+    pid, eid = await _subject(client, "X3d")
+    c = (await _post(client, eid, _body())).json()
+    engine = client._transport.app.state.engine
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "UPDATE performance_candidates SET provenance_hash = '"
+            + "d" * 64 + "' WHERE id = :i"), {"i": c["id"]})
+    r = await client.post(f"/performance-candidates/{c['id']}/adopt",
+                          json={"adopted_by": "d"})
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_x3e_selfconsistent_provenance_grammar_violation_rejects(client):
+    pid, eid = await _subject(client, "X3e")
+    c = (await _post(client, eid, _body())).json()
+    await _corrupt_provenance(client, c, {
+        "schema_version": 1, "source_kind": "authored",
+        "producer_id": "p", "producer_version": "1",
+        "source_identity": None, "parameters_sha256": None,
+        "retarget": None, "extra_forbidden_key": True})
+    r = await client.post(f"/performance-candidates/{c['id']}/adopt",
+                          json={"adopted_by": "d"})
+    assert r.status_code == 422, r.text
+
+
+@pytest.mark.asyncio
+async def test_x3f_source_identity_path_form_rejects(client):
+    pid, eid = await _subject(client, "X3f")
+    c = (await _post(client, eid, _body())).json()
+    await _corrupt_provenance(client, c, {
+        "schema_version": 1, "source_kind": "authored",
+        "producer_id": "p", "producer_version": "1",
+        "source_identity": "file://x/y", "parameters_sha256": None,
+        "retarget": None})
+    r = await client.post(f"/performance-candidates/{c['id']}/adopt",
+                          json={"adopted_by": "d"})
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_x4_corrupt_winner_replay_fails_closed(client):
+    pid, eid = await _subject(client, "X4")
+    c = (await _post(client, eid, _body())).json()
+    rev = (await client.post(f"/performance-candidates/{c['id']}/"
+                             "adopt",
+                             json={"adopted_by": "d"})).json()
+    # tamper the WINNER closure before duplicate replay
+    engine = client._transport.app.state.engine
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "UPDATE performance_revisions SET performance_kind = "
+            "'BODY' WHERE id = :i"), {"i": rev["id"]})
+    r = await client.post(f"/performance-candidates/{c['id']}/adopt",
+                          json={"adopted_by": "other"})
+    assert r.status_code == 500, r.text
+
+
+# --------------------------- X5 ------------------------------------
+
+@pytest.mark.asyncio
+async def test_x5_adopt_delete_duplicate_adopt_returns_winner(client):
+    pid, eid = await _subject(client, "X5")
+    c = (await _post(client, eid, _body())).json()
+    r1 = (await client.post(f"/performance-candidates/{c['id']}/"
+                            "adopt",
+                            json={"adopted_by": "director"})).json()
+    r = await client.delete(f"/entities/{eid}")
+    assert r.status_code in (200, 204)
+    r2 = await client.post(f"/performance-candidates/{c['id']}/adopt",
+                           json={"adopted_by": "producer"})
+    assert r2.status_code == 200, r2.text
+    assert r2.json()["id"] == r1["id"]
+    assert r2.json()["adoption_id"] == r1["adoption_id"]
+    assert r2.json()["adopted_by"] == "director"
+
+
+@pytest.mark.asyncio
+async def test_x5b_first_adoption_after_delete_rejects(client):
+    pid, eid = await _subject(client, "X5b")
+    c = (await _post(client, eid, _body())).json()
+    await client.delete(f"/entities/{eid}")
+    r = await client.post(f"/performance-candidates/{c['id']}/adopt",
+                          json={"adopted_by": "d"})
+    assert r.status_code == 422
+    assert r.json()["error_code"] == "PERFORMANCE_SUBJECT_DELETED"
+
+
+# --------------------------- X6/X7 ---------------------------------
+
+@pytest.mark.asyncio
+async def test_x6_http_scalar_strictness(client):
+    pid, eid = await _subject(client, "X6")
+    for bad_body in (_body(value=True), _body(value="7"),
+                     _body(value=7.0), _body(num=True),
+                     _body(num="7"), _body(num=7.0)):
+        r = await _post(client, eid, bad_body)
+        assert r.status_code == 422, (r.status_code, r.text)
+    ok = await _post(client, eid, _body(value=5, num=0))
+    assert ok.status_code == 201, ok.text
+
+
+@pytest.mark.asyncio
+async def test_x7_frozen_create_body_grammar(client):
+    pid, eid = await _subject(client, "X7")
+    nested = _body()
+    assert "temporal_domain" in nested
+    r = await _post(client, eid, nested)
+    assert r.status_code == 201, r.text
+    flat = dict(nested)
+    flat["temporal_start"] = flat.pop("temporal_domain")["start"]
+    flat["temporal_end"] = {"num": 4500, "den": 1}
+    r2 = await _post(client, eid, flat)
+    assert r2.status_code == 422  # closed model rejects obsolete form
+
+
+# --------------------------- X8 ------------------------------------
+
+@pytest.mark.asyncio
+async def test_x8_concurrent_first_identical_candidates_one_blob(client):
+    pid, eid = await _subject(client, "X8")
+    body = _body(value=42)
+    r1, r2 = await asyncio.gather(_post(client, eid, body),
+                                   _post(client, eid, body))
+    assert r1.status_code == 201, r1.text
+    assert r2.status_code == 201, r2.text
+    c1, c2 = r1.json(), r2.json()
+    assert c1["canonical_channel_payload_blob_hash"] == \
+        c2["canonical_channel_payload_blob_hash"]
+    engine = client._transport.app.state.engine
+    async with engine.connect() as conn:
+        n_blob = (await conn.execute(text(
+            "SELECT COUNT(*) FROM blobs WHERE hash = :h"),
+            {"h": c1["canonical_channel_payload_blob_hash"]})).scalar()
+        n_rev = (await conn.execute(text(
+            "SELECT COUNT(*) FROM performance_revisions"))).scalar()
+    assert n_blob == 1
+    assert n_rev == 0
+    settings = client._transport.app.state.settings
+    h = c1["canonical_channel_payload_blob_hash"]
+    p = (settings.blob_dir / "sha256" / h[:2] / h[2:4] / h)
+    assert hashlib.sha256(p.read_bytes()).hexdigest() == h
+
+
+# --------------------------- X9 ------------------------------------
+
+async def _seeded_candidate(client, tag):
+    pid, eid = await _subject(client, f"X9-{tag!r}")
+    c = (await _post(client, eid, _body())).json()
+    engine = client._transport.app.state.engine
+    async with engine.connect() as conn:
+        await conn.exec_driver_sql("PRAGMA wal_checkpoint(TRUNCATE)")
+    await __import__("tests.m17b_seed", fromlist=["stamp_alembic"]) \
+        .stamp_alembic(client)
+    return pid, eid, c
+
+
+def _verify(client):
+    from soloring.recovery.m17b_verifier import (
+        verify_m17b_performance_state)
+    settings = client._transport.app.state.settings
+    return verify_m17b_performance_state(
+        settings.data_dir / "soloring.db", settings.blob_dir)
+
+
+@pytest.mark.asyncio
+async def test_x9_recovery_provenance_grammar_corruptions(client):
+    pid, eid, c = await _seeded_candidate(client, b"prov")
+    engine = client._transport.app.state.engine
+    from soloring.domain.canonical import (canonical_hash,
+                                           canonical_json_str)
+    bad_docs = [
+        {"schema_version": 1, "source_kind": "authored",
+         "producer_id": "p", "producer_version": "1",
+         "source_identity": None, "parameters_sha256": None,
+         "retarget": None, "extra": 1},
+        {"schema_version": 2, "source_kind": "authored",
+         "producer_id": "p", "producer_version": "1",
+         "source_identity": None, "parameters_sha256": None,
+         "retarget": None},
+        {"schema_version": 1, "source_kind": "authored",
+         "producer_id": "p" * 256, "producer_version": "1",
+         "source_identity": None, "parameters_sha256": None,
+         "retarget": None},
+        {"schema_version": 1, "source_kind": "authored",
+         "producer_id": "p", "producer_version": "1",
+         "source_identity": "FILE://x", "parameters_sha256": None,
+         "retarget": None},
+        {"schema_version": 1, "source_kind": "authored",
+         "producer_id": "p", "producer_version": "1",
+         "source_identity": None, "parameters_sha256": "XYZ",
+         "retarget": None},
+        {"schema_version": 1, "source_kind": "authored",
+         "producer_id": "p", "producer_version": "1",
+         "source_identity": None, "parameters_sha256": None,
+         "retarget": {"source_performance_revision_id": "x"}},
+    ]
+    for doc in bad_docs:
+        j = canonical_json_str(doc)
+        async with engine.begin() as conn:
+            await conn.execute(text(
+                "UPDATE performance_candidates SET provenance_json = "
+                ":j, provenance_hash = :h WHERE id = :i"),
+                {"j": j, "h": canonical_hash(doc), "i": c["id"]})
+        with pytest.raises(Exception) as ei:
+            _verify(client)
+        assert "grammar" in str(ei.value), str(ei.value)
+    # restore a lawful envelope passes again
+    good = {"schema_version": 1, "source_kind": "authored",
+            "producer_id": "p", "producer_version": "1",
+            "source_identity": None, "parameters_sha256": None,
+            "retarget": None}
+    j = canonical_json_str(good)
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "UPDATE performance_candidates SET provenance_json = :j, "
+            "provenance_hash = :h WHERE id = :i"),
+            {"j": j, "h": canonical_hash(good), "i": c["id"]})
+    _verify(client)
+
+
+@pytest.mark.asyncio
+async def test_x9_recovery_adoption_and_review_grammar(client):
+    pid, eid, c = await _seeded_candidate(client, b"adp")
+    rev = (await client.post(f"/performance-candidates/{c['id']}/"
+                             "adopt",
+                             json={"adopted_by": "d"})).json()
+    engine = client._transport.app.state.engine
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "UPDATE performance_revisions SET adoption_id = "
+            "'not-a-uuid' WHERE id = :i"), {"i": rev["id"]})
+    with pytest.raises(Exception) as ei:
+        _verify(client)
+    assert "adoption" in str(ei.value)
+    from soloring.domain.ids import new_uuid
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "UPDATE performance_revisions SET adoption_id = :a "
+            "WHERE id = :i"),
+            {"a": new_uuid(), "i": rev["id"]})
+        await conn.execute(text(
+            "UPDATE performance_revisions SET adopted_by = :b "
+            "WHERE id = :i"),
+            {"b": "x" * 256, "i": rev["id"]})
+    with pytest.raises(Exception) as ei2:
+        _verify(client)
+    assert "adopted_by" in str(ei2.value) or "grammar" in \
+        str(ei2.value)
+
+
+# --------------------------- X10/X11 -------------------------------
+
+@pytest.mark.asyncio
+async def test_x10_f05_real_immutability_surface(client):
+    pid, eid = await _subject(client, "X10")
+    c = (await _post(client, eid, _body())).json()
+    rev = (await client.post(f"/performance-candidates/{c['id']}/"
+                             "adopt",
+                             json={"adopted_by": "d"})).json()
+    from soloring.api.m17b_performance import router as m17b_router
+    methods = {}
+    for route in m17b_router.routes:
+        path = getattr(route, "path", "")
+        if path == "/performance-revisions/{revision_id}":
+            methods.setdefault(path, set()).update(
+                route.methods)
+    assert "/performance-revisions/{revision_id}" in methods
+    allowed = methods["/performance-revisions/{revision_id}"]
+    assert "GET" in allowed
+    assert not (allowed & {"PUT", "PATCH", "DELETE"})
+    r_put = await client.put(
+        f"/performance-revisions/{rev['id']}", json={})
+    r_patch = await client.patch(
+        f"/performance-revisions/{rev['id']}", json={})
+    r_del = await client.delete(
+        f"/performance-revisions/{rev['id']}")
+    for m, r in (("put", r_put), ("patch", r_patch),
+                 ("delete", r_del)):
+        assert r.status_code == 405, (m, r.status_code)
+    r = await client.get(f"/performance-revisions/{rev['id']}")
+    assert r.json()["performance_kind"] == "FACIAL"
+    assert r.json()["canonical_channel_payload_sha256"] == \
+        rev["canonical_channel_payload_sha256"]
+
+
+@pytest.mark.asyncio
+async def test_x11_a03_subject_owned_project_derivation(client):
+    from fastapi.routing import APIRoute
+    pid, eid = await _subject(client, "X11")
+    from soloring.api.schemas.m17b_performance import (
+        PerformanceCandidateCreate)
+    schema_fields = set(PerformanceCandidateCreate.model_fields)
+    assert "project_id" not in schema_fields, \
+        "the create schema exposes no caller project override"
+    c = (await _post(client, eid, _body())).json()
+    assert c["project_id"] == pid
+    p2 = (await client.post("/projects",
+                            json={"name": "X11-B"})).json()["id"]
+    engine = client._transport.app.state.engine
+    async with engine.connect() as conn:
+        n = (await conn.execute(text(
+            "SELECT COUNT(*) FROM performance_candidates WHERE "
+            "project_id = :p AND subject_id = :s"),
+            {"p": p2, "s": eid})).scalar()
+    assert n == 0

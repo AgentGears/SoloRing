@@ -254,6 +254,14 @@ def _verify_candidates(con: sqlite3.Connection, blob_root: Path) -> None:
                     _verify_alignment_link(con, aid, r["subject_id"],
                                            r["project_id"])
         prov = json.loads(r["provenance_json"])
+        from soloring.performance.revision import (
+            build_provenance_envelope)
+        try:
+            build_provenance_envelope(prov)
+        except SoloRingError as exc:
+            raise _corrupt("candidate provenance violates "
+                           "the closed grammar: "
+                           + exc.message) from exc
         if _canonical(prov) != r["provenance_json"] or \
                 _hash(prov) != r["provenance_hash"]:
             raise _corrupt("candidate provenance rehash fail")
@@ -282,8 +290,17 @@ def _verify_revisions(con: sqlite3.Connection) -> None:
                 raise _corrupt(
                     f"revision copied closure diverges on {f} — "
                     "corruption, never repaired")
-        if not r["adoption_id"] or not r["adopted_by"].strip():
-            raise _corrupt("revision adoption metadata invalid")
+        from soloring.performance.revision import (
+            validate_adoption_metadata)
+        try:
+            validate_adoption_metadata(
+                adoption_id=r["adoption_id"],
+                adopted_by=r["adopted_by"],
+                adopted_at=r["adopted_at"])
+        except SoloRingError as exc:
+            raise _corrupt("revision adoption metadata "
+                           "violates grammar: "
+                           + exc.message) from exc
         n = con.execute("SELECT COUNT(*) FROM performance_revisions "
                         "WHERE adopted_candidate_id = ?",
                         (r["adopted_candidate_id"],)).fetchone()[0]
@@ -380,10 +397,16 @@ def _verify_reviews(con: sqlite3.Connection) -> None:
             raise _corrupt("review assessment missing")
         if r["decision"] not in ("ACCEPT_FOR_NEW_CANDIDATE", "REJECT"):
             raise _corrupt("review decision outside law")
-        if not r["reviewed_by"].strip():
-            raise _corrupt("review reviewer empty")
-        if r["rationale"] is not None and len(r["rationale"]) > 4096:
-            raise _corrupt("review rationale over bound")
+        from soloring.performance.revision import (
+            validate_review_metadata)
+        try:
+            validate_review_metadata(
+                decision=r["decision"],
+                reviewed_by=r["reviewed_by"],
+                rationale=r["rationale"])
+        except SoloRingError as exc:
+            raise _corrupt("review metadata violates "
+                           "grammar: " + exc.message) from exc
 
 
 def _verify_retargeted(con: sqlite3.Connection) -> None:

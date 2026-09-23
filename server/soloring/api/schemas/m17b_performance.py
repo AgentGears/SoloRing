@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictInt
 
 
 class _Closed(BaseModel):
@@ -15,8 +15,11 @@ class _Closed(BaseModel):
 
 
 class RationalIn(_Closed):
-    num: int
-    den: int
+    # authority integers are STRICT (correction CR-C): bool,
+    # numeric strings and integral floats reject at the boundary
+    # instead of being silently repaired into authority
+    num: StrictInt
+    den: StrictInt
 
 
 class KeyframeProvenanceIn(_Closed):
@@ -26,7 +29,7 @@ class KeyframeProvenanceIn(_Closed):
 
 class KeyframeIn(_Closed):
     time_ms: RationalIn
-    value: int
+    value: StrictInt
     provenance: KeyframeProvenanceIn
 
 
@@ -39,11 +42,15 @@ class ChannelIn(_Closed):
     keyframes: list[KeyframeIn]
 
 
+class TemporalDomainIn(_Closed):
+    start: RationalIn
+    end: RationalIn
+
+
 class PerformanceCandidateCreate(_Closed):
     performance_kind: Literal["BODY", "FACIAL", "BODY_FACIAL"]
     performance_profile_id: str
-    temporal_start: RationalIn
-    temporal_end: RationalIn
+    temporal_domain: TemporalDomainIn
     channels: list[ChannelIn]
     source_provenance: "_ProvenanceIn"
 

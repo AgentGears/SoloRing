@@ -19,10 +19,10 @@ def _build(body: dict):
          "channels": body["channels"]},
         performance_kind=body["performance_kind"],
         performance_profile_id="performance-profile/1",
-        start_num=body["temporal_start"]["num"],
-        start_den=body["temporal_start"]["den"],
-        end_num=body["temporal_end"]["num"],
-        end_den=body["temporal_end"]["den"])
+        start_num=body["temporal_domain"]["start"]["num"],
+        start_den=body["temporal_domain"]["start"]["den"],
+        end_num=body["temporal_domain"]["end"]["num"],
+        end_den=body["temporal_domain"]["end"]["den"])
 
 
 def _err(body: dict):

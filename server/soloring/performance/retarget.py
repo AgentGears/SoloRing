@@ -148,10 +148,6 @@ async def assess_physical_retarget(
         raise not_found(ErrorCode.RETARGET_TO_REVISION_NOT_FOUND,
                         f"to production revision "
                         f"{to_production_revision_id!r} not found")
-    from soloring.domain.models import Project
-    for label, pr in (("from", from_pr), ("to", to_pr)):
-        project = await session.get(Project, performance.project_id)
-        break
     # project agreement for both physical revisions
     from soloring.production.models import ProductionObject
     from_obj = await session.get(ProductionObject,
@@ -214,24 +210,11 @@ async def assess_physical_retarget(
     try:
         await session.flush()
     except IntegrityError:
-        winner = (await session.execute(
-            select(PerformanceRetargetAssessment).where(
-                PerformanceRetargetAssessment.performance_revision_id
-                == performance.id,
-                PerformanceRetargetAssessment.
-                from_production_revision_id == from_pr.id,
-                PerformanceRetargetAssessment.to_production_revision_id
-                == to_pr.id,
-                PerformanceRetargetAssessment.evaluator_id ==
-                EVALUATOR_ID,
-                PerformanceRetargetAssessment.evaluator_version ==
-                EVALUATOR_VERSION,
-                PerformanceRetargetAssessment.scope_hash == scope_hash)
-        )).scalar_one_or_none()
-        if winner is None:
-            raise
-        _assert_deterministic(winner, report_json, report_hash, verdict)
-        return winner
+        # concurrent first creation converges at the route boundary
+        # (correction CR-A): the failed ORM transaction is never
+        # queried; the route rolls back and reruns, and the fast
+        # path returns the committed winner
+        raise
     return row
 
 
