@@ -61,6 +61,7 @@ ALLOWLIST = (
     "tests/test_m17b_retarget.py",
     "tests/test_m17b_recovery.py",
     "tests/test_m17b_source_gate.py",
+    "tests/test_m17b_matrix.py",
     "tests/m17b_seed.py",
     "docs/SoloRing-M17B-Proof-Map.md",
     "scripts/m17b_validate_proof_map.py",
