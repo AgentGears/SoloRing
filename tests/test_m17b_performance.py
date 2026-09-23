@@ -654,10 +654,10 @@ async def test_k04_revision_pagination_is_stable_and_gap_duplicate_free_for_equa
 @pytest.mark.asyncio
 async def test_k05_exact_candidate_and_review_evidence_are_dereferenceable_review_listing_is_dete(client):
     """K05 (repaired per the publication-stage review): MULTIPLE
-    reviews — equal-``created_at`` CONFLICTING decisions (ACCEPT and
+    reviews — equal-``reviewed_at`` CONFLICTING decisions (ACCEPT and
     REJECT are both lawful immutable evidence on one assessment) —
     remain separately dereferenceable at their exact ids and the
-    listing is deterministic ``(created_at, id)`` order (id tie-break
+    listing is deterministic ``(reviewed_at, id)`` order (id tie-break
     at the forced equal timestamp), with no latest-wins collapse."""
     pid, eid = await _subject(client)
     from tests.m17b_seed import (seed_production_object,

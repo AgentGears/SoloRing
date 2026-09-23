@@ -83,12 +83,46 @@ def test_h05_no_shotrevision_schema_8():
 
 
 def test_h06_no_generation_workflowspec_performance_schema():
-    """H06 (repaired per the publication-stage review): STRUCTURAL
-    inspection — the generation service source genuinely contains no
-    performance vocabulary (no tautology), the frozen ComfyUI workflow
-    contracts admit no performance key anywhere in their JSON trees,
-    and the generations table has no performance column."""
+    """H06 (PUB-R2): STRUCTURAL inspection of the ACTUAL WorkflowSpec
+    authority — schema 4 in soloring.observation.workflow_spec
+    (ROOT_KEYS / WORLD_OBSERVATION_KEYS / exact-key parser) and its
+    schema-3 delegate in soloring.spatial.spec3 — plus the generation
+    service source, the frozen workflow-contract JSON trees, and the
+    generations table. A change to the WorkflowSpec schema code that
+    introduced a performance key would fail here."""
+    import inspect
     import json as _json
+
+    import soloring.observation.workflow_spec as ws4
+    import soloring.spatial.spec3 as ws3
+    from soloring.errors import SoloRingError
+
+    for mod in (ws4, ws3):
+        src = inspect.getsource(mod)
+        assert "performance" not in src.lower(), \
+            f"{mod.__name__} mentions performance vocabulary"
+        for name, value in vars(mod).items():
+            if name.startswith("__"):
+                continue
+            members = ()
+            if isinstance(value, (set, frozenset)):
+                members = value
+            elif isinstance(value, dict):
+                members = list(value)
+            for m in members:
+                if isinstance(m, str):
+                    assert "performance" not in m.lower(), \
+                        (mod.__name__, name, m)
+
+    # schema-4 key vocabularies exist and the parser is exact-key
+    # closed: a performance key (like ANY unknown key) is refused
+    assert isinstance(ws4.ROOT_KEYS, frozenset)
+    assert isinstance(ws4.WORLD_OBSERVATION_KEYS, frozenset)
+    with pytest.raises(SoloRingError) as exc_info:
+        ws4.parse_workflow_spec_v4(
+            {"schema_version": 4, "performance": None})
+    assert "performance" in str(exc_info.value)
+
     src = (SERVER / "soloring" / "generation" / "service.py"
            ).read_text(encoding="utf-8", errors="replace")
     assert "performance" not in src.lower(), \
