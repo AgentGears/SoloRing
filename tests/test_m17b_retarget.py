@@ -357,18 +357,26 @@ async def test_g18_retarget_candidate_inherits_source_project_subject_kind_profi
 
 @pytest.mark.asyncio
 async def test_g19_identical_retarget_assessment_creation_converges_sequentially_and_concurrently(client):
+    """G19 (rewritten per the publication-stage review): TRUE
+    zero-preexisting convergence — the FIRST-EVER assessment
+    creations at a coordinate run concurrently and exercise the
+    unique-conflict convergence path (no row exists when they start),
+    produce exactly one row with identical identity/report, and a
+    subsequent sequential replay converges on the winner."""
     _, _, rev, pr1, pr2, _ = await _world(client, b"g19")
     args = (rev["id"], pr1["production_revision_id"],
             pr2["production_revision_id"])
-    r1 = await _assess(client, *args)
-    r2 = await _assess(client, *args)
-    assert r1.status_code == r2.status_code == 201
-    assert r1.json()["id"] == r2.json()["id"]
-    assert r1.json()["report_hash"] == r2.json()["report_hash"]
     ra, rb = await asyncio.gather(_assess(client, *args),
                                   _assess(client, *args))
-    ids = {ra.json().get("id"), rb.json().get("id")}
-    assert ids == {r1.json()["id"]}
+    assert ra.status_code == 201, ra.text
+    assert rb.status_code == 201, rb.text
+    assert ra.json()["id"] == rb.json()["id"]
+    assert ra.json()["report_hash"] == rb.json()["report_hash"]
+    assert ra.json()["scope_hash"] == rb.json()["scope_hash"]
+    # sequential replay of the identical creation converges on winner
+    r3 = await _assess(client, *args)
+    assert r3.status_code == 201
+    assert r3.json()["id"] == ra.json()["id"]
     engine = client._transport.app.state.engine
     async with engine.connect() as conn:
         n = (await conn.execute(text(

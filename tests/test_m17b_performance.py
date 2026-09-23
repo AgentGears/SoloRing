@@ -291,22 +291,38 @@ async def test_f04_concurrent_duplicate_adoption_converges_to_one_exact_performa
 
 @pytest.mark.asyncio
 async def test_f05_adopted_revision_is_immutable(client):
+    """F05 (rewritten per the publication-stage review): the REAL
+    immutability surface — the M17B router exposes no mutation method
+    on the revision authority, live PUT/PATCH/DELETE attempts return
+    405, and the authority bytes are unchanged after the attempts."""
     pid, eid = await _subject(client)
     from tests.m17b_seed import adopt, create_candidate
     c = await create_candidate(client, eid, candidate_body(
         [channel(SMILE, [kf(0, 1, 0)])]))
     rev = await adopt(client, c["id"])
-    engine = client._transport.app.state.engine
-    async with engine.begin() as conn:
-        await conn.execute(text(
-            "UPDATE performance_revisions SET performance_kind = "
-            "'BODY' WHERE id = :i"), {"i": rev["id"]})
+    from soloring.api.m17b_performance import router as m17b_router
+    methods = set()
+    for route in m17b_router.routes:
+        if getattr(route, "path", "") == \
+                "/performance-revisions/{revision_id}":
+            methods |= route.methods
+    assert "GET" in methods
+    assert not (methods & {"PUT", "PATCH", "DELETE"})
+    r_put = await client.put(
+        f"/performance-revisions/{rev['id']}", json={})
+    r_patch = await client.patch(
+        f"/performance-revisions/{rev['id']}", json={})
+    r_del = await client.delete(
+        f"/performance-revisions/{rev['id']}")
+    for m, r in (("put", r_put), ("patch", r_patch),
+                 ("delete", r_del)):
+        assert r.status_code == 405, (m, r.status_code)
     r = await client.get(f"/performance-revisions/{rev['id']}")
-    # structural immutability: no update route exists
     assert r.status_code == 200
-    assert r.json()["performance_kind"] == "BODY"  # DB-level tamper
-    # ...but the API exposes no mutation surface:
-    assert not any(m == "PUT" for m in ("GET", "POST"))
+    assert r.json()["performance_kind"] == rev["performance_kind"]
+    assert r.json()["canonical_channel_payload_sha256"] == \
+        rev["canonical_channel_payload_sha256"]
+    assert r.json()["adopted_candidate_id"] == c["id"]
 
 
 @pytest.mark.asyncio
@@ -547,6 +563,10 @@ async def test_k02_revision_collection_rejects_partial_cursor(client):
 
 @pytest.mark.asyncio
 async def test_k03_candidate_pagination_is_stable_and_gap_duplicate_free_for_equal_created_at_usi(client):
+    """K03 (repaired per the publication-stage review): four
+    equal-``created_at`` candidates for the SAME subject the route
+    pages, plus one later API-created row — exact ``(created_at, id)``
+    traversal with the tie broken by id, no gaps, no duplicates."""
     pid, eid = await _subject(client)
     engine = client._transport.app.state.engine
     now = "2026-01-01T00:00:00.000Z"
@@ -555,6 +575,7 @@ async def test_k03_candidate_pagination_is_stable_and_gap_duplicate_free_for_equ
     bp = settings.blob_dir / "sha256" / h[:2] / h[2:4] / h
     bp.parent.mkdir(parents=True, exist_ok=True)
     bp.write_bytes(b"pagination-fixture")
+    eq_ids = []
     async with engine.begin() as conn:
         await conn.execute(text(
             "INSERT OR IGNORE INTO blobs (hash, path, size_bytes, "
@@ -563,12 +584,8 @@ async def test_k03_candidate_pagination_is_stable_and_gap_duplicate_free_for_equ
             {"h": h, "p": f"sha256/{h[:2]}/{h[2:4]}/{h}", "s": 19,
              "n": now})
         for i in range(4):
-            await conn.execute(text(
-                "INSERT INTO creative_entities (id, project_id, "
-                "kind, name, created_at, updated_at) VALUES "
-                "(:e, :p, 'character', :nm, :n, :n)"),
-                {"e": f"pag{i}", "p": pid, "nm": f"Pag{i}",
-                 "n": now})
+            cid = f"k03-equal-{i:04d}"
+            eq_ids.append(cid)
             await conn.execute(text(
                 "INSERT INTO performance_candidates (id, project_id, "
                 "subject_id, performance_kind, performance_profile_id,"
@@ -581,13 +598,12 @@ async def test_k03_candidate_pagination_is_stable_and_gap_duplicate_free_for_equ
                 "provenance_hash, created_at) VALUES (:i, :p, :s, "
                 "'FACIAL', 'performance-profile/1', 0, 1, 4500, 1, "
                 ":h, :h, 1, 'authored', 1, '{}', :ph, :n)"),
-                {"i": f"cand{i}", "p": pid, "s": f"pag{i}",
+                {"i": cid, "p": pid, "s": eid,
                  "h": h, "ph": 'b' * 64, "n": now})
-    seen = []
     from tests.m17b_seed import create_candidate
-    # create one via API so the subject has a real row too
     c = await create_candidate(client, eid, candidate_body(
         [channel(SMILE, [kf(0, 1, 0)])]))
+    seen = []
     url = f"/creative-entities/{eid}/performance-candidates?limit=2"
     while url:
         page = (await client.get(url)).json()
@@ -596,12 +612,18 @@ async def test_k03_candidate_pagination_is_stable_and_gap_duplicate_free_for_equ
         url = (f"/creative-entities/{eid}/performance-candidates"
                f"?limit=2&cursor_created={cur[0]}&cursor_id={cur[1]}"
                ) if cur else None
-    assert len(seen) == len(set(seen))
-    assert c["id"] in seen
+    # equal-created_at rows come first in exact id order (tie-break),
+    # then the later API-created row; no gaps, no duplicates
+    assert seen == sorted(eq_ids) + [c["id"]]
+    assert len(seen) == len(set(seen)) == 5
 
 
 @pytest.mark.asyncio
 async def test_k04_revision_pagination_is_stable_and_gap_duplicate_free_for_equal_adopted_at_usin(client):
+    """K04 (repaired per the publication-stage review): all three
+    revisions are FORCED to identical ``adopted_at`` — the cursor
+    traversal must then break every tie by id, cross the tie boundary
+    mid-page, and yield the exact total order with no duplicates."""
     pid, eid = await _subject(client)
     from tests.m17b_seed import adopt, create_candidate
     revs = []
@@ -609,6 +631,13 @@ async def test_k04_revision_pagination_is_stable_and_gap_duplicate_free_for_equa
         c = await create_candidate(client, eid, candidate_body(
             [channel(SMILE, [kf(0, 1, i)])]))
         revs.append((await adopt(client, c["id"]))["id"])
+    engine = client._transport.app.state.engine
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "UPDATE performance_revisions SET adopted_at = :t WHERE "
+            "id IN (:a, :b, :c)"),
+            {"t": "2026-01-01T00:00:00.000Z", "a": revs[0],
+             "b": revs[1], "c": revs[2]})
     seen = []
     url = f"/creative-entities/{eid}/performance-revisions?limit=2"
     while url:
@@ -618,12 +647,18 @@ async def test_k04_revision_pagination_is_stable_and_gap_duplicate_free_for_equa
         url = (f"/creative-entities/{eid}/performance-revisions"
                f"?limit=2&cursor_adopted={cur[0]}&cursor_id={cur[1]}"
                ) if cur else None
-    assert sorted(seen) == sorted(revs)
-    assert len(seen) == len(set(seen))
+    assert seen == sorted(revs)
+    assert len(seen) == len(set(seen)) == 3
 
 
 @pytest.mark.asyncio
 async def test_k05_exact_candidate_and_review_evidence_are_dereferenceable_review_listing_is_dete(client):
+    """K05 (repaired per the publication-stage review): MULTIPLE
+    reviews — equal-``created_at`` CONFLICTING decisions (ACCEPT and
+    REJECT are both lawful immutable evidence on one assessment) —
+    remain separately dereferenceable at their exact ids and the
+    listing is deterministic ``(created_at, id)`` order (id tie-break
+    at the forced equal timestamp), with no latest-wins collapse."""
     pid, eid = await _subject(client)
     from tests.m17b_seed import (seed_production_object,
                                  seed_production_revision)
@@ -645,14 +680,32 @@ async def test_k05_exact_candidate_and_review_evidence_are_dereferenceable_revie
               "to_production_revision_id":
               pr2["production_revision_id"]})).json()
     assert a["overall_verdict"] == "REQUIRES_REVIEW"
-    review = (await client.post(
+    accept = (await client.post(
         f"/performance-retarget-assessments/{a['id']}/reviews",
         json={"decision": "ACCEPT_FOR_NEW_CANDIDATE",
-              "reviewed_by": "rev", "rationale": None})).json()
-    rr = await client.get(f"/performance-retarget-reviews/"
-                          f"{review['id']}")
-    assert rr.status_code == 200
-    assert rr.json()["assessment_id"] == a["id"]
+              "reviewed_by": "rev-a", "rationale": None})).json()
+    reject = (await client.post(
+        f"/performance-retarget-assessments/{a['id']}/reviews",
+        json={"decision": "REJECT",
+              "reviewed_by": "rev-b", "rationale": None})).json()
+    # force identical reviewed_at: the listing order must break the
+    # tie by id, not by decision or recency
+    engine = client._transport.app.state.engine
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "UPDATE performance_retarget_reviews SET reviewed_at = :t "
+            "WHERE id IN (:a, :b)"),
+            {"t": "2026-01-01T00:00:00.000Z", "a": accept["id"],
+             "b": reject["id"]})
+    for rv in (accept, reject):
+        rr = await client.get(f"/performance-retarget-reviews/"
+                              f"{rv['id']}")
+        assert rr.status_code == 200
+        assert rr.json()["assessment_id"] == a["id"]
+        assert rr.json()["decision"] == rv["decision"]
     lst = (await client.get(
         f"/performance-retarget-assessments/{a['id']}/reviews")).json()
-    assert [x["id"] for x in lst["reviews"]] == [review["id"]]
+    got = [x["id"] for x in lst["reviews"]]
+    assert got == sorted([accept["id"], reject["id"]])
+    assert {x["decision"] for x in lst["reviews"]} == {
+        "ACCEPT_FOR_NEW_CANDIDATE", "REJECT"}

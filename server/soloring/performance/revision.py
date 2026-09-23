@@ -200,8 +200,9 @@ async def verify_candidate_integrity(
         from soloring.performance.revision import (
             _verify_alignment_provenance)
         await _verify_alignment_provenance(
-            session, subject_id=candidate.subject_id, channels=doc[
-                "channels"])
+            session, subject_id=candidate.subject_id,
+            project_id=candidate.project_id,
+            channels=doc["channels"])
     return {"payload_document": doc, "envelope": envelope}
 
 _CLOSURE_FIELDS = (
@@ -333,11 +334,15 @@ async def _verify_subject(session: AsyncSession, *, subject_id: str,
 
 async def _verify_alignment_provenance(session: AsyncSession, *,
                                        subject_id: str,
+                                       project_id: str,
                                        channels: list[dict]) -> None:
-    """Per-keyframe alignment provenance law (frozen R7 §6.5): the
-    referenced M17A DialogueAlignment must exist, belong to the same
-    Project through its source VP, and that VP's speaker must equal
-    the Performance subject. The link is audit evidence only."""
+    """Per-keyframe alignment provenance law (frozen R7 §6.5, completed
+    by the publication review): the referenced M17A DialogueAlignment
+    must exist, its source VP's speaker must equal the Performance
+    subject, AND the alignment's dialogue line must belong to the SAME
+    Project as the Performance candidate/subject (the same law the
+    recovery verifier enforces through _verify_alignment_link). The
+    link is audit evidence only."""
     from soloring.performance.models import DialogueAlignment
     seen = set()
     for ch in channels:
@@ -379,8 +384,16 @@ async def _verify_alignment_provenance(session: AsyncSession, *,
                     "subject")
             from soloring.performance.models import DialogueLine
             line = await session.get(DialogueLine, dlr.dialogue_line_id)
-            from soloring.domain.models import Project
-            project = await session.get(Project, line.project_id)
+            if line is None or line.project_id is None:
+                raise SoloRingError(
+                    ErrorCode.INTERNAL_INVARIANT_VIOLATION,
+                    "alignment line missing — corruption",
+                    status_code=500)
+            if line.project_id != project_id:
+                raise _invalid(
+                    ErrorCode.PERFORMANCE_ALIGNMENT_PROJECT_MISMATCH,
+                    "alignment's dialogue line belongs to another "
+                    "project than the Performance candidate")
             from soloring.performance.models import VocalCandidate
             vc = await session.get(
                 VocalCandidate, vp.adopted_candidate_id)
@@ -440,83 +453,8 @@ async def create_performance_candidate(
         temporal_end_num, temporal_end_den)
 
     await _verify_alignment_provenance(
-        session, subject_id=subject_id, channels=normalized)
-
-    store = BlobStore(settings)
-    tmp = store.tmp_path()
-    tmp.write_bytes(body)
-    await store.place(payload_sha, tmp)
-    from soloring.assets.models import Blob
-    if await session.get(Blob, payload_sha) is None:
-        session.add(Blob(hash=payload_sha,
-                         path=store.relative_path_for_hash(payload_sha),
-                         size_bytes=len(body),
-                         detected_media_type="application/json",
-                         created_at=await db_now(session)))
-
-    prov_json = canonical_json_str(envelope)
-    prov_hash = canonical_hash(envelope)
-    candidate = PerformanceCandidate(
-        id=new_uuid(), project_id=entity.project_id,
-        subject_id=subject_id,
-        performance_kind=performance_kind,
-        performance_profile_id=PROFILE_ID,
-        temporal_start_num=sn, temporal_start_den=sd,
-        temporal_end_num=en, temporal_end_den=ed,
-        canonical_channel_payload_blob_hash=payload_sha,
-        canonical_channel_payload_sha256=payload_sha,
-        payload_schema_version=1,
-        source_kind=envelope["source_kind"],
-        provenance_schema_version=1,
-        provenance_json=prov_json, provenance_hash=prov_hash,
-        created_at=await db_now(session))
-    session.add(candidate)
-    await session.flush()
-    return candidate
-
-
-
-async def create_performance_candidate(
-        session: AsyncSession, settings, *, subject_id: str,
-        performance_kind: str, performance_profile_id: str,
-        temporal_start_num: int, temporal_start_den: int,
-        temporal_end_num: int, temporal_end_den: int,
-        channels: dict, source_provenance: dict) -> PerformanceCandidate:
-    """Frozen R7 §9: validate, canonicalize, BlobStore-place, persist —
-    or leave nothing. Caller hashes and caller filesystem paths are
-    never accepted. Repeated identical submissions are distinct lawful
-    evidence rows (no semantic dedupe)."""
-    from soloring.continuity.models import CreativeEntity
-    entity = await session.get(CreativeEntity, subject_id)
-    if entity is None:
-        raise not_found(ErrorCode.PERFORMANCE_SUBJECT_NOT_FOUND,
-                        f"subject entity {subject_id!r} not found")
-    await _verify_subject(session, subject_id=subject_id,
-                          project_id=entity.project_id)
-
-    envelope = build_provenance_envelope(source_provenance)
-    if envelope["source_kind"] == "retargeted":
-        raise _invalid(
-            ErrorCode.PERFORMANCE_PROVENANCE_INVALID,
-            "retargeted candidates are created only through the "
-            "retarget-candidate service")
-
-    payload = {"schema_version": 1,
-               "performance_profile_id": performance_profile_id,
-               "channels": channels}
-    body, normalized = build_canonical_payload(
-        payload, performance_kind=performance_kind,
-        performance_profile_id=performance_profile_id,
-        start_num=temporal_start_num, start_den=temporal_start_den,
-        end_num=temporal_end_num, end_den=temporal_end_den)
-    payload_sha = hashlib.sha256(body).hexdigest()
-    from soloring.performance.profile import validate_temporal_domain
-    sn, sd, en, ed = validate_temporal_domain(
-        temporal_start_num, temporal_start_den,
-        temporal_end_num, temporal_end_den)
-
-    await _verify_alignment_provenance(
-        session, subject_id=subject_id, channels=normalized)
+        session, subject_id=subject_id, project_id=entity.project_id,
+        channels=normalized)
 
     store = BlobStore(settings)
     tmp = store.tmp_path()
@@ -574,13 +512,17 @@ async def get_performance_revision(session: AsyncSession, *,
 
 
 async def adopt_performance_candidate(
-        session: AsyncSession, *, candidate_id: str,
+        session: AsyncSession, settings, *, candidate_id: str,
         adopted_by: str) -> PerformanceRevision:
-    """Frozen R7 §10 as corrected (CR-E/CR-B): the existing winner
-    returns FIRST regardless of later subject soft deletion — activity
-    is a first-admission rule, not an eternal historical-validity
-    rule — and every authority transition (first or replay) verifies
-    full candidate integrity before inserting or returning."""
+    """Frozen R7 §10 as corrected (CR-E/CR-B + publication review): the
+    existing winner returns FIRST regardless of later subject soft
+    deletion — activity is a first-admission rule, not an eternal
+    historical-validity rule — and every authority transition (first
+    or replay) verifies full candidate integrity before inserting or
+    returning. ``settings`` is the RUNNING APP's Settings (routes bind
+    request.app.state.settings — the same data root the engine and
+    candidate placement used); the process-global get_settings()
+    singleton is deliberately never consulted here."""
     candidate = await get_performance_candidate(
         session, candidate_id=candidate_id)
     if not isinstance(adopted_by, str) or not adopted_by.strip() \
@@ -596,8 +538,7 @@ async def adopt_performance_candidate(
     if existing is not None:
         # historical replay: winner + source-candidate integrity,
         # never vetoed by current subject state
-        await verify_candidate_integrity(
-            session, _settings_of(session), candidate)
+        await verify_candidate_integrity(session, settings, candidate)
         revalidate_winner(existing, candidate)
         return existing
 
@@ -610,8 +551,7 @@ async def adopt_performance_candidate(
             "subject is deleted — first adoption requires an active "
             "subject; later soft deletion never invalidates adopted "
             "history")
-    await verify_candidate_integrity(
-        session, _settings_of(session), candidate)
+    await verify_candidate_integrity(session, settings, candidate)
 
     revision = PerformanceRevision(
         id=new_uuid(), **{f: getattr(candidate, f)
@@ -629,11 +569,4 @@ async def adopt_performance_candidate(
         # its snapshot before re-reading the committed winner
         raise
     return revision
-
-
-def _settings_of(session: AsyncSession):
-    """Settings bound to the session's app (routes bind
-    app.state.settings to the same data root the engine uses)."""
-    from soloring.settings import get_settings
-    return get_settings()
 

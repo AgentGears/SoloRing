@@ -83,9 +83,33 @@ def test_h05_no_shotrevision_schema_8():
 
 
 def test_h06_no_generation_workflowspec_performance_schema():
+    """H06 (repaired per the publication-stage review): STRUCTURAL
+    inspection — the generation service source genuinely contains no
+    performance vocabulary (no tautology), the frozen ComfyUI workflow
+    contracts admit no performance key anywhere in their JSON trees,
+    and the generations table has no performance column."""
+    import json as _json
     src = (SERVER / "soloring" / "generation" / "service.py"
            ).read_text(encoding="utf-8", errors="replace")
-    assert "performance" not in src.lower() or True  # no schema change
+    assert "performance" not in src.lower(), \
+        "generation service mentions performance vocabulary"
+
+    def _assert_no_performance(node, where: str) -> None:
+        if isinstance(node, dict):
+            for k, v in node.items():
+                assert "performance" not in str(k).lower(), \
+                    f"workflow key {k!r} in {where}"
+                _assert_no_performance(v, where)
+        elif isinstance(node, list):
+            for v in node:
+                _assert_no_performance(v, where)
+
+    workflows = sorted((REPO / "workflows").rglob("*.json"))
+    assert workflows, "frozen workflow contracts not found"
+    for wf in workflows:
+        doc = _json.loads(wf.read_text(encoding="utf-8"))
+        _assert_no_performance(doc, wf.name)
+
     _, cols = _db_tables()
     gen = cols.get("generations", [])
     assert not any("performance" in c for c in gen)

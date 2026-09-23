@@ -5,7 +5,10 @@ discipline; X3 candidate-integrity corruption before adoption; X4
 corrupt-winner replay; X5 adoption lifecycle ordering; X6 HTTP scalar
 strictness; X7 frozen create-body grammar; X8 concurrent first
 candidate Blob race; X9 recovery grammar corruptions; X10 F05 real
-immutability surface; X11 A03 corrected structural ownership.
+immutability surface; X11 A03 corrected structural ownership;
+X12 adoption uses the running app's Settings (publication
+review); X13 alignment provenance binds to the candidate's
+project.
 """
 
 from __future__ import annotations
@@ -581,4 +584,178 @@ async def test_x11_a03_subject_owned_project_derivation(client):
             "SELECT COUNT(*) FROM performance_candidates WHERE "
             "project_id = :p AND subject_id = :s"),
             {"p": p2, "s": eid})).scalar()
+    assert n == 0
+
+
+# --------------------------- X12/X13 --------------------------------
+# Publication-stage review regressions (PUB-R1): running-app Settings
+# propagation and alignment provenance project binding.
+
+
+@pytest.mark.asyncio
+async def test_x12_adoption_uses_running_app_settings_not_the_process_singleton(client, tmp_path):
+    """PUB-R1 regression: adoption integrity reads the retained Blob
+    through the RUNNING APP's Settings (request.app.state.settings).
+    With the process singleton poisoned toward a different (empty)
+    data root, first adoption AND winner replay must both succeed and
+    round-trip the payload hash from the app root."""
+    from soloring import settings as settings_mod
+    from soloring.settings import Settings
+    pid, eid = await _subject(client, "X12")
+    poisoned = Settings(data_dir=tmp_path / "poisoned-root")
+    previous = settings_mod._settings
+    settings_mod._settings = poisoned
+    try:
+        c = (await _post(client, eid, _body())).json()
+        r1 = await client.post(
+            f"/performance-candidates/{c['id']}/adopt",
+            json={"adopted_by": "d"})
+        assert r1.status_code == 200, r1.text
+        r2 = await client.post(
+            f"/performance-candidates/{c['id']}/adopt",
+            json={"adopted_by": "d2"})
+        assert r2.status_code == 200, r2.text
+        assert r2.json()["id"] == r1.json()["id"]  # winner replay
+        assert r1.json()["canonical_channel_payload_sha256"] == \
+            c["canonical_channel_payload_sha256"]
+    finally:
+        settings_mod._settings = previous
+
+
+@pytest.mark.asyncio
+async def test_x13_alignment_from_another_project_rejects_at_creation_and_adoption(client):
+    """PUB-R1 regression: an alignment whose dialogue line lives in
+    ANOTHER project - even with the speaker equal to the Performance
+    subject - is rejected at candidate creation AND at adoption-time
+    integrity (a DB-crafted candidate that bypassed creation gets the
+    same refusal), matching the recovery verifier's project law."""
+    pid, eid = await _subject(client, "X13")
+    engine = client._transport.app.state.engine
+    now = "2026-01-01T00:00:00.000Z"
+    h64 = "c" * 64
+    p2 = "00000000-0000-4000-8000-000000000b01"
+    dl = "00000000-0000-4000-8000-000000000b02"
+    dlr = "00000000-0000-4000-8000-000000000b03"
+    vc = "00000000-0000-4000-8000-000000000b04"
+    vpr = "00000000-0000-4000-8000-000000000b05"
+    aid = "00000000-0000-4000-8000-000000000b06"
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "INSERT INTO projects (id, name, created_at, updated_at) "
+            "VALUES (:i, 'X13-B', :n, :n)"), {"i": p2, "n": now})
+        await conn.execute(text(
+            "INSERT INTO dialogue_lines (id, project_id, created_at) "
+            "VALUES (:i, :p, :n)"),
+            {"i": dl, "p": p2, "n": now})
+        await conn.execute(text(
+            "INSERT INTO dialogue_line_revisions (id, dialogue_line_id,"
+            " revision_number, speaker_subject_id, language, wording, "
+            "schema_version, spec_json, spec_hash, created_at) VALUES "
+            "(:i, :l, 1, :sp, 'en', 'x13 line', 1, '{}', :sh, :n)"),
+            {"i": dlr, "l": dl, "sp": eid, "sh": h64, "n": now})
+        await conn.execute(text(
+            "INSERT INTO blobs (hash, path, size_bytes, "
+            "detected_media_type, created_at) VALUES "
+            "(:h, :pa, 1, NULL, :n)"),
+            {"h": h64, "pa": f"sha256/{h64[:2]}/{h64[2:4]}/{h64}",
+             "n": now})
+        await conn.execute(text(
+            "INSERT INTO vocal_candidates (id, dialogue_line_revision_id,"
+            " retained_audio_blob_hash, native_sample_rate_hz, "
+            "retained_sample_count, trim_start_sample, "
+            "trim_end_sample_exclusive, source_kind, "
+            "provenance_schema_version, provenance_json, "
+            "provenance_hash, created_at) VALUES "
+            "(:i, :l, :h, 48000, 10, 0, 10, 'recorded', 1, '{}', "
+            ":ph, :n)"),
+            {"i": vc, "l": dlr, "h": h64, "ph": h64, "n": now})
+        await conn.execute(text(
+            "INSERT INTO vocal_performance_revisions (id, "
+            "dialogue_line_revision_id, revision_number, "
+            "speaker_subject_id, retained_audio_blob_hash, "
+            "native_sample_rate_hz, retained_sample_count, "
+            "trim_start_sample, trim_end_sample_exclusive, "
+            "source_kind, provenance_schema_version, provenance_json, "
+            "provenance_hash, adopted_candidate_id, adoption_id, "
+            "adopted_by, adopted_at) VALUES "
+            "(:i, :l, 1, :sp, :h, 48000, 10, 0, 10, 'recorded', 1, "
+            "'{}', :ph, :vc, :ad, 'x13', :n)"),
+            {"i": vpr, "l": dlr, "sp": eid, "h": h64, "ph": h64,
+             "vc": vc, "ad": "00000000-0000-4000-8000-000000000b07",
+             "n": now})
+        await conn.execute(text(
+            "INSERT INTO dialogue_alignments (id, "
+            "vocal_performance_revision_id, analyzer_id, "
+            "analyzer_version, model_identity, runtime_identity, "
+            "parameters_sha256, alignment_schema_version, "
+            "retained_blob_hash, retained_sha256, derivation_run_json, "
+            "derivation_run_hash, derivation_run_identity, created_at)"
+            " VALUES (:i, :v, 'x13-analyzer', '1', 'm', 'r', :ph, 1, "
+            ":h, :h, '{}', :dh, :dh, :n)"),
+            {"i": aid, "v": vpr, "ph": h64, "h": h64,
+             "dh": "d" * 64, "n": now})
+
+    # creation path: the cross-project alignment reference rejects
+    from tests.m17b_seed import candidate_body
+    body = candidate_body([channel(SMILE, [kf(0, 1, 0, kind="DERIVED",
+                                               alignment=aid)])])
+    r = await _post(client, eid, body)
+    assert r.status_code in (403, 422), r.text
+    assert r.json()["error_code"] == \
+        "PERFORMANCE_ALIGNMENT_PROJECT_MISMATCH", r.text
+
+    # adoption path: a DB-crafted candidate that bypassed creation
+    # (fully lawful closure bytes, keyframes referencing the
+    # cross-project alignment) gets the same refusal at integrity time
+    from soloring.performance.profile import build_canonical_payload
+    from soloring.performance.revision import build_provenance_envelope
+    from soloring.domain.canonical import (canonical_hash,
+                                           canonical_json_str)
+    payload = {"schema_version": 1,
+               "performance_profile_id": "performance-profile/1",
+               "channels": body["channels"]}
+    body_bytes, _norm = build_canonical_payload(
+        payload, performance_kind="FACIAL",
+        performance_profile_id="performance-profile/1",
+        start_num=0, start_den=1, end_num=4500, end_den=1)
+    bh = hashlib.sha256(body_bytes).hexdigest()
+    envelope = build_provenance_envelope(
+        {"schema_version": 1, "source_kind": "authored",
+         "producer_id": "x13", "producer_version": "1",
+         "source_identity": None, "parameters_sha256": None,
+         "retarget": None})
+    prov_json = canonical_json_str(envelope)
+    settings = client._transport.app.state.settings
+    bp = settings.blob_dir / "sha256" / bh[:2] / bh[2:4] / bh
+    bp.parent.mkdir(parents=True, exist_ok=True)
+    bp.write_bytes(body_bytes)
+    cid = "00000000-0000-4000-8000-000000000b08"
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "INSERT OR IGNORE INTO blobs (hash, path, size_bytes, "
+            "detected_media_type, created_at) VALUES "
+            "(:h, :p, :s, NULL, :n)"),
+            {"h": bh, "p": f"sha256/{bh[:2]}/{bh[2:4]}/{bh}",
+             "s": len(body_bytes), "n": now})
+        await conn.execute(text(
+            "INSERT INTO performance_candidates (id, project_id, "
+            "subject_id, performance_kind, performance_profile_id, "
+            "temporal_start_num, temporal_start_den, "
+            "temporal_end_num, temporal_end_den, "
+            "canonical_channel_payload_blob_hash, "
+            "canonical_channel_payload_sha256, payload_schema_version,"
+            " source_kind, provenance_schema_version, provenance_json, "
+            "provenance_hash, created_at) VALUES "
+            "(:i, :p, :s, 'FACIAL', 'performance-profile/1', 0, 1, "
+            "4500, 1, :h, :h, 1, 'authored', 1, :j, :ph, :n)"),
+            {"i": cid, "p": pid, "s": eid, "h": bh, "j": prov_json,
+             "ph": canonical_hash(envelope), "n": now})
+    r2 = await client.post(f"/performance-candidates/{cid}/adopt",
+                           json={"adopted_by": "d"})
+    assert r2.status_code in (403, 422), r2.text
+    assert r2.json()["error_code"] == \
+        "PERFORMANCE_ALIGNMENT_PROJECT_MISMATCH", r2.text
+    async with engine.connect() as conn:
+        n = (await conn.execute(text(
+            "SELECT COUNT(*) FROM performance_revisions"))).scalar()
     assert n == 0

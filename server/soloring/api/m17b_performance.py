@@ -186,11 +186,12 @@ async def list_performance_candidates(
              response_model=PerformanceRevisionRead, status_code=200)
 async def adopt_performance_candidate(
         candidate_id: str, body: AdoptRequest,
+        request: Request,
         session: AsyncSession = Depends(get_session)):
     try:
         revision = await revision_svc.adopt_performance_candidate(
-            session, candidate_id=candidate_id,
-            adopted_by=body.adopted_by)
+            session, request.app.state.settings,
+            candidate_id=candidate_id, adopted_by=body.adopted_by)
         await session.commit()
     except IntegrityError:
         # concurrent duplicate adoption converges through
@@ -198,8 +199,8 @@ async def adopt_performance_candidate(
         # re-run — the fresh transaction sees the committed winner
         await session.rollback()
         revision = await revision_svc.adopt_performance_candidate(
-            session, candidate_id=candidate_id,
-            adopted_by=body.adopted_by)
+            session, request.app.state.settings,
+            candidate_id=candidate_id, adopted_by=body.adopted_by)
         await session.commit()
     return PerformanceRevisionRead(**_revision_view(revision))
 
