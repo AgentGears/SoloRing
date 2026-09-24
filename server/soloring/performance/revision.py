@@ -219,21 +219,37 @@ async def verify_candidate_integrity(
             channels=doc["channels"])
 
     # retarget evidence resolution (the recovery verifier's law;
-    # second Codex review P1): a retargeted candidate may only be
-    # promoted when its provenance actually resolves — source
-    # revision, exact assessment coordinate, REQUIRES_REVIEW verdict,
-    # and an owned ACCEPT review
+    # second Codex review P1 + final-diff review): a retargeted
+    # candidate may only be promoted when its provenance actually
+    # resolves — source revision, exact assessment coordinate,
+    # REQUIRES_REVIEW verdict, an owned ACCEPT review — AND its
+    # semantic closure equals the referenced source revision
+    # byte/scalar-exact (the creation-time copy law)
     if row_lookup is None and envelope["source_kind"] == "retargeted":
-        await _verify_retarget_evidence(session, envelope)
+        await _verify_retarget_evidence(session, candidate, envelope)
     return {"payload_document": doc, "envelope": envelope}
 
 
+# the semantic fields a retarget candidate copies byte/scalar-exact
+# from its source revision (creation law == recovery law; the payload
+# hash columns carry the payload equality)
+_RETARGET_COPY_FIELDS = (
+    "project_id", "subject_id", "performance_kind",
+    "performance_profile_id", "temporal_start_num",
+    "temporal_start_den", "temporal_end_num", "temporal_end_den",
+    "canonical_channel_payload_blob_hash",
+    "canonical_channel_payload_sha256", "payload_schema_version")
+
+
 async def _verify_retarget_evidence(session: AsyncSession,
-                                    envelope: dict) -> None:
+                                    candidate, envelope: dict) -> None:
     """Live mirror of the recovery verifier's retarget law chain:
     the envelope's retarget block must resolve to a real
     REQUIRES_REVIEW assessment at the exact recorded coordinate with
-    an owned ACCEPT_FOR_NEW_CANDIDATE review."""
+    an owned ACCEPT_FOR_NEW_CANDIDATE review, and the candidate's
+    semantic closure must equal the referenced source revision —
+    valid evidence references plus a divergent payload is still
+    corruption, not a lawful retarget."""
     ret = envelope.get("retarget") or {}
     from soloring.performance.models import (
         PerformanceRevision as PR,
@@ -245,6 +261,13 @@ async def _verify_retarget_evidence(session: AsyncSession,
         raise _invalid(
             ErrorCode.PERFORMANCE_PROVENANCE_INVALID,
             "retarget provenance source revision does not resolve")
+    for f in _RETARGET_COPY_FIELDS:
+        if getattr(candidate, f) != getattr(source, f):
+            raise _invalid(
+                ErrorCode.PERFORMANCE_PROVENANCE_INVALID,
+                f"retarget candidate semantic closure diverges from "
+                f"its source revision on {f} — retargeting never "
+                "edits semantic performance bytes")
     a = await session.get(PerformanceRetargetAssessment,
                           ret.get("compatibility_assessment_id"))
     if a is None:

@@ -1111,6 +1111,70 @@ async def test_x19_adoption_rejects_unresolved_retarget_evidence(client):
     r = await _try_adopt(cid)
     assert r.status_code in (403, 422), r.text
 
+    # 1b. FULLY VALID evidence chain but DIVERGENT semantic closure:
+    # the crafted payload is lawful and internally canonical yet uses
+    # SMILE value 1 while the source revision's payload uses 0 —
+    # valid references + edited semantics is exactly the corruption
+    # the retarget copy law forbids (final-diff review: the evidence
+    # checks alone do not close this)
+    from soloring.performance.profile import build_canonical_payload
+    from soloring.domain.canonical import (canonical_hash as _ch,
+                                           canonical_json_str as _cjs)
+    from soloring.performance.revision import build_provenance_envelope \
+        as _bpe
+    divergent_body, _ = build_canonical_payload(
+        {"schema_version": 1,
+         "performance_profile_id": "performance-profile/1",
+         "channels": candidate_body([channel(SMILE, [kf(0, 1, 1)])])[
+             "channels"]},
+        performance_kind="FACIAL",
+        performance_profile_id="performance-profile/1",
+        start_num=0, start_den=1, end_num=4500, end_den=1)
+    dbh = hashlib.sha256(divergent_body).hexdigest()
+    dbp = settings.blob_dir / "sha256" / dbh[:2] / dbh[2:4] / dbh
+    dbp.parent.mkdir(parents=True, exist_ok=True)
+    dbp.write_bytes(divergent_body)
+    env1b = _bpe({"schema_version": 1, "source_kind": "retargeted",
+                  "producer_id": "x19-divergent",
+                  "producer_version": "1", "source_identity": None,
+                  "parameters_sha256": None,
+                  "retarget": {
+                      "source_performance_revision_id": rev["id"],
+                      "from_production_revision_id":
+                          pr1["production_revision_id"],
+                      "to_production_revision_id":
+                          pr2["production_revision_id"],
+                      "compatibility_assessment_id": a["id"],
+                      "accepted_review_id": accept["id"]}})
+    import sqlite3 as _s2
+    con = _s2.connect(settings.data_dir / "soloring.db")
+    con.execute(
+        "INSERT OR IGNORE INTO blobs (hash, path, size_bytes, "
+        "detected_media_type, created_at) VALUES (?, ?, ?, NULL, "
+        "'2026-01-01T00:00:00.000Z')",
+        (dbh, f"sha256/{dbh[:2]}/{dbh[2:4]}/{dbh}",
+         len(divergent_body)))
+    con.execute(
+        "INSERT INTO performance_candidates (id, project_id, "
+        "subject_id, performance_kind, performance_profile_id, "
+        "temporal_start_num, temporal_start_den, temporal_end_num, "
+        "temporal_end_den, canonical_channel_payload_blob_hash, "
+        "canonical_channel_payload_sha256, payload_schema_version, "
+        "source_kind, provenance_schema_version, provenance_json, "
+        "provenance_hash, created_at) VALUES "
+        "('00000000-0000-4000-8000-0000000x19b', ?, ?, 'FACIAL', "
+        "'performance-profile/1', 0, 1, 4500, 1, ?, ?, 1, "
+        "'retargeted', 1, ?, ?, '2026-01-01T00:00:00.000Z')",
+        (pid, eid, dbh, dbh, _cjs(env1b), _ch(env1b)))
+    con.commit()
+    con.close()
+    r = await client.post(
+        "/performance-candidates/"
+        "00000000-0000-4000-8000-0000000x19b/adopt",
+        json={"adopted_by": "d"})
+    assert r.status_code in (403, 422), r.text
+    assert "diverges from" in r.json()["message"], r.text
+
     # 2. real assessment id but stale coordinate (pr3, not pr2)
     producer_label = "x19-stale"
     pj, ph = _craft(producer_label, {
