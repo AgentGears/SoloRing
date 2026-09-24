@@ -149,6 +149,9 @@ ALLOWED_PATTERNS = [
     # post-M16-closure publication refresh (separately authorized):
     # the README status refresh to M16/0017. Documentation only.
     r"^README\.md$",
+    # M17B second-Codex round: the sqlalchemy <2.1 ceiling pin
+    # (dependency-drift incident, CI run #161). Packaging metadata only.
+    r"^pyproject\.toml$",
     # M16-E closure surface (reviewed successor slice): the frozen §22
     # owner rename of the P0 module, the §23 source-gate owners, and
     # the four M16 validators.

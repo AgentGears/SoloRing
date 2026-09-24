@@ -66,6 +66,9 @@ M16_SURFACE = (
     # post-closure publication refresh (separately authorized): the
     # README status refresh to M16/0017. Documentation only.
     r"^README\.md$",
+    # M17B second-Codex round: the sqlalchemy <2.1 ceiling pin
+    # (dependency-drift incident, CI run #161). Packaging metadata only.
+    r"^pyproject\.toml$",
     # post-M16 R3 evidence-only publication (frozen R3 §23): the frozen
     # regression freeze set (spec/oracles/reviews/lineage/correction +
     # manifest), the external certifying harness, and the closed R3
