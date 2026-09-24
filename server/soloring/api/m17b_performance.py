@@ -325,8 +325,12 @@ async def list_retarget_reviews(
     (PUB-R3): SQL cursor predicate on ``(reviewed_at, id)``, bounded
     limit, ``limit + 1`` lookahead, deterministic continuation — the
     same pattern as the other M17B collections; never materializes
-    the full history."""
+    the full history. The service's parent-existence precondition is
+    preserved (PUB-R4): a missing assessment fails with
+    RETARGET_ASSESSMENT_NOT_FOUND rather than an empty collection."""
     from soloring.performance.models import PerformanceRetargetReview
+    await retarget_svc.get_assessment(session,
+                                      assessment_id=assessment_id)
     cursor = _cursor(cursor_reviewed, cursor_id, "cursor_reviewed",
                      "cursor_id")
     limit = max(1, min(200, limit))

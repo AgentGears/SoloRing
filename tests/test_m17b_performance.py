@@ -767,3 +767,42 @@ async def test_k05b_review_listing_bounded_keyset_pagination_pins(client):
                f"&cursor_id={cur[1]}") if cur else None
     assert seen == sorted(ids)
     assert len(seen) == len(set(seen)) == 3
+
+
+@pytest.mark.asyncio
+async def test_k05c_review_listing_missing_assessment_404_vs_zero_reviews_200(client):
+    """K05c (PUB-R4): the bounded keyset page preserves the service's
+    parent-existence precondition — a MISSING assessment fails with
+    RETARGET_ASSESSMENT_NOT_FOUND (404), while an EXISTING assessment
+    with zero reviews is an empty 200 collection. The PUB-R3 keyset
+    rewrite had silently turned the first case into the second."""
+    pid, eid = await _subject(client)
+    from tests.m17b_seed import (seed_production_object,
+                                 seed_production_revision)
+    c = (await _post(client, eid, candidate_body(
+        [channel(SMILE, [kf(0, 1, 0)])]))).json()
+    rev = (await client.post(f"/performance-candidates/{c['id']}/adopt",
+                             json={"adopted_by": "director"})).json()
+    obj = await seed_production_object(client, pid, "K05c obj",
+                                       b"k05c-object")
+    pr1 = await seed_production_revision(client, obj, b"k05c-r1", 1)
+    pr3 = await seed_production_revision(client, obj, b"k05c-r3", 3)
+    a = (await client.post(
+        f"/performance-revisions/{rev['id']}/retarget-assessments",
+        json={"from_production_revision_id":
+              pr1["production_revision_id"],
+              "to_production_revision_id":
+              pr3["production_revision_id"]})).json()
+    # existing assessment, zero reviews -> empty 200 collection
+    r_empty = await client.get(
+        f"/performance-retarget-assessments/{a['id']}/reviews")
+    assert r_empty.status_code == 200
+    assert r_empty.json()["reviews"] == []
+    assert r_empty.json()["next_cursor"] is None
+    # missing assessment -> the M17B not-found path, not an empty page
+    r_missing = await client.get(
+        "/performance-retarget-assessments/"
+        "00000000-0000-4000-8000-00000000d999/reviews")
+    assert r_missing.status_code == 404, r_missing.text
+    assert r_missing.json()["error_code"] == \
+        "RETARGET_ASSESSMENT_NOT_FOUND"
