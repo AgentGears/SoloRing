@@ -81,6 +81,9 @@ ALLOWLIST = (
     "server/alembic/versions/0019_m17b_performance_revisions.py",
     "server/soloring/api/m17b_performance.py",
     "server/soloring/recovery/m17b_verifier.py",
+    # M17B second-Codex round: the sqlalchemy <2.1 ceiling pin
+    # (dependency-drift incident, run #161). Packaging metadata only.
+    "pyproject.toml",
     "tests/test_m17a_matrix.py",
     "apps/web/package.json",
     "apps/web/package-lock.json",
