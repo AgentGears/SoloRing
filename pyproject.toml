@@ -13,7 +13,10 @@ dependencies = [
     "uvicorn[standard]>=0.30",
     "pydantic>=2.7",
     "pydantic-settings>=2.3",
-    "sqlalchemy>=2.0.30",
+    # ceiling pinned 2026-09-24: SQLAlchemy 2.1.0 released mid-PR and
+    # broke CI collection (run #161 vs #160 on identical code); the
+    # codebase is certified against the 2.0.x line
+    "sqlalchemy>=2.0.30,<2.1",
     "aiosqlite>=0.20",
     "alembic>=1.13",
     "python-multipart>=0.0.9",
