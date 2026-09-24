@@ -8,7 +8,9 @@ candidate Blob race; X9 recovery grammar corruptions; X10 F05 real
 immutability surface; X11 A03 corrected structural ownership;
 X12 adoption uses the running app's Settings (publication
 review); X13 alignment provenance binds to the candidate's
-project.
+project; X14-X17 PUB-R3 recovery/API regressions (operation
+Blob root; 0019 predecessor semantics; cross-project
+assessment law; bounded review keyset).
 """
 
 from __future__ import annotations
@@ -759,3 +761,213 @@ async def test_x13_alignment_from_another_project_rejects_at_creation_and_adopti
         n = (await conn.execute(text(
             "SELECT COUNT(*) FROM performance_revisions"))).scalar()
     assert n == 0
+
+
+# --------------------------- X14-X17 --------------------------------
+# PUB-R3 regressions (Codex independent-review findings).
+
+
+async def _r37world(client, tag: bytes):
+    from tests.m17b_seed import (make_entity, make_project,
+                                 seed_production_object,
+                                 seed_production_revision, stamp_alembic)
+    pid = await make_project(client, name=f"R37 {tag!r}")
+    eid = await make_entity(client, pid)
+    c = (await _post(client, eid, _body())).json()
+    rev = (await client.post(f"/performance-candidates/{c['id']}/adopt",
+                             json={"adopted_by": "d"})).json()
+    obj = await seed_production_object(client, pid, "R37 obj", tag)
+    pr1 = await seed_production_revision(client, obj, tag + b"1", 1)
+    pr2 = await seed_production_revision(client, obj, tag + b"2", 2)
+    a = (await client.post(
+        f"/performance-revisions/{rev['id']}/retarget-assessments",
+        json={"from_production_revision_id":
+              pr1["production_revision_id"],
+              "to_production_revision_id":
+              pr2["production_revision_id"]})).json()
+    engine = client._transport.app.state.engine
+    async with engine.connect() as conn:
+        await conn.exec_driver_sql("PRAGMA wal_checkpoint(TRUNCATE)")
+    await stamp_alembic(client)
+    return pid, eid, c, rev, obj, pr1, pr2, a
+
+
+@pytest.mark.asyncio
+async def test_x14_backup_and_restore_use_operation_blob_root_not_process_singleton(client, tmp_path):
+    """PUB-R3/Codex-P1: with the process Settings singleton poisoned
+    toward an EMPTY data root, backup() must verify M17B payloads
+    under the operation's (app) Blob root and restore() under the
+    restore-staged tree — never get_settings().blob_dir."""
+    from soloring import settings as settings_mod
+    from soloring.recovery.backup import backup, restore
+    from soloring.settings import Settings
+    from tests.m17b_seed import stamp_alembic
+    pid, eid = await _subject(client, "X14")
+    c = (await _post(client, eid, _body())).json()
+    await client.post(f"/performance-candidates/{c['id']}/adopt",
+                      json={"adopted_by": "d"})
+    engine = client._transport.app.state.engine
+    async with engine.connect() as conn:
+        await conn.exec_driver_sql("PRAGMA wal_checkpoint(TRUNCATE)")
+    await stamp_alembic(client)
+    settings = client._transport.app.state.settings
+    poisoned = Settings(data_dir=tmp_path / "poisoned-root")
+    previous = settings_mod._settings
+    settings_mod._settings = poisoned
+    try:
+        root = tmp_path / "bk"
+        await backup(settings, root)
+        dest = tmp_path / "rs"
+        await restore(root, dest)
+    finally:
+        settings_mod._settings = previous
+    import sqlite3
+    con = sqlite3.connect(dest / "soloring.db")
+    n, h = con.execute(
+        "SELECT COUNT(*), MAX(canonical_channel_payload_blob_hash) "
+        "FROM performance_candidates").fetchone()
+    con.close()
+    assert n == 1 and h == c["canonical_channel_payload_blob_hash"]
+
+
+@pytest.mark.asyncio
+async def test_x15_backup_at_0019_rejects_m14_and_m15_semantic_corruption(client, tmp_path):
+    """PUB-R3/Codex-P1: at head 0019 the liveness wrapper now runs the
+    M14 observation and M15 compatibility verifiers; representative
+    corruption in either must refuse the BACKUP."""
+    from soloring.recovery.backup import backup
+    pid, eid, c, rev, obj, pr1, pr2, a = await _r37world(client, b"x15")
+    engine = client._transport.app.state.engine
+    settings = client._transport.app.state.settings
+    e64 = "e" * 64
+    bad_m14 = ("INSERT INTO derived_observation_artifacts "
+               "(id, project_id, observation_spec_hash, artifact_role, "
+               "materializer_id, materializer_version, "
+               "materializer_contract_hash, parameters_json, "
+               "parameters_hash, provenance_json, provenance_hash, "
+               "blob_hash, created_at) VALUES "
+               "(:i, :p, :sh, 'observation.world_depth', 'm', 1, :mc, "
+               "'{}', :ph, "
+               "'{}', :pv, :bh, :n)")
+    m14_params = {"i": "00000000-0000-4000-8000-00000000c401",
+                  "p": pid, "sh": "z" * 64, "mc": e64,
+                  "ph": e64, "pv": e64,
+                  "bh": c["canonical_channel_payload_blob_hash"],
+                  "n": "2026-01-01T00:00:00.000Z"}
+    async with engine.begin() as conn:
+        await conn.execute(text(bad_m14), m14_params)
+    with pytest.raises(Exception) as exc_info:
+        await backup(settings, tmp_path / "bk14")
+    assert "observation_spec_hash" in str(exc_info.value)
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "DELETE FROM derived_observation_artifacts WHERE id = :i"),
+            {"i": m14_params["i"]})
+    bad_m15 = ("INSERT INTO production_compatibility_assessments "
+               "(id, project_id, production_object_id, from_revision_id, "
+               "from_revision_hash, to_revision_id, to_revision_hash, "
+               "schema_version, evaluator_id, evaluator_version, "
+               "scope_json, scope_hash, report_json, report_hash, "
+               "overall_verdict, created_at) VALUES "
+               "(:i, :p, :o, :f, :sh, :t, :h, 1, "
+               "'soloring.production_revision_compatibility', 1, '{}', "
+               ":sc, "
+               "'{}', :rh, 'COMPATIBLE_AS_IS', :n)")
+    async with engine.begin() as conn:
+        await conn.execute(text(bad_m15),
+                           {"i": "00000000-0000-4000-8000-00000000c501",
+                            "p": pid, "o": obj,
+                            "f": pr1["production_revision_id"],
+                            "sh": "z" * 64,
+                            "t": pr2["production_revision_id"],
+                            "h": "f" * 64, "sc": "a" * 64,
+                            "rh": "b" * 64,
+                            "n": "2026-01-01T00:00:00.000Z"})
+    with pytest.raises(Exception) as exc_info:
+        await backup(settings, tmp_path / "bk15")
+    assert "revision hash invalid" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_x16_restore_at_0019_rejects_m14_and_m15_semantic_corruption(client, tmp_path):
+    """PUB-R3/Codex-P1 (restore side): a backup tree whose DB carries
+    representative M14/M15 semantic corruption — with the manifest
+    database hash recomputed so the tree is self-consistent — must be
+    REFUSED at restore by the newly-dispatched predecessor verifiers."""
+    import hashlib
+    import json as _json
+    import sqlite3
+    from soloring.recovery.backup import backup, restore
+    pid, eid, c, rev, obj, pr1, pr2, a = await _r37world(client, b"x16")
+    settings = client._transport.app.state.settings
+    root = tmp_path / "bk"
+    await backup(settings, root)
+
+    def _tamper_and_reseal(sql: str, params) -> None:
+        db = root / "soloring.db"
+        con = sqlite3.connect(db)
+        con.execute(sql, params)
+        con.commit()
+        con.close()
+        mf = root / "backup-manifest.json"
+        doc = _json.loads(mf.read_text(encoding="utf-8"))
+        doc["database_sha256"] = hashlib.sha256(
+            db.read_bytes()).hexdigest()
+        from soloring.domain.canonical import canonical_json_bytes
+        mf.write_bytes(canonical_json_bytes(doc))
+
+    e64 = "e" * 64
+    _tamper_and_reseal(
+        "INSERT INTO derived_observation_artifacts "
+        "(id, project_id, observation_spec_hash, artifact_role, "
+        "materializer_id, materializer_version, "
+        "materializer_contract_hash, parameters_json, parameters_hash, "
+        "provenance_json, provenance_hash, blob_hash, created_at) "
+        "VALUES (?, ?, ?, 'observation.world_depth', 'm', 1, ?, '{}', "
+        "?, '{}', ?, ?, '2026-01-01T00:00:00.000Z')",
+        ("00000000-0000-4000-8000-00000000c402", pid, "z" * 64,
+         e64, e64, e64, c["canonical_channel_payload_blob_hash"]))
+    with pytest.raises(Exception) as exc_info:
+        await restore(root, tmp_path / "rs14")
+    assert "observation_spec_hash" in str(exc_info.value)
+
+    _tamper_and_reseal(
+        "DELETE FROM derived_observation_artifacts WHERE id = ?",
+        ("00000000-0000-4000-8000-00000000c402",))
+    _tamper_and_reseal(
+        "INSERT INTO production_compatibility_assessments "
+        "(id, project_id, production_object_id, from_revision_id, "
+        "from_revision_hash, to_revision_id, to_revision_hash, "
+        "schema_version, evaluator_id, evaluator_version, scope_json, "
+        "scope_hash, report_json, report_hash, overall_verdict, "
+        "created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 1, "
+        "'soloring.production_revision_compatibility', "
+        "1, '{}', ?, '{}', ?, 'COMPATIBLE_AS_IS', "
+        "'2026-01-01T00:00:00.000Z')",
+        ("00000000-0000-4000-8000-00000000c502", pid, obj,
+         pr1["production_revision_id"], "z" * 64,
+         pr2["production_revision_id"], "f" * 64,
+         "a" * 64, "b" * 64))
+    with pytest.raises(Exception) as exc_info:
+        await restore(root, tmp_path / "rs15")
+    assert "revision hash invalid" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_x17_recovery_rejects_self_consistent_cross_project_assessment(client, tmp_path):
+    """PUB-R3/Codex-P1: an assessment whose referenced
+    ProductionObject is moved to ANOTHER project — with scope/report
+    still recomputing byte-identically (self-consistent) — is
+    corruption under the live-service Project law, now enforced by
+    recovery too."""
+    pid, eid, c, rev, obj, pr1, pr2, a = await _r37world(client, b"x17")
+    p2 = (await client.post("/projects",
+                            json={"name": "X17-B"})).json()["id"]
+    engine = client._transport.app.state.engine
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "UPDATE production_objects SET project_id = :p "
+            "WHERE id = :o"), {"p": p2, "o": obj})
+    with pytest.raises(Exception) as exc_info:
+        _verify(client)
+    assert "another project" in str(exc_info.value)

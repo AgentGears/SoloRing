@@ -334,6 +334,25 @@ def _verify_assessments(con: sqlite3.Connection) -> None:
                            "disagrees")
         from_obj = str(from_pr["production_object_id"])
         to_obj = str(to_pr["production_object_id"])
+        # PUB-R3: the live service requires BOTH referenced
+        # ProductionObjects to belong to the Performance revision's
+        # Project; recovery enforces the identical law (existence +
+        # exact project agreement) before recomputing evidence.
+        from_obj_row = con.execute(
+            "SELECT project_id FROM production_objects WHERE id = ?",
+            (from_obj,)).fetchone()
+        to_obj_row = con.execute(
+            "SELECT project_id FROM production_objects WHERE id = ?",
+            (to_obj,)).fetchone()
+        if from_obj_row is None or to_obj_row is None:
+            raise _corrupt("assessment physical object missing")
+        if from_obj_row["project_id"] != perf["project_id"] or \
+                to_obj_row["project_id"] != perf["project_id"]:
+            raise _corrupt(
+                "assessment physical object belongs to another "
+                "project than the performance revision — "
+                "self-consistent cross-project state is still "
+                "corruption")
         if from_pr["id"] == to_pr["id"]:
             reason = "SAME_EXACT_PHYSICAL_REVISION"
         elif from_obj == to_obj:

@@ -709,3 +709,61 @@ async def test_k05_exact_candidate_and_review_evidence_are_dereferenceable_revie
     assert got == sorted([accept["id"], reject["id"]])
     assert {x["decision"] for x in lst["reviews"]} == {
         "ACCEPT_FOR_NEW_CANDIDATE", "REJECT"}
+
+
+@pytest.mark.asyncio
+async def test_k05b_review_listing_bounded_keyset_pagination_pins(client):
+    """K05b (PUB-R3/Codex-P2): the review listing is a bounded keyset
+    page — zero/negative limits clamp to 1, over-max clamps to 200,
+    and equal-``reviewed_at`` histories traverse deterministically by
+    ``(reviewed_at, id)`` with exact continuations."""
+    pid, eid = await _subject(client)
+    from tests.m17b_seed import (seed_production_object,
+                                 seed_production_revision)
+    c = (await _post(client, eid, candidate_body(
+        [channel(SMILE, [kf(0, 1, 0)])]))).json()
+    rev = (await client.post(f"/performance-candidates/{c['id']}/adopt",
+                             json={"adopted_by": "director"})).json()
+    obj = await seed_production_object(client, pid, "K05b obj",
+                                       b"k05b-object")
+    pr1 = await seed_production_revision(client, obj, b"k05b-r1", 1)
+    pr2 = await seed_production_revision(client, obj, b"k05b-r2", 2)
+    a = (await client.post(
+        f"/performance-revisions/{rev['id']}/retarget-assessments",
+        json={"from_production_revision_id":
+              pr1["production_revision_id"],
+              "to_production_revision_id":
+              pr2["production_revision_id"]})).json()
+    ids = []
+    for i, decision in enumerate(("ACCEPT_FOR_NEW_CANDIDATE", "REJECT",
+                                  "ACCEPT_FOR_NEW_CANDIDATE")):
+        rv = (await client.post(
+            f"/performance-retarget-assessments/{a['id']}/reviews",
+            json={"decision": decision,
+                  "reviewed_by": f"rev-{i}",
+                  "rationale": None})).json()
+        ids.append(rv["id"])
+    engine = client._transport.app.state.engine
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "UPDATE performance_retarget_reviews SET reviewed_at = :t "
+            "WHERE assessment_id = :a"),
+            {"t": "2026-01-01T00:00:00.000Z", "a": a["id"]})
+    base = f"/performance-retarget-assessments/{a['id']}/reviews"
+    r_zero = (await client.get(f"{base}?limit=0")).json()
+    assert len(r_zero["reviews"]) == 1
+    assert r_zero["next_cursor"] is not None
+    r_neg = (await client.get(f"{base}?limit=-5")).json()
+    assert len(r_neg["reviews"]) == 1
+    r_big = (await client.get(f"{base}?limit=999")).json()
+    assert [x["id"] for x in r_big["reviews"]] == sorted(ids)
+    assert r_big["next_cursor"] is None
+    seen, url = [], f"{base}?limit=2"
+    while url:
+        page = (await client.get(url)).json()
+        seen += [x["id"] for x in page["reviews"]]
+        cur = page.get("next_cursor")
+        url = (f"{base}?limit=2&cursor_reviewed={cur[0]}"
+               f"&cursor_id={cur[1]}") if cur else None
+    assert seen == sorted(ids)
+    assert len(seen) == len(set(seen)) == 3

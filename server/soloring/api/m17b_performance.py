@@ -321,13 +321,26 @@ async def list_retarget_reviews(
         cursor_reviewed: str | None = None,
         cursor_id: str | None = None,
         session: AsyncSession = Depends(get_session)):
+    """Bounded keyset pagination over the append-only review evidence
+    (PUB-R3): SQL cursor predicate on ``(reviewed_at, id)``, bounded
+    limit, ``limit + 1`` lookahead, deterministic continuation — the
+    same pattern as the other M17B collections; never materializes
+    the full history."""
+    from soloring.performance.models import PerformanceRetargetReview
     cursor = _cursor(cursor_reviewed, cursor_id, "cursor_reviewed",
                      "cursor_id")
-    reviews = await retarget_svc.list_reviews(
-        session, assessment_id=assessment_id)
+    limit = max(1, min(200, limit))
+    stmt = select(PerformanceRetargetReview).where(
+        PerformanceRetargetReview.assessment_id == assessment_id)
     if cursor is not None:
-        reviews = [r for r in reviews
-                   if (r.reviewed_at, r.id) > cursor]
+        stmt = stmt.where(or_(
+            PerformanceRetargetReview.reviewed_at > cursor[0],
+            and_(PerformanceRetargetReview.reviewed_at == cursor[0],
+                 PerformanceRetargetReview.id > cursor[1])))
+    stmt = stmt.order_by(
+        PerformanceRetargetReview.reviewed_at,
+        PerformanceRetargetReview.id).limit(limit + 1)
+    reviews = (await session.execute(stmt)).scalars().fetchall()
     more = len(reviews) > limit
     reviews = reviews[:limit]
     return RetargetReviewCollection(

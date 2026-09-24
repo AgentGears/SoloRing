@@ -328,7 +328,8 @@ def install_successor_semantics(recovery: ModuleType) -> None:
     recovery._verify_m17b_performance_state = (
         verify_m17b_performance_state)
 
-    def _verify_head_semantics(staged_db: Path, head: str) -> None:
+    def _verify_head_semantics(staged_db: Path, head: str,
+                               blob_root=None) -> None:
         if head not in recovery.SUPPORTED_RESTORE_ALEMBIC_HEADS:
             raise _corrupt(f"unsupported recovery head {head!r}.")
         if head == recovery.PRE_M11_ALEMBIC_HEAD:
@@ -354,33 +355,41 @@ def install_successor_semantics(recovery: ModuleType) -> None:
         recovery._verify_m17a_dialogue_vocal_state(staged_db)
         if head == getattr(recovery, "M17A_ALEMBIC_HEAD", None):
             return
-        recovery._verify_m17b_performance_state(staged_db)
+        recovery._verify_m17b_performance_state(staged_db, blob_root)
 
     recovery._verify_head_semantics = _verify_head_semantics
 
     original_enumerate = recovery._enumerate_liveness
 
     def _enumerate_with_successor_semantics(staged_db: Path,
-                                            expected_columns=None):
+                                            expected_columns=None,
+                                            blob_root=None):
+        """Head-dispatched successor semantic verification (PUB-R3):
+        every predecessor verifier that applies at the staged head
+        runs — at 0019 that includes M14 observation and M15
+        compatibility semantics, not only M16/M17A/M17B — and the
+        M17B physical-payload verification reads the OPERATION's Blob
+        root (backup source root / restore staged tree), never the
+        process-global Settings singleton."""
         head = recovery._staged_db_head(staged_db)
         if head in (recovery.M14_ALEMBIC_HEAD, recovery.M15_ALEMBIC_HEAD,
                     recovery.M16_ALEMBIC_HEAD,
-                    getattr(recovery, "M17A_ALEMBIC_HEAD", None)):
+                    getattr(recovery, "M17A_ALEMBIC_HEAD", None),
+                    getattr(recovery, "M17B_ALEMBIC_HEAD", None)):
             recovery._verify_m14_observation_state(staged_db)
         if head in (recovery.M15_ALEMBIC_HEAD, recovery.M16_ALEMBIC_HEAD,
-                    getattr(recovery, "M17A_ALEMBIC_HEAD", None)):
+                    getattr(recovery, "M17A_ALEMBIC_HEAD", None),
+                    getattr(recovery, "M17B_ALEMBIC_HEAD", None)):
             recovery._verify_m15_compatibility_state(staged_db)
         if head in (recovery.M16_ALEMBIC_HEAD,
                     getattr(recovery, "M17A_ALEMBIC_HEAD", None),
                     getattr(recovery, "M17B_ALEMBIC_HEAD", None)):
             recovery._verify_m16_intra_shot_state(staged_db)
-        if head == getattr(recovery, "M17A_ALEMBIC_HEAD", None):
-            recovery._verify_m17a_dialogue_vocal_state(staged_db)
         if head in (getattr(recovery, "M17A_ALEMBIC_HEAD", None),
                     getattr(recovery, "M17B_ALEMBIC_HEAD", None)):
             recovery._verify_m17a_dialogue_vocal_state(staged_db)
         if head == getattr(recovery, "M17B_ALEMBIC_HEAD", None):
-            recovery._verify_m17b_performance_state(staged_db)
+            recovery._verify_m17b_performance_state(staged_db, blob_root)
         return original_enumerate(staged_db, expected_columns)
 
     recovery._enumerate_liveness = _enumerate_with_successor_semantics
