@@ -10,7 +10,10 @@ X12 adoption uses the running app's Settings (publication
 review); X13 alignment provenance binds to the candidate's
 project; X14-X17 PUB-R3 recovery/API regressions (operation
 Blob root; 0019 predecessor semantics; cross-project
-assessment law; bounded review keyset).
+assessment law; bounded review keyset); X18-X20 second-Codex
+regressions (adoption subject/project agreement; retarget
+evidence resolution at adoption; minimal API provenance
+defaults).
 """
 
 from __future__ import annotations
@@ -971,3 +974,225 @@ async def test_x17_recovery_rejects_self_consistent_cross_project_assessment(cli
     with pytest.raises(Exception) as exc_info:
         _verify(client)
     assert "another project" in str(exc_info.value)
+
+
+# --------------------------- X18-X20 --------------------------------
+# Second-Codex-review regressions (adoption integrity + API contract).
+
+
+@pytest.mark.asyncio
+async def test_x18_adoption_rejects_subject_project_disagreement(client):
+    """Second-Codex P1: a schema-valid candidate whose project_id is
+    NOT its subject's project (DB-crafted) must not be promotable —
+    the live adoption now enforces the recovery verifier's
+    subject/project agreement law."""
+    pid, eid = await _subject(client, "X18")
+    p2 = (await client.post("/projects",
+                            json={"name": "X18-B"})).json()["id"]
+    c = (await _post(client, eid, _body())).json()
+    engine = client._transport.app.state.engine
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "UPDATE performance_candidates SET project_id = :p "
+            "WHERE id = :i"), {"p": p2, "i": c["id"]})
+    r = await client.post(f"/performance-candidates/{c['id']}/adopt",
+                          json={"adopted_by": "d"})
+    assert r.status_code in (403, 422), r.text
+    assert r.json()["error_code"] == "PERFORMANCE_PROJECT_MISMATCH"
+    async with engine.connect() as conn:
+        n = (await conn.execute(text(
+            "SELECT COUNT(*) FROM performance_revisions"))).scalar()
+    assert n == 0
+
+
+@pytest.mark.asyncio
+async def test_x19_adoption_rejects_unresolved_retarget_evidence(client):
+    """Second-Codex P1: a retargeted candidate's provenance must
+    actually RESOLVE at adoption — source revision, exact assessment
+    coordinate, REQUIRES_REVIEW verdict, owned ACCEPT review. Forged
+    ids, a stale coordinate, and a non-accepting review each refuse
+    promotion (the recovery verifier's law, now enforced live)."""
+    from tests.m17b_seed import (make_entity, make_project,
+                                 seed_production_object,
+                                 seed_production_revision)
+    pid = await make_project(client, name="X19")
+    eid = await make_entity(client, pid)
+    c = (await _post(client, eid, _body())).json()
+    rev = (await client.post(f"/performance-candidates/{c['id']}/adopt",
+                             json={"adopted_by": "d"})).json()
+    obj = await seed_production_object(client, pid, "X19 obj", b"x19")
+    pr1 = await seed_production_revision(client, obj, b"x19-1", 1)
+    pr2 = await seed_production_revision(client, obj, b"x19-2", 2)
+    pr3 = await seed_production_revision(client, obj, b"x19-3", 3)
+    a = (await client.post(
+        f"/performance-revisions/{rev['id']}/retarget-assessments",
+        json={"from_production_revision_id":
+              pr1["production_revision_id"],
+              "to_production_revision_id":
+              pr2["production_revision_id"]})).json()
+    accept = (await client.post(
+        f"/performance-retarget-assessments/{a['id']}/reviews",
+        json={"decision": "ACCEPT_FOR_NEW_CANDIDATE",
+              "reviewed_by": "rev", "rationale": None})).json()
+    engine = client._transport.app.state.engine
+    settings = client._transport.app.state.settings
+
+    def _craft(producer, retarget):
+        from soloring.performance.revision import (
+            build_provenance_envelope)
+        from soloring.domain.canonical import (canonical_hash,
+                                               canonical_json_str)
+        envelope = build_provenance_envelope(
+            {"schema_version": 1, "source_kind": "retargeted",
+             "producer_id": producer, "producer_version": "1",
+             "source_identity": None, "parameters_sha256": None,
+             "retarget": retarget})
+        return canonical_json_str(envelope), canonical_hash(envelope)
+
+    def _retarget_candidate(prov_json, prov_hash, producer):
+        from soloring.performance.profile import build_canonical_payload
+        payload = {"schema_version": 1,
+                   "performance_profile_id":
+                       "performance-profile/1",
+                   "channels": candidate_body(
+                       [channel(SMILE, [kf(0, 1, 0)])])["channels"]}
+        body_bytes, _ = build_canonical_payload(
+            payload, performance_kind="FACIAL",
+            performance_profile_id="performance-profile/1",
+            start_num=0, start_den=1, end_num=4500, end_den=1)
+        bh = hashlib.sha256(body_bytes).hexdigest()
+        bp = settings.blob_dir / "sha256" / bh[:2] / bh[2:4] / bh
+        bp.parent.mkdir(parents=True, exist_ok=True)
+        bp.write_bytes(body_bytes)
+        cid = producer.replace("x19-", "00000000-0000-4000-8000-0000000")
+        import sqlite3 as _s
+        con = _s.connect(settings.data_dir / "soloring.db")
+        con.execute(
+            "INSERT OR IGNORE INTO blobs (hash, path, size_bytes, "
+            "detected_media_type, created_at) VALUES (?, ?, ?, NULL, "
+            "'2026-01-01T00:00:00.000Z')",
+            (bh, f"sha256/{bh[:2]}/{bh[2:4]}/{bh}", len(body_bytes)))
+        con.execute(
+            "INSERT INTO performance_candidates (id, project_id, "
+            "subject_id, performance_kind, performance_profile_id, "
+            "temporal_start_num, temporal_start_den, "
+            "temporal_end_num, temporal_end_den, "
+            "canonical_channel_payload_blob_hash, "
+            "canonical_channel_payload_sha256, payload_schema_version,"
+            " source_kind, provenance_schema_version, provenance_json, "
+            "provenance_hash, created_at) VALUES (?, ?, ?, 'FACIAL', "
+            "'performance-profile/1', 0, 1, 4500, 1, ?, ?, 1, "
+            "'retargeted', 1, ?, ?, '2026-01-01T00:00:00.000Z')",
+            (cid, pid, eid, bh, bh, prov_json, prov_hash))
+        con.commit()
+        con.close()
+        return cid
+
+    import asyncio as _a
+
+    async def _try_adopt(cid):
+        return await client.post(
+            f"/performance-candidates/{cid}/adopt",
+            json={"adopted_by": "d"})
+
+    # 1. forged ids (nothing resolves)
+    producer_label = "x19-forger"
+    pj, ph = _craft(producer_label, {
+        "source_performance_revision_id": rev["id"],
+        "from_production_revision_id":
+            pr1["production_revision_id"],
+        "to_production_revision_id":
+            pr2["production_revision_id"],
+        "compatibility_assessment_id":
+            "00000000-0000-4000-8000-00000000f001",
+        "accepted_review_id":
+            "00000000-0000-4000-8000-00000000f002"})
+    cid = _retarget_candidate(pj, ph, producer_label)
+    r = await _try_adopt(cid)
+    assert r.status_code in (403, 422), r.text
+
+    # 2. real assessment id but stale coordinate (pr3, not pr2)
+    producer_label = "x19-stale"
+    pj, ph = _craft(producer_label, {
+        "source_performance_revision_id": rev["id"],
+        "from_production_revision_id":
+            pr1["production_revision_id"],
+        "to_production_revision_id":
+            pr3["production_revision_id"],
+        "compatibility_assessment_id": a["id"],
+        "accepted_review_id": accept["id"]})
+    cid = _retarget_candidate(pj, ph, producer_label)
+    r = await _try_adopt(cid)
+    assert r.status_code in (403, 422), r.text
+
+    # 3. real coordinate but non-accepting review (REJECT exists on a
+    #    second assessment)
+    a2 = (await client.post(
+        f"/performance-revisions/{rev['id']}/retarget-assessments",
+        json={"from_production_revision_id":
+              pr1["production_revision_id"],
+              "to_production_revision_id":
+              pr3["production_revision_id"]})).json()
+    reject = (await client.post(
+        f"/performance-retarget-assessments/{a2['id']}/reviews",
+        json={"decision": "REJECT",
+              "reviewed_by": "rev", "rationale": None})).json()
+    producer_label = "x19-rej"
+    pj, ph = _craft(producer_label, {
+        "source_performance_revision_id": rev["id"],
+        "from_production_revision_id":
+            pr1["production_revision_id"],
+        "to_production_revision_id":
+            pr3["production_revision_id"],
+        "compatibility_assessment_id": a2["id"],
+        "accepted_review_id": reject["id"]})
+    cid = _retarget_candidate(pj, ph, producer_label)
+    r = await _try_adopt(cid)
+    assert r.status_code in (403, 422), r.text
+    engine2 = client._transport.app.state.engine
+    async with engine2.connect() as conn:
+        n = (await conn.execute(text(
+            "SELECT COUNT(*) FROM performance_revisions WHERE "
+            "adopted_candidate_id LIKE '%0000000%' AND "
+            "adopted_candidate_id != :real", ),
+            {"real": c["id"]})).scalar()
+    assert n == 0  # none of the crafted candidates were promoted
+
+
+@pytest.mark.asyncio
+async def test_x20_minimal_api_provenance_defaults_materialize(client):
+    """Second-Codex P3: a candidate create whose provenance supplies
+    ONLY the required producer fields is VALID per the published
+    schema and must succeed — the declared defaults (schema_version,
+    source_kind, source_identity, parameters_sha256) materialize into
+    the complete closed envelope. The route previously stripped them
+    via exclude_unset and the service then demanded the exact key
+    set, turning a schema-valid request into a 422."""
+    from tests.m17b_seed import candidate_body, channel, kf, SMILE
+    pid, eid = await _subject(client, "X20")
+    body = candidate_body([channel(SMILE, [kf(0, 1, 0)])])
+    body["source_provenance"] = {"producer_id": "minimal-client",
+                                 "producer_version": "1"}
+    r = await _post(client, eid, body)
+    assert r.status_code == 201, r.text
+    c = r.json()
+    assert c["source_kind"] == "authored"
+    rev = await client.post(f"/performance-candidates/{c['id']}/adopt",
+                            json={"adopted_by": "d"})
+    assert rev.status_code == 200, rev.text
+    # the persisted envelope is the complete closed form
+    import json as _json
+    from soloring.domain.canonical import canonical_hash
+    engine = client._transport.app.state.engine
+    async with engine.connect() as conn:
+        pj = (await conn.execute(text(
+            "SELECT provenance_json FROM performance_candidates WHERE "
+            "id = :i"), {"i": c["id"]})).scalar()
+    doc = _json.loads(pj)
+    assert set(doc) == {"schema_version", "source_kind", "producer_id",
+                        "producer_version", "source_identity",
+                        "parameters_sha256", "retarget"}
+    assert doc["schema_version"] == 1 and doc["source_kind"] == \
+        "authored"
+    assert doc["source_identity"] is None and \
+        doc["parameters_sha256"] is None

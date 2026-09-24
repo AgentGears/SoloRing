@@ -118,7 +118,11 @@ async def create_performance_candidate(
             temporal_end_num=body.temporal_domain.end.num,
             temporal_end_den=body.temporal_domain.end.den,
             channels=[ch.model_dump() for ch in body.channels],
-            source_provenance={**body.source_provenance.model_dump(exclude_unset=True), "retarget": None})
+            # second-Codex P3: dump the FULL declared model so the schema's
+        # declared defaults materialize into the complete closed
+        # envelope (exclude_unset stripped them and the service
+        # requires the exact complete key set)
+        source_provenance={**body.source_provenance.model_dump(), "retarget": None})
         await session.commit()
     except IntegrityError:
         # concurrent first submissions of IDENTICAL canonical
@@ -138,7 +142,11 @@ async def create_performance_candidate(
             temporal_end_num=body.temporal_domain.end.num,
             temporal_end_den=body.temporal_domain.end.den,
             channels=[ch.model_dump() for ch in body.channels],
-            source_provenance={**body.source_provenance.model_dump(exclude_unset=True), "retarget": None})
+            # second-Codex P3: dump the FULL declared model so the schema's
+        # declared defaults materialize into the complete closed
+        # envelope (exclude_unset stripped them and the service
+        # requires the exact complete key set)
+        source_provenance={**body.source_provenance.model_dump(), "retarget": None})
         await session.commit()
     return PerformanceCandidateRead(**_candidate_view(candidate))
 

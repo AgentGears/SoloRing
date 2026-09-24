@@ -195,6 +195,20 @@ async def verify_candidate_integrity(
             ErrorCode.PERFORMANCE_PROVENANCE_INVALID,
             "candidate provenance bytes/hash do not recompute")
 
+    # subject/project agreement (the recovery verifier's law; second
+    # Codex review P1): a schema-valid candidate whose project is not
+    # the subject's project is corruption and must not be promoted
+    if row_lookup is None:
+        from soloring.continuity.models import CreativeEntity
+        subject = await session.get(CreativeEntity,
+                                    candidate.subject_id)
+        if subject is None or subject.project_id != \
+                candidate.project_id:
+            raise _invalid(
+                ErrorCode.PERFORMANCE_PROJECT_MISMATCH,
+                "candidate subject/project disagreement — the "
+                "candidate does not belong to its subject's project")
+
     # alignment provenance integrity (same immutable law as creation)
     if row_lookup is None:
         from soloring.performance.revision import (
@@ -203,7 +217,61 @@ async def verify_candidate_integrity(
             session, subject_id=candidate.subject_id,
             project_id=candidate.project_id,
             channels=doc["channels"])
+
+    # retarget evidence resolution (the recovery verifier's law;
+    # second Codex review P1): a retargeted candidate may only be
+    # promoted when its provenance actually resolves — source
+    # revision, exact assessment coordinate, REQUIRES_REVIEW verdict,
+    # and an owned ACCEPT review
+    if row_lookup is None and envelope["source_kind"] == "retargeted":
+        await _verify_retarget_evidence(session, envelope)
     return {"payload_document": doc, "envelope": envelope}
+
+
+async def _verify_retarget_evidence(session: AsyncSession,
+                                    envelope: dict) -> None:
+    """Live mirror of the recovery verifier's retarget law chain:
+    the envelope's retarget block must resolve to a real
+    REQUIRES_REVIEW assessment at the exact recorded coordinate with
+    an owned ACCEPT_FOR_NEW_CANDIDATE review."""
+    ret = envelope.get("retarget") or {}
+    from soloring.performance.models import (
+        PerformanceRevision as PR,
+        PerformanceRetargetAssessment,
+        PerformanceRetargetReview)
+    source = await session.get(PR, ret.get(
+        "source_performance_revision_id"))
+    if source is None:
+        raise _invalid(
+            ErrorCode.PERFORMANCE_PROVENANCE_INVALID,
+            "retarget provenance source revision does not resolve")
+    a = await session.get(PerformanceRetargetAssessment,
+                          ret.get("compatibility_assessment_id"))
+    if a is None:
+        raise _invalid(
+            ErrorCode.PERFORMANCE_PROVENANCE_INVALID,
+            "retarget provenance assessment does not resolve")
+    if (a.performance_revision_id,
+            a.from_production_revision_id,
+            a.to_production_revision_id) != (
+            ret.get("source_performance_revision_id"),
+            ret.get("from_production_revision_id"),
+            ret.get("to_production_revision_id")):
+        raise _invalid(
+            ErrorCode.PERFORMANCE_PROVENANCE_INVALID,
+            "retarget provenance coordinate mismatch")
+    if a.overall_verdict != "REQUIRES_REVIEW":
+        raise _invalid(
+            ErrorCode.PERFORMANCE_PROVENANCE_INVALID,
+            "retarget seeded from a non-REQUIRES_REVIEW assessment")
+    review = await session.get(PerformanceRetargetReview,
+                               ret.get("accepted_review_id"))
+    if review is None or review.assessment_id != a.id or \
+            review.decision != "ACCEPT_FOR_NEW_CANDIDATE":
+        raise _invalid(
+            ErrorCode.PERFORMANCE_PROVENANCE_INVALID,
+            "retarget accepted review does not satisfy the review "
+            "law chain")
 
 _CLOSURE_FIELDS = (
     "project_id", "subject_id", "performance_kind",
