@@ -61,8 +61,8 @@ generation, capture, and synchronization are downstream milestones
 (M17C+).
 
 Status: **M17B — Body/Facial Performance Revisions — CLOSED** at
-certified head `75fc4800c30195d2a4ec78b8187db10a4f21e4a2`
-(frozen plan R7, §19 certification 2651×2 + GPU gate 9/9, migration
+certified head `8c3501a8495a4dd5ed46066da4b4a8bd2b719181`
+(frozen plan R7, §19 certification 2657×2 + GPU gate 9/9, migration
 head `0019_m17b_performance_revisions`); merge/publication of the
 branch is a separate pending gate. Earlier milestones M0–M16 are closed
 and published — the M13 hygiene baseline remains
