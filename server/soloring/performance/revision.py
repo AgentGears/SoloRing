@@ -260,7 +260,9 @@ _RETARGET_COPY_FIELDS = (
 
 
 async def _verify_retarget_evidence(session: AsyncSession, settings,
-                                    candidate, envelope: dict) -> None:
+                                    candidate, envelope: dict, *,
+                                    _seen: set | None = None
+                                    ) -> None:
     """Live mirror of the recovery verifier's retarget law chain:
     the envelope's retarget block must resolve to a real
     REQUIRES_REVIEW assessment at the exact recorded coordinate with
@@ -274,7 +276,22 @@ async def _verify_retarget_evidence(session: AsyncSession, settings,
     builders the assessment service uses (a stored verdict is never
     trusted), and the source revision's own adoption lineage is
     revalidated against its adopted candidate (closure + adoption
-    metadata) before it may seed new authority."""
+    metadata) before it may seed new authority.
+
+    Transitive ancestry (delta review of the fourth-Codex fix): when
+    the SOURCE candidate is itself retargeted, its OWN retarget
+    evidence is re-resolved too, recursively, with a visited set —
+    recovery re-resolves every retargeted candidate row at
+    verification time, so post-adoption tampering of any historical
+    ACCEPT review in the chain must refuse new authority live. The
+    ancestry is linear (each retarget candidate has exactly one
+    source revision); the visited set guards tampered cycles."""
+    seen = _seen if _seen is not None else set()
+    if candidate.id in seen:
+        raise _invalid(
+            ErrorCode.PERFORMANCE_PROVENANCE_INVALID,
+            "retarget ancestry cycle detected — corruption")
+    seen = seen | {candidate.id}
     ret = envelope.get("retarget") or {}
     from soloring.performance.models import (
         PerformanceRevision as PR,
@@ -303,11 +320,17 @@ async def _verify_retarget_evidence(session: AsyncSession, settings,
     # mutates the same columns on both rows (e.g. both
     # provenance_hash values set to the same wrong-but-valid 64-hex);
     # recovery recomputes every candidate row's provenance envelope
-    # hash, so the live path must too. The core (not the full
-    # integrity entry) is used deliberately: a retargeted source
-    # candidate is revalidated per-row without following ITS retarget
-    # chain — each chain link was fully validated at its own adoption.
+    # hash, so the live path must too.
     await _verify_candidate_core(session, settings, source_candidate)
+    # transitive ancestry (recovery parity): if the source candidate
+    # is itself retargeted, re-resolve ITS evidence chain too — a
+    # post-adoption tamper of any historical ACCEPT review must
+    # refuse new authority; the visited set bounds tampered cycles
+    if source_candidate.source_kind == "retargeted":
+        source_envelope = json.loads(source_candidate.provenance_json)
+        await _verify_retarget_evidence(
+            session, settings, source_candidate, source_envelope,
+            _seen=seen)
     validate_adoption_metadata(adoption_id=source.adoption_id,
                                adopted_by=source.adopted_by,
                                adopted_at=source.adopted_at)

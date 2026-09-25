@@ -1479,6 +1479,79 @@ async def test_x21_adoption_rejects_tampered_assessment_verdict(client):
     assert r.status_code in (403, 422), r.text
     assert "provenance" in r.json()["message"], r.text
 
+    # (g) delta review of the fourth-Codex fix: TRANSITIVE ancestry —
+    # lawful two-hop chain C0->R0->C1->R1; AFTER R1's adoption,
+    # mutate C1's historical accepted review ACCEPT->REJECT (all of
+    # C1's per-row core data and the R1<->C1 closure stay intact);
+    # then a fully lawful second-hop assessment+ACCEPT+candidate C2
+    # is created — C2's ADOPTION must refuse because the ancestry
+    # walk re-resolves C1's own retarget evidence and finds the
+    # tampered historical review (recovery parity: recovery
+    # re-resolves every retargeted candidate row)
+    from tests.m17b_seed import (make_entity, make_project,
+                                 seed_production_object,
+                                 seed_production_revision)
+    pid_g = await make_project(client, name="X21g")
+    eid_g = await make_entity(client, pid_g)
+    c0 = (await _post(client, eid_g, _body())).json()
+    r0 = (await client.post(f"/performance-candidates/{c0['id']}/adopt",
+                            json={"adopted_by": "d"})).json()
+    obj_g = await seed_production_object(client, pid_g, "X21g obj",
+                                         b"x21g")
+    g1 = await seed_production_revision(client, obj_g, b"x21g-1", 1)
+    g2 = await seed_production_revision(client, obj_g, b"x21g-2", 2)
+    a1 = (await client.post(
+        f"/performance-revisions/{r0['id']}/retarget-assessments",
+        json={"from_production_revision_id":
+              g1["production_revision_id"],
+              "to_production_revision_id":
+              g2["production_revision_id"]})).json()
+    acc1 = (await client.post(
+        f"/performance-retarget-assessments/{a1['id']}/reviews",
+        json={"decision": "ACCEPT_FOR_NEW_CANDIDATE",
+              "reviewed_by": "rev1", "rationale": None})).json()
+    rc1 = (await client.post(
+        f"/performance-revisions/{r0['id']}/retarget-candidates",
+        json={"assessment_id": a1["id"],
+              "accepted_review_id": acc1["id"],
+              "producer_id": "hop1", "producer_version": "1",
+              "source_identity": None,
+              "parameters_sha256": None})).json()
+    r1 = (await client.post(
+        f"/performance-candidates/{rc1['id']}/adopt",
+        json={"adopted_by": "d"})).json()
+    assert r1.get("id"), r1
+    # post-adoption tamper: C1's historical ACCEPT -> REJECT
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "UPDATE performance_retarget_reviews SET decision = "
+            "'REJECT' WHERE id = :i"), {"i": acc1["id"]})
+    # fully lawful second hop for R1
+    g3 = await seed_production_revision(client, obj_g, b"x21g-3", 3)
+    a2 = (await client.post(
+        f"/performance-revisions/{r1['id']}/retarget-assessments",
+        json={"from_production_revision_id":
+              g2["production_revision_id"],
+              "to_production_revision_id":
+              g3["production_revision_id"]})).json()
+    acc2 = (await client.post(
+        f"/performance-retarget-assessments/{a2['id']}/reviews",
+        json={"decision": "ACCEPT_FOR_NEW_CANDIDATE",
+              "reviewed_by": "rev2", "rationale": None})).json()
+    rc2 = await client.post(
+        f"/performance-revisions/{r1['id']}/retarget-candidates",
+        json={"assessment_id": a2["id"],
+              "accepted_review_id": acc2["id"],
+              "producer_id": "hop2", "producer_version": "1",
+              "source_identity": None,
+              "parameters_sha256": None})
+    assert rc2.status_code == 201, rc2.text
+    r = await client.post(
+        f"/performance-candidates/{rc2.json()['id']}/adopt",
+        json={"adopted_by": "d"})
+    assert r.status_code in (403, 422), r.text
+    assert "review law chain" in r.json()["message"], r.text
+
 
 @pytest.mark.asyncio
 async def test_x22_retarget_rejects_tampered_source_revision_lineage(client):
