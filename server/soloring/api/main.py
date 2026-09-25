@@ -97,8 +97,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(spatial_plans_router)
     app.include_router(production_world_router)
     app.include_router(performance_router)
-    app.include_router(m17b_performance_router)
+    # M17C shadows only the two M17B authority-transition path/method pairs;
+    # its router must therefore precede the predecessor router. All other
+    # predecessor routes remain active unchanged.
     app.include_router(m17c_performance_router)
+    app.include_router(m17b_performance_router)
 
     return app
 
