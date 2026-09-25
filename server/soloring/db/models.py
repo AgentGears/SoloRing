@@ -158,6 +158,10 @@ from soloring.performance.models import (  # noqa: E402,F401
     ShotVocalSegmentMapping,
     DialogueAlignment,
 )
+from soloring.performance.m17c_models import (  # noqa: E402,F401
+    PerformanceCandidateVocalBinding,
+    PerformanceRevisionVocalBinding,
+)
 
 __all__ = [
     "WorkerLease",
