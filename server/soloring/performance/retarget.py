@@ -231,6 +231,45 @@ def _assert_deterministic(existing: PerformanceRetargetAssessment,
             "overwritten", status_code=500)
 
 
+async def verify_assessment_persisted_laws(
+        session: AsyncSession, performance: PerformanceRevision,
+        assessment: PerformanceRetargetAssessment, from_pr, to_pr
+        ) -> None:
+    """The persisted-row laws of a retarget assessment (recovery
+    parity, third-Codex P1-1 completion): the assessment row's project
+    equals the performance revision's project, the duplicated
+    from/to snapshot-hash columns equal the referenced physical
+    revisions' CURRENT snapshot hashes, and both referenced
+    ProductionObjects exist and belong to the performance revision's
+    project. Scope/report recomputation alone cannot catch any of
+    these — object project ownership in particular is not part of the
+    recomputed bytes."""
+    from soloring.production.models import ProductionObject
+    if assessment.project_id != performance.project_id:
+        raise _invalid(
+            ErrorCode.RETARGET_PROJECT_MISMATCH,
+            "assessment project != performance revision project")
+    if assessment.from_production_revision_hash != \
+            from_pr.snapshot_hash or \
+            assessment.to_production_revision_hash != \
+            to_pr.snapshot_hash:
+        raise _invalid(
+            ErrorCode.RETARGET_PROJECT_MISMATCH,
+            "assessment duplicated snapshot-hash columns disagree "
+            "with the referenced physical revisions")
+    from_obj = await session.get(ProductionObject,
+                                 from_pr.production_object_id)
+    to_obj = await session.get(ProductionObject,
+                               to_pr.production_object_id)
+    if from_obj is None or to_obj is None or \
+            from_obj.project_id != performance.project_id or \
+            to_obj.project_id != performance.project_id:
+        raise _invalid(
+            ErrorCode.RETARGET_PROJECT_MISMATCH,
+            "assessment physical object missing or outside the "
+            "performance revision's project")
+
+
 async def get_assessment(session: AsyncSession, *, assessment_id: str
                          ) -> PerformanceRetargetAssessment:
     a = await session.get(PerformanceRetargetAssessment, assessment_id)

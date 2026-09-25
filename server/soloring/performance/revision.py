@@ -320,6 +320,14 @@ async def _verify_retarget_evidence(session: AsyncSession,
         raise _invalid(
             ErrorCode.PERFORMANCE_PROVENANCE_INVALID,
             "retarget assessment physical revision does not resolve")
+    # persisted-row laws (recovery parity, third-Codex P1-1
+    # completion): assessment project equality, duplicated snapshot
+    # hashes, and both ProductionObjects' project ownership — none of
+    # which the recomputed scope/report bytes can express
+    from soloring.performance.retarget import (
+        verify_assessment_persisted_laws)
+    await verify_assessment_persisted_laws(
+        session, source, a, from_pr, to_pr)
     if a.evaluator_id != EVALUATOR_ID or \
             a.evaluator_version != EVALUATOR_VERSION or \
             a.schema_version != 1:

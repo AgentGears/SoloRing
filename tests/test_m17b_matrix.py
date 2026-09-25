@@ -1319,7 +1319,114 @@ async def test_x21_adoption_rejects_tampered_assessment_verdict(client):
         f"/performance-candidates/{rc.json()['id']}/adopt",
         json={"adopted_by": "d"})
     assert r.status_code in (403, 422), r.text
+
+    # ---- delta-review subcases: the four tamper shapes the
+    # recomputation alone (or a stale-hash check alone) cannot catch
+
+    async def _fresh_world(tag: bytes):
+        pid_l = await make_project(client, name=f"X21-{tag!r}")
+        eid_l = await make_entity(client, pid_l)
+        c_l = (await _post(client, eid_l, _body())).json()
+        rev_l = (await client.post(
+            f"/performance-candidates/{c_l['id']}/adopt",
+            json={"adopted_by": "d"})).json()
+        obj_l = await seed_production_object(
+            client, pid_l, f"X21 obj {tag!r}", tag)
+        p1 = await seed_production_revision(client, obj_l, tag + b"1", 1)
+        p2 = await seed_production_revision(client, obj_l, tag + b"2", 2)
+        a_l = (await client.post(
+            f"/performance-revisions/{rev_l['id']}/retarget-assessments",
+            json={"from_production_revision_id":
+                  p1["production_revision_id"],
+                  "to_production_revision_id":
+                  p2["production_revision_id"]})).json()
+        acc = (await client.post(
+            f"/performance-retarget-assessments/{a_l['id']}/reviews",
+            json={"decision": "ACCEPT_FOR_NEW_CANDIDATE",
+                  "reviewed_by": "rev", "rationale": None})).json()
+        return pid_l, eid_l, rev_l, obj_l, p1, p2, a_l, acc
+
+    async def _try_adopt_forge(rev_l, a_l, acc):
+        rc = await client.post(
+            f"/performance-revisions/{rev_l['id']}/retarget-candidates",
+            json={"assessment_id": a_l["id"],
+                  "accepted_review_id": acc["id"],
+                  "producer_id": "x21b", "producer_version": "1",
+                  "source_identity": None, "parameters_sha256": None})
+        assert rc.status_code == 201, rc.text
+        return await client.post(
+            f"/performance-candidates/{rc.json()['id']}/adopt",
+            json={"adopted_by": "d"})
+
+    # (a) SELF-CONSISTENT forged report+hash: keep the stored
+    # verdict REQUIRES_REVIEW (creation requires it) but forge the
+    # report's reason_code to one the evaluator would never derive
+    # here, and recompute the forged report_hash from the tampered
+    # document — no stale-hash check can catch this; only the
+    # evaluator's recomputation can
+    pid_a, eid_a, rev_a, obj_a, p1a, p2a, a_a, acc_a = \
+        await _fresh_world(b"sc")
+    engine0 = client._transport.app.state.engine
+    async with engine0.connect() as conn:
+        stored = (await conn.execute(text(
+            "SELECT report_json FROM "
+            "performance_retarget_assessments WHERE id = :i"),
+            {"i": a_a["id"]})).scalar()
+    import json as _j21
+    from soloring.domain.canonical import (canonical_hash as _ch21,
+                                           canonical_json_str as _cj21)
+    doc = _j21.loads(stored)
+    assert doc["reason_code"] == \
+        "SAME_PRODUCTION_OBJECT_DIFFERENT_REVISION"
+    doc["reason_code"] = "SAME_EXACT_PHYSICAL_REVISION"
+    forged_json = _cj21(doc)
+    forged_hash = _ch21(doc)
+    async with engine0.begin() as conn:
+        await conn.execute(text(
+            "UPDATE performance_retarget_assessments SET report_json "
+            "= :j, report_hash = :h WHERE id = :i"),
+            {"j": forged_json, "h": forged_hash, "i": a_a["id"]})
+    r = await _try_adopt_forge(rev_a, a_a, acc_a)
+    assert r.status_code in (403, 422), r.text
     assert "recomputation" in r.json()["message"], r.text
+
+    # (b) assessment.project_id tampered to another project
+    pid_b, eid_b, rev_b, obj_b, p1b, p2b, a_b, acc_b = \
+        await _fresh_world(b"pj")
+    p_other = (await client.post(
+        "/projects", json={"name": "X21-other"})).json()["id"]
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "UPDATE performance_retarget_assessments SET project_id = "
+            ":p WHERE id = :i"), {"p": p_other, "i": a_b["id"]})
+    r = await _try_adopt_forge(rev_b, a_b, acc_b)
+    assert r.status_code in (403, 422), r.text
+    assert "project" in r.json()["message"], r.text
+
+    # (c) duplicated snapshot-hash column tampered
+    pid_c, eid_c, rev_c, obj_c, p1c, p2c, a_c, acc_c = \
+        await _fresh_world(b"sh")
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "UPDATE performance_retarget_assessments SET "
+            "from_production_revision_hash = :h WHERE id = :i"),
+            {"h": "b" * 64, "i": a_c["id"]})
+    r = await _try_adopt_forge(rev_c, a_c, acc_c)
+    assert r.status_code in (403, 422), r.text
+    assert "snapshot-hash" in r.json()["message"], r.text
+
+    # (d) referenced ProductionObject moved to another project —
+    # scope/report/verdict all still recompute identically; only the
+    # persisted ownership law catches it
+    pid_d, eid_d, rev_d, obj_d, p1d, p2d, a_d, acc_d = \
+        await _fresh_world(b"po")
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "UPDATE production_objects SET project_id = :p WHERE id = "
+            ":o"), {"p": p_other, "o": obj_d})
+    r = await _try_adopt_forge(rev_d, a_d, acc_d)
+    assert r.status_code in (403, 422), r.text
+    assert "project" in r.json()["message"], r.text
 
 
 @pytest.mark.asyncio
