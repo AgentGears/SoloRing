@@ -13,7 +13,9 @@ Blob root; 0019 predecessor semantics; cross-project
 assessment law; bounded review keyset); X18-X20 second-Codex
 regressions (adoption subject/project agreement; retarget
 evidence resolution at adoption; minimal API provenance
-defaults).
+defaults); X21-X23 third-Codex regressions (assessment
+verdict recomputation; source-revision lineage; VP-speaker
+alignment law).
 """
 
 from __future__ import annotations
@@ -1260,3 +1262,203 @@ async def test_x20_minimal_api_provenance_defaults_materialize(client):
         "authored"
     assert doc["source_identity"] is None and \
         doc["parameters_sha256"] is None
+
+
+# --------------------------- X21-X23 --------------------------------
+# Third-Codex-review regressions (live/recovery authority parity).
+
+
+@pytest.mark.asyncio
+async def test_x21_adoption_rejects_tampered_assessment_verdict(client):
+    """Third-Codex P1-1: a stored assessment verdict is never trusted —
+    a REQUIRES_REVIEW row whose bytes were tampered from the
+    evaluator's actual recomputation (e.g. INCOMPATIBLE overwritten to
+    REQUIRES_REVIEW) must refuse retarget promotion, exactly as
+    recovery would refuse the same database."""
+    from tests.m17b_seed import (make_entity, make_project,
+                                 seed_production_object,
+                                 seed_production_revision)
+    pid = await make_project(client, name="X21")
+    eid = await make_entity(client, pid)
+    c = (await _post(client, eid, _body())).json()
+    rev = (await client.post(f"/performance-candidates/{c['id']}/adopt",
+                             json={"adopted_by": "d"})).json()
+    obj = await seed_production_object(client, pid, "X21 obj", b"x21")
+    # SAME_EXACT_PHYSICAL_REVISION (pr1 -> pr1) yields a
+    # non-REQUIRES_REVIEW verdict lawfully; the tamper overwrites it
+    pr1 = await seed_production_revision(client, obj, b"x21-1", 1)
+    a = (await client.post(
+        f"/performance-revisions/{rev['id']}/retarget-assessments",
+        json={"from_production_revision_id":
+              pr1["production_revision_id"],
+              "to_production_revision_id":
+              pr1["production_revision_id"]})).json()
+    verdict = a["overall_verdict"]
+    assert verdict != "REQUIRES_REVIEW", verdict
+    accept = (await client.post(
+        f"/performance-retarget-assessments/{a['id']}/reviews",
+        json={"decision": "ACCEPT_FOR_NEW_CANDIDATE",
+              "reviewed_by": "rev", "rationale": None})).json()
+    engine = client._transport.app.state.engine
+    # tamper the stored verdict (and report bytes) to REQUIRES_REVIEW
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "UPDATE performance_retarget_assessments SET "
+            "overall_verdict = 'REQUIRES_REVIEW', report_json = "
+            "replace(report_json, :old, 'REQUIRES_REVIEW') "
+            "WHERE id = :i"),
+            {"old": verdict, "i": a["id"]})
+    rc = await client.post(
+        f"/performance-revisions/{rev['id']}/retarget-candidates",
+        json={"assessment_id": a["id"],
+              "accepted_review_id": accept["id"],
+              "producer_id": "x21", "producer_version": "1",
+              "source_identity": None, "parameters_sha256": None})
+    assert rc.status_code == 201, rc.text
+    r = await client.post(
+        f"/performance-candidates/{rc.json()['id']}/adopt",
+        json={"adopted_by": "d"})
+    assert r.status_code in (403, 422), r.text
+    assert "recomputation" in r.json()["message"], r.text
+
+
+@pytest.mark.asyncio
+async def test_x22_retarget_rejects_tampered_source_revision_lineage(client):
+    """Third-Codex P1-2: the source PerformanceRevision's own adoption
+    lineage is revalidated before it may seed new authority — a
+    tampered source (closure no longer reproducing its adopted
+    candidate) must refuse retarget-seeding, exactly as recovery
+    would refuse the same database."""
+    from tests.m17b_seed import (make_entity, make_project,
+                                 seed_production_object,
+                                 seed_production_revision)
+    pid = await make_project(client, name="X22")
+    eid = await make_entity(client, pid)
+    c = (await _post(client, eid, _body())).json()
+    rev = (await client.post(f"/performance-candidates/{c['id']}/adopt",
+                             json={"adopted_by": "d"})).json()
+    obj = await seed_production_object(client, pid, "X22 obj", b"x22")
+    pr1 = await seed_production_revision(client, obj, b"x22-1", 1)
+    pr2 = await seed_production_revision(client, obj, b"x22-2", 2)
+    a = (await client.post(
+        f"/performance-revisions/{rev['id']}/retarget-assessments",
+        json={"from_production_revision_id":
+              pr1["production_revision_id"],
+              "to_production_revision_id":
+              pr2["production_revision_id"]})).json()
+    accept = (await client.post(
+        f"/performance-retarget-assessments/{a['id']}/reviews",
+        json={"decision": "ACCEPT_FOR_NEW_CANDIDATE",
+              "reviewed_by": "rev", "rationale": None})).json()
+    engine = client._transport.app.state.engine
+    # tamper the SOURCE revision's adoption lineage: its
+    # adopted_candidate_id no longer resolves (kind drift is unusable
+    # here — creation itself would refuse a BODY source with face
+    # channels; the lineage tamper survives creation and only the
+    # adoption-time lineage revalidation catches it)
+    decoy = (await _post(client, eid, _body(5))).json()
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "UPDATE performance_revisions SET adopted_candidate_id = "
+            ":decoy WHERE id = :i"),
+            {"decoy": decoy["id"], "i": rev["id"]})
+    rc = await client.post(
+        f"/performance-revisions/{rev['id']}/retarget-candidates",
+        json={"assessment_id": a["id"],
+              "accepted_review_id": accept["id"],
+              "producer_id": "x22", "producer_version": "1",
+              "source_identity": None, "parameters_sha256": None})
+    r = await client.post(
+        f"/performance-candidates/{rc.json()['id']}/adopt",
+        json={"adopted_by": "d"})
+    assert r.status_code in (403, 422), r.text
+    assert "adopted candidate closure" in r.json()["message"], r.text
+
+
+@pytest.mark.asyncio
+async def test_x23_alignment_subject_law_uses_vp_speaker(client):
+    """Third-Codex P1-3: the alignment speaker law is the ALIGNMENT'S
+    OWN VP speaker (vocal_performance_revisions.speaker_subject_id —
+    recovery parity), not the dialogue-line revision's speaker. A
+    tampered VP whose speaker differs from the Performance subject
+    must refuse candidate CREATION even when the line revision's
+    speaker still matches."""
+    pid, eid = await _subject(client, "X23")
+    other = (await client.post("/projects",
+                               json={"name": "X23-subj-home"})).json()
+    from tests.m17b_seed import make_entity
+    other_eid = await make_entity(client, other["id"])
+    engine = client._transport.app.state.engine
+    now = "2026-01-01T00:00:00.000Z"
+    h64 = "c" * 64
+    ids = {k: f"00000000-0000-4000-8000-000000000c{i:02d}"
+           for i, k in enumerate(
+               ["p2", "dl", "dlr", "vc", "vpr", "aid"], start=1)}
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "INSERT INTO projects (id, name, created_at, updated_at) "
+            "VALUES (:i, 'X23-B', :n, :n)"),
+            {"i": ids["p2"], "n": now})
+        await conn.execute(text(
+            "INSERT INTO dialogue_lines (id, project_id, created_at) "
+            "VALUES (:i, :p, :n)"),
+            {"i": ids["dl"], "p": ids["p2"], "n": now})
+        # the LINE revision's speaker still equals the subject; the VP
+        # (the alignment's actual source) is tampered to another
+        # speaker — the exact shape the old live check missed
+        await conn.execute(text(
+            "INSERT INTO dialogue_line_revisions (id, dialogue_line_id,"
+            " revision_number, speaker_subject_id, language, wording, "
+            "schema_version, spec_json, spec_hash, created_at) VALUES "
+            "(:i, :l, 1, :sp, 'en', 'x23', 1, '{}', :sh, :n)"),
+            {"i": ids["dlr"], "l": ids["dl"], "sp": eid,
+             "sh": h64, "n": now})
+        await conn.execute(text(
+            "INSERT INTO blobs (hash, path, size_bytes, "
+            "detected_media_type, created_at) VALUES "
+            "(:h, :pa, 1, NULL, :n)"),
+            {"h": h64, "pa": f"sha256/{h64[:2]}/{h64[2:4]}/{h64}",
+             "n": now})
+        await conn.execute(text(
+            "INSERT INTO vocal_candidates (id, dialogue_line_revision_id,"
+            " retained_audio_blob_hash, native_sample_rate_hz, "
+            "retained_sample_count, trim_start_sample, "
+            "trim_end_sample_exclusive, source_kind, "
+            "provenance_schema_version, provenance_json, "
+            "provenance_hash, created_at) VALUES "
+            "(:i, :l, :h, 48000, 10, 0, 10, 'recorded', 1, '{}', "
+            ":ph, :n)"),
+            {"i": ids["vc"], "l": ids["dlr"], "h": h64, "ph": h64,
+             "n": now})
+        await conn.execute(text(
+            "INSERT INTO vocal_performance_revisions (id, "
+            "dialogue_line_revision_id, revision_number, "
+            "speaker_subject_id, retained_audio_blob_hash, "
+            "native_sample_rate_hz, retained_sample_count, "
+            "trim_start_sample, trim_end_sample_exclusive, "
+            "source_kind, provenance_schema_version, provenance_json, "
+            "provenance_hash, adopted_candidate_id, adoption_id, "
+            "adopted_by, adopted_at) VALUES "
+            "(:i, :l, 1, :sp, :h, 48000, 10, 0, 10, 'recorded', 1, "
+            "'{}', :ph, :vc, :ad, 'x23', :n)"),
+            {"i": ids["vpr"], "l": ids["dlr"], "sp": other_eid,
+             "h": h64, "ph": h64, "vc": ids["vc"],
+             "ad": "00000000-0000-4000-8000-000000000c07", "n": now})
+        await conn.execute(text(
+            "INSERT INTO dialogue_alignments (id, "
+            "vocal_performance_revision_id, analyzer_id, "
+            "analyzer_version, model_identity, runtime_identity, "
+            "parameters_sha256, alignment_schema_version, "
+            "retained_blob_hash, retained_sha256, derivation_run_json, "
+            "derivation_run_hash, derivation_run_identity, created_at)"
+            " VALUES (:i, :v, 'x23-analyzer', '1', 'm', 'r', :ph, 1, "
+            ":h, :h, '{}', :dh, :dh, :n)"),
+            {"i": ids["aid"], "v": ids["vpr"], "ph": h64, "h": h64,
+             "dh": "d" * 64, "n": now})
+    from tests.m17b_seed import candidate_body
+    body = candidate_body([channel(SMILE, [kf(0, 1, 0, kind="DERIVED",
+                                               alignment=ids["aid"])])])
+    r = await _post(client, eid, body)
+    assert r.status_code in (403, 422), r.text
+    assert r.json()["error_code"] == \
+        "PERFORMANCE_ALIGNMENT_SUBJECT_MISMATCH", r.text

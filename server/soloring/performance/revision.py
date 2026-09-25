@@ -249,7 +249,14 @@ async def _verify_retarget_evidence(session: AsyncSession,
     an owned ACCEPT_FOR_NEW_CANDIDATE review, and the candidate's
     semantic closure must equal the referenced source revision —
     valid evidence references plus a divergent payload is still
-    corruption, not a lawful retarget."""
+    corruption, not a lawful retarget.
+
+    Third-Codex hardening: the referenced assessment's scope/report/
+    verdict are RECOMPUTED from immutable rows through the same
+    builders the assessment service uses (a stored verdict is never
+    trusted), and the source revision's own adoption lineage is
+    revalidated against its adopted candidate (closure + adoption
+    metadata) before it may seed new authority."""
     ret = envelope.get("retarget") or {}
     from soloring.performance.models import (
         PerformanceRevision as PR,
@@ -261,6 +268,21 @@ async def _verify_retarget_evidence(session: AsyncSession,
         raise _invalid(
             ErrorCode.PERFORMANCE_PROVENANCE_INVALID,
             "retarget provenance source revision does not resolve")
+    # source-revision adoption lineage (recovery parity): the source
+    # must still reproduce its own adopted candidate's closure and
+    # carry lawful adoption metadata before it can seed authority
+    source_candidate = await session.get(
+        type(candidate), source.adopted_candidate_id)
+    if source_candidate is None or not closure_matches(
+            source, source_candidate):
+        raise _invalid(
+            ErrorCode.PERFORMANCE_PROVENANCE_INVALID,
+            "retarget source revision does not reproduce its own "
+            "adopted candidate closure — tampered authority cannot "
+            "seed new authority")
+    validate_adoption_metadata(adoption_id=source.adoption_id,
+                               adopted_by=source.adopted_by,
+                               adopted_at=source.adopted_at)
     for f in _RETARGET_COPY_FIELDS:
         if getattr(candidate, f) != getattr(source, f):
             raise _invalid(
@@ -283,6 +305,53 @@ async def _verify_retarget_evidence(session: AsyncSession,
         raise _invalid(
             ErrorCode.PERFORMANCE_PROVENANCE_INVALID,
             "retarget provenance coordinate mismatch")
+    # assessment recomputation (recovery parity): recompute scope and
+    # report through the ASSESSMENT SERVICE's own builders — a stored
+    # verdict/verdict row that does not recompute is corruption
+    from soloring.performance.retarget import (
+        EVALUATOR_ID, EVALUATOR_VERSION, _build_report, _build_scope,
+        _evaluate)
+    from soloring.production.models import ProductionRevision
+    from_pr = await session.get(ProductionRevision,
+                                a.from_production_revision_id)
+    to_pr = await session.get(ProductionRevision,
+                              a.to_production_revision_id)
+    if from_pr is None or to_pr is None:
+        raise _invalid(
+            ErrorCode.PERFORMANCE_PROVENANCE_INVALID,
+            "retarget assessment physical revision does not resolve")
+    if a.evaluator_id != EVALUATOR_ID or \
+            a.evaluator_version != EVALUATOR_VERSION or \
+            a.schema_version != 1:
+        raise _invalid(
+            ErrorCode.PERFORMANCE_PROVENANCE_INVALID,
+            "retarget assessment evaluator identity drift")
+    scope = _build_scope(
+        performance=source,
+        payload_sha=source.canonical_channel_payload_sha256,
+        from_pr=from_pr, to_pr=to_pr)
+    from soloring.domain.canonical import (canonical_hash,
+                                           canonical_json_str)
+    scope_json = canonical_json_str(scope)
+    scope_hash = canonical_hash(scope)
+    if a.scope_json != scope_json or a.scope_hash != scope_hash:
+        raise _invalid(
+            ErrorCode.PERFORMANCE_PROVENANCE_INVALID,
+            "retarget assessment scope does not recompute from "
+            "immutable rows")
+    verdict, reason = _evaluate(from_pr, to_pr)
+    report = _build_report(
+        scope_hash=scope_hash, performance_id=source.id,
+        from_id=from_pr.id, to_id=to_pr.id, verdict=verdict,
+        reason=reason, from_obj=str(from_pr.production_object_id),
+        to_obj=str(to_pr.production_object_id))
+    if a.report_json != canonical_json_str(report) or \
+            a.report_hash != canonical_hash(report) or \
+            a.overall_verdict != verdict:
+        raise _invalid(
+            ErrorCode.PERFORMANCE_PROVENANCE_INVALID,
+            "retarget assessment stored report/verdict != evaluator "
+            "recomputation")
     if a.overall_verdict != "REQUIRES_REVIEW":
         raise _invalid(
             ErrorCode.PERFORMANCE_PROVENANCE_INVALID,
@@ -468,7 +537,12 @@ async def _verify_alignment_provenance(session: AsyncSession, *,
                     ErrorCode.INTERNAL_INVARIANT_VIOLATION,
                     "VP line revision missing — corruption",
                     status_code=500)
-            if dlr.speaker_subject_id != subject_id:
+            # third-Codex P1-3: the speaker law is the ALIGNMENT'S OWN
+            # VP speaker (recovery parity — recovery checks
+            # vocal_performance_revisions.speaker_subject_id), not the
+            # dialogue-line revision's speaker; a tampered VP with a
+            # different speaker must refuse here, not at backup time
+            if vp.speaker_subject_id != subject_id:
                 raise _invalid(
                     ErrorCode.PERFORMANCE_ALIGNMENT_SUBJECT_MISMATCH,
                     "alignment's source VP speaker != Performance "
