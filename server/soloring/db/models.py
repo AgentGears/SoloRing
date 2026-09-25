@@ -157,6 +157,10 @@ from soloring.performance.models import (  # noqa: E402,F401
     VocalPerformanceSelection,
     ShotVocalSegmentMapping,
     DialogueAlignment,
+    PerformanceCandidate,
+    PerformanceRevision,
+    PerformanceRetargetAssessment,
+    PerformanceRetargetReview,
 )
 from soloring.performance.m17c_models import (  # noqa: E402,F401
     PerformanceCandidateVocalBinding,
@@ -247,4 +251,17 @@ __all__ = [
     "CompositionOccurrenceRevisionTracking",
     "ProductionUpdateOperation",
     "ProductionUpdateItem",
+    "DialogueLine",
+    "DialogueLineRevision",
+    "VocalCandidate",
+    "VocalPerformanceRevision",
+    "VocalPerformanceSelection",
+    "ShotVocalSegmentMapping",
+    "DialogueAlignment",
+    "PerformanceCandidate",
+    "PerformanceRevision",
+    "PerformanceRetargetAssessment",
+    "PerformanceRetargetReview",
+    "PerformanceCandidateVocalBinding",
+    "PerformanceRevisionVocalBinding",
 ]
