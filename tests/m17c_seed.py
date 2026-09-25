@@ -1,0 +1,107 @@
+"""FastAPI app factory (plan §3, §99).
+
+M0 surface: a health endpoint, CORS, and SQLite version logging at startup. The
+generation worker never runs inside this process (plan §4).
+"""
+
+from __future__ import annotations
+
+import logging
+import sqlite3
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from soloring.api.errors import register_exception_handlers
+from soloring.api.assets import router as assets_router
+from soloring.api.blobs import router as blobs_router
+from soloring.api.continuity import router as continuity_router
+from soloring.api.intra_shot import router as intra_shot_router
+from soloring.api.entities import router as entities_router
+from soloring.api.generations import router as generations_router
+from soloring.api.compositions import router as compositions_router
+from soloring.api.production import router as production_router
+from soloring.api.projects import router as projects_router
+from soloring.api.sequences import router as narrative_router
+from soloring.api.references import router as references_router
+from soloring.api.realization import router as realization_router
+from soloring.api.revisions import router as revisions_router
+from soloring.api.shots import router as shots_router
+from soloring.api.spatial_worlds import router as spatial_worlds_router
+from soloring.api.spatial_tracks import router as spatial_tracks_router
+from soloring.api.spatial_plans import router as spatial_plans_router
+from soloring.api.production_world import router as production_world_router
+from soloring.api.takes import router as takes_router
+from soloring.api.visual import router as visual_router
+from soloring.api.performance import router as performance_router
+from soloring.api.m17b_performance import (router as m17b_performance_router)
+from soloring.api.m17c_performance import (router as m17c_performance_router)
+from soloring.db.engine import create_soloring_engine, create_session_factory
+from soloring.settings import Settings, get_settings
+
+log = logging.getLogger("soloring.api")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    settings: Settings = app.state.settings
+    engine = create_soloring_engine(settings)
+    app.state.engine = engine
+    app.state.session_factory = create_session_factory(engine)
+    log.info("SQLite runtime version: %s", sqlite3.sqlite_version)
+    try:
+        yield
+    finally:
+        await engine.dispose()
+
+
+def create_app(settings: Settings | None = None) -> FastAPI:
+    settings = settings or get_settings()
+    app = FastAPI(title="SoloRing", version="0.1.0", lifespan=lifespan)
+    app.state.settings = settings
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    @app.get("/health")
+    async def health() -> dict:
+        return {"status": "ok", "sqlite_version": sqlite3.sqlite_version}
+
+    # Stable SoloRing error envelope + validation normalization (plan §42, §43).
+    register_exception_handlers(app)
+
+    app.include_router(projects_router)
+    app.include_router(shots_router)
+    app.include_router(references_router)
+    app.include_router(revisions_router)
+    app.include_router(entities_router)
+    app.include_router(narrative_router)
+    app.include_router(continuity_router)
+    app.include_router(intra_shot_router)
+    app.include_router(realization_router)
+    app.include_router(assets_router)
+    app.include_router(production_router)
+    app.include_router(compositions_router)
+    app.include_router(blobs_router)
+    app.include_router(generations_router)
+    app.include_router(takes_router)
+    app.include_router(visual_router)
+    app.include_router(spatial_worlds_router)
+    app.include_router(spatial_tracks_router)
+    app.include_router(spatial_plans_router)
+    app.include_router(production_world_router)
+    app.include_router(performance_router)
+    app.include_router(m17b_performance_router)
+    app.include_router(m17c_performance_router)
+
+    return app
+
+
+# uvicorn soloring.api.main:app
+app = create_app()
