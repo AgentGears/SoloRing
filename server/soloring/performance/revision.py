@@ -102,22 +102,19 @@ def validate_review_metadata(*, decision, reviewed_by, rationale) -> None:
             "code points")
 
 
-async def verify_candidate_integrity(
+async def _verify_candidate_core(
         session: AsyncSession, settings, candidate: PerformanceCandidate,
         *, row_lookup=None, blob_reader=None) -> dict:
-    """Full immutable candidate-closure integrity (correction CR-B).
-
-    Verifies temporal canonicality, profile/kind row fields, the
-    physical retained Blob (bytes + dual-hash agreement), the exact
-    closed payload grammar with byte-identical canonical re-emission,
-    the closed provenance grammar + canonical hash, and alignment
-    provenance integrity. Pure with respect to CURRENT state: only
-    immutable candidate fields and immutable referenced rows are read.
-
-    ``row_lookup``/``blob_reader`` let the recovery verifier inject
-    its own staged-DB readers (sqlite3 rows + root path) without
-    importing transport behavior into recovery.
-    """
+    """Per-row candidate integrity core (fourth-Codex factoring):
+    profile/schema versions, temporal canonicality, dual-hash
+    agreement, physical Blob bytes + rehash, canonical payload
+    re-emission, closed provenance grammar + canonical hash,
+    subject/project agreement, and alignment provenance. This is the
+    per-row law recovery runs on EVERY candidate row; it deliberately
+    does NOT resolve retarget evidence (that is the caller's concern,
+    so a retargeted SOURCE candidate can be revalidated here without
+    unbounded chain recursion — each chain link was fully validated
+    at its own adoption)."""
     from soloring.performance.revision import (
         build_provenance_envelope)
 
@@ -217,7 +214,27 @@ async def verify_candidate_integrity(
             session, subject_id=candidate.subject_id,
             project_id=candidate.project_id,
             channels=doc["channels"])
+    return {"payload_document": doc, "envelope": envelope}
 
+
+async def verify_candidate_integrity(
+        session: AsyncSession, settings, candidate: PerformanceCandidate,
+        *, row_lookup=None, blob_reader=None) -> dict:
+    """Full immutable candidate-closure integrity (correction CR-B):
+    the per-row core (``_verify_candidate_core``) PLUS, on the live
+    path, retarget evidence resolution for retargeted candidates.
+
+    Pure with respect to CURRENT state: only immutable candidate
+    fields and immutable referenced rows are read.
+
+    ``row_lookup``/``blob_reader`` let the recovery verifier inject
+    its own staged-DB readers (sqlite3 rows + root path) without
+    importing transport behavior into recovery.
+    """
+    result = await _verify_candidate_core(
+        session, settings, candidate,
+        row_lookup=row_lookup, blob_reader=blob_reader)
+    envelope = result["envelope"]
     # retarget evidence resolution (the recovery verifier's law;
     # second Codex review P1 + final-diff review): a retargeted
     # candidate may only be promoted when its provenance actually
@@ -226,8 +243,9 @@ async def verify_candidate_integrity(
     # semantic closure equals the referenced source revision
     # byte/scalar-exact (the creation-time copy law)
     if row_lookup is None and envelope["source_kind"] == "retargeted":
-        await _verify_retarget_evidence(session, candidate, envelope)
-    return {"payload_document": doc, "envelope": envelope}
+        await _verify_retarget_evidence(
+            session, settings, candidate, envelope)
+    return result
 
 
 # the semantic fields a retarget candidate copies byte/scalar-exact
@@ -241,7 +259,7 @@ _RETARGET_COPY_FIELDS = (
     "canonical_channel_payload_sha256", "payload_schema_version")
 
 
-async def _verify_retarget_evidence(session: AsyncSession,
+async def _verify_retarget_evidence(session: AsyncSession, settings,
                                     candidate, envelope: dict) -> None:
     """Live mirror of the recovery verifier's retarget law chain:
     the envelope's retarget block must resolve to a real
@@ -280,6 +298,16 @@ async def _verify_retarget_evidence(session: AsyncSession,
             "retarget source revision does not reproduce its own "
             "adopted candidate closure — tampered authority cannot "
             "seed new authority")
+    # full per-row integrity on the SOURCE CANDIDATE (fourth-Codex
+    # P1): closure equality alone cannot catch a PAIRED tamper that
+    # mutates the same columns on both rows (e.g. both
+    # provenance_hash values set to the same wrong-but-valid 64-hex);
+    # recovery recomputes every candidate row's provenance envelope
+    # hash, so the live path must too. The core (not the full
+    # integrity entry) is used deliberately: a retargeted source
+    # candidate is revalidated per-row without following ITS retarget
+    # chain — each chain link was fully validated at its own adoption.
+    await _verify_candidate_core(session, settings, source_candidate)
     validate_adoption_metadata(adoption_id=source.adoption_id,
                                adopted_by=source.adopted_by,
                                adopted_at=source.adopted_at)

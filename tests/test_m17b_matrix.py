@@ -1446,6 +1446,39 @@ async def test_x21_adoption_rejects_tampered_assessment_verdict(client):
     assert r.status_code in (403, 422), r.text
     assert "reviewed_by" in r.json()["message"], r.text
 
+    # (f) fourth-Codex P1: PAIRED source provenance tamper — mutate
+    # the source PerformanceCandidate's AND the adopted source
+    # PerformanceRevision's provenance_hash to the SAME wrong-but-
+    # valid 64-hex value; closure equality still matches (the tamper
+    # is symmetric), ownership/decision/grammar all hold — only full
+    # per-row integrity on the source candidate (provenance envelope
+    # canonical-hash recomputation, the recovery law for every
+    # candidate row) refuses it
+    pid_f, eid_f, rev_f, obj_f, p1f, p2f, a_f, acc_f = \
+        await _fresh_world(b"pp")
+    wrong_hash = "9" * 64
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "UPDATE performance_candidates SET provenance_hash = :h "
+            "WHERE id = (SELECT adopted_candidate_id FROM "
+            "performance_revisions WHERE id = :r)"),
+            {"h": wrong_hash, "r": rev_f["id"]})
+        await conn.execute(text(
+            "UPDATE performance_revisions SET provenance_hash = :h "
+            "WHERE id = :r"), {"h": wrong_hash, "r": rev_f["id"]})
+    rc = await client.post(
+        f"/performance-revisions/{rev_f['id']}/retarget-candidates",
+        json={"assessment_id": a_f["id"],
+              "accepted_review_id": acc_f["id"],
+              "producer_id": "x21f", "producer_version": "1",
+              "source_identity": None, "parameters_sha256": None})
+    assert rc.status_code == 201, rc.text
+    r = await client.post(
+        f"/performance-candidates/{rc.json()['id']}/adopt",
+        json={"adopted_by": "d"})
+    assert r.status_code in (403, 422), r.text
+    assert "provenance" in r.json()["message"], r.text
+
 
 @pytest.mark.asyncio
 async def test_x22_retarget_rejects_tampered_source_revision_lineage(client):
