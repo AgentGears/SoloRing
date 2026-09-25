@@ -43,7 +43,7 @@ async def _assess_and_apply(client, base):
     return result
 
 
-async def _stamp_alembic(client, head="0018_m17a_dialogue_vocal_foundation"):
+async def _stamp_alembic(client, head="0019_m17b_performance_revisions"):
     """The conftest engine builds schema via create_all (no
     alembic_version); the backup machinery requires the table."""
     engine = client._transport.app.state.engine
@@ -125,7 +125,7 @@ async def test_0016_backup_restore_preserves_m15_rows_and_hashes(
     await backup(settings, backup_root)
     manifest = json.loads((backup_root / "backup-manifest.json")
                           .read_text(encoding="utf-8"))
-    assert manifest["alembic_version"] == "0018_m17a_dialogue_vocal_foundation"
+    assert manifest["alembic_version"] == "0019_m17b_performance_revisions"
 
     # M16-C certified the 0017 head, so the live backup runs there; the
     # REC:01 proof stays pinned to the 0016 posture via the REC:02
@@ -145,6 +145,13 @@ async def test_0016_backup_restore_preserves_m15_rows_and_hashes(
                       "shot_revision_intra_shot_events",
                       "shot_revision_intra_shot_specs",
                       "shot_intra_shot_event_proposals",
+                      # M17B tables carry two Blob-FK paths; the old-head
+                      # postures drop them (empty, as the create_all seed wrote
+                      # no performance rows)
+                      "performance_retarget_reviews",
+                      "performance_retarget_assessments",
+                      "performance_revisions",
+                      "performance_candidates",
                       # M17A tables carry three Blob-FK paths; the exact
                       # 0016 eight-path posture drops them (empty, as
                       # the create_all seed wrote no dialogue rows)
@@ -246,6 +253,11 @@ async def test_0015_backup_restores_without_inventing_m15_state(client,
                       "production_compatibility_uses",
                       "production_compatibility_assessments",
                       "composition_occurrence_revision_tracking",
+                      # M17B: old-head postures drop the performance tables
+                      "performance_retarget_reviews",
+                      "performance_retarget_assessments",
+                      "performance_revisions",
+                      "performance_candidates",
                       # M17A: exact 0015 eight-path posture drops them
                       "dialogue_alignments",
                       "shot_vocal_segment_mappings",

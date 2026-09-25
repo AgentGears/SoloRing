@@ -66,6 +66,9 @@ M16_SURFACE = (
     # post-closure publication refresh (separately authorized): the
     # README status refresh to M16/0017. Documentation only.
     r"^README\.md$",
+    # M17B second-Codex round: the sqlalchemy <2.1 ceiling pin
+    # (dependency-drift incident, CI run #161). Packaging metadata only.
+    r"^pyproject\.toml$",
     # post-M16 R3 evidence-only publication (frozen R3 §23): the frozen
     # regression freeze set (spec/oracles/reviews/lineage/correction +
     # manifest), the external certifying harness, and the closed R3
@@ -89,6 +92,20 @@ M16_SURFACE = (
     r"\.py$",
     r"^tests/m17a_seed\.py$",
     r"^tests/test_m17a_[a-z_]+\.py$",
+    # M17B reviewed successor surface (frozen R7)
+        r"^server/soloring/recovery/m17b_verifier\.py$",
+    r"^server/soloring/performance/profile\.py$",
+    r"^server/soloring/performance/revision\.py$",
+    r"^server/soloring/performance/retarget\.py$",
+    r"^server/alembic/versions/0019_m17b_performance_revisions"
+    r"\.py$",
+    r"^tests/m17b_seed\.py$",
+    r"^tests/test_m17b_[a-z_]+\.py$",
+    r"^docs/SoloRing-M17B-Proof-Map\.md$",
+    r"^scripts/m17b_validate_proof_map\.py$",
+    r"^server/soloring/api/m17b_performance\.py$",
+    r"^server/soloring/api/schemas/m17b_performance\.py$",
+
     # reviewed successor carves from the M16 correction rounds:
     # predecessor-test era head-pins/migration expectations, the m10f
     # 0016-posture fixtures, and boundary-validator carve entries

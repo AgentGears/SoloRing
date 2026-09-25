@@ -54,6 +54,20 @@ ALLOWLIST = (
     "tests/test_m17a_compatibility.py",
     "tests/test_m17a_recovery.py",
     "tests/test_m17a_source_gate.py",
+    "server/alembic/versions/0019_m17b_performance_revisions.py",
+    "tests/test_m17b_migration.py",
+    "tests/test_m17b_profile.py",
+    "tests/test_m17b_performance.py",
+    "tests/test_m17b_retarget.py",
+    "tests/test_m17b_recovery.py",
+    "tests/test_m17b_source_gate.py",
+    "tests/test_m17b_matrix.py",
+    "tests/m17b_seed.py",
+    "docs/SoloRing-M17B-Proof-Map.md",
+    "scripts/m17b_validate_proof_map.py",
+    "server/soloring/api/schemas/m17b_performance.py",
+    "server/soloring/api/m17b_performance.py",
+    "server/soloring/recovery/m17b_verifier.py",
     "tests/test_m17a_matrix.py",
     "tests/conftest.py",
     "tests/test_m13_races.py",
@@ -477,10 +491,12 @@ def main() -> int:
     admitted_0017 = "0017_m16_intra_shot_consequences.py"
     # M17A (frozen R5): the dialogue/vocal foundation migration
     admitted_0018 = "0018_m17a_dialogue_vocal_foundation.py"
+    # M17B (frozen R7): the performance-revisions migration
+    admitted_0019 = "0019_m17b_performance_revisions.py"
     mig_beyond = [p.name for p in versions.glob("*.py")
                   if p.stem >= "0015" and p.name not in (
                       admitted_0015, admitted_0016, admitted_0017,
-                      admitted_0018)]
+                      admitted_0018, admitted_0019)]
     if mig_beyond:
         errors.append(f"migration at/beyond 0015 beyond the frozen M14/M15/"
                       f"M16-A/M17A migrations exists: {mig_beyond}")
@@ -515,6 +531,14 @@ def main() -> int:
         "persistent_consequence_reviews",
     }
     # M17A (frozen R5 §4): exactly seven dialogue/vocal tables
+    # M17B (frozen R7 §4): exactly four performance tables
+    admitted_m17b_tables = {
+        "performance_candidates",
+        "performance_revisions",
+        "performance_retarget_assessments",
+        "performance_retarget_reviews",
+    }
+
     admitted_m17a_tables = {
         "dialogue_lines",
         "dialogue_line_revisions",
@@ -546,6 +570,9 @@ def main() -> int:
                 continue
             if (f.endswith("0018_m17a_dialogue_vocal_foundation.py")
                     and name in admitted_m17a_tables):
+                continue
+            if (f.endswith("0019_m17b_performance_revisions.py")
+                    and name in admitted_m17b_tables):
                 continue
             errors.append(f"{f}: new table {name} in migration source")
         if f.endswith("0017_m16_intra_shot_consequences.py") and names != admitted_m16_tables:

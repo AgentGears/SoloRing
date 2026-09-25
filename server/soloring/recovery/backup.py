@@ -43,7 +43,7 @@ from soloring.workflows.artifact_store import WorkflowArtifactStore
 # verified through M13 + M14 + M15 + M16 semantics.
 # M17A (frozen R5 §12): the dialogue/vocal verifier advances the
 # expected head to 0018 and adds three physical Blob-FK paths.
-EXPECTED_ALEMBIC_HEAD = "0018_m17a_dialogue_vocal_foundation"
+EXPECTED_ALEMBIC_HEAD = "0019_m17b_performance_revisions"
 BACKUP_MANIFEST_SCHEMA_VERSION = 1
 
 # M13 (frozen R3 §23): restore is head-dispatched across five heads. M14
@@ -58,6 +58,7 @@ M14_ALEMBIC_HEAD = "0015_m14_world_observation_execution"
 M15_ALEMBIC_HEAD = "0016_m15_revision_compatibility"
 M16_ALEMBIC_HEAD = "0017_m16_intra_shot_consequences"
 M17A_ALEMBIC_HEAD = "0018_m17a_dialogue_vocal_foundation"
+M17B_ALEMBIC_HEAD = "0019_m17b_performance_revisions"
 SUPPORTED_RESTORE_ALEMBIC_HEADS = frozenset({
     PRE_M11_ALEMBIC_HEAD,
     M11_ALEMBIC_HEAD,
@@ -74,6 +75,10 @@ SUPPORTED_RESTORE_ALEMBIC_HEADS = frozenset({
     # dialogue/vocal semantic verifier; physical Blob inventory is
     # exactly eleven paths.
     M17A_ALEMBIC_HEAD,
+    # M17B head (frozen R7 §14): restores at 0019 verify through the
+    # performance/retarget semantic verifier; physical Blob inventory
+    # is exactly thirteen paths.
+    M17B_ALEMBIC_HEAD,
 })
 
 ARTIFACT_KINDS = (
@@ -135,6 +140,19 @@ M17A_BLOB_FK_COLUMNS = frozenset(
         ("dialogue_alignments", "retained_blob_hash"),
     }
 )
+# M17B (frozen R7 §14.2): head 0019 adds exactly two physical
+# Blob-FK paths — candidate and revision canonical channel payloads
+# — for an exact thirteen-path inventory. Heads 0018 and earlier
+# keep their exact predecessor policies.
+M17B_BLOB_FK_COLUMNS = frozenset(
+    set(M17A_BLOB_FK_COLUMNS)
+    | {
+        ("performance_candidates",
+         "canonical_channel_payload_blob_hash"),
+        ("performance_revisions",
+         "canonical_channel_payload_blob_hash"),
+    }
+)
 
 
 def _blob_fk_policy_for_head(head: str) -> frozenset:
@@ -150,6 +168,8 @@ def _blob_fk_policy_for_head(head: str) -> frozenset:
         return M14_BLOB_FK_COLUMNS
     if head == M17A_ALEMBIC_HEAD:
         return M17A_BLOB_FK_COLUMNS
+    if head == M17B_ALEMBIC_HEAD:
+        return M17B_BLOB_FK_COLUMNS
     raise RecoveryCorruption(f"unsupported recovery head {head!r}.")
 
 _HEX = set("0123456789abcdef")
@@ -1081,13 +1101,19 @@ def _verify_manifest_files(root: Path, manifest: dict) -> None:
         _verify_bytes(path, entry["sha256"])
 
 
-def _verify_liveness_equal(db_path: Path, manifest: dict) -> None:
-    """Re-enumerate DB liveness and require exact manifest equality."""
+def _verify_liveness_equal(db_path: Path, manifest: dict,
+                           blob_root=None) -> None:
+    """Re-enumerate DB liveness and require exact manifest equality.
+    ``blob_root`` is the OPERATION's Blob tree (backup-tree/restore-
+    stage root) — threaded through to the successor semantic
+    verifiers so M17B physical payloads are verified against that
+    tree, never the process-global Settings (PUB-R3)."""
     head = manifest["alembic_version"]
     _normalize_staged_wal(db_path)
     _drop_sidecar_files(db_path)
     _verify_staged_db(db_path, expected_head=head)
-    live = _enumerate_liveness(db_path, _blob_fk_policy_for_head(head))
+    live = _enumerate_liveness(db_path, _blob_fk_policy_for_head(head),
+                               blob_root=blob_root)
     if live.blob_hashes != manifest["blob_hashes"]:
         raise RecoveryCorruption(
             "re-enumerated Blob liveness differs from the manifest."
@@ -1125,7 +1151,8 @@ def _verify_backup_tree(root: Path, full_liveness: bool) -> dict:
     manifest = parse_backup_manifest_v1(raw)
     _verify_manifest_files(root, manifest)
     if full_liveness:
-        _verify_liveness_equal(root / "soloring.db", manifest)
+        _verify_liveness_equal(root / "soloring.db", manifest,
+                               blob_root=root / "blobs")
     return manifest
 
 
@@ -1785,7 +1812,12 @@ async def backup(
         # M13 §23.4: immutable production-world state is verified in the
         # staged DB before liveness enumeration/certification.
         await asyncio.to_thread(_verify_m13_world_state, staged_db)
-        liveness = await asyncio.to_thread(_enumerate_liveness, staged_db)
+        # PUB-R3: the successor semantic verifier (incl. M17B physical
+        # payloads) must read the BACKUP SOURCE's Blob root (this
+        # operation's settings), never the process-global singleton.
+        liveness = await asyncio.to_thread(
+            _enumerate_liveness, staged_db,
+            blob_root=Path(settings.blob_dir))
 
         blob_root = Path(settings.blob_dir)
         for h in liveness.blob_hashes:
@@ -1928,9 +1960,12 @@ async def restore(backup_root: Path, dest: Path) -> dict:
 
         # Step 9: exact liveness equality with the manifest (the restored
         # DATA root is not a backup artifact; verify against the parsed
-        # source manifest, not a manifest file inside the stage).
+        # source manifest, not a manifest file inside the stage). The
+        # semantic verifiers read the RESTORE STAGE's Blob tree, not the
+        # process-global Settings (PUB-R3).
         await asyncio.to_thread(
-            _verify_liveness_equal, staged_db, manifest)
+            _verify_liveness_equal, staged_db, manifest,
+            blob_root=stage / "blobs")
 
         # Step 10: production historical verification on the staged root.
         await _production_historical_probe(stage, manifest)

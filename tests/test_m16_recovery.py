@@ -28,7 +28,7 @@ async def _settings(client):
 
 
 
-async def _stamp_alembic(client, head="0018_m17a_dialogue_vocal_foundation"):
+async def _stamp_alembic(client, head="0019_m17b_performance_revisions"):
     """The conftest engine builds schema via create_all (no
     alembic_version); the recovery machinery requires the table."""
     from sqlalchemy import text as _text
@@ -84,7 +84,7 @@ async def test_recovery_01(client, factory,
         client, factory)
     await _stamp_alembic(client)
     manifest, dest = await _backup_and_restore(client, tmp_path, "depth")
-    assert manifest["alembic_version"] == "0018_m17a_dialogue_vocal_foundation"
+    assert manifest["alembic_version"] == "0019_m17b_performance_revisions"
     import sqlite3
 
     con = sqlite3.connect(str(dest / "soloring.db"))
@@ -99,7 +99,7 @@ async def test_recovery_01(client, factory,
             "WHERE shot_revision_id = ?", (revision.id,)).fetchone()[0]
     finally:
         con.close()
-    assert head == "0018_m17a_dialogue_vocal_foundation"
+    assert head == "0019_m17b_performance_revisions"
     assert events == 1
     assert children == 1
 
@@ -424,7 +424,7 @@ async def test_recovery_07(client, factory):
     SH = _rb.SUPPORTED_RESTORE_ALEMBIC_HEADS
     policy = _rb._blob_fk_policy_for_head
 
-    assert EH == "0018_m17a_dialogue_vocal_foundation"
+    assert EH == "0019_m17b_performance_revisions"
     assert set(SH) == {
         "0011_m10_derived_spatial_execution",
         "0012_m11_reusable_production_revisions",
@@ -434,6 +434,7 @@ async def test_recovery_07(client, factory):
         "0016_m15_revision_compatibility",
         "0017_m16_intra_shot_consequences",
         "0018_m17a_dialogue_vocal_foundation",
+        "0019_m17b_performance_revisions",
     }
 
 async def test_recovery_08(client, factory):
@@ -449,9 +450,9 @@ async def test_recovery_08(client, factory):
 
     inventory = policy("0017_m16_intra_shot_consequences")
     assert len(inventory) == 8
-    # M17A head carries the exact eleven-path inventory (frozen R5
-    # §12.1); 0018-era liveness adds the three dialogue/vocal paths.
-    assert len(policy("0018_m17a_dialogue_vocal_foundation")) == 11
+    # M17A head 0018 carries the exact eleven-path inventory (frozen
+    # R5 §12.1); M17B head 0019 adds the two performance paths.
+    assert len(policy("0019_m17b_performance_revisions")) == 13
     try:
         policy("0099_m99_future")
     except Exception:

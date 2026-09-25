@@ -319,7 +319,7 @@ def _stamp(data_dir, head: str) -> None:
 
 def test_m13_recovery_01(tmp_path):
     """M13-RECOVERY:01 — supported-head dispatch incl. 0014."""
-    assert rb.EXPECTED_ALEMBIC_HEAD == "0018_m17a_dialogue_vocal_foundation"
+    assert rb.EXPECTED_ALEMBIC_HEAD == "0019_m17b_performance_revisions"
     assert rb.SUPPORTED_RESTORE_ALEMBIC_HEADS == {
         "0011_m10_derived_spatial_execution",
         "0012_m11_reusable_production_revisions",
@@ -329,6 +329,7 @@ def test_m13_recovery_01(tmp_path):
         "0016_m15_revision_compatibility",
         "0017_m16_intra_shot_consequences",
         "0018_m17a_dialogue_vocal_foundation",
+        "0019_m17b_performance_revisions",
     }
 
 
@@ -337,7 +338,7 @@ def test_m13_recovery_03(tmp_path):
     data_dir = tmp_path / "data"
     data_dir.mkdir()
     ids = asyncio.run(_seed_full(data_dir))
-    _stamp(data_dir, "0018_m17a_dialogue_vocal_foundation")
+    _stamp(data_dir, "0019_m17b_performance_revisions")
     con = sqlite3.connect(data_dir / "soloring.db")
     con.execute(
         "UPDATE composition_spatial_bindings SET binding_json = "
@@ -355,17 +356,17 @@ def test_m13_recovery_04(tmp_path):
     data_dir = tmp_path / "data"
     data_dir.mkdir()
     asyncio.run(_seed_full(data_dir))
-    _stamp(data_dir, "0018_m17a_dialogue_vocal_foundation")
+    _stamp(data_dir, "0019_m17b_performance_revisions")
     con = sqlite3.connect(data_dir / "soloring.db")
     try:
         found = rb._blob_fk_inventory(con)
     finally:
         con.close()
     assert set(rb.M11_BLOB_FK_COLUMNS) <= found
-    # current schema (0018 head): the exact eleven-path M17A
+    # current schema (0019 head): the exact thirteen-path M17B
     # inventory (frozen R5 §12.1)
-    assert found == set(rb.M17A_BLOB_FK_COLUMNS)
-    assert len(found) == 11
+    assert found == set(rb.M17B_BLOB_FK_COLUMNS)
+    assert len(found) == 13
 
 
 def test_m13_recovery_05(tmp_path):
@@ -375,7 +376,7 @@ def test_m13_recovery_05(tmp_path):
     data_dir = tmp_path / "data"
     data_dir.mkdir()
     ids = asyncio.run(_seed_full(data_dir))
-    _stamp(data_dir, "0018_m17a_dialogue_vocal_foundation")
+    _stamp(data_dir, "0019_m17b_performance_revisions")
     con = sqlite3.connect(data_dir / "soloring.db")
     # make today's authority evolve: soft-delete the pinned PI track and
     # drop the current selection (the binding is now stale but immutable)

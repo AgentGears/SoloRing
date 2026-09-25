@@ -67,6 +67,23 @@ ALLOWLIST = (
     "tests/test_m17a_compatibility.py",
     "tests/test_m17a_recovery.py",
     "tests/test_m17a_source_gate.py",
+    "server/soloring/api/schemas/m17b_performance.py",
+    "tests/test_m17b_migration.py",
+    "tests/test_m17b_profile.py",
+    "tests/test_m17b_performance.py",
+    "tests/test_m17b_retarget.py",
+    "tests/test_m17b_recovery.py",
+    "tests/test_m17b_source_gate.py",
+    "tests/test_m17b_matrix.py",
+    "tests/m17b_seed.py",
+    "docs/SoloRing-M17B-Proof-Map.md",
+    "scripts/m17b_validate_proof_map.py",
+    "server/alembic/versions/0019_m17b_performance_revisions.py",
+    "server/soloring/api/m17b_performance.py",
+    "server/soloring/recovery/m17b_verifier.py",
+    # M17B second-Codex round: the sqlalchemy <2.1 ceiling pin
+    # (dependency-drift incident, run #161). Packaging metadata only.
+    "pyproject.toml",
     "tests/test_m17a_matrix.py",
     "apps/web/package.json",
     "apps/web/package-lock.json",
@@ -497,6 +514,14 @@ def main(repo: Path = REPO) -> int:
                 "server/soloring/performance/")
             or f.startswith(
                 "server/alembic/versions/0018_")
+            or f.startswith(
+                "server/alembic/versions/0019_")
+            or f.startswith(
+                "server/soloring/recovery/m17b_")
+            or f.startswith(
+                "server/soloring/api/m17b_")
+            or f.startswith(
+                "server/soloring/api/schemas/m17b_")
         ):
             errors.append(f"backend change outside the security slice: {f}")
         if (f.startswith("server/alembic/")
@@ -506,6 +531,8 @@ def main(repo: Path = REPO) -> int:
                     "server/alembic/versions/0017_m16_intra_shot_consequences.py",
                     # M17A (frozen R5): the dialogue/vocal migration
                     "server/alembic/versions/0018_m17a_dialogue_vocal_foundation.py",
+                    # M17B (frozen R7): the performance migration
+                    "server/alembic/versions/0019_m17b_performance_revisions.py",
                 )):
             errors.append(f"alembic change outside the security slice: {f}")
         if not path_allowed(f, allowlist):
@@ -519,10 +546,13 @@ def main(repo: Path = REPO) -> int:
     admitted_0017 = "0017_m16_intra_shot_consequences.py"
     # M17A (frozen R5): the dialogue/vocal foundation migration
     admitted_0018 = "0018_m17a_dialogue_vocal_foundation.py"
+    # M17B (frozen R7): the performance-revisions migration
+    admitted_0019 = "0019_m17b_performance_revisions.py"
     mig_beyond = [
         p.name for p in versions.glob("*.py")
         if p.stem >= "0015" and p.name not in (
-            admitted_0015, admitted_0016, admitted_0017, admitted_0018)
+            admitted_0015, admitted_0016, admitted_0017, 
+            admitted_0018, admitted_0019)
     ]
     if mig_beyond:
         errors.append(

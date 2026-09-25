@@ -40,6 +40,20 @@ ALLOWED_PATTERNS = [
     r"^scripts/(hygiene|next_security|m14|m16)_validate_boundary\.py$",
     r"^tests/m17a_seed\.py$",
     r"^tests/test_m17a_[a-z_]+\.py$",
+    # M17B reviewed successor surface (frozen R7)
+        r"^server/soloring/recovery/m17b_verifier\.py$",
+    r"^server/soloring/performance/profile\.py$",
+    r"^server/soloring/performance/revision\.py$",
+    r"^server/soloring/performance/retarget\.py$",
+    r"^server/alembic/versions/0019_m17b_performance_revisions"
+    r"\.py$",
+    r"^tests/m17b_seed\.py$",
+    r"^tests/test_m17b_[a-z_]+\.py$",
+    r"^docs/SoloRing-M17B-Proof-Map\.md$",
+    r"^scripts/m17b_validate_proof_map\.py$",
+    r"^server/soloring/api/m17b_performance\.py$",
+    r"^server/soloring/api/schemas/m17b_performance\.py$",
+
     r"^docs/SoloRing-M14-[^/]+\.md$",
     r"^scripts/m14_validate_[a-z0-9_]+\.py$",
     r"^tests/fixtures/m14/[^/]+$",
@@ -135,6 +149,9 @@ ALLOWED_PATTERNS = [
     # post-M16-closure publication refresh (separately authorized):
     # the README status refresh to M16/0017. Documentation only.
     r"^README\.md$",
+    # M17B second-Codex round: the sqlalchemy <2.1 ceiling pin
+    # (dependency-drift incident, CI run #161). Packaging metadata only.
+    r"^pyproject\.toml$",
     # M16-E closure surface (reviewed successor slice): the frozen §22
     # owner rename of the P0 module, the §23 source-gate owners, and
     # the four M16 validators.

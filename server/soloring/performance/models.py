@@ -362,3 +362,258 @@ class DialogueAlignment(Base):
     derivation_run_identity: Mapped[str] = mapped_column(Text,
                                                          nullable=False)
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class PerformanceCandidate(Base):
+    """M17B immutable candidate/evidence row; NOT A7 authority (frozen
+    R7 §4.1)."""
+
+    __tablename__ = "performance_candidates"
+    __table_args__ = (
+        CheckConstraint("performance_kind IN ('BODY','FACIAL',"
+                        "'BODY_FACIAL')", name="ck_pc_kind"),
+        CheckConstraint("performance_profile_id = 'performance-profile/1'",
+                        name="ck_pc_profile"),
+        CheckConstraint("payload_schema_version = 1",
+                        name="ck_pc_payload_schema"),
+        CheckConstraint("provenance_schema_version = 1",
+                        name="ck_pc_provenance_schema"),
+        CheckConstraint("source_kind IN ('authored','performance_capture',"
+                        "'tracking','reconstruction','generated',"
+                        "'simulated','procedural','imported','retargeted')",
+                        name="ck_pc_source_kind"),
+        CheckConstraint("temporal_start_den > 0", name="ck_pc_start_den"),
+        CheckConstraint("temporal_end_den > 0", name="ck_pc_end_den"),
+        CheckConstraint("length(canonical_channel_payload_blob_hash) = 64 "
+                        "AND canonical_channel_payload_blob_hash "
+                        "NOT GLOB '*[^0-9a-f]*'",
+                        name="ck_pc_payload_blob_hash_hex"),
+        CheckConstraint("length(canonical_channel_payload_sha256) = 64 "
+                        "AND canonical_channel_payload_sha256 "
+                        "NOT GLOB '*[^0-9a-f]*'",
+                        name="ck_pc_payload_sha_hex"),
+        CheckConstraint("length(provenance_hash) = 64 "
+                        "AND provenance_hash NOT GLOB '*[^0-9a-f]*'",
+                        name="ck_pc_provenance_hash_hex"),
+        ForeignKeyConstraint(["project_id"], ["projects.id"],
+                             name="fk_pc_project", ondelete="RESTRICT"),
+        ForeignKeyConstraint(["subject_id"], ["creative_entities.id"],
+                             name="fk_pc_subject", ondelete="RESTRICT"),
+        ForeignKeyConstraint(["canonical_channel_payload_blob_hash"],
+                             ["blobs.hash"], name="fk_pc_payload_blob",
+                             ondelete="RESTRICT"),
+        Index("ix_pc_subject_created_id", "subject_id", "created_at",
+              "id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    project_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    subject_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    performance_kind: Mapped[str] = mapped_column(Text, nullable=False)
+    performance_profile_id: Mapped[str] = mapped_column(Text,
+                                                        nullable=False)
+    temporal_start_num: Mapped[int] = mapped_column(Integer,
+                                                    nullable=False)
+    temporal_start_den: Mapped[int] = mapped_column(Integer,
+                                                    nullable=False)
+    temporal_end_num: Mapped[int] = mapped_column(Integer,
+                                                  nullable=False)
+    temporal_end_den: Mapped[int] = mapped_column(Integer,
+                                                  nullable=False)
+    canonical_channel_payload_blob_hash: Mapped[str] = mapped_column(
+        String(64), nullable=False)
+    canonical_channel_payload_sha256: Mapped[str] = mapped_column(
+        Text, nullable=False)
+    payload_schema_version: Mapped[int] = mapped_column(
+        Integer, nullable=False)
+    source_kind: Mapped[str] = mapped_column(Text, nullable=False)
+    provenance_schema_version: Mapped[int] = mapped_column(
+        Integer, nullable=False)
+    provenance_json: Mapped[str] = mapped_column(Text, nullable=False)
+    provenance_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class PerformanceRevision(Base):
+    """M17B immutable A7 authority created only by explicit adoption
+    (frozen R7 §4.2). No current/latest pointer, no parent, no
+    revision_number."""
+
+    __tablename__ = "performance_revisions"
+    __table_args__ = (
+        CheckConstraint("performance_kind IN ('BODY','FACIAL',"
+                        "'BODY_FACIAL')", name="ck_pr_kind"),
+        CheckConstraint("performance_profile_id = 'performance-profile/1'",
+                        name="ck_pr_profile"),
+        CheckConstraint("payload_schema_version = 1",
+                        name="ck_pr_payload_schema"),
+        CheckConstraint("provenance_schema_version = 1",
+                        name="ck_pr_provenance_schema"),
+        CheckConstraint("source_kind IN ('authored','performance_capture',"
+                        "'tracking','reconstruction','generated',"
+                        "'simulated','procedural','imported','retargeted')",
+                        name="ck_pr_source_kind"),
+        CheckConstraint("temporal_start_den > 0", name="ck_pr_start_den"),
+        CheckConstraint("temporal_end_den > 0", name="ck_pr_end_den"),
+        CheckConstraint("length(canonical_channel_payload_blob_hash) = 64 "
+                        "AND canonical_channel_payload_blob_hash "
+                        "NOT GLOB '*[^0-9a-f]*'",
+                        name="ck_pr_payload_blob_hash_hex"),
+        CheckConstraint("length(canonical_channel_payload_sha256) = 64 "
+                        "AND canonical_channel_payload_sha256 "
+                        "NOT GLOB '*[^0-9a-f]*'",
+                        name="ck_pr_payload_sha_hex"),
+        CheckConstraint("length(provenance_hash) = 64 "
+                        "AND provenance_hash NOT GLOB '*[^0-9a-f]*'",
+                        name="ck_pr_provenance_hash_hex"),
+        CheckConstraint("length(trim(adopted_by)) > 0",
+                        name="ck_pr_adopted_by_nonempty"),
+        ForeignKeyConstraint(["project_id"], ["projects.id"],
+                             name="fk_pr_project", ondelete="RESTRICT"),
+        ForeignKeyConstraint(["subject_id"], ["creative_entities.id"],
+                             name="fk_pr_subject", ondelete="RESTRICT"),
+        ForeignKeyConstraint(["canonical_channel_payload_blob_hash"],
+                             ["blobs.hash"], name="fk_pr_payload_blob",
+                             ondelete="RESTRICT"),
+        ForeignKeyConstraint(["adopted_candidate_id"],
+                             ["performance_candidates.id"],
+                             name="fk_pr_candidate", ondelete="RESTRICT"),
+        UniqueConstraint("adopted_candidate_id",
+                         name="uq_pr_adopted_candidate"),
+        UniqueConstraint("adoption_id", name="uq_pr_adoption_id"),
+        Index("ix_pr_subject_adopted_id", "subject_id", "adopted_at",
+              "id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    project_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    subject_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    performance_kind: Mapped[str] = mapped_column(Text, nullable=False)
+    performance_profile_id: Mapped[str] = mapped_column(Text,
+                                                        nullable=False)
+    temporal_start_num: Mapped[int] = mapped_column(Integer,
+                                                    nullable=False)
+    temporal_start_den: Mapped[int] = mapped_column(Integer,
+                                                    nullable=False)
+    temporal_end_num: Mapped[int] = mapped_column(Integer,
+                                                  nullable=False)
+    temporal_end_den: Mapped[int] = mapped_column(Integer,
+                                                  nullable=False)
+    canonical_channel_payload_blob_hash: Mapped[str] = mapped_column(
+        String(64), nullable=False)
+    canonical_channel_payload_sha256: Mapped[str] = mapped_column(
+        Text, nullable=False)
+    payload_schema_version: Mapped[int] = mapped_column(
+        Integer, nullable=False)
+    source_kind: Mapped[str] = mapped_column(Text, nullable=False)
+    provenance_schema_version: Mapped[int] = mapped_column(
+        Integer, nullable=False)
+    provenance_json: Mapped[str] = mapped_column(Text, nullable=False)
+    provenance_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    adopted_candidate_id: Mapped[str] = mapped_column(
+        String(36), nullable=False)
+    adoption_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    adopted_by: Mapped[str] = mapped_column(Text, nullable=False)
+    adopted_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class PerformanceRetargetAssessment(Base):
+    """M17B immutable Performance-physical compatibility evidence
+    (frozen R7 §4.3)."""
+
+    __tablename__ = "performance_retarget_assessments"
+    __table_args__ = (
+        CheckConstraint("schema_version = 1", name="ck_pra_schema"),
+        CheckConstraint(
+            "evaluator_id = 'soloring.performance_physical_retarget'",
+            name="ck_pra_evaluator_id"),
+        CheckConstraint("evaluator_version = 1",
+                        name="ck_pra_evaluator_version"),
+        CheckConstraint("overall_verdict IN ('COMPATIBLE_AS_IS',"
+                        "'COMPATIBLE_VIA_DETERMINISTIC_TRANSLATION',"
+                        "'REQUIRES_REVIEW','INCOMPATIBLE')",
+                        name="ck_pra_verdict"),
+        CheckConstraint("length(from_production_revision_hash) = 64 "
+                        "AND from_production_revision_hash "
+                        "NOT GLOB '*[^0-9a-f]*'",
+                        name="ck_pra_from_hash_hex"),
+        CheckConstraint("length(to_production_revision_hash) = 64 "
+                        "AND to_production_revision_hash "
+                        "NOT GLOB '*[^0-9a-f]*'",
+                        name="ck_pra_to_hash_hex"),
+        CheckConstraint("length(scope_hash) = 64 "
+                        "AND scope_hash NOT GLOB '*[^0-9a-f]*'",
+                        name="ck_pra_scope_hash_hex"),
+        CheckConstraint("length(report_hash) = 64 "
+                        "AND report_hash NOT GLOB '*[^0-9a-f]*'",
+                        name="ck_pra_report_hash_hex"),
+        ForeignKeyConstraint(["project_id"], ["projects.id"],
+                             name="fk_pra_project", ondelete="RESTRICT"),
+        ForeignKeyConstraint(["performance_revision_id"],
+                             ["performance_revisions.id"],
+                             name="fk_pra_revision", ondelete="RESTRICT"),
+        ForeignKeyConstraint(["from_production_revision_id"],
+                             ["production_revisions.id"],
+                             name="fk_pra_from_revision",
+                             ondelete="RESTRICT"),
+        ForeignKeyConstraint(["to_production_revision_id"],
+                             ["production_revisions.id"],
+                             name="fk_pra_to_revision",
+                             ondelete="RESTRICT"),
+        UniqueConstraint("performance_revision_id",
+                         "from_production_revision_id",
+                         "to_production_revision_id", "evaluator_id",
+                         "evaluator_version", "scope_hash",
+                         name="uq_pra_coordinate"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    project_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    performance_revision_id: Mapped[str] = mapped_column(
+        String(36), nullable=False)
+    from_production_revision_id: Mapped[str] = mapped_column(
+        String(36), nullable=False)
+    from_production_revision_hash: Mapped[str] = mapped_column(
+        Text, nullable=False)
+    to_production_revision_id: Mapped[str] = mapped_column(
+        String(36), nullable=False)
+    to_production_revision_hash: Mapped[str] = mapped_column(
+        Text, nullable=False)
+    schema_version: Mapped[int] = mapped_column(Integer,
+                                                 nullable=False)
+    evaluator_id: Mapped[str] = mapped_column(Text, nullable=False)
+    evaluator_version: Mapped[int] = mapped_column(Integer,
+                                                    nullable=False)
+    scope_json: Mapped[str] = mapped_column(Text, nullable=False)
+    scope_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    report_json: Mapped[str] = mapped_column(Text, nullable=False)
+    report_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    overall_verdict: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class PerformanceRetargetReview(Base):
+    """M17B append-only review evidence for REQUIRES_REVIEW (frozen R7
+    §4.4). No latest-wins, no supersession."""
+
+    __tablename__ = "performance_retarget_reviews"
+    __table_args__ = (
+        CheckConstraint("decision IN ('ACCEPT_FOR_NEW_CANDIDATE',"
+                        "'REJECT')", name="ck_prr_decision"),
+        CheckConstraint("length(trim(reviewed_by)) > 0",
+                        name="ck_prr_reviewed_by_nonempty"),
+        ForeignKeyConstraint(["assessment_id"],
+                             ["performance_retarget_assessments.id"],
+                             name="fk_prr_assessment",
+                             ondelete="RESTRICT"),
+        Index("ix_prr_assessment_reviewed_id", "assessment_id",
+              "reviewed_at", "id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    assessment_id: Mapped[str] = mapped_column(String(36),
+                                               nullable=False)
+    decision: Mapped[str] = mapped_column(Text, nullable=False)
+    reviewed_by: Mapped[str] = mapped_column(Text, nullable=False)
+    reviewed_at: Mapped[str] = mapped_column(Text, nullable=False)
+    rationale: Mapped[str | None] = mapped_column(Text)
