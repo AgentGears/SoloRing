@@ -1,6 +1,6 @@
 """M17C: dialogue-bound Performance capture foundation.
 
-R4 freezes migration 0020 as the additive M17C migration.  This first
+R4 freezes migration 0020 as the additive M17C migration. This first
 implementation slice creates the PF-03 immutable synchronization companions.
 The remaining PF-02/capture/execution tables are added to this same migration
 before publication; the branch is not published while 0020 is partial.
@@ -11,7 +11,7 @@ Downgrade refuses if either M17C binding table contains rows.
 from alembic import op
 import sqlalchemy as sa
 
-revision = "0020_m17c_dialogue_bound_performance_capture"
+revision = "0020_m17c_performance_capture"
 down_revision = "0019_m17b_performance_revisions"
 branch_labels = None
 depends_on = None
