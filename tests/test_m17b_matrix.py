@@ -15,7 +15,8 @@ regressions (adoption subject/project agreement; retarget
 evidence resolution at adoption; minimal API provenance
 defaults); X21-X23 third-Codex regressions (assessment
 verdict recomputation; source-revision lineage; VP-speaker
-alignment law).
+alignment law); X24 accepted-review metadata grammar at
+adoption.
 """
 
 from __future__ import annotations
@@ -1427,6 +1428,23 @@ async def test_x21_adoption_rejects_tampered_assessment_verdict(client):
     r = await _try_adopt_forge(rev_d, a_d, acc_d)
     assert r.status_code in (403, 422), r.text
     assert "project" in r.json()["message"], r.text
+
+    # (e) delta-review residue: DB-tamper the ACCEPTED REVIEW's
+    # reviewed_by to an over-long value AFTER creation — nonblank
+    # (the DB CHECK only enforces nonempty) but outside the shared
+    # grammar's 255-code-point bound, which recovery enforces on
+    # every review row; ownership/decision still hold, so only the
+    # grammar check can refuse it at adoption
+    pid_e, eid_e, rev_e, obj_e, p1e, p2e, a_e, acc_e = \
+        await _fresh_world(b"rv")
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "UPDATE performance_retarget_reviews SET reviewed_by = "
+            ":rb WHERE id = :i"),
+            {"rb": "x" * 300, "i": acc_e["id"]})
+    r = await _try_adopt_forge(rev_e, a_e, acc_e)
+    assert r.status_code in (403, 422), r.text
+    assert "reviewed_by" in r.json()["message"], r.text
 
 
 @pytest.mark.asyncio

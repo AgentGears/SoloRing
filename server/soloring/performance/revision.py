@@ -372,6 +372,15 @@ async def _verify_retarget_evidence(session: AsyncSession,
             ErrorCode.PERFORMANCE_PROVENANCE_INVALID,
             "retarget accepted review does not satisfy the review "
             "law chain")
+    # accepted-review persisted grammar (recovery parity, P1-1
+    # residue): recovery validates every review row's metadata
+    # through the shared grammar — the live authority path must not
+    # promote a referenced review whose metadata recovery would
+    # refuse (e.g. whitespace-tampered reviewed_by)
+    validate_review_metadata(
+        decision=review.decision,
+        reviewed_by=review.reviewed_by,
+        rationale=review.rationale)
 
 _CLOSURE_FIELDS = (
     "project_id", "subject_id", "performance_kind",
