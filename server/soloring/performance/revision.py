@@ -206,14 +206,16 @@ async def _verify_candidate_core(
                 "candidate subject/project disagreement — the "
                 "candidate does not belong to its subject's project")
 
-    # alignment provenance integrity (same immutable law as creation)
+    # alignment provenance integrity (same immutable law as creation);
+    # SR26-05: on persisted-history verification a missing cited
+    # alignment is corruption, not a client lookup miss
     if row_lookup is None:
         from soloring.performance.revision import (
             _verify_alignment_provenance)
         await _verify_alignment_provenance(
             session, subject_id=candidate.subject_id,
             project_id=candidate.project_id,
-            channels=doc["channels"])
+            channels=doc["channels"], history=True)
     return {"payload_document": doc, "envelope": envelope}
 
 
@@ -563,14 +565,19 @@ async def _verify_subject(session: AsyncSession, *, subject_id: str,
 async def _verify_alignment_provenance(session: AsyncSession, *,
                                        subject_id: str,
                                        project_id: str,
-                                       channels: list[dict]) -> None:
+                                       channels: list[dict],
+                                       history: bool = False) -> None:
     """Per-keyframe alignment provenance law (frozen R7 §6.5, completed
     by the publication review): the referenced M17A DialogueAlignment
     must exist, its source VP's speaker must equal the Performance
     subject, AND the alignment's dialogue line must belong to the SAME
     Project as the Performance candidate/subject (the same law the
     recovery verifier enforces through _verify_alignment_link). The
-    link is audit evidence only."""
+    link is audit evidence only.
+
+    ``history=True`` (SR26-05) translates admission-time 404/422
+    outcomes into the corruption contract, because the cited alignment
+    was already persisted with the canonical payload."""
     from soloring.performance.models import DialogueAlignment
     seen = set()
     for ch in channels:
@@ -581,6 +588,12 @@ async def _verify_alignment_provenance(session: AsyncSession, *,
             seen.add(aid)
             row = await session.get(DialogueAlignment, aid)
             if row is None:
+                if history:
+                    raise SoloRingError(
+                        ErrorCode.INTERNAL_INVARIANT_VIOLATION,
+                        f"persisted payload cites missing dialogue "
+                        f"alignment {aid!r}",
+                        status_code=500)
                 raise not_found(ErrorCode.PERFORMANCE_ALIGNMENT_NOT_FOUND,
                                 f"dialogue alignment {aid!r} not found")
             from soloring.performance.models import (
@@ -651,11 +664,17 @@ async def create_performance_candidate(
         performance_kind: str, performance_profile_id: str,
         temporal_start_num: int, temporal_start_den: int,
         temporal_end_num: int, temporal_end_den: int,
-        channels: dict, source_provenance: dict) -> PerformanceCandidate:
+        channels: dict, source_provenance: dict,
+        sync_mode: str = "NONE") -> PerformanceCandidate:
     """Frozen R7 §9: validate, canonicalize, BlobStore-place, persist —
     or leave nothing. Caller hashes and caller filesystem paths are
     never accepted. Repeated identical submissions are distinct lawful
-    evidence rows (no semantic dedupe)."""
+    evidence rows (no semantic dedupe).
+
+    SR26-01 corrective: every candidate is created together with its
+    immutable PF-03 applicability classification (NONE for the generic
+    route; the dialogue-bound service passes VOCAL_V1), so applicability
+    can never be lost together with the binding payload."""
     from soloring.continuity.models import CreativeEntity
     entity = await session.get(CreativeEntity, subject_id)
     if entity is None:
@@ -718,6 +737,17 @@ async def create_performance_candidate(
         provenance_json=prov_json, provenance_hash=prov_hash,
         created_at=await db_now(session))
     session.add(candidate)
+    await session.flush()
+    from soloring.performance.m17c_models import (
+        PerformanceCandidateSyncClassification)
+    if sync_mode not in ("NONE", "VOCAL_V1"):
+        raise _invalid(ErrorCode.PERFORMANCE_PROVENANCE_INVALID,
+                       f"unknown sync classification mode {sync_mode!r}")
+    session.add(PerformanceCandidateSyncClassification(
+        performance_candidate_id=candidate.id,
+        sync_mode=sync_mode,
+        classification_schema_version=1,
+        created_at=await db_now(session)))
     await session.flush()
     return candidate
 

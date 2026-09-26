@@ -71,11 +71,11 @@ async def create_retarget_candidate(
     source = await revision_svc.get_performance_revision(
         session, revision_id=revision_id)
 
-    # PF-03 classification is a two-sided closure law. A missing revision
-    # companion cannot silently downgrade an adopted dialogue-bound revision
-    # into generic M17B history: the adopted candidate companion proves that
-    # the revision companion must exist. Conversely, a revision companion
-    # without its source candidate companion is equally corrupt.
+    # SR26-01: the immutable applicability discriminator is verified
+    # first — a VOCAL_V1 revision whose companions have totally
+    # disappeared refuses here instead of downgrading to generic M17B
+    # retargeting. The XOR companion check is retained beneath it.
+    await binding_svc.verify_revision_sync_classification(session, source)
     candidate_binding = await session.get(
         PerformanceCandidateVocalBinding, source.adopted_candidate_id)
     source_binding = await session.get(

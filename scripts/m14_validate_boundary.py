@@ -23,6 +23,10 @@ ALLOWED_PATTERNS = [
     r"^post-m16-integrated-r3-evidence/harness/",
     r"^SoloRing-Post-M16-Integrated-Sequence-Regression-R3-CLOSED"
     r"\.md$",
+    # PR #26 review records (M17C-A first pass + second-review
+    # reconciliation): reviewed evidence documents, no product code
+    r"^SoloRing-PR26-First-Pass-Review-R1\.md$",
+    r"^SoloRing-PR26-Reconciliation-and-Correction-Record\.md$",
     # M17A implementation (frozen R5): the dialogue/vocal foundation
     # surface — performance package, migration, API, recovery
     # verifier, boundary validators, and the M17A tests.
@@ -53,6 +57,22 @@ ALLOWED_PATTERNS = [
     r"^scripts/m17b_validate_proof_map\.py$",
     r"^server/soloring/api/m17b_performance\.py$",
     r"^server/soloring/api/schemas/m17b_performance\.py$",
+    # M17C-A (PR #26, second-review reconciliation): reviewed successor
+    # surface + successor-maintained files swept for the 0020 head
+    r"^server/soloring/performance/m17c_[a-z_]+\.py$",
+    r"^server/soloring/api/m17c_performance\.py$",
+    r"^server/soloring/api/schemas/m17c_performance\.py$",
+    r"^server/soloring/recovery/m17c_verifier\.py$",
+    r"^server/alembic/versions/0020_m17c_dialogue_bound_performance"
+    r"\.py$",
+    r"^tests/m17c_seed\.py$",
+    r"^tests/test_m17c_[a-z_]+\.py$",
+    r"^tests/test_post_m13_next_security\.py$",
+    r"^tests/test_m14_b5_increment3\.py$",
+    r"^tests/test_m14_base_corpus\.py$",
+    r"^tests/test_m15_baseline\.py$",
+    r"^tests/test_m16_recovery\.py$",
+    r"^scripts/m17c_validate_[a-z0-9_]+\.py$",
 
     r"^docs/SoloRing-M14-[^/]+\.md$",
     r"^scripts/m14_validate_[a-z0-9_]+\.py$",

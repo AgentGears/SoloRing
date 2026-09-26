@@ -34,7 +34,9 @@ from soloring.performance.m17c_contract import (
     strict_int,
 )
 from soloring.performance.m17c_models import (
+    PerformanceCandidateSyncClassification,
     PerformanceCandidateVocalBinding,
+    PerformanceRevisionSyncClassification,
     PerformanceRevisionVocalBinding,
 )
 from soloring.performance.models import (
@@ -142,8 +144,15 @@ def _row_document(row) -> dict:
 def _verify_binding_bytes(row) -> dict:
     if row.binding_schema_version != 1 or row.synchronization_basis_version != 1:
         raise corrupt("M17C vocal binding schema/basis version is not 1")
-    cn, cd = canonical_rational(
-        row.performance_origin_num, row.performance_origin_den)
+    try:
+        cn, cd = canonical_rational(
+            row.performance_origin_num, row.performance_origin_den)
+    except SoloRingError as exc:
+        # SR26-05: a malformed persisted rational is corruption of
+        # immutable history, never a client request problem.
+        raise corrupt(
+            f"M17C vocal binding stores an invalid persisted rational: "
+            f"{exc.message}") from exc
     if (cn, cd) != (row.performance_origin_num, row.performance_origin_den):
         raise corrupt("M17C vocal binding stores a noncanonical rational")
     doc = _row_document(row)
@@ -266,10 +275,11 @@ async def _verify_alignment_exact_vp(
             seen.add(aid)
             alignment = await session.get(DialogueAlignment, aid)
             if alignment is None:
-                raise not_found(
-                    ErrorCode.PERFORMANCE_ALIGNMENT_NOT_FOUND,
-                    f"dialogue alignment {aid!r} not found",
-                )
+                # SR26-05: the canonical payload already cited this
+                # alignment at admission; its disappearance is corruption.
+                raise corrupt(
+                    f"persisted M17C payload cites missing dialogue "
+                    f"alignment {aid!r}")
             if alignment.vocal_performance_revision_id != vp_id:
                 raise invalid(
                     PERFORMANCE_VOCAL_ALIGNMENT_MISMATCH,
@@ -307,6 +317,7 @@ async def verify_candidate_vocal_binding(
     row: PerformanceCandidateVocalBinding,
     *,
     payload_document: dict | None = None,
+    pending_binding: PerformanceCandidateVocalBinding | None = None,
 ) -> dict:
     if row.performance_candidate_id != candidate.id:
         raise corrupt("candidate vocal-binding parent id diverges")
@@ -315,15 +326,30 @@ async def verify_candidate_vocal_binding(
             PERFORMANCE_VOCAL_BINDING_INVALID,
             "dialogue-bound performance must be FACIAL or BODY_FACIAL",
         )
+    candidate_classification = await verify_candidate_sync_classification(
+        session, candidate, pending_binding=pending_binding)
+    if candidate_classification.sync_mode != "VOCAL_V1":
+        raise corrupt(
+            "candidate carries a vocal binding but is not classified "
+            "VOCAL_V1")
     _verify_binding_bytes(row)
     vp = await session.get(VocalPerformanceRevision,
                            row.vocal_performance_revision_id)
     if vp is None:
-        raise not_found(
-            ErrorCode.VOCAL_PERFORMANCE_NOT_FOUND,
-            f"vocal performance revision {row.vocal_performance_revision_id!r} "
-            "not found",
-        )
+        if pending_binding is not None:
+            # admission: a client-supplied VP id that does not exist is
+            # a request problem (404), not corruption
+            raise not_found(
+                ErrorCode.VOCAL_PERFORMANCE_NOT_FOUND,
+                f"vocal performance revision "
+                f"{row.vocal_performance_revision_id!r} not found",
+            )
+        # SR26-05: the binding already persisted this exact VP identity;
+        # its disappearance is corruption, not a client lookup miss.
+        raise corrupt(
+            "persisted M17C vocal binding names a missing "
+            f"VocalPerformanceRevision "
+            f"{row.vocal_performance_revision_id!r}")
     await verify_vocal_performance_integrity(
         session, settings, vp, expected_project_id=candidate.project_id)
     if candidate.subject_id != vp.speaker_subject_id:
@@ -392,6 +418,7 @@ async def create_dialogue_bound_performance_candidate(
         temporal_end_den=temporal_end_den,
         channels=channels,
         source_provenance=source_provenance,
+        sync_mode="VOCAL_V1",
     )
     row = PerformanceCandidateVocalBinding(
         performance_candidate_id=candidate.id,
@@ -409,35 +436,200 @@ async def create_dialogue_bound_performance_candidate(
     )
     integrity = await revision_svc.verify_candidate_integrity(
         session, settings, candidate)
+    # pending_binding: the SR26-01 cardinality law normally reads the
+    # companion through the session; during creation the row is not yet
+    # persisted, so it is handed to the classification check directly.
     await verify_candidate_vocal_binding(
         session, settings, candidate, row,
-        payload_document=integrity["payload_document"])
+        payload_document=integrity["payload_document"],
+        pending_binding=row)
     session.add(row)
     await session.flush()
     return candidate, row
 
 
-async def get_candidate_vocal_binding(
-    session: AsyncSession, *, candidate_id: str
+async def verify_candidate_sync_classification(
+    session: AsyncSession, candidate: PerformanceCandidate,
+    *, pending_binding=None,
+) -> PerformanceCandidateSyncClassification:
+    """SR26-01 discriminator law for a candidate row.
+
+    Every candidate carries exactly one immutable classification; its
+    absence is corruption. VOCAL_V1 requires exactly one binding row;
+    NONE prohibits one. ``pending_binding`` supplies an in-flight,
+    not-yet-persisted binding during creation.
+    """
+    classification = await session.get(
+        PerformanceCandidateSyncClassification, candidate.id)
+    if classification is None:
+        raise corrupt(
+            f"performance candidate {candidate.id!r} has no PF-03 sync "
+            "classification; applicability cannot be determined")
+    if classification.classification_schema_version != 1:
+        raise corrupt("PF-03 sync classification schema version is not 1")
+    binding = await session.get(
+        PerformanceCandidateVocalBinding, candidate.id)
+    if binding is None:
+        binding = pending_binding
+    if classification.sync_mode == "VOCAL_V1":
+        if binding is None:
+            raise corrupt(
+                f"performance candidate {candidate.id!r} is classified "
+                "VOCAL_V1 but its PF-03 binding companion is missing "
+                "(total companion loss)")
+    elif classification.sync_mode == "NONE":
+        if binding is not None:
+            raise corrupt(
+                f"performance candidate {candidate.id!r} is classified "
+                "NONE but carries a PF-03 binding companion")
+    else:
+        raise corrupt(
+            f"PF-03 sync classification has unknown mode "
+            f"{classification.sync_mode!r}")
+    return classification
+
+
+async def verify_revision_sync_classification(
+    session: AsyncSession, revision: PerformanceRevision,
+) -> PerformanceRevisionSyncClassification:
+    """SR26-01 discriminator law for an adopted revision row."""
+    classification = await session.get(
+        PerformanceRevisionSyncClassification, revision.id)
+    if classification is None:
+        raise corrupt(
+            f"performance revision {revision.id!r} has no PF-03 sync "
+            "classification; applicability cannot be determined")
+    if classification.classification_schema_version != 1:
+        raise corrupt("PF-03 sync classification schema version is not 1")
+    binding = await session.get(
+        PerformanceRevisionVocalBinding, revision.id)
+    if classification.sync_mode == "VOCAL_V1":
+        if binding is None:
+            raise corrupt(
+                f"performance revision {revision.id!r} is classified "
+                "VOCAL_V1 but its PF-03 binding companion is missing "
+                "(total companion loss)")
+    elif classification.sync_mode == "NONE":
+        if binding is not None:
+            raise corrupt(
+                f"performance revision {revision.id!r} is classified "
+                "NONE but carries a PF-03 binding companion")
+    else:
+        raise corrupt(
+            f"PF-03 sync classification has unknown mode "
+            f"{classification.sync_mode!r}")
+    return classification
+
+
+def _read_binding_scalar_laws(row, parent, vp) -> None:
+    """DB-level immutable-identity laws shared by the read path.
+
+    SR26-03 cost boundary (recorded): authoritative reads prove the
+    PF-03 classification, canonical binding bytes/hash, parent/companion
+    closure, and exact immutable identity against stored authority
+    rows; they do not rehash the retained VP audio bytes (a
+    transition-time and recovery-time check).
+    """
+    _verify_binding_bytes(row)
+    if row.sample_rate_hz != vp.native_sample_rate_hz:
+        raise corrupt("binding sample rate != VP native sample rate")
+    if not (vp.trim_start_sample <= row.source_start_sample <
+            row.source_end_sample_exclusive <= vp.trim_end_sample_exclusive):
+        raise corrupt("binding source interval lies outside the VP trim")
+    if parent.subject_id != vp.speaker_subject_id:
+        raise corrupt("binding parent subject != VP speaker")
+
+
+async def read_candidate_vocal_binding(
+    session: AsyncSession, settings, *, candidate_id: str,
 ) -> PerformanceCandidateVocalBinding:
-    row = await session.get(PerformanceCandidateVocalBinding, candidate_id)
-    if row is None:
+    """SR26-03: fail-closed authoritative candidate binding read."""
+    candidate = await session.get(PerformanceCandidate, candidate_id)
+    if candidate is None:
+        raise not_found(
+            ErrorCode.PERFORMANCE_CANDIDATE_NOT_FOUND,
+            f"performance candidate {candidate_id!r} not found")
+    classification = await verify_candidate_sync_classification(
+        session, candidate)
+    if classification.sync_mode == "NONE":
         raise not_found(
             PERFORMANCE_VOCAL_BINDING_NOT_FOUND,
             f"performance candidate {candidate_id!r} has no vocal binding",
         )
+    row = await session.get(PerformanceCandidateVocalBinding, candidate_id)
+    # verify_candidate_sync_classification proved existence for VOCAL_V1
+    vp = await session.get(VocalPerformanceRevision,
+                           row.vocal_performance_revision_id)
+    if vp is None:
+        raise corrupt(
+            "persisted M17C vocal binding names a missing "
+            f"VocalPerformanceRevision "
+            f"{row.vocal_performance_revision_id!r}")
+    _read_binding_scalar_laws(row, candidate, vp)
+    interval = _vocal_performance_interval(row)
+    domain = _candidate_domain(candidate)
+    if not (domain[0] <= interval[0] < interval[1] <= domain[1]):
+        raise corrupt(
+            "persisted binding interval lies outside the candidate domain")
+    integrity = await revision_svc.verify_candidate_integrity(
+        session, settings, candidate)
+    await _verify_alignment_exact_vp(
+        session, integrity["payload_document"], vp.id)
     return row
 
 
-async def get_revision_vocal_binding(
-    session: AsyncSession, *, revision_id: str
+async def read_revision_vocal_binding(
+    session: AsyncSession, settings, *, revision_id: str,
 ) -> PerformanceRevisionVocalBinding:
-    row = await session.get(PerformanceRevisionVocalBinding, revision_id)
-    if row is None:
+    """SR26-03: fail-closed authoritative revision binding read."""
+    revision = await session.get(PerformanceRevision, revision_id)
+    if revision is None:
+        raise not_found(
+            ErrorCode.PERFORMANCE_REVISION_NOT_FOUND,
+            f"performance revision {revision_id!r} not found")
+    classification = await verify_revision_sync_classification(
+        session, revision)
+    if classification.sync_mode == "NONE":
         raise not_found(
             PERFORMANCE_VOCAL_BINDING_NOT_FOUND,
             f"performance revision {revision_id!r} has no vocal binding",
         )
+    row = await session.get(PerformanceRevisionVocalBinding, revision_id)
+    candidate = await session.get(PerformanceCandidate,
+                                  revision.adopted_candidate_id)
+    if candidate is None:
+        raise corrupt("dialogue-bound revision adopted candidate is missing")
+    candidate_classification = await verify_candidate_sync_classification(
+        session, candidate)
+    if candidate_classification.sync_mode != classification.sync_mode:
+        raise corrupt(
+            "revision PF-03 classification != adopted candidate "
+            "classification")
+    candidate_row = await session.get(
+        PerformanceCandidateVocalBinding, candidate.id)
+    if candidate_row is None:
+        raise corrupt(
+            "dialogue-bound revision source candidate binding is missing")
+    if not _semantic_binding_equal(candidate_row, row):
+        raise corrupt(
+            "revision vocal binding != adopted candidate binding closure")
+    vp = await session.get(VocalPerformanceRevision,
+                           row.vocal_performance_revision_id)
+    if vp is None:
+        raise corrupt(
+            "persisted M17C vocal binding names a missing "
+            f"VocalPerformanceRevision "
+            f"{row.vocal_performance_revision_id!r}")
+    _read_binding_scalar_laws(row, revision, vp)
+    interval = _vocal_performance_interval(row)
+    domain = _candidate_domain(candidate)
+    if not (domain[0] <= interval[0] < interval[1] <= domain[1]):
+        raise corrupt(
+            "persisted binding interval lies outside the parent domain")
+    integrity = await revision_svc.verify_candidate_integrity(
+        session, settings, candidate)
+    await _verify_alignment_exact_vp(
+        session, integrity["payload_document"], vp.id)
     return row
 
 
@@ -454,6 +646,12 @@ async def verify_revision_vocal_binding(
 ) -> dict:
     if row.performance_revision_id != revision.id:
         raise corrupt("revision vocal-binding parent id diverges")
+    revision_classification = await verify_revision_sync_classification(
+        session, revision)
+    if revision_classification.sync_mode != "VOCAL_V1":
+        raise corrupt(
+            "revision carries a vocal binding but is not classified "
+            "VOCAL_V1")
     candidate = await session.get(PerformanceCandidate,
                                   revision.adopted_candidate_id)
     if candidate is None:
@@ -475,9 +673,16 @@ async def adoption_binding_precheck(
     settings,
     candidate: PerformanceCandidate,
 ) -> PerformanceCandidateVocalBinding | None:
+    # SR26-01: the discriminator is verified FIRST — a VOCAL_V1
+    # candidate whose binding companion has totally disappeared refuses
+    # here instead of silently downgrading to generic M17B.
+    classification = await verify_candidate_sync_classification(
+        session, candidate)
+    if classification.sync_mode == "NONE":
+        return None
     row = await session.get(PerformanceCandidateVocalBinding, candidate.id)
-    if row is not None:
-        await verify_candidate_vocal_binding(session, settings, candidate, row)
+    # classification law proved the row exists for VOCAL_V1
+    await verify_candidate_vocal_binding(session, settings, candidate, row)
     return row
 
 
@@ -490,12 +695,43 @@ async def converge_revision_binding(
     *,
     allow_create: bool,
 ) -> PerformanceRevisionVocalBinding | None:
-    existing = await session.get(PerformanceRevisionVocalBinding, revision.id)
-    if candidate_binding is None:
+    candidate_classification = await verify_candidate_sync_classification(
+        session, candidate)
+    existing_cls = await session.get(
+        PerformanceRevisionSyncClassification, revision.id)
+    if existing_cls is None:
+        if not allow_create:
+            raise corrupt(
+                "adopted winner is missing its PF-03 sync classification")
+        existing_cls = PerformanceRevisionSyncClassification(
+            performance_revision_id=revision.id,
+            sync_mode=candidate_classification.sync_mode,
+            classification_schema_version=1,
+            created_at=await db_now(session),
+        )
+        session.add(existing_cls)
+        await session.flush()
+    else:
+        if existing_cls.classification_schema_version != 1:
+            raise corrupt(
+                "PF-03 sync classification schema version is not 1")
+        if existing_cls.sync_mode != candidate_classification.sync_mode:
+            raise corrupt(
+                "revision PF-03 classification != adopted candidate "
+                "classification")
+
+    if candidate_classification.sync_mode == "NONE":
+        if candidate_binding is not None:
+            raise corrupt(
+                "generic M17B candidate has an unexpected vocal binding")
+        existing = await session.get(
+            PerformanceRevisionVocalBinding, revision.id)
         if existing is not None:
             raise corrupt(
-                "generic M17B candidate has an unexpected revision vocal binding")
+                "generic M17B revision has an unexpected vocal binding")
         return None
+
+    existing = await session.get(PerformanceRevisionVocalBinding, revision.id)
     if existing is not None:
         await verify_revision_vocal_binding(session, settings, revision, existing)
         return existing
@@ -520,15 +756,51 @@ async def preserve_retarget_binding(
     source_revision: PerformanceRevision,
     candidate: PerformanceCandidate,
 ) -> PerformanceCandidateVocalBinding | None:
+    # SR26-01: classification is copied independently of the binding
+    # payload, and the source classification law runs FIRST — a VOCAL_V1
+    # source whose binding has totally disappeared refuses here.
+    source_cls = await session.get(
+        PerformanceRevisionSyncClassification, source_revision.id)
+    if source_cls is None:
+        raise corrupt(
+            "source revision has no PF-03 sync classification")
+    if source_cls.classification_schema_version != 1:
+        raise corrupt("PF-03 sync classification schema version is not 1")
+
+    # the retarget service constructs candidates directly (not through
+    # create_performance_candidate), so the classification companion is
+    # installed here in the same transaction.
+    existing_cls = await session.get(
+        PerformanceCandidateSyncClassification, candidate.id)
+    if existing_cls is None:
+        existing_cls = PerformanceCandidateSyncClassification(
+            performance_candidate_id=candidate.id,
+            sync_mode=source_cls.sync_mode,
+            classification_schema_version=1,
+            created_at=await db_now(session),
+        )
+        session.add(existing_cls)
+        await session.flush()
+    elif existing_cls.sync_mode != source_cls.sync_mode:
+        raise corrupt(
+            "retarget candidate PF-03 classification != source revision "
+            "classification")
+
+    if source_cls.sync_mode == "NONE":
+        if await session.get(PerformanceCandidateVocalBinding,
+                             candidate.id) is not None:
+            raise corrupt(
+                "non-dialogue retarget candidate unexpectedly has binding")
+        return None
+
     source = await session.get(PerformanceRevisionVocalBinding,
                                source_revision.id)
+    # verify_revision_sync_classification below proves existence for
+    # VOCAL_V1; total source loss refuses as corruption there.
+    await verify_revision_sync_classification(session, source_revision)
+    await verify_revision_vocal_binding(session, settings, source_revision, source)
     existing = await session.get(PerformanceCandidateVocalBinding,
                                  candidate.id)
-    if source is None:
-        if existing is not None:
-            raise corrupt("non-dialogue retarget candidate unexpectedly has binding")
-        return None
-    await verify_revision_vocal_binding(session, settings, source_revision, source)
     if existing is not None:
         for field in BINDING_FIELDS:
             if getattr(existing, field) != getattr(source, field):

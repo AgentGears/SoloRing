@@ -105,6 +105,20 @@ M16_SURFACE = (
     r"^scripts/m17b_validate_proof_map\.py$",
     r"^server/soloring/api/m17b_performance\.py$",
     r"^server/soloring/api/schemas/m17b_performance\.py$",
+    # M17C-A (PR #26, second-review reconciliation): reviewed successor
+    # surface + successor-maintained files swept for the 0020 head
+    r"^server/soloring/performance/m17c_[a-z_]+\.py$",
+    r"^server/soloring/api/m17c_performance\.py$",
+    r"^server/soloring/api/schemas/m17c_performance\.py$",
+    r"^server/soloring/recovery/m17c_verifier\.py$",
+    r"^server/alembic/versions/0020_m17c_dialogue_bound_performance"
+    r"\.py$",
+    r"^tests/m17c_seed\.py$",
+    r"^tests/test_m17c_[a-z_]+\.py$",
+    r"^SoloRing-PR26-First-Pass-Review-R1\.md$",
+    r"^SoloRing-PR26-Reconciliation-and-Correction-Record\.md$",
+    r"^tests/test_post_m13_next_security\.py$",
+    r"^tests/test_m14_base_corpus\.py$",
 
     # reviewed successor carves from the M16 correction rounds:
     # predecessor-test era head-pins/migration expectations, the m10f

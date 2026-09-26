@@ -107,3 +107,57 @@ class PerformanceRevisionVocalBinding(Base):
     binding_json: Mapped[str] = mapped_column(Text, nullable=False)
     binding_hash: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class PerformanceCandidateSyncClassification(Base):
+    """SR26-01 corrective: immutable PF-03 applicability discriminator.
+
+    One row per PerformanceCandidate, independent of the optional
+    binding payload, so total companion loss can never be reinterpreted
+    as generic M17B history. NONE prohibits a binding row; VOCAL_V1
+    requires exactly one.
+    """
+
+    __tablename__ = "performance_candidate_sync_classifications"
+    __table_args__ = (
+        CheckConstraint("sync_mode IN ('NONE', 'VOCAL_V1')",
+                        name="ck_pcsc_mode"),
+        CheckConstraint("classification_schema_version = 1",
+                        name="ck_pcsc_schema"),
+        ForeignKeyConstraint(
+            ["performance_candidate_id"], ["performance_candidates.id"],
+            name="fk_pcsc_parent", ondelete='RESTRICT'),
+    )
+
+    performance_candidate_id: Mapped[str] = mapped_column(
+        String(36), primary_key=True)
+    sync_mode: Mapped[str] = mapped_column(Text, nullable=False)
+    classification_schema_version: Mapped[int] = mapped_column(
+        Integer, nullable=False)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class PerformanceRevisionSyncClassification(Base):
+    """SR26-01 corrective: revision-side applicability discriminator.
+
+    Copied from the adopted candidate classification at adoption,
+    independently of the binding payload.
+    """
+
+    __tablename__ = "performance_revision_sync_classifications"
+    __table_args__ = (
+        CheckConstraint("sync_mode IN ('NONE', 'VOCAL_V1')",
+                        name="ck_prsc_mode"),
+        CheckConstraint("classification_schema_version = 1",
+                        name="ck_prsc_schema"),
+        ForeignKeyConstraint(
+            ["performance_revision_id"], ["performance_revisions.id"],
+            name="fk_prsc_parent", ondelete='RESTRICT'),
+    )
+
+    performance_revision_id: Mapped[str] = mapped_column(
+        String(36), primary_key=True)
+    sync_mode: Mapped[str] = mapped_column(Text, nullable=False)
+    classification_schema_version: Mapped[int] = mapped_column(
+        Integer, nullable=False)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)

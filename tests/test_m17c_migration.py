@@ -14,6 +14,8 @@ HEAD = "0020_m17c_performance_capture"
 TABLES = {
     "performance_candidate_vocal_bindings",
     "performance_revision_vocal_bindings",
+    "performance_candidate_sync_classifications",
+    "performance_revision_sync_classifications",
 }
 
 

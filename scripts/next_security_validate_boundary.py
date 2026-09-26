@@ -41,6 +41,34 @@ ALLOWLIST = (
     "post-m16-r3-freeze/",
     "post-m16-integrated-r3-evidence/harness/",
     "SoloRing-Post-M16-Integrated-Sequence-Regression-R3-CLOSED.md",
+    # PR #26 review records (M17C-A first pass + second-review
+    # reconciliation): reviewed evidence documents, no product code
+    "SoloRing-PR26-First-Pass-Review-R1.md",
+    "SoloRing-PR26-Reconciliation-and-Correction-Record.md",
+    # M17C-A (PR #26, second-review reconciliation): reviewed successor surface + successor-maintained
+    # files swept for the 0020 head-advance
+    "server/alembic/versions/0020_m17c_dialogue_bound_performance.py",
+    "server/soloring/api/m17c_performance.py",
+    "server/soloring/api/schemas/m17c_performance.py",
+    "server/soloring/recovery/m17c_verifier.py",
+    "tests/m17c_seed.py",
+    "tests/test_m17c_binding_authority.py",
+    "tests/test_m17c_binding_transitions.py",
+    "tests/test_m17c_first_pass_regressions.py",
+    "tests/test_m17c_migration.py",
+    "tests/test_m17c_route_ownership.py",
+    "tests/test_m17c_sr26_regressions.py",
+    "server/soloring/recovery/backup.py",
+    "server/soloring/recovery/successor_semantics.py",
+    "server/soloring/performance/revision.py",
+    "server/soloring/errors.py",
+    "tests/test_m14_b5_increment3.py",
+    "tests/test_m14_base_corpus.py",
+    "tests/test_m15_baseline.py",
+    "tests/test_post_m13_next_security.py",
+    "tests/test_post_m13_hygiene.py",
+    "tests/test_m16_recovery.py",
+    "scripts/m14_validate_baseline.py",
     # M17A implementation (frozen R5): the dialogue/vocal foundation
     # surface — performance package, migration, API, recovery
     # verifier, boundary validators, and the M17A tests.
@@ -522,6 +550,15 @@ def main(repo: Path = REPO) -> int:
                 "server/soloring/api/m17b_")
             or f.startswith(
                 "server/soloring/api/schemas/m17b_")
+            # M17C-A (PR #26, second-review reconciled)
+            or f.startswith(
+                "server/alembic/versions/0020_")
+            or f.startswith(
+                "server/soloring/recovery/m17c_")
+            or f.startswith(
+                "server/soloring/api/m17c_")
+            or f.startswith(
+                "server/soloring/api/schemas/m17c_")
         ):
             errors.append(f"backend change outside the security slice: {f}")
         if (f.startswith("server/alembic/")
@@ -533,6 +570,9 @@ def main(repo: Path = REPO) -> int:
                     "server/alembic/versions/0018_m17a_dialogue_vocal_foundation.py",
                     # M17B (frozen R7): the performance migration
                     "server/alembic/versions/0019_m17b_performance_revisions.py",
+                    # M17C-A (PR #26, second-review reconciled)
+                    "server/alembic/versions/0020_m17c_dialogue_bound_"
+                    "performance.py",
                 )):
             errors.append(f"alembic change outside the security slice: {f}")
         if not path_allowed(f, allowlist):
@@ -548,11 +588,13 @@ def main(repo: Path = REPO) -> int:
     admitted_0018 = "0018_m17a_dialogue_vocal_foundation.py"
     # M17B (frozen R7): the performance-revisions migration
     admitted_0019 = "0019_m17b_performance_revisions.py"
+    # M17C-A (PR #26, second-review reconciled)
+    admitted_0020 = "0020_m17c_dialogue_bound_performance.py"
     mig_beyond = [
         p.name for p in versions.glob("*.py")
         if p.stem >= "0015" and p.name not in (
-            admitted_0015, admitted_0016, admitted_0017, 
-            admitted_0018, admitted_0019)
+            admitted_0015, admitted_0016, admitted_0017,
+            admitted_0018, admitted_0019, admitted_0020)
     ]
     if mig_beyond:
         errors.append(

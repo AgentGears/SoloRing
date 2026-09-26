@@ -93,6 +93,17 @@ REVIEWED_SUCCESSOR_PATHS = frozenset({
     "server/soloring/api/main.py",
     "server/soloring/db/models.py",
     "server/soloring/errors.py",
+    # M17C-A (PR #26, second-review reconciliation): the dialogue-bound
+    # performance surface lawfully owns the PerformanceRevision
+    # vocabulary
+    "server/soloring/performance/m17c_binding.py",
+    "server/soloring/performance/m17c_contract.py",
+    "server/soloring/performance/m17c_models.py",
+    "server/soloring/performance/m17c_transition.py",
+    "server/soloring/api/m17c_performance.py",
+    "server/soloring/api/schemas/m17c_performance.py",
+    "server/soloring/recovery/m17c_verifier.py",
+    "server/alembic/versions/0020_m17c_dialogue_bound_performance.py",
 })
 
 FORBIDDEN_PATTERNS: list[tuple[str, str]] = [

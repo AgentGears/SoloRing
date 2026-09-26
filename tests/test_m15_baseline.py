@@ -52,20 +52,25 @@ PROHIBITED_PREFIXES = (
 )
 # Frozen R4 §28/BASE:03 — the M11–M14 validator battery CI wires ahead
 # of pytest; M15 must never regress a frozen predecessor gate.
-# M17C-A (PR #26, mirroring the CI retirement in .github/workflows/
-# ci.yml): the boundary/source-fit validators are frozen-slice-scoped
-# and reject successor milestones by design, so they are retired here
-# alongside their CI steps. Proof maps and the admitted-set-swept
-# m14 baseline validator remain enforced.
+# SR26-04 (second-review reconciliation): every predecessor validator
+# is individually classified. The boundary/source-fit/baseline gates
+# are successor-aware (exact reviewed successor paths, admitted
+# successor migrations/tables) and are KEPT and swept per milestone;
+# none is retired without a named replacement gate.
 _PREDECESSOR_VALIDATORS = (
     "m10f_validate_proof_map.py",
     "m11_validate_proof_map.py",
     "m12_validate_proof_map.py",
     "m13_validate_proof_map.py",
+    "m13_validate_boundary.py",
     "hygiene_validate_proof_map.py",
+    "hygiene_validate_boundary.py",
     "next_security_validate_proof_map.py",
+    "next_security_validate_boundary.py",
     "m14_validate_baseline.py",
     "m14_validate_proof_map.py",
+    "m14_validate_boundary.py",
+    "m14_validate_source_fit.py",
 )
 
 

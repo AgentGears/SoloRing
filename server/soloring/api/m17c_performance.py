@@ -209,10 +209,15 @@ async def create_dialogue_bound_performance_candidate(
 )
 async def get_candidate_vocal_binding(
     candidate_id: str,
+    request: Request,
     session: AsyncSession = Depends(get_session),
 ):
-    row = await m17c_svc.get_candidate_vocal_binding(
-        session, candidate_id=candidate_id)
+    # SR26-03: authoritative reads verify the PF-03 classification,
+    # canonical binding bytes/hash, parent/companion closure, and exact
+    # immutable identity before representing the binding as authority.
+    # Damaged PF-03 closure fails closed as corruption (500), not 404.
+    row = await m17c_svc.read_candidate_vocal_binding(
+        session, request.app.state.settings, candidate_id=candidate_id)
     return VocalBindingRead(**m17c_svc.binding_view(row))
 
 
@@ -222,8 +227,9 @@ async def get_candidate_vocal_binding(
 )
 async def get_revision_vocal_binding(
     revision_id: str,
+    request: Request,
     session: AsyncSession = Depends(get_session),
 ):
-    row = await m17c_svc.get_revision_vocal_binding(
-        session, revision_id=revision_id)
+    row = await m17c_svc.read_revision_vocal_binding(
+        session, request.app.state.settings, revision_id=revision_id)
     return VocalBindingRead(**m17c_svc.binding_view(row))

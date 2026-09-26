@@ -327,6 +327,11 @@ def install_successor_semantics(recovery: ModuleType) -> None:
     )
     recovery._verify_m17b_performance_state = (
         verify_m17b_performance_state)
+    from soloring.recovery.m17c_verifier import (
+        verify_m17c_binding_state,
+    )
+    recovery._verify_m17c_binding_state = (
+        verify_m17c_binding_state)
 
     def _verify_head_semantics(staged_db: Path, head: str,
                                blob_root=None) -> None:
@@ -356,6 +361,11 @@ def install_successor_semantics(recovery: ModuleType) -> None:
         if head == getattr(recovery, "M17A_ALEMBIC_HEAD", None):
             return
         recovery._verify_m17b_performance_state(staged_db, blob_root)
+        if head == getattr(recovery, "M17B_ALEMBIC_HEAD", None):
+            return
+        # SR26-02 corrective: head 0020 verifies the PF-03 authority it
+        # introduced; it is never certified only through M17B depth.
+        recovery._verify_m17c_binding_state(staged_db, blob_root)
 
     recovery._verify_head_semantics = _verify_head_semantics
 
@@ -400,6 +410,8 @@ def install_successor_semantics(recovery: ModuleType) -> None:
         if head in (getattr(recovery, "M17B_ALEMBIC_HEAD", None),
                     getattr(recovery, "M17C_A_ALEMBIC_HEAD", None)):
             recovery._verify_m17b_performance_state(staged_db, blob_root)
+        if head == getattr(recovery, "M17C_A_ALEMBIC_HEAD", None):
+            recovery._verify_m17c_binding_state(staged_db, blob_root)
         return original_enumerate(staged_db, expected_columns)
 
     recovery._enumerate_liveness = _enumerate_with_successor_semantics
