@@ -66,7 +66,7 @@ ALLOWED_PATTERNS = [
     r"^server/alembic/versions/0020_m17c_dialogue_bound_performance"
     r"\.py$",
     r"^tests/m17c_seed\.py$",
-    r"^tests/test_m17c_[a-z_]+\.py$",
+    r"^tests/test_m17c_[a-z0-9_]+\.py$",
     r"^tests/test_post_m13_next_security\.py$",
     r"^tests/test_m14_b5_increment3\.py$",
     r"^tests/test_m14_base_corpus\.py$",

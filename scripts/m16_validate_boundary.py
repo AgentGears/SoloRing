@@ -114,7 +114,7 @@ M16_SURFACE = (
     r"^server/alembic/versions/0020_m17c_dialogue_bound_performance"
     r"\.py$",
     r"^tests/m17c_seed\.py$",
-    r"^tests/test_m17c_[a-z_]+\.py$",
+    r"^tests/test_m17c_[a-z0-9_]+\.py$",
     r"^SoloRing-PR26-First-Pass-Review-R1\.md$",
     r"^SoloRing-PR26-Reconciliation-and-Correction-Record\.md$",
     r"^tests/test_post_m13_next_security\.py$",
