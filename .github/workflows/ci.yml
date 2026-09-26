@@ -71,6 +71,8 @@ jobs:
           tests/test_m17c_binding_authority.py
           tests/test_m17c_binding_transitions.py
           tests/test_m17c_migration.py
+          tests/test_m17c_first_pass_regressions.py
+          tests/test_m17c_route_ownership.py
 
       - name: No repo-root generated residue
         run: python -c "from pathlib import Path; assert not Path('m10f-scale-pkgs').exists(), 'repo-root residue present'"
@@ -97,7 +99,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: "22"
           cache: npm
