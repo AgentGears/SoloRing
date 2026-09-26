@@ -43,7 +43,12 @@ from soloring.workflows.artifact_store import WorkflowArtifactStore
 # verified through M13 + M14 + M15 + M16 semantics.
 # M17A (frozen R5 §12): the dialogue/vocal verifier advances the
 # expected head to 0018 and adds three physical Blob-FK paths.
-EXPECTED_ALEMBIC_HEAD = "0019_m17b_performance_revisions"
+# M17C-A (PR #26 first-pass sweep): migration 0020 adds the two
+# dialogue-bound binding companion tables and NO new Blob-FK paths, so
+# the expected head advances to 0020 while restores verify through the
+# exact published M17B-depth semantics; the dedicated M17C recovery
+# verifier lands with the M17C-C slice before publication.
+EXPECTED_ALEMBIC_HEAD = "0020_m17c_performance_capture"
 BACKUP_MANIFEST_SCHEMA_VERSION = 1
 
 # M13 (frozen R3 §23): restore is head-dispatched across five heads. M14
@@ -59,6 +64,7 @@ M15_ALEMBIC_HEAD = "0016_m15_revision_compatibility"
 M16_ALEMBIC_HEAD = "0017_m16_intra_shot_consequences"
 M17A_ALEMBIC_HEAD = "0018_m17a_dialogue_vocal_foundation"
 M17B_ALEMBIC_HEAD = "0019_m17b_performance_revisions"
+M17C_A_ALEMBIC_HEAD = "0020_m17c_performance_capture"
 SUPPORTED_RESTORE_ALEMBIC_HEADS = frozenset({
     PRE_M11_ALEMBIC_HEAD,
     M11_ALEMBIC_HEAD,
@@ -79,6 +85,11 @@ SUPPORTED_RESTORE_ALEMBIC_HEADS = frozenset({
     # performance/retarget semantic verifier; physical Blob inventory
     # is exactly thirteen paths.
     M17B_ALEMBIC_HEAD,
+    # M17C-A head (PR #26): restores at 0020 verify through the exact
+    # published M17B-depth semantics — the binding companions add no
+    # Blob-FK path, so the physical inventory stays thirteen paths
+    # until the M17C-C recovery slice.
+    M17C_A_ALEMBIC_HEAD,
 })
 
 ARTIFACT_KINDS = (
@@ -168,7 +179,9 @@ def _blob_fk_policy_for_head(head: str) -> frozenset:
         return M14_BLOB_FK_COLUMNS
     if head == M17A_ALEMBIC_HEAD:
         return M17A_BLOB_FK_COLUMNS
-    if head == M17B_ALEMBIC_HEAD:
+    if head in (M17B_ALEMBIC_HEAD, M17C_A_ALEMBIC_HEAD):
+        # M17C-A adds no Blob FK (binding companions reference no
+        # blobs): 0020 shares the exact thirteen-path M17B inventory.
         return M17B_BLOB_FK_COLUMNS
     raise RecoveryCorruption(f"unsupported recovery head {head!r}.")
 

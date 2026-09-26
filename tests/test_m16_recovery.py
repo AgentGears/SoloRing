@@ -28,7 +28,7 @@ async def _settings(client):
 
 
 
-async def _stamp_alembic(client, head="0019_m17b_performance_revisions"):
+async def _stamp_alembic(client, head="0020_m17c_performance_capture"):  # M17C-A advances the head
     """The conftest engine builds schema via create_all (no
     alembic_version); the recovery machinery requires the table."""
     from sqlalchemy import text as _text
@@ -84,7 +84,7 @@ async def test_recovery_01(client, factory,
         client, factory)
     await _stamp_alembic(client)
     manifest, dest = await _backup_and_restore(client, tmp_path, "depth")
-    assert manifest["alembic_version"] == "0019_m17b_performance_revisions"
+    assert manifest["alembic_version"] == "0020_m17c_performance_capture"
     import sqlite3
 
     con = sqlite3.connect(str(dest / "soloring.db"))
@@ -99,7 +99,7 @@ async def test_recovery_01(client, factory,
             "WHERE shot_revision_id = ?", (revision.id,)).fetchone()[0]
     finally:
         con.close()
-    assert head == "0019_m17b_performance_revisions"
+    assert head == "0020_m17c_performance_capture"
     assert events == 1
     assert children == 1
 
@@ -424,7 +424,7 @@ async def test_recovery_07(client, factory):
     SH = _rb.SUPPORTED_RESTORE_ALEMBIC_HEADS
     policy = _rb._blob_fk_policy_for_head
 
-    assert EH == "0019_m17b_performance_revisions"
+    assert EH == "0020_m17c_performance_capture"
     assert set(SH) == {
         "0011_m10_derived_spatial_execution",
         "0012_m11_reusable_production_revisions",
@@ -435,6 +435,7 @@ async def test_recovery_07(client, factory):
         "0017_m16_intra_shot_consequences",
         "0018_m17a_dialogue_vocal_foundation",
         "0019_m17b_performance_revisions",
+        "0020_m17c_performance_capture",
     }
 
 async def test_recovery_08(client, factory):

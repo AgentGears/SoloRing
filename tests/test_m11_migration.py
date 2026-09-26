@@ -266,5 +266,5 @@ def test_migration_head_is_0012(tmp_path, monkeypatch):
     ver = con.execute("SELECT version_num FROM alembic_version").fetchone()[0]
     files = sorted(p.name for p in VERSIONS.glob("0*.py"))
     con.close()
-    assert ver == "0019_m17b_performance_revisions"  # M15A advanced to 0016; M16-A advances the head
-    assert files[-1] == "0019_m17b_performance_revisions.py"
+    assert ver == "0020_m17c_performance_capture"  # M17C-A advances the head
+    assert files[-1] == "0020_m17c_dialogue_bound_performance.py"

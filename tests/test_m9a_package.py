@@ -635,7 +635,7 @@ async def test_no_migration_added_and_reference_role_still_present():
         p.name for p in
         (BASE_DIR / "server" / "alembic" / "versions").glob("0*.py")
     )
-    assert versions[-1] == "0019_m17b_performance_revisions.py"
+    assert versions[-1] == "0020_m17c_dialogue_bound_performance.py"
     # M10A added 0010/0011 (frozen r3 §7/§102); M9 itself added none beyond
     # updating predecessor head pins.
     # generation_inputs.reference_role remains the published fact.

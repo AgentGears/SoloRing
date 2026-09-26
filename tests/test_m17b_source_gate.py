@@ -78,8 +78,10 @@ def test_h05_no_shotrevision_schema_8():
                    for t in tabs)
     vers = sorted(p.name for p in
                   (SERVER / "alembic" / "versions").glob("*.py"))
-    assert vers[-1] == "0019_m17b_performance_revisions.py"
-    assert not any("schema_8" in v or "0020" in v for v in vers)
+    # M17C-A (successor-admitted): the one migration beyond 0019 is
+    # 0020; schema-8 Shot capture remains a future M17C-C surface.
+    assert vers[-1] == "0020_m17c_dialogue_bound_performance.py"
+    assert not any("schema_8" in v for v in vers)
 
 
 def test_h06_no_generation_workflowspec_performance_schema():

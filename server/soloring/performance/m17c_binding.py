@@ -46,7 +46,7 @@ from soloring.performance.models import (
     VocalCandidate,
     VocalPerformanceRevision,
 )
-from soloring.performance.temporal import canonical_rational, performance_ms
+from soloring.performance.temporal import canonical_rational
 
 _BINDING_INPUT_KEYS = {
     "vocal_performance_revision_id",
@@ -233,15 +233,18 @@ async def verify_vocal_performance_integrity(
 
 
 def _vocal_performance_interval(row) -> tuple[Fraction, Fraction]:
+    # Exact arithmetic without the persisted-rational i64 bound: the
+    # induced interval is a derived check-time value, never persisted
+    # in the binding (only the origin num/den pair is). A lawful origin
+    # like (2**63-1)/(2**63-2) must not be rejected because an
+    # intermediate numerator crosses the storage range before
+    # reduction; persistence bounds apply where values are stored.
     start = Fraction(row.performance_origin_num, row.performance_origin_den)
-    end = performance_ms(
-        row.source_end_sample_exclusive,
-        origin_num=row.performance_origin_num,
-        origin_den=row.performance_origin_den,
-        source_start_sample=row.source_start_sample,
-        sample_rate_hz=row.sample_rate_hz,
+    delta_ms = Fraction(
+        (row.source_end_sample_exclusive - row.source_start_sample) * 1000,
+        row.sample_rate_hz,
     )
-    return start, end
+    return start, start + delta_ms
 
 
 def _candidate_domain(candidate: PerformanceCandidate) -> tuple[Fraction, Fraction]:

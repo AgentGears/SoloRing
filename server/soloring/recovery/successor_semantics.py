@@ -372,23 +372,33 @@ def install_successor_semantics(recovery: ModuleType) -> None:
         root (backup source root / restore staged tree), never the
         process-global Settings singleton."""
         head = recovery._staged_db_head(staged_db)
+        # M17C-A (PR #26 first-pass sweep): head 0020 verifies through
+        # the exact published M17B-depth chains — the binding
+        # companions add surfaces covered by the future M17C-C
+        # verifier, but every predecessor verifier that applies at 0019
+        # also applies at 0020.
         if head in (recovery.M14_ALEMBIC_HEAD, recovery.M15_ALEMBIC_HEAD,
                     recovery.M16_ALEMBIC_HEAD,
                     getattr(recovery, "M17A_ALEMBIC_HEAD", None),
-                    getattr(recovery, "M17B_ALEMBIC_HEAD", None)):
+                    getattr(recovery, "M17B_ALEMBIC_HEAD", None),
+                    getattr(recovery, "M17C_A_ALEMBIC_HEAD", None)):
             recovery._verify_m14_observation_state(staged_db)
         if head in (recovery.M15_ALEMBIC_HEAD, recovery.M16_ALEMBIC_HEAD,
                     getattr(recovery, "M17A_ALEMBIC_HEAD", None),
-                    getattr(recovery, "M17B_ALEMBIC_HEAD", None)):
+                    getattr(recovery, "M17B_ALEMBIC_HEAD", None),
+                    getattr(recovery, "M17C_A_ALEMBIC_HEAD", None)):
             recovery._verify_m15_compatibility_state(staged_db)
         if head in (recovery.M16_ALEMBIC_HEAD,
                     getattr(recovery, "M17A_ALEMBIC_HEAD", None),
-                    getattr(recovery, "M17B_ALEMBIC_HEAD", None)):
+                    getattr(recovery, "M17B_ALEMBIC_HEAD", None),
+                    getattr(recovery, "M17C_A_ALEMBIC_HEAD", None)):
             recovery._verify_m16_intra_shot_state(staged_db)
         if head in (getattr(recovery, "M17A_ALEMBIC_HEAD", None),
-                    getattr(recovery, "M17B_ALEMBIC_HEAD", None)):
+                    getattr(recovery, "M17B_ALEMBIC_HEAD", None),
+                    getattr(recovery, "M17C_A_ALEMBIC_HEAD", None)):
             recovery._verify_m17a_dialogue_vocal_state(staged_db)
-        if head == getattr(recovery, "M17B_ALEMBIC_HEAD", None):
+        if head in (getattr(recovery, "M17B_ALEMBIC_HEAD", None),
+                    getattr(recovery, "M17C_A_ALEMBIC_HEAD", None)):
             recovery._verify_m17b_performance_state(staged_db, blob_root)
         return original_enumerate(staged_db, expected_columns)
 

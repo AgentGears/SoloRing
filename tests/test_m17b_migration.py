@@ -39,7 +39,7 @@ def _fresh_upgrade_reaches_0019(tmp_path):
     tabs = {r[0] for r in con.execute(
         "SELECT name FROM sqlite_master WHERE type='table'")}
     con.close()
-    assert ver == "0019_m17b_performance_revisions"
+    assert ver == "0020_m17c_performance_capture"  # M17C-A advances the head
     assert set(_M17B_TABLES) <= tabs
     assert len([t for t in tabs if t in _M17B_TABLES]) == 4
 
@@ -51,8 +51,12 @@ def _i02_exactly_four_m17b_tables(tmp_path):
     tabs = {r[0] for r in con.execute(
         "SELECT name FROM sqlite_master WHERE type='table'")}
     con.close()
+    # M17C-A (PR #26): the performance-prefixed set is the four M17B
+    # tables plus the two dialogue-bound binding companions.
     assert {t for t in tabs if t.startswith("performance_")} == \
-        set(_M17B_TABLES)
+        set(_M17B_TABLES) | {
+            "performance_candidate_vocal_bindings",
+            "performance_revision_vocal_bindings"}
 
 
 def _i03_predecessor_tables_unchanged(tmp_path):
@@ -60,9 +64,14 @@ def _i03_predecessor_tables_unchanged(tmp_path):
     _alembic(db18, "upgrade",
              "0018_m17a_dialogue_vocal_foundation")
     _alembic(db19, "upgrade", "head")
+    # M17C-A (PR #26): the two binding companions are M17C additions,
+    # excluded alongside the four M17B tables.
+    _excluded = tuple(_M17B_TABLES) + (
+        "performance_candidate_vocal_bindings",
+        "performance_revision_vocal_bindings")
     q = ("SELECT name, sql FROM sqlite_master WHERE type='table' "
          "AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'alembic%' "
-         "AND name NOT IN {}".format(str(tuple(_M17B_TABLES))))
+         "AND name NOT IN {}".format(str(_excluded)))
     def _normalize(rows):
         # alembic emits table-level constraints in nondeterministic
         # ORDER across runs; compare the constraint SET per table
