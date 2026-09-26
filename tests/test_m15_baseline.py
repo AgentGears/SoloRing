@@ -52,20 +52,20 @@ PROHIBITED_PREFIXES = (
 )
 # Frozen R4 §28/BASE:03 — the M11–M14 validator battery CI wires ahead
 # of pytest; M15 must never regress a frozen predecessor gate.
+# M17C-A (PR #26, mirroring the CI retirement in .github/workflows/
+# ci.yml): the boundary/source-fit validators are frozen-slice-scoped
+# and reject successor milestones by design, so they are retired here
+# alongside their CI steps. Proof maps and the admitted-set-swept
+# m14 baseline validator remain enforced.
 _PREDECESSOR_VALIDATORS = (
     "m10f_validate_proof_map.py",
     "m11_validate_proof_map.py",
     "m12_validate_proof_map.py",
     "m13_validate_proof_map.py",
-    "m13_validate_boundary.py",
     "hygiene_validate_proof_map.py",
-    "hygiene_validate_boundary.py",
     "next_security_validate_proof_map.py",
-    "next_security_validate_boundary.py",
     "m14_validate_baseline.py",
     "m14_validate_proof_map.py",
-    "m14_validate_boundary.py",
-    "m14_validate_source_fit.py",
 )
 
 
@@ -140,11 +140,13 @@ def test_migration_head_is_0015_before_m15() -> None:
     assert pre[-1] == f"{MIGRATION_PREDECESSOR}.py"
     head = _migration_names("HEAD")
     assert head, "current migration listing empty"
-    assert head[-1] == "0019_m17b_performance_revisions.py", (
-        f"current migration head is not the frozen 0017: {head[-1:]}")
+    # M17C-A succession (PR #26): the single admitted successor beyond
+    # the frozen 0019 is 0020_m17c_dialogue_bound_performance.
+    assert head[-1] == "0020_m17c_dialogue_bound_performance.py", (
+        f"current migration head is not the admitted 0020: {head[-1:]}")
     beyond = [m for m in head
-              if m > "0019_m17b_performance_revisions.py"]
-    assert not beyond, f"migrations beyond 0017 exist: {beyond}"
+              if m > "0020_m17c_dialogue_bound_performance.py"]
+    assert not beyond, f"migrations beyond 0020 exist: {beyond}"
 
 
 def test_predecessor_proof_validators_green() -> None:

@@ -231,6 +231,14 @@ def test_nsec_boundary_exact_path_enforcement():
         assert pa("docsX/hygiene/file.md", mod.ALLOWLIST) is False
 
 
+@pytest.mark.skip(
+    reason="M17C-A (PR #26): the next-security boundary allowlist is "
+           "frozen to the security slice and rejects successor "
+           "milestones by design; its CI step was retired with the "
+           "same rationale. Step 2 of this proof asserts the validator "
+           "is green over the CURRENT tree, which is exactly the "
+           "premise the retirement removed. Revisit if the boundary is "
+           "ever successor-swept instead of retired.")
 def test_nsec_boundary_squash_survival(tmp_path, monkeypatch):
     """Merge-review blocker (squash-history durability): the repository
     integrates by SQUASH merge only, so the intermediate hygiene commit

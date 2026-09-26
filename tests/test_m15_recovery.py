@@ -43,7 +43,7 @@ async def _assess_and_apply(client, base):
     return result
 
 
-async def _stamp_alembic(client, head="0019_m17b_performance_revisions"):
+async def _stamp_alembic(client, head="0020_m17c_performance_capture"):  # M17C-A advances the head
     """The conftest engine builds schema via create_all (no
     alembic_version); the backup machinery requires the table."""
     engine = client._transport.app.state.engine
@@ -125,7 +125,7 @@ async def test_0016_backup_restore_preserves_m15_rows_and_hashes(
     await backup(settings, backup_root)
     manifest = json.loads((backup_root / "backup-manifest.json")
                           .read_text(encoding="utf-8"))
-    assert manifest["alembic_version"] == "0019_m17b_performance_revisions"
+    assert manifest["alembic_version"] == "0020_m17c_performance_capture"
 
     # M16-C certified the 0017 head, so the live backup runs there; the
     # REC:01 proof stays pinned to the 0016 posture via the REC:02

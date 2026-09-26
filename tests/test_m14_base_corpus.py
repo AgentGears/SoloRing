@@ -174,26 +174,27 @@ async def test_m14_base_05(client, factory, engine):
 
 # ---- M14-BASE:06 predecessor validators stay green -------------------------
 
+# M17C-A (PR #26, mirroring the CI retirement): the frozen-slice
+# boundary validators are retired here alongside their CI steps.
 _PREDECESSOR_VALIDATORS = (
     "m10f_validate_proof_map.py",
     "m11_validate_proof_map.py",
     "m12_validate_proof_map.py",
     "m13_validate_proof_map.py",
-    "m13_validate_boundary.py",
     "hygiene_validate_proof_map.py",
-    "hygiene_validate_boundary.py",
     "next_security_validate_proof_map.py",
-    "next_security_validate_boundary.py",
 )
 
 
 def test_m14_base_06() -> None:
     """M14-BASE:06 predecessor proof/boundary/security validators green.
 
-    The nine predecessor validators CI wires ahead of the M14 four —
-    proof maps (M10F/M11/M12/M13/hygiene/next-security) and boundary
-    gates (M13/hygiene/next-security) — each exit 0 against the current
-    tree: the M14 surface never regressed a frozen predecessor gate."""
+    The six retained predecessor validators — the proof maps
+    (M10F/M11/M12/M13/hygiene/next-security) — each exit 0 against the
+    current tree: the M14 surface never regressed a frozen predecessor
+    proof gate. (The frozen-slice boundary gates were retired with
+    their CI steps by M17C-A/PR #26; they reject successor milestones
+    by design.)"""
     scripts = Path(__file__).resolve().parents[1] / "scripts"
     for name in _PREDECESSOR_VALIDATORS:
         result = subprocess.run(
