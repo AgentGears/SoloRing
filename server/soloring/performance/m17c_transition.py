@@ -1,8 +1,8 @@
 """M17C-aware wrappers for the published M17B authority transitions.
 
-The public M17B routes continue to own adoption/retarget entry points. These
-wrappers preserve the predecessor behavior for generic candidates while adding
-the optional PF-03 companion law when a dialogue-bound binding is present.
+The M17C public transition routes preserve predecessor behavior for generic
+candidates while adding the optional PF-03 companion law when dialogue-bound
+binding authority is present.
 """
 
 from __future__ import annotations
@@ -13,7 +13,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from soloring.performance import m17c_binding as binding_svc
 from soloring.performance import retarget as retarget_svc
 from soloring.performance import revision as revision_svc
-from soloring.performance.m17c_models import PerformanceRevisionVocalBinding
+from soloring.performance.m17c_contract import corrupt
+from soloring.performance.m17c_models import (
+    PerformanceCandidateVocalBinding,
+    PerformanceRevisionVocalBinding,
+)
 from soloring.performance.models import PerformanceRevision
 
 
@@ -66,13 +70,25 @@ async def create_retarget_candidate(
 ):
     source = await revision_svc.get_performance_revision(
         session, revision_id=revision_id)
-    source_binding = await session.get(PerformanceRevisionVocalBinding,
-                                       source.id)
+
+    # PF-03 classification is a two-sided closure law. A missing revision
+    # companion cannot silently downgrade an adopted dialogue-bound revision
+    # into generic M17B history: the adopted candidate companion proves that
+    # the revision companion must exist. Conversely, a revision companion
+    # without its source candidate companion is equally corrupt.
+    candidate_binding = await session.get(
+        PerformanceCandidateVocalBinding, source.adopted_candidate_id)
+    source_binding = await session.get(
+        PerformanceRevisionVocalBinding, source.id)
+    if (candidate_binding is None) != (source_binding is None):
+        raise corrupt(
+            "adopted PerformanceRevision PF-03 companion closure is incomplete")
     if source_binding is not None:
-        # C05: corrupted binding/VP lineage refuses before a new retarget
-        # candidate can become fresh evidence.
+        # Corrupted binding/VP lineage refuses before a new retarget candidate
+        # can become fresh evidence.
         await binding_svc.verify_revision_vocal_binding(
             session, settings, source, source_binding)
+
     candidate = await retarget_svc.create_retarget_candidate(
         session,
         settings,
@@ -86,4 +102,14 @@ async def create_retarget_candidate(
     )
     await binding_svc.preserve_retarget_binding(
         session, settings, source_revision=source, candidate=candidate)
+
+    # Defend the same closure law across the complete transaction. PF-03 rows
+    # are immutable through the public API, but a damaged database must still
+    # fail closed if the source companion disappears between precheck and copy.
+    if source_binding is not None:
+        copied = await session.get(
+            PerformanceCandidateVocalBinding, candidate.id)
+        if copied is None:
+            raise corrupt(
+                "dialogue-bound retarget candidate is missing its PF-03 binding")
     return candidate
