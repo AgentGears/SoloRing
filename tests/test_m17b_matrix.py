@@ -758,6 +758,14 @@ async def test_x13_alignment_from_another_project_rejects_at_creation_and_adopti
             "4500, 1, :h, :h, 1, 'authored', 1, :j, :ph, :n)"),
             {"i": cid, "p": pid, "s": eid, "h": bh, "j": prov_json,
              "ph": canonical_hash(envelope), "n": now})
+        # SR26-01: raw-inserted fixture candidates carry their NONE
+        # classification companion
+        await conn.execute(text(
+            "INSERT INTO performance_candidate_sync_classifications "
+            "(performance_candidate_id, sync_mode, "
+            "classification_schema_version, created_at) VALUES "
+            "(:i, 'NONE', 1, :n)"),
+            {"i": cid, "n": now})
     r2 = await client.post(f"/performance-candidates/{cid}/adopt",
                            json={"adopted_by": "d"})
     assert r2.status_code in (403, 422), r2.text
@@ -1087,6 +1095,14 @@ async def test_x19_adoption_rejects_unresolved_retarget_evidence(client):
             "'performance-profile/1', 0, 1, 4500, 1, ?, ?, 1, "
             "'retargeted', 1, ?, ?, '2026-01-01T00:00:00.000Z')",
             (cid, pid, eid, bh, bh, prov_json, prov_hash))
+        # SR26-01: raw-inserted fixture candidates carry their NONE
+        # classification companion
+        con.execute(
+            "INSERT INTO performance_candidate_sync_classifications "
+            "(performance_candidate_id, sync_mode, "
+            "classification_schema_version, created_at) VALUES "
+            "(?, 'NONE', 1, '2026-01-01T00:00:00.000Z')",
+            (cid,))
         con.commit()
         con.close()
         return cid
@@ -1169,6 +1185,14 @@ async def test_x19_adoption_rejects_unresolved_retarget_evidence(client):
         "'performance-profile/1', 0, 1, 4500, 1, ?, ?, 1, "
         "'retargeted', 1, ?, ?, '2026-01-01T00:00:00.000Z')",
         (pid, eid, dbh, dbh, _cjs(env1b), _ch(env1b)))
+    # SR26-01: raw-inserted fixture candidates carry their NONE
+    # classification companion
+    con.execute(
+        "INSERT INTO performance_candidate_sync_classifications "
+        "(performance_candidate_id, sync_mode, "
+        "classification_schema_version, created_at) VALUES "
+        "('00000000-0000-4000-8000-0000000x19b', 'NONE', 1, "
+        "'2026-01-01T00:00:00.000Z')")
     con.commit()
     con.close()
     r = await client.post(
