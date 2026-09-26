@@ -1,7 +1,8 @@
 """M17C dialogue-bound Performance API schemas.
 
-Request schemas are closed.  Authority integers are StrictInt; services remain
-responsible for canonical rational reduction and cross-row integrity.
+Request schemas are closed. Authority integers are strict and constrained to
+SQLite's signed 64-bit INTEGER domain; services remain responsible for
+canonical rational reduction and cross-row integrity.
 """
 
 from __future__ import annotations
@@ -12,14 +13,17 @@ from pydantic import BaseModel, ConfigDict, Field, StrictInt
 
 from soloring.api.schemas.m17b_performance import ChannelIn, TemporalDomainIn
 
+SQLITE_INT_MIN = -(2**63)
+SQLITE_INT_MAX = 2**63 - 1
+
 
 class _Closed(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
 class RationalIn(_Closed):
-    num: StrictInt
-    den: StrictInt
+    num: StrictInt = Field(ge=SQLITE_INT_MIN, le=SQLITE_INT_MAX)
+    den: StrictInt = Field(ge=1, le=SQLITE_INT_MAX)
 
 
 class SourceProvenanceIn(_Closed):
@@ -43,9 +47,9 @@ class SourceProvenanceIn(_Closed):
 
 class VocalBindingIn(_Closed):
     vocal_performance_revision_id: str
-    source_start_sample: StrictInt
-    source_end_sample_exclusive: StrictInt
-    sample_rate_hz: StrictInt
+    source_start_sample: StrictInt = Field(ge=0, le=SQLITE_INT_MAX)
+    source_end_sample_exclusive: StrictInt = Field(ge=1, le=SQLITE_INT_MAX)
+    sample_rate_hz: StrictInt = Field(ge=1, le=SQLITE_INT_MAX)
     performance_origin_ms: RationalIn
 
 
