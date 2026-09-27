@@ -105,3 +105,39 @@ No heuristic preservation: the unpublished migration identity is renamed `0020_m
 ## Frozen for the final Codex delta review
 
 Cycle-2 delta: `44f7dc6..d9b1132` (commits `8c1a4b6` DR26-01..04, `d9b1132` allowlist sweep) plus this record update. Scope: classification closure (DR26-01), articulation-in-reads (DR26-02), the ADMISSION/HISTORICAL context (DR26-03), and the r2 migration identity (DR26-04). SR26-04 gate restoration and SR26-06 centralization remain closed per the reconciliation; the live-GPU item remains an operator environment requalification matter, not evidence against this code.
+
+---
+
+# Corrective cycle 3 (C2-01..04) — 2026-09-27
+
+The final delta review accepted four findings (C2-01/02/03 blocking; C2-04 evidence defect). All four are implemented per the prescribed minimal shapes; DR26-02 and DR26-04 remain resolved (not regressed); the cycle-3 delta `1a920d0..` head below is frozen for the final delta-only review of exactly that range.
+
+## C2-01 — complete adopted-pair closure: CLOSED
+
+Implemented exactly the preferred minimal shape (no new bespoke pair verifier): `verify_revision_sync_classification` now (1) loads the adopted candidate, (2) calls `verify_candidate_sync_classification` — the candidate-LOCAL verifier with its full cardinality law, not a bare classification fetch — then (3) validates the revision's own classification/schema/cardinality and (4) requires mode equality before (5) returning. One non-recursive call proves candidate-local cardinality + revision-local cardinality + pair equality. The candidate authoritative GET invokes that full revision verifier on BOTH return paths (honest-NONE 404 and binding-return) whenever the candidate is adopted, replacing the two branch-local comparisons; the revision GET already calls it before its 404 path.
+
+Regressions (all green): V1/V1 pair with ONLY the revision binding deleted — candidate GET **500** (the previously escaping case), revision GET 500, replay refuses, retarget zero candidates, recovery refuses; NONE/NONE genuine M17B pair with an injected candidate binding — both GETs 500, replay refuses, recovery refuses; lawful NONE/NONE keeps honest 404s on both GETs (and the pre-existing B06/X-cells confirm no regression).
+
+## C2-02 — finished ADMISSION/HISTORICAL semantics: CLOSED
+
+`performance_kind`: the transition-verifier branch is context-aware (admission keeps the 422; an impossible persisted kind corrupts), and the read law (`_read_binding_scalar_laws`) corrupts on an impossible persisted kind for both GETs. Project closure: `verify_vocal_performance_integrity` is now context-neutral — it verifies the VP's physical/identity closure and RETURNS the VP/DialogueLine project id; the comparison lives in `verify_candidate_vocal_binding` under its explicit context (admission → `PERFORMANCE_VOCAL_PROJECT_MISMATCH` 422; historical → corruption), and the reads prove project agreement through the VP's DLR/DialogueLine chain (no audio rehash). Regressions: fresh BODY-kind request keeps 422; persisted kind corruption → 500 (replay + GET); fresh cross-project VP keeps 422 with the exact code; persisted project disagreement → 500 (GET + replay).
+
+## C2-03 — revision-owned temporal-domain law: CLOSED
+
+Generic `_temporal_domain` helper over any object carrying the four temporal columns. The candidate GET validates against the candidate domain; the revision GET validates against the REVISION's own domain (matching recovery's revision-owned check). The regression tampers ONLY the revision's `temporal_end_num` (candidate untouched): the revision GET refuses 500 while the candidate GET stays a lawful 200 — proving the revision-owned law specifically — and the staged recovery refuses the same state (first observed via the predecessor closure law, which independently rejects the de-cohered revision; both refusals are corruption-contract).
+
+## C2-04 — non-vacuous inverse recovery proof: CLOSED
+
+The staged inverse state now deletes the candidate binding (candidate-local law fully satisfied: NONE + no binding) while the revision stays VOCAL_V1 with its binding intact, so the refusal can only come from the cross-pair classification disagreement — and the test asserts the word "classification" in the corruption message so a future earlier local check cannot silently make it vacuous again.
+
+## Cycle-3 gates (committed tree `30bddf0` + record)
+
+- C2 regression battery: **9/9**; C2+DR26: **20/20**; full M17C battery incl. M17B-interaction files (`test_m17b_matrix`, `test_m17b_recovery`): **127/127**.
+- All nineteen validators: **VALID** (after admitting the new `test_m17c_c2_regressions.py` to the hygiene/nsec allowlists and the CI focused list).
+- Full backend suite: **2763 passed / 8 skipped / 2 failed** — the 2 failures are `exec_09/exec_10`, and both **passed on immediate individual rerun** (146s / 227s) with the executor up; `git diff 1a920d0..HEAD` shows zero changes under the worker/executor/gate sources, so these are the known live-GPU flake class, not cycle-3 regressions.
+- Frontend (local CI-equivalent): vitest **143/143** (32 files), `tsc --noEmit` clean, `next build` succeeds.
+- Residue: none; tracked tree clean.
+
+## Frozen for the final delta review (cycle 3)
+
+Cycle-3 delta: `1a920d0..30bddf0` (commit `8ddec61` C2-01..04, commit `30bddf0` allowlist sweep) plus this record update. Review scope per the handoff: exactly `1a920d0..NEW_HEAD`. No merge, no ready-mark, no M17C-B start until this cycle clears.
