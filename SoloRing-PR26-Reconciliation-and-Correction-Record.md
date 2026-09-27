@@ -68,3 +68,40 @@ The three live-GPU gate failures and the inability to re-confirm them green loca
 ## Frozen for delta review
 
 The corrective delta (commits `8ee2a3d`, `e0bda96`, `63305d5`, plus the record updates in this commit) is frozen here for the Codex delta-only review: the SR26-01 discriminator, the SR26-02 verifier and dispatch wiring, the SR26-03 read laws, the SR26-04 gate restorations and sweeps, the SR26-05 admission/history split, and the SR26-06 centralization — with the environment incident above as the only open local-gate item.
+
+---
+
+# Corrective cycle 2 (DR26-01..04) — 2026-09-27
+
+The delta review of cycle 1 accepted four findings (DR26-01 blocker; DR26-02/03/04 bounded). All four are implemented and green; the cycle-2 delta (`44f7dc6..` head below) is frozen for the final Codex delta-only review.
+
+## DR26-01 — classification-closure invariant (blocker): CLOSED
+
+The shared invariant is now structural: `verify_revision_sync_classification` — the single entry point consumed by retarget precheck, adoption replay (`converge_revision_binding` → `verify_revision_vocal_binding`), and the revision read — verifies **candidate↔revision classification equality before either side's NONE/VOCAL_V1 interpretation**, including missing-classification and missing-candidate corruption. Authoritative reads close the loop symmetrically in both directions: the candidate GET compares against its adopted revision on BOTH the NONE 404-path and the VOCAL_V1 path (closing the inverse candidate-side downgrade). The recovery verifier checks the pair closure for **every** revision — including revisions with no binding at all — before the cardinality pass.
+
+Regressions (all green): the coordinated-downgrade matrix in both directions (candidate VOCAL_V1/revision→NONE with revision binding deleted; revision VOCAL_V1/candidate→NONE with candidate binding deleted), both-bindings-deleted-with-one-side-downgraded, each proving: GETs refuse with `INTERNAL_INVARIANT_VIOLATION` rather than 404; adoption replay refuses without repair; retarget creates zero candidates; recovery refuses (both directions).
+
+## DR26-02 — articulation law in authoritative reads: CLOSED
+
+`_verify_articulation` now runs in both binding GETs over the already-loaded canonical payload (HISTORICAL context; no VP-audio rehash). The regression coherently re-hashes the retained payload (new blob + updated candidate/revision hashes + blob row) so every hash check passes and ONLY the articulation layer can refuse — both GETs refuse with the corruption contract.
+
+## DR26-03 — explicit ADMISSION/HISTORICAL verification context: CLOSED
+
+`ADMISSION`/`HISTORICAL` constants in the contract; `verify_candidate_vocal_binding` (and the alignment/articulation helpers) take an explicit `context` — the `pending_binding` inference is gone. Applied consistently to: missing VP, subject mismatch, rate mismatch, trim/interval mismatch, temporal-domain mismatch, missing alignment, wrong-VP alignment, and articulation channel/interval failures. ADMISSION keeps the established 4xx codes — regressions pin fresh-request missing-alignment and missing-VP at **404** (not 500); HISTORICAL translates impossible persisted states to `INTERNAL_INVARIANT_VIOLATION` — the post-adoption wrong-VP-alignment regression proves the historical side.
+
+## DR26-04 — superseded draft-0020 policy: CLOSED
+
+No heuristic preservation: the unpublished migration identity is renamed `0020_m17c_performance_capture` → **`0020_m17c_perf_capture_r2`** (26 chars, within the repository version width), filename renamed to match, and 35 files swept (recovery heads, ~30 test head-pins/stamps, validator admitted-sets/allowlists — the validators also admit the deleted draft filename as a successor-maintained rename). Regressions prove: a DB stamped `0020_m17c_performance_capture` is **mechanically rejected** — `alembic upgrade head` fails (cannot locate the revision) and the staged head ≠ expected recovery head — while fresh `0019 → r2` succeeds with all four M17C tables present.
+
+## Cycle-2 gates (all green, committed tree `d9b1132`)
+
+- Focused M17C suites (7 files incl. the new DR26 battery): **75/75**.
+- Boundary-gate test files (nsec squash-survival, m15 baseline, m14 corpus/baseline): **41/41**.
+- All nineteen CI validators: **VALID** on the committed tree.
+- Full backend suite: **2756 passed / 8 skipped / 0 failed / 0 errors** (41:57) — including `exec_08/09/10`, which passed this run with the repaired executor environment (the cycle-1 environment incident's dependency restoration held; the operator requalification item from cycle 1 remains recommended but is no longer blocking evidence).
+- Frontend (local CI-equivalent): vitest **143/143**, `tsc --noEmit` clean, `next build` succeeds.
+- Residue: none; tracked tree clean.
+
+## Frozen for the final Codex delta review
+
+Cycle-2 delta: `44f7dc6..d9b1132` (commits `8c1a4b6` DR26-01..04, `d9b1132` allowlist sweep) plus this record update. Scope: classification closure (DR26-01), articulation-in-reads (DR26-02), the ADMISSION/HISTORICAL context (DR26-03), and the r2 migration identity (DR26-04). SR26-04 gate restoration and SR26-06 centralization remain closed per the reconciliation; the live-GPU item remains an operator environment requalification matter, not evidence against this code.
