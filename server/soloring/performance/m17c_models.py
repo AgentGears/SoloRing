@@ -9,7 +9,8 @@ transition.
 
 from __future__ import annotations
 
-from sqlalchemy import CheckConstraint, ForeignKeyConstraint, Integer, String, Text
+from sqlalchemy import (CheckConstraint, ForeignKeyConstraint, Index,
+                        Integer, String, Text)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from soloring.db.base import Base
@@ -161,3 +162,62 @@ class PerformanceRevisionSyncClassification(Base):
     classification_schema_version: Mapped[int] = mapped_column(
         Integer, nullable=False)
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class ShotPerformanceSegmentMapping(Base):
+    """M17C-B PF-02: mutable Shot-local Performance working intent.
+
+    Current working mapping following the ShotVocalSegmentMapping
+    precedent (frozen R4 8.1); M17C-C will capture the exact
+    resolved set into ShotRevision schema 8. For dialogue-bound
+    PerformanceRevisions the stored interval/anchor are the exact values
+    mechanically induced from the paired ShotVocalSegmentMapping
+    through the immutable revision vocal binding (no tolerance).
+    """
+
+    __tablename__ = "shot_performance_segment_mappings"
+    __table_args__ = (
+        CheckConstraint("position >= 0", name="ck_spsm_position"),
+        CheckConstraint("performance_start_den > 0",
+                        name="ck_spsm_start_den_positive"),
+        CheckConstraint("performance_end_den > 0",
+                        name="ck_spsm_end_den_positive"),
+        CheckConstraint("shot_anchor_den > 0",
+                        name="ck_spsm_anchor_den_positive"),
+        CheckConstraint("mapping_schema_version = 1",
+                        name="ck_spsm_mapping_schema"),
+        CheckConstraint("length(mapping_hash) = 64",
+                        name="ck_spsm_mapping_hash_len"),
+        ForeignKeyConstraint(
+            ["shot_id"], ["shots.id"],
+            name="fk_spsm_shot", ondelete="RESTRICT"),
+        ForeignKeyConstraint(
+            ["performance_revision_id"], ["performance_revisions.id"],
+            name="fk_spsm_pr", ondelete="RESTRICT"),
+        Index("ix_spsm_pr", "performance_revision_id"),
+    )
+
+    shot_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    position: Mapped[int] = mapped_column(Integer, primary_key=True)
+    performance_revision_id: Mapped[str] = mapped_column(
+        String(36), nullable=False)
+    performance_start_num: Mapped[int] = mapped_column(
+        Integer, nullable=False)
+    performance_start_den: Mapped[int] = mapped_column(
+        Integer, nullable=False)
+    performance_end_num: Mapped[int] = mapped_column(
+        Integer, nullable=False)
+    performance_end_den: Mapped[int] = mapped_column(
+        Integer, nullable=False)
+    shot_anchor_num: Mapped[int] = mapped_column(Integer,
+                                                  nullable=False)
+    shot_anchor_den: Mapped[int] = mapped_column(Integer,
+                                                  nullable=False)
+    vocal_mapping_position: Mapped[int | None] = mapped_column(
+        Integer, nullable=True)
+    mapping_schema_version: Mapped[int] = mapped_column(
+        Integer, nullable=False)
+    mapping_json: Mapped[str] = mapped_column(Text, nullable=False)
+    mapping_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[str] = mapped_column(Text, nullable=False)

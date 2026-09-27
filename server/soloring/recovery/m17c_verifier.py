@@ -66,6 +66,7 @@ def verify_m17c_binding_state(staged_db: Path,
         _verify_candidate_bindings(con, blob_root)
         _verify_revision_bindings(con)
         _verify_retarget_lineage(con)
+        _verify_shot_performance_mappings(con)
     finally:
         con.close()
 
@@ -408,3 +409,106 @@ def _verify_retarget_lineage(con) -> None:
                 raise _corrupt(
                     f"retarget candidate {candidate['id']!r} binding "
                     f"diverges from source revision {source_id!r}")
+
+
+def _verify_shot_performance_mappings(con) -> None:
+    """frozen R4 §13.3: working mapping rows are verified for canonical
+    storage/project/reference integrity (current VP selection is NOT
+    historical truth during backup validation — a lawfully STALE
+    working mapping remains a lawful stored working state)."""
+    import math
+    for row in con.execute(
+            "SELECT * FROM shot_performance_segment_mappings"):
+        pr = con.execute(
+            "SELECT project_id FROM performance_revisions WHERE id = ?",
+            (row["performance_revision_id"],)).fetchone()
+        if pr is None:
+            raise _corrupt(
+                f"performance mapping {row['shot_id']!r}@"
+                f"{row['position']} references a missing "
+                "PerformanceRevision")
+        shot = con.execute(
+            "SELECT project_id FROM shots WHERE id = ?",
+            (row["shot_id"],)).fetchone()
+        if shot is None:
+            raise _corrupt(
+                f"performance mapping {row['shot_id']!r}@"
+                f"{row['position']} references a missing Shot")
+        if pr["project_id"] != shot["project_id"]:
+            raise _corrupt(
+                f"performance mapping {row['shot_id']!r}@"
+                f"{row['position']} crosses projects")
+        if row["mapping_schema_version"] != 1:
+            raise _corrupt(
+                f"performance mapping {row['shot_id']!r}@"
+                f"{row['position']} schema version is not 1")
+        if row["performance_start_den"] <= 0 or \
+                row["performance_end_den"] <= 0 or \
+                row["shot_anchor_den"] <= 0:
+            raise _corrupt(
+                f"performance mapping {row['shot_id']!r}@"
+                f"{row['position']} stores a nonpositive rational "
+                "denominator")
+        if math.gcd(abs(row["performance_start_num"]),
+                    row["performance_start_den"]) != 1 or \
+                math.gcd(abs(row["performance_end_num"]),
+                         row["performance_end_den"]) != 1 or \
+                math.gcd(abs(row["shot_anchor_num"]),
+                         row["shot_anchor_den"]) != 1:
+            raise _corrupt(
+                f"performance mapping {row['shot_id']!r}@"
+                f"{row['position']} stores a noncanonical rational")
+        doc = {
+            "mapping_schema_version": row["mapping_schema_version"],
+            "performance_revision_id": row["performance_revision_id"],
+            "performance_start_ms": {
+                "num": row["performance_start_num"],
+                "den": row["performance_start_den"]},
+            "performance_end_ms": {
+                "num": row["performance_end_num"],
+                "den": row["performance_end_den"]},
+            "shot_anchor_ms": {
+                "num": row["shot_anchor_num"],
+                "den": row["shot_anchor_den"]},
+            "vocal_mapping_position":
+                row["vocal_mapping_position"],
+        }
+        if row["mapping_json"] != _canonical(doc) or \
+                row["mapping_hash"] != _hash(doc):
+            raise _corrupt(
+                f"performance mapping {row['shot_id']!r}@"
+                f"{row['position']} canonical bytes/hash diverge")
+        # dialogue-bound pairing: a mapping with a vocal position on a
+        # VOCAL_V1 revision must keep its paired vocal mapping
+        if row["vocal_mapping_position"] is not None:
+            cls = con.execute(
+                "SELECT sync_mode FROM "
+                "performance_revision_sync_classifications "
+                "WHERE performance_revision_id = ?",
+                (row["performance_revision_id"],)).fetchone()
+            if cls is None or cls["sync_mode"] != "VOCAL_V1":
+                raise _corrupt(
+                    f"performance mapping {row['shot_id']!r}@"
+                    f"{row['position']} carries vocal_mapping_position "
+                    "but the PerformanceRevision is not VOCAL_V1")
+            vocal = con.execute(
+                "SELECT 1 FROM shot_vocal_segment_mappings "
+                "WHERE shot_id = ? AND position = ?",
+                (row["shot_id"], row["vocal_mapping_position"])
+            ).fetchone()
+            if vocal is None:
+                raise _corrupt(
+                    f"performance mapping {row['shot_id']!r}@"
+                    f"{row['position']} pairs with a missing "
+                    "ShotVocalSegmentMapping")
+        else:
+            cls = con.execute(
+                "SELECT sync_mode FROM "
+                "performance_revision_sync_classifications "
+                "WHERE performance_revision_id = ?",
+                (row["performance_revision_id"],)).fetchone()
+            if cls is not None and cls["sync_mode"] == "VOCAL_V1":
+                raise _corrupt(
+                    f"performance mapping {row['shot_id']!r}@"
+                    f"{row['position']} maps a VOCAL_V1 "
+                    "PerformanceRevision without vocal_mapping_position")

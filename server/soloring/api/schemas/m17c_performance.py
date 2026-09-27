@@ -71,4 +71,30 @@ class VocalBindingRead(BaseModel):
     synchronization_basis_version: int
     binding_schema_version: int
     binding_hash: str
+
+
+class PerformanceSegmentPut(_Closed):
+    """M17C-B frozen R4 §8.1/§17.1: closed request grammar with raw
+    rational {num, den} inputs; service canonicalization is
+    authoritative and induced values must match exactly."""
+    performance_revision_id: str
+    performance_start_ms: RationalIn
+    performance_end_ms: RationalIn
+    shot_anchor_ms: RationalIn
+    vocal_mapping_position: StrictInt | None = Field(default=None, ge=0)
+
+
+class PerformanceSegmentRead(BaseModel):
+    shot_id: str
+    position: int
+    performance_revision_id: str
+    performance_start_ms: dict
+    performance_end_ms: dict
+    shot_anchor_ms: dict
+    vocal_mapping_position: int | None
+    mapping_hash: str
+    readiness: str
+    readiness_diagnostics: dict | None = None
+    created_at: str
+    updated_at: str
     created_at: str

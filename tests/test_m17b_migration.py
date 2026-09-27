@@ -60,6 +60,8 @@ def _i02_exactly_four_m17b_tables(tmp_path):
             "performance_revision_vocal_bindings",
             "performance_candidate_sync_classifications",
             "performance_revision_sync_classifications"}
+    # M17C-B: the Shot working-mapping table is M17C-added too
+    assert "shot_performance_segment_mappings" in tabs
 
 
 def _i03_predecessor_tables_unchanged(tmp_path):
@@ -74,7 +76,8 @@ def _i03_predecessor_tables_unchanged(tmp_path):
         "performance_candidate_vocal_bindings",
         "performance_revision_vocal_bindings",
         "performance_candidate_sync_classifications",
-        "performance_revision_sync_classifications")
+        "performance_revision_sync_classifications",
+        "shot_performance_segment_mappings")
     q = ("SELECT name, sql FROM sqlite_master WHERE type='table' "
          "AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'alembic%' "
          "AND name NOT IN {}".format(str(_excluded)))

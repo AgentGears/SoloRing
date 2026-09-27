@@ -22,9 +22,12 @@ from soloring.api.schemas.m17b_performance import (
 )
 from soloring.api.schemas.m17c_performance import (
     DialogueBoundPerformanceCandidateCreate,
+    PerformanceSegmentPut,
+    PerformanceSegmentRead,
     VocalBindingRead,
 )
 from soloring.performance import m17c_binding as m17c_svc
+from soloring.performance import m17c_shot_mapping as shot_mapping_svc
 from soloring.performance import m17c_transition as transition_svc
 from soloring.performance.models import PerformanceCandidate, PerformanceRevision
 
@@ -233,3 +236,72 @@ async def get_revision_vocal_binding(
     row = await m17c_svc.read_revision_vocal_binding(
         session, request.app.state.settings, revision_id=revision_id)
     return VocalBindingRead(**m17c_svc.binding_view(row))
+
+
+@router.put(
+    "/shots/{shot_id}/performance-segments/{position}",
+    status_code=200,
+)
+async def put_performance_segment(
+    shot_id: str,
+    position: int,
+    body: PerformanceSegmentPut,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+):
+    """M17C-B frozen R4 §8: mutable Shot working intent. For
+    dialogue-bound PerformanceRevisions the supplied interval/anchor
+    must equal the exact induced values (no tolerance)."""
+    row = await shot_mapping_svc.put_shot_performance_segment_mapping(
+        session, request.app.state.settings,
+        shot_id=shot_id, position=position,
+        performance_revision_id=body.performance_revision_id,
+        performance_start_num=body.performance_start_ms.num,
+        performance_start_den=body.performance_start_ms.den,
+        performance_end_num=body.performance_end_ms.num,
+        performance_end_den=body.performance_end_ms.den,
+        shot_anchor_num=body.shot_anchor_ms.num,
+        shot_anchor_den=body.shot_anchor_ms.den,
+        vocal_mapping_position=body.vocal_mapping_position)
+    await session.commit()
+    return {"shot_id": row.shot_id, "position": row.position,
+            "mapping_hash": row.mapping_hash}
+
+
+@router.delete(
+    "/shots/{shot_id}/performance-segments/{position}",
+    status_code=204,
+)
+async def delete_performance_segment(
+    shot_id: str,
+    position: int,
+    session: AsyncSession = Depends(get_session),
+):
+    await shot_mapping_svc.delete_shot_performance_segment_mapping(
+        session, shot_id=shot_id, position=position)
+    await session.commit()
+
+
+@router.get(
+    "/shots/{shot_id}/performance-segments",
+    response_model=list[PerformanceSegmentRead],
+)
+async def list_performance_segments(
+    shot_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+):
+    return await shot_mapping_svc.list_shot_performance_segment_mappings(
+        session, request.app.state.settings, shot_id=shot_id)
+
+
+@router.get("/shots/{shot_id}/performance-readiness")
+async def get_performance_readiness(
+    shot_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+):
+    """frozen R4 §9: readiness is a read-time projection; STALE never
+    mutates authority or historical state."""
+    return await shot_mapping_svc.project_shot_performance_readiness(
+        session, request.app.state.settings, shot_id=shot_id)

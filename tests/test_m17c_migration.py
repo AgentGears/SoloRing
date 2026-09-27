@@ -16,6 +16,7 @@ TABLES = {
     "performance_revision_vocal_bindings",
     "performance_candidate_sync_classifications",
     "performance_revision_sync_classifications",
+    "shot_performance_segment_mappings",
 }
 
 

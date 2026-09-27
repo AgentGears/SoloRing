@@ -165,6 +165,9 @@ from soloring.performance.models import (  # noqa: E402,F401
 from soloring.performance.m17c_models import (  # noqa: E402,F401
     PerformanceCandidateVocalBinding,
     PerformanceRevisionVocalBinding,
+    PerformanceCandidateSyncClassification,
+    PerformanceRevisionSyncClassification,
+    ShotPerformanceSegmentMapping,
 )
 
 __all__ = [
@@ -264,4 +267,7 @@ __all__ = [
     "PerformanceRetargetReview",
     "PerformanceCandidateVocalBinding",
     "PerformanceRevisionVocalBinding",
+    "PerformanceCandidateSyncClassification",
+    "PerformanceRevisionSyncClassification",
+    "ShotPerformanceSegmentMapping",
 ]

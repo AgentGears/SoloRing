@@ -52,6 +52,7 @@ ALLOWLIST = (
     "tests/test_m17c_dr26_regressions.py",
     "tests/test_m17c_c2_regressions.py",
     "tests/test_m17c_c3_regressions.py",
+    "tests/test_m17c_shot_mapping.py",
     "server/soloring/recovery/backup.py",
     "server/soloring/recovery/successor_semantics.py",
     "server/soloring/performance/revision.py",
@@ -584,6 +585,9 @@ def main() -> int:
         "performance_revision_vocal_bindings",
         "performance_candidate_sync_classifications",
         "performance_revision_sync_classifications",
+        # M17C-B (frozen R4 §8.1): the mutable Shot working-mapping
+        # table
+        "shot_performance_segment_mappings",
     }
 
     admitted_m17a_tables = {
