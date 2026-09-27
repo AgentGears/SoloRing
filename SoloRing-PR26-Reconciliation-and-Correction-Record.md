@@ -141,3 +141,38 @@ The staged inverse state now deletes the candidate binding (candidate-local law 
 ## Frozen for the final delta review (cycle 3)
 
 Cycle-3 delta: `1a920d0..30bddf0` (commit `8ddec61` C2-01..04, commit `30bddf0` allowlist sweep) plus this record update. Review scope per the handoff: exactly `1a920d0..NEW_HEAD`. No merge, no ready-mark, no M17C-B start until this cycle clears.
+
+---
+
+# Corrective cycle 4 / final (C3-01..02) — 2026-09-27
+
+The final review verified both residuals against `40664f7`. Both are corrected here; C2-01/C2-03 remain closed, and C2-02/C2-04 now close through C3-01/C3-02 respectively. No other finding, gate, migration, recovery architecture, discriminator, retarget, timing, articulation, or vocabulary surface was reopened.
+
+## C3-01 — VP verification split by cost; GETs prove full structural authority: CLOSED
+
+`verify_vocal_performance_integrity` is refactored into two layers with **identical composite behavior** (transitions/recovery keep the full existing law set; nothing was weakened):
+
+- `_verify_vp_structural_authority(session, vp)` — the CHEAP verifier, **no retained blob read/hash/WAVE inspection anywhere**: adopted VocalCandidate exists; adopted-exactly-once (a structural count law); every immutable VP copied-authority field equals the adopted candidate — explicitly including `dialogue_line_revision_id`; VocalCandidate provenance closed grammar/canonical bytes/hash/source-kind (pure column computation, no media reads); VP DialogueLineRevision exists and matches the adopted candidate's; VP speaker == DLR speaker; DialogueLine exists; speaker CreativeEntity exists and belongs to that project; **returns the authoritative VP/DialogueLine project id**.
+- `_verify_vp_physical_media(session, settings, vp)` — retained blob existence/integrity/rehash, WAVE validity, sample rate, sample-frame count, authoritative trim containment.
+
+The composite `verify_vocal_performance_integrity = structural + physical` (admission, adoption/replay/retarget, and recovery continue paying the full price). The binding GETs' project law (`_read_project_law`) now runs the **full structural verifier** — replacing the too-weak VP→DLR→DialogueLine-only check the review flagged — then requires the verified VP project to equal the reading parent's project. No retained VP audio bytes are read or rehashed on either GET.
+
+**Adversarial regression (green):** repoint ONLY `vocal_performance_revisions.dialogue_line_revision_id` at an alternate same-project/same-speaker DLR — binding VP id, candidate/revision bindings, speaker, project, alignments, retained audio all unchanged, so every shallow GET check stays apparently valid — both GETs refuse with `INTERNAL_INVARIANT_VIOLATION` on the VP↔VocalCandidate structural closure, and staged recovery refuses the same state.
+
+**Cost-boundary proof (green, direct):** a spy on the `soloring.performance.vocal._verify_blob` seam (the only VP-retained-audio read/hash path in the M17C verifier stack; the candidate payload storage used by `verify_candidate_integrity` is a different, unpatched path, so the seam is unambiguous) proves both lawful GETs return 200 with **zero** invocations of the retained-media verifier.
+
+## C3-02 — branch-specific inverse recovery proof: CLOSED
+
+The recovery verifier's cross-pair branch now emits the stable diagnostic marker `PAIR-CLASSIFICATION-DISAGREEMENT:` with both conflicting modes. The inverse fixture is unchanged conceptually (both sides locally cardinality-valid: candidate NONE + no binding; revision VOCAL_V1 + binding intact) and the assertion now requires the marker + "adopted candidate" + `'VOCAL_V1'` + `'NONE'` — unsatisfiable by a missing classification, malformed schema, NONE+binding, VOCAL_V1+missing-binding, or any unrelated classification error.
+
+## Cycle-4 gates (exact, committed tree `6f9a72d`)
+
+- C3 regressions **2/2**; full corrective battery (C3+C2+DR26+SR26+authority+transitions+migration+first-pass+route-ownership+M17B matrix+M17B recovery): **129/129**.
+- All nineteen validators: **VALID** (after admitting `test_m17c_c3_regressions.py` to the hygiene/nsec allowlists and the CI focused list).
+- Full backend suite: **2767 passed / 8 skipped / 0 failed / 0 errors** in 2:28:34 — a fully-green first pass **including the three live-GPU exec gates** (the run was long because the pinned Wan2.2 executor ran cold after the earlier environment work; no GPU flake occurred and no rerun was needed).
+- Frontend (local CI-equivalent): vitest **143/143** (32 files), `tsc --noEmit` clean (0 errors), `next build` succeeds.
+- Residue: none; tracked tree clean.
+
+## Frozen for the final delta review (cycle 4)
+
+Cycle-4 delta: `40664f7..NEW_HEAD` (commit `6f9a72d` corrections+regressions+allowlist sweep, plus this record update). Review scope per the handoff: exactly `40664f7..NEW_HEAD`, focused on (1) the structural-vs-physical VP verification split, (2) GET structural closure completeness, (3) confirmation GETs do not rehash VP audio, (4) the C3-02 branch-specific recovery proof, and (5) direct regressions caused by the small refactor. If clean with no new authority defect, M17C-A can be frozen technically sound and work can proceed to M17C-B while PR #26 remains draft.
