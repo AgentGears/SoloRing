@@ -169,10 +169,15 @@ async def verify_vocal_performance_integrity(
     session: AsyncSession,
     settings,
     vp: VocalPerformanceRevision,
-    *,
-    expected_project_id: str | None = None,
 ) -> str:
-    """Live M17A-recovery-parity verifier for a VP seeding new authority."""
+    """Live M17A-recovery-parity verifier for a VP seeding new authority.
+
+    C2-02: this function is CONTEXT-NEUTRAL — it verifies the VP's own
+    physical/identity closure and RETURNS the VP/DialogueLine project
+    id. Project agreement with the consuming candidate is the caller's
+    law, so the caller's ADMISSION/HISTORICAL context decides the error
+    contract for a mismatch.
+    """
     vc = await session.get(VocalCandidate, vp.adopted_candidate_id)
     if vc is None:
         raise corrupt("bound VocalPerformanceRevision adopted candidate missing")
@@ -235,11 +240,6 @@ async def verify_vocal_performance_integrity(
     speaker = await session.get(CreativeEntity, vp.speaker_subject_id)
     if speaker is None or speaker.project_id != line.project_id:
         raise corrupt("bound VP speaker does not belong to DialogueLine project")
-    if expected_project_id is not None and line.project_id != expected_project_id:
-        raise invalid(
-            PERFORMANCE_VOCAL_PROJECT_MISMATCH,
-            "bound VP/DialogueLine belongs to another Project",
-        )
     return line.project_id
 
 
@@ -258,10 +258,13 @@ def _vocal_performance_interval(row) -> tuple[Fraction, Fraction]:
     return start, start + delta_ms
 
 
-def _candidate_domain(candidate: PerformanceCandidate) -> tuple[Fraction, Fraction]:
+def _temporal_domain(obj) -> tuple[Fraction, Fraction]:
+    """C2-03: generic exact temporal domain over any object carrying
+    temporal_start_num/den and temporal_end_num/den (candidate or
+    revision) — each owner validates against its OWN domain."""
     return (
-        Fraction(candidate.temporal_start_num, candidate.temporal_start_den),
-        Fraction(candidate.temporal_end_num, candidate.temporal_end_den),
+        Fraction(obj.temporal_start_num, obj.temporal_start_den),
+        Fraction(obj.temporal_end_num, obj.temporal_end_den),
     )
 
 
@@ -350,10 +353,16 @@ async def verify_candidate_vocal_binding(
     if row.performance_candidate_id != candidate.id:
         raise corrupt("candidate vocal-binding parent id diverges")
     if candidate.performance_kind not in ("FACIAL", "BODY_FACIAL"):
-        raise invalid(
-            PERFORMANCE_VOCAL_BINDING_INVALID,
-            "dialogue-bound performance must be FACIAL or BODY_FACIAL",
-        )
+        # C2-02: an impossible persisted kind is corruption; only a
+        # fresh request keeps the admission 422.
+        if context == ADMISSION:
+            raise invalid(
+                PERFORMANCE_VOCAL_BINDING_INVALID,
+                "dialogue-bound performance must be FACIAL or BODY_FACIAL",
+            )
+        raise corrupt(
+            f"persisted dialogue-bound candidate {candidate.id!r} has "
+            f"impossible performance_kind {candidate.performance_kind!r}")
     candidate_classification = await verify_candidate_sync_classification(
         session, candidate, pending_binding=pending_binding)
     if candidate_classification.sync_mode != "VOCAL_V1":
@@ -374,8 +383,20 @@ async def verify_candidate_vocal_binding(
             "persisted M17C vocal binding names a missing "
             f"VocalPerformanceRevision "
             f"{row.vocal_performance_revision_id!r}")
-    await verify_vocal_performance_integrity(
-        session, settings, vp, expected_project_id=candidate.project_id)
+    # C2-02: project closure is the caller's law — the VP verifier is
+    # context-neutral and returns the VP/DialogueLine project id.
+    vp_project_id = await verify_vocal_performance_integrity(
+        session, settings, vp)
+    if vp_project_id != candidate.project_id:
+        if context == ADMISSION:
+            raise invalid(
+                PERFORMANCE_VOCAL_PROJECT_MISMATCH,
+                "bound VP/DialogueLine belongs to another Project",
+            )
+        raise corrupt(
+            "persisted binding's VP/DialogueLine project "
+            f"{vp_project_id!r} disagrees with the candidate's project "
+            f"{candidate.project_id!r}")
     if candidate.subject_id != vp.speaker_subject_id:
         if context == ADMISSION:
             raise invalid(
@@ -401,7 +422,7 @@ async def verify_candidate_vocal_binding(
         raise corrupt(
             "persisted binding source interval lies outside the VP trim")
     bound_interval = _vocal_performance_interval(row)
-    domain = _candidate_domain(candidate)
+    domain = _temporal_domain(candidate)
     if not (domain[0] <= bound_interval[0] < bound_interval[1] <= domain[1]):
         if context == ADMISSION:
             raise invalid(
@@ -531,14 +552,21 @@ async def verify_candidate_sync_classification(
 async def verify_revision_sync_classification(
     session: AsyncSession, revision: PerformanceRevision,
 ) -> PerformanceRevisionSyncClassification:
-    """SR26-01 discriminator law for an adopted revision row.
+    """Adopted-pair classification closure (SR26-01 + DR26-01 + C2-01).
 
-    DR26-01 closure invariant: an adopted revision's sync classification
-    must equal its adopted candidate's classification BEFORE either side
-    may interpret NONE or VOCAL_V1 — a divergent pair is corruption even
-    when the revision side alone looks self-consistent (including a
-    corrupted-to-NONE revision with its binding deleted).
+    One non-recursive call proves: the adopted candidate's LOCAL
+    classification law (exists, schema, NONE/VOCAL_V1 cardinality — via
+    the shared candidate-local verifier, not a bare row fetch), the
+    revision's own LOCAL law, and pair equality — before either side's
+    mode may be interpreted.
     """
+    candidate = await session.get(PerformanceCandidate,
+                                  revision.adopted_candidate_id)
+    if candidate is None:
+        raise corrupt("adopted revision's candidate is missing")
+    candidate_classification = await verify_candidate_sync_classification(
+        session, candidate)
+
     classification = await session.get(
         PerformanceRevisionSyncClassification, revision.id)
     if classification is None:
@@ -546,18 +574,6 @@ async def verify_revision_sync_classification(
             f"performance revision {revision.id!r} has no PF-03 sync "
             "classification; applicability cannot be determined")
     if classification.classification_schema_version != 1:
-        raise corrupt("PF-03 sync classification schema version is not 1")
-    candidate = await session.get(PerformanceCandidate,
-                                  revision.adopted_candidate_id)
-    if candidate is None:
-        raise corrupt("adopted revision's candidate is missing")
-    candidate_classification = await session.get(
-        PerformanceCandidateSyncClassification, candidate.id)
-    if candidate_classification is None:
-        raise corrupt(
-            f"adopted candidate {candidate.id!r} has no PF-03 sync "
-            "classification; applicability cannot be determined")
-    if candidate_classification.classification_schema_version != 1:
         raise corrupt("PF-03 sync classification schema version is not 1")
     if candidate_classification.sync_mode != classification.sync_mode:
         raise corrupt(
@@ -594,6 +610,11 @@ def _read_binding_scalar_laws(row, parent, vp) -> None:
     transition-time and recovery-time check).
     """
     _verify_binding_bytes(row)
+    if parent.performance_kind not in ("FACIAL", "BODY_FACIAL"):
+        # C2-02: an impossible persisted kind is corruption on reads.
+        raise corrupt(
+            f"persisted dialogue-bound parent {parent.id!r} has "
+            f"impossible performance_kind {parent.performance_kind!r}")
     if row.sample_rate_hz != vp.native_sample_rate_hz:
         raise corrupt("binding sample rate != VP native sample rate")
     if not (vp.trim_start_sample <= row.source_start_sample <
@@ -601,6 +622,24 @@ def _read_binding_scalar_laws(row, parent, vp) -> None:
         raise corrupt("binding source interval lies outside the VP trim")
     if parent.subject_id != vp.speaker_subject_id:
         raise corrupt("binding parent subject != VP speaker")
+
+
+async def _read_project_law(session: AsyncSession, parent, vp) -> None:
+    """C2-02: project closure on reads — resolve the VP's project
+    through its DialogueLineRevision/DialogueLine chain (no audio
+    rehash) and require it to equal the reading parent's project."""
+    dlr = await session.get(DialogueLineRevision,
+                            vp.dialogue_line_revision_id)
+    if dlr is None:
+        raise corrupt("bound VP DialogueLineRevision is missing")
+    line = await session.get(DialogueLine, dlr.dialogue_line_id)
+    if line is None:
+        raise corrupt("bound VP DialogueLine is missing")
+    if line.project_id != parent.project_id:
+        raise corrupt(
+            "persisted binding's VP/DialogueLine project "
+            f"{line.project_id!r} disagrees with the reading parent's "
+            f"project {parent.project_id!r}")
 
 
 async def read_candidate_vocal_binding(
@@ -614,47 +653,24 @@ async def read_candidate_vocal_binding(
             f"performance candidate {candidate_id!r} not found")
     classification = await verify_candidate_sync_classification(
         session, candidate)
+    # C2-01: an ADOPTED candidate's read proves the FULL pair closure —
+    # candidate-local law, revision-local law, and equality — via the
+    # one shared revision verifier, BEFORE either mode is interpreted
+    # (both the honest-NONE 404 path and the binding-return path).
+    adopted_revision = (await session.execute(
+        select(PerformanceRevision).where(
+            PerformanceRevision.adopted_candidate_id == candidate.id)
+    )).scalar_one_or_none()
+    if adopted_revision is not None:
+        await verify_revision_sync_classification(
+            session, adopted_revision)
     if classification.sync_mode == "NONE":
-        # DR26-01: an ADOPTED candidate must agree with its revision
-        # before NONE may be interpreted as an honest absence.
-        revision = (await session.execute(
-            select(PerformanceRevision).where(
-                PerformanceRevision.adopted_candidate_id == candidate.id)
-        )).scalar_one_or_none()
-        if revision is not None:
-            revision_classification = await session.get(
-                PerformanceRevisionSyncClassification, revision.id)
-            if revision_classification is None:
-                raise corrupt(
-                    f"adopted revision {revision.id!r} has no PF-03 sync "
-                    "classification; applicability cannot be determined")
-            if revision_classification.sync_mode != "NONE":
-                raise corrupt(
-                    f"candidate {candidate.id!r} PF-03 classification NONE "
-                    f"!= adopted revision classification "
-                    f"{revision_classification.sync_mode!r}")
         raise not_found(
             PERFORMANCE_VOCAL_BINDING_NOT_FOUND,
             f"performance candidate {candidate_id!r} has no vocal binding",
         )
     row = await session.get(PerformanceCandidateVocalBinding, candidate_id)
     # verify_candidate_sync_classification proved existence for VOCAL_V1
-    # DR26-01 (symmetric closure): an adopted VOCAL_V1 candidate must
-    # agree with its revision before the read represents authority.
-    adopted_revision = (await session.execute(
-        select(PerformanceRevision).where(
-            PerformanceRevision.adopted_candidate_id == candidate.id)
-    )).scalar_one_or_none()
-    if adopted_revision is not None:
-        revision_classification = await session.get(
-            PerformanceRevisionSyncClassification, adopted_revision.id)
-        if revision_classification is None or \
-                revision_classification.sync_mode != "VOCAL_V1":
-            raise corrupt(
-                f"candidate {candidate.id!r} PF-03 classification "
-                "VOCAL_V1 != adopted revision classification "
-                f"{(revision_classification.sync_mode
-                    if revision_classification is not None else None)!r}")
     vp = await session.get(VocalPerformanceRevision,
                            row.vocal_performance_revision_id)
     if vp is None:
@@ -663,8 +679,9 @@ async def read_candidate_vocal_binding(
             f"VocalPerformanceRevision "
             f"{row.vocal_performance_revision_id!r}")
     _read_binding_scalar_laws(row, candidate, vp)
+    await _read_project_law(session, candidate, vp)
     interval = _vocal_performance_interval(row)
-    domain = _candidate_domain(candidate)
+    domain = _temporal_domain(candidate)
     if not (domain[0] <= interval[0] < interval[1] <= domain[1]):
         raise corrupt(
             "persisted binding interval lies outside the candidate domain")
@@ -699,12 +716,8 @@ async def read_revision_vocal_binding(
                                   revision.adopted_candidate_id)
     if candidate is None:
         raise corrupt("dialogue-bound revision adopted candidate is missing")
-    candidate_classification = await verify_candidate_sync_classification(
-        session, candidate)
-    if candidate_classification.sync_mode != classification.sync_mode:
-        raise corrupt(
-            "revision PF-03 classification != adopted candidate "
-            "classification")
+    # verify_revision_sync_classification already proved the candidate's
+    # local law and pair equality (C2-01) — no duplicate comparison here.
     candidate_row = await session.get(
         PerformanceCandidateVocalBinding, candidate.id)
     if candidate_row is None:
@@ -721,11 +734,16 @@ async def read_revision_vocal_binding(
             f"VocalPerformanceRevision "
             f"{row.vocal_performance_revision_id!r}")
     _read_binding_scalar_laws(row, revision, vp)
+    await _read_project_law(session, revision, vp)
     interval = _vocal_performance_interval(row)
-    domain = _candidate_domain(candidate)
+    # C2-03: the REVISION owns its temporal-domain law — the persisted
+    # interval must fit the revision's own domain, matching recovery's
+    # revision-owned check (never the adopted candidate's domain).
+    domain = _temporal_domain(revision)
     if not (domain[0] <= interval[0] < interval[1] <= domain[1]):
         raise corrupt(
-            "persisted binding interval lies outside the parent domain")
+            "persisted binding interval lies outside the revision's own "
+            "temporal domain")
     integrity = await revision_svc.verify_candidate_integrity(
         session, settings, candidate)
     await _verify_alignment_exact_vp(

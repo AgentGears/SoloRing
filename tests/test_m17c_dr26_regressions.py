@@ -183,6 +183,12 @@ async def test_dr26_01_recovery_refuses_coordinated_downgrade(client,
 
 @pytest.mark.asyncio
 async def test_dr26_01_recovery_refuses_inverse_downgrade(client, tmp_path):
+    """C2-04: the inverse state is constructed so BOTH sides are
+    locally valid — candidate classification NONE with its binding
+    deleted (candidate-local law satisfied), revision VOCAL_V1 with its
+    binding intact (revision-local law satisfied). Recovery must refuse
+    on the cross-pair disagreement itself, so the proof cannot be made
+    vacuous by an earlier local cardinality check."""
     from tests.test_m17c_sr26_regressions import (
         _backup_m17c, _restore_refuses)
     world, candidate, revision = await _world(client)
@@ -193,9 +199,14 @@ async def test_dr26_01_recovery_refuses_inverse_downgrade(client, tmp_path):
         "UPDATE performance_candidate_sync_classifications "
         "SET sync_mode = 'NONE' WHERE performance_candidate_id = ?",
         (candidate["id"],))
+    con.execute(
+        "DELETE FROM performance_candidate_vocal_bindings "
+        "WHERE performance_candidate_id = ?",
+        (candidate["id"],))
     con.commit()
     con.close()
-    await _restore_refuses(root, tmp_path, "dr26b")
+    exc = await _restore_refuses(root, tmp_path, "dr26b")
+    assert "classification" in str(exc), exc
 
 
 # ---------------------------------------------------------------------------
