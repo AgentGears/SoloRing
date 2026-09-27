@@ -80,7 +80,7 @@ def test_h05_no_shotrevision_schema_8():
                   (SERVER / "alembic" / "versions").glob("*.py"))
     # M17C-A (successor-admitted): the one migration beyond 0019 is
     # 0020; schema-8 Shot capture remains a future M17C-C surface.
-    assert vers[-1] == "0020_m17c_dialogue_bound_performance.py"
+    assert vers[-1] == "0020_m17c_perf_capture_r2.py"
     assert not any("schema_8" in v for v in vers)
 
 

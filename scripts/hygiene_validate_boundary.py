@@ -35,6 +35,9 @@ ALLOWLIST = (
     # M17C-A (PR #26, second-review reconciliation): reviewed
     # successor surface + successor-maintained files swept for
     # the 0020 head-advance (each with in-file precedent)
+    "server/alembic/versions/0020_m17c_perf_capture_r2.py",
+    # DR26-04: the superseded draft-0020 migration file (deleted by the
+    # r2 identity rename; successor-maintained rename)
     "server/alembic/versions/0020_m17c_dialogue_bound_performance.py",
     "server/soloring/api/m17c_performance.py",
     "server/soloring/api/schemas/m17c_performance.py",
@@ -524,11 +527,13 @@ def main() -> int:
     admitted_0019 = "0019_m17b_performance_revisions.py"
     # M17C-A (PR #26): the dialogue-bound binding + classification
     # migration (second-review reconciled)
-    admitted_0020 = "0020_m17c_dialogue_bound_performance.py"
+    admitted_0020 = "0020_m17c_perf_capture_r2.py"
+    superseded_0020_draft = "0020_m17c_dialogue_bound_performance.py"
     mig_beyond = [p.name for p in versions.glob("*.py")
                   if p.stem >= "0015" and p.name not in (
                       admitted_0015, admitted_0016, admitted_0017,
-                      admitted_0018, admitted_0019, admitted_0020)]
+                      admitted_0018, admitted_0019, admitted_0020,
+                      superseded_0020_draft)]
     if mig_beyond:
         errors.append(f"migration at/beyond 0015 beyond the frozen M14/M15/"
                       f"M16-A/M17A migrations exists: {mig_beyond}")
@@ -613,7 +618,7 @@ def main() -> int:
             if (f.endswith("0019_m17b_performance_revisions.py")
                     and name in admitted_m17b_tables):
                 continue
-            if (f.endswith("0020_m17c_dialogue_bound_performance.py")
+            if (f.endswith("0020_m17c_perf_capture_r2.py")
                     and name in admitted_m17c_tables):
                 continue
             errors.append(f"{f}: new table {name} in migration source")

@@ -1,17 +1,20 @@
-"""M17C: dialogue-bound Performance capture foundation.
+"""M17C: dialogue-bound Performance capture foundation (DR26-04 r2).
 
-R4 freezes migration 0020 as the additive M17C migration. This first
-implementation slice creates the PF-03 immutable synchronization companions.
-The remaining PF-02/capture/execution tables are added to this same migration
-before publication; the branch is not published while 0020 is partial.
-
-Downgrade refuses if either M17C binding table contains rows.
+Revision identity note (DR26-04): this migration supersedes the
+unpublished draft identity `0020_m17c_performance_capture`, whose
+schema lacked the SR26-01 applicability classifications. Because 0020
+is explicitly unpublished draft state, no heuristic preservation is
+attempted: a database stamped with the superseded draft identity is
+mechanically rejected (recovery refuses the unknown head; alembic
+cannot locate the revision) and must be rebuilt from 0019. The r2
+identity makes that incompatibility mechanical rather than
+documentary.
 """
 
 from alembic import op
 import sqlalchemy as sa
 
-revision = "0020_m17c_performance_capture"
+revision = "0020_m17c_perf_capture_r2"
 down_revision = "0019_m17b_performance_revisions"
 branch_labels = None
 depends_on = None

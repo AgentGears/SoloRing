@@ -48,7 +48,7 @@ def test_migrations_present_and_chained():
         "0017_m16_intra_shot_consequences.py",
         "0018_m17a_dialogue_vocal_foundation.py",
         "0019_m17b_performance_revisions.py",
-        "0020_m17c_dialogue_bound_performance.py"]
+        "0020_m17c_perf_capture_r2.py"]
     m10 = (VERSIONS / "0010_m10_spatial_cinematic_continuity.py").read_text()
     assert 'down_revision: Union[str, None] = "0009_m8_visual_identity"' in m10
     m11 = (VERSIONS / "0011_m10_derived_spatial_execution.py").read_text()

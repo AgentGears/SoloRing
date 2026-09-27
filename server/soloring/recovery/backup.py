@@ -48,7 +48,7 @@ from soloring.workflows.artifact_store import WorkflowArtifactStore
 # the expected head advances to 0020 while restores verify through the
 # exact published M17B-depth semantics; the dedicated M17C recovery
 # verifier lands with the M17C-C slice before publication.
-EXPECTED_ALEMBIC_HEAD = "0020_m17c_performance_capture"
+EXPECTED_ALEMBIC_HEAD = "0020_m17c_perf_capture_r2"
 BACKUP_MANIFEST_SCHEMA_VERSION = 1
 
 # M13 (frozen R3 §23): restore is head-dispatched across five heads. M14
@@ -64,7 +64,7 @@ M15_ALEMBIC_HEAD = "0016_m15_revision_compatibility"
 M16_ALEMBIC_HEAD = "0017_m16_intra_shot_consequences"
 M17A_ALEMBIC_HEAD = "0018_m17a_dialogue_vocal_foundation"
 M17B_ALEMBIC_HEAD = "0019_m17b_performance_revisions"
-M17C_A_ALEMBIC_HEAD = "0020_m17c_performance_capture"
+M17C_A_ALEMBIC_HEAD = "0020_m17c_perf_capture_r2"
 SUPPORTED_RESTORE_ALEMBIC_HEADS = frozenset({
     PRE_M11_ALEMBIC_HEAD,
     M11_ALEMBIC_HEAD,

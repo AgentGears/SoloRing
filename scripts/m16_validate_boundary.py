@@ -111,7 +111,7 @@ M16_SURFACE = (
     r"^server/soloring/api/m17c_performance\.py$",
     r"^server/soloring/api/schemas/m17c_performance\.py$",
     r"^server/soloring/recovery/m17c_verifier\.py$",
-    r"^server/alembic/versions/0020_m17c_dialogue_bound_performance"
+    r"^server/alembic/versions/0020_m17c_perf_capture_r2"
     r"\.py$",
     r"^tests/m17c_seed\.py$",
     r"^tests/test_m17c_[a-z0-9_]+\.py$",

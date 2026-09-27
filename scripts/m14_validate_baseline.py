@@ -140,6 +140,8 @@ def check_base03() -> list[str]:
         # migration (the CI step for this validator was retired as
         # successor-milestone ceremony; this admitted set keeps the
         # proof-map-owned M14-BASE:03 test meaningful).
+        "0020_m17c_perf_capture_r2.py",
+        # DR26-04 rename: the superseded draft-0020 file (deleted by r2)
         "0020_m17c_dialogue_bound_performance.py",
     }
     if not migrations or migrations[-1] not in admitted:
@@ -147,7 +149,7 @@ def check_base03() -> list[str]:
             "current migration head is not an admitted frozen head: "
             f"{migrations[-1:]}")
     beyond = [m for m in migrations
-              if m > "0020_m17c_dialogue_bound_performance.py"]
+              if m > "0020_m17c_perf_capture_r2.py"]
     if beyond:
         errors.append(f"migrations beyond exact M16-A 0017 exist: {beyond}")
     m16_named = [m for m in migrations if m.startswith("0017_")]

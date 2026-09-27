@@ -146,11 +146,11 @@ def test_migration_head_is_0015_before_m15() -> None:
     head = _migration_names("HEAD")
     assert head, "current migration listing empty"
     # M17C-A succession (PR #26): the single admitted successor beyond
-    # the frozen 0019 is 0020_m17c_dialogue_bound_performance.
-    assert head[-1] == "0020_m17c_dialogue_bound_performance.py", (
+    # the frozen 0019 is 0020_m17c_perf_capture_r2.
+    assert head[-1] == "0020_m17c_perf_capture_r2.py", (
         f"current migration head is not the admitted 0020: {head[-1:]}")
     beyond = [m for m in head
-              if m > "0020_m17c_dialogue_bound_performance.py"]
+              if m > "0020_m17c_perf_capture_r2.py"]
     assert not beyond, f"migrations beyond 0020 exist: {beyond}"
 
 

@@ -228,6 +228,41 @@ def _verify_candidate_bindings(con, blob_root: Path) -> None:
 
 
 def _verify_revision_bindings(con) -> None:
+    # DR26-01 closure invariant first: an adopted revision's sync
+    # classification must equal its adopted candidate's classification
+    # BEFORE either side's NONE/VOCAL_V1 interpretation — checked for
+    # every revision, including revisions with no binding at all.
+    for parent in con.execute(
+            "SELECT * FROM performance_revisions"):
+        cls = con.execute(
+            "SELECT * FROM performance_revision_sync_classifications "
+            "WHERE performance_revision_id = ?",
+            (parent["id"],)).fetchone()
+        if cls is None:
+            raise _corrupt(
+                f"performance revision {parent['id']!r} has no PF-03 sync "
+                "classification; applicability cannot be determined")
+        candidate = con.execute(
+            "SELECT * FROM performance_candidates WHERE id = ?",
+            (parent["adopted_candidate_id"],)).fetchone()
+        if candidate is None:
+            raise _corrupt(
+                f"performance revision {parent['id']!r} adopted candidate "
+                "is missing")
+        candidate_cls = con.execute(
+            "SELECT * FROM performance_candidate_sync_classifications "
+            "WHERE performance_candidate_id = ?",
+            (candidate["id"],)).fetchone()
+        if candidate_cls is None:
+            raise _corrupt(
+                f"adopted candidate {candidate['id']!r} has no PF-03 sync "
+                "classification; applicability cannot be determined")
+        if candidate_cls["sync_mode"] != cls["sync_mode"]:
+            raise _corrupt(
+                f"performance revision {parent['id']!r} classification "
+                f"{cls['sync_mode']!r} != adopted candidate classification "
+                f"{candidate_cls['sync_mode']!r}")
+
     for parent, cls, binding in _binding_cardinality(
             con,
             parent_col="performance_revision_id",

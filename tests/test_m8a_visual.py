@@ -116,7 +116,7 @@ async def test_migration_head_is_0009_and_downgrade_refuses_state(
                 "SELECT name FROM sqlite_master WHERE type='table'"
             )
         }
-        assert rev[0] == "0020_m17c_performance_capture"
+        assert rev[0] == "0020_m17c_perf_capture_r2"
         for t in (
             "visual_facets", "visual_facet_value_policies", "visual_anchors",
             "visual_anchor_items", "visual_anchor_revisions",

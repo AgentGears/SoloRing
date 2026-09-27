@@ -103,7 +103,7 @@ REVIEWED_SUCCESSOR_PATHS = frozenset({
     "server/soloring/api/m17c_performance.py",
     "server/soloring/api/schemas/m17c_performance.py",
     "server/soloring/recovery/m17c_verifier.py",
-    "server/alembic/versions/0020_m17c_dialogue_bound_performance.py",
+    "server/alembic/versions/0020_m17c_perf_capture_r2.py",
 })
 
 FORBIDDEN_PATTERNS: list[tuple[str, str]] = [

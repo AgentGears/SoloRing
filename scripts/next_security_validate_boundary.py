@@ -47,6 +47,8 @@ ALLOWLIST = (
     "SoloRing-PR26-Reconciliation-and-Correction-Record.md",
     # M17C-A (PR #26, second-review reconciliation): reviewed successor surface + successor-maintained
     # files swept for the 0020 head-advance
+    "server/alembic/versions/0020_m17c_perf_capture_r2.py",
+    # DR26-04 rename: the superseded draft-0020 file (deleted by r2)
     "server/alembic/versions/0020_m17c_dialogue_bound_performance.py",
     "server/soloring/api/m17c_performance.py",
     "server/soloring/api/schemas/m17c_performance.py",
@@ -570,7 +572,9 @@ def main(repo: Path = REPO) -> int:
                     "server/alembic/versions/0018_m17a_dialogue_vocal_foundation.py",
                     # M17B (frozen R7): the performance migration
                     "server/alembic/versions/0019_m17b_performance_revisions.py",
-                    # M17C-A (PR #26, second-review reconciled)
+                    # M17C-A (PR #26, second-review reconciled);
+                    # DR26-04 rename: r2 head + the superseded draft file
+                    "server/alembic/versions/0020_m17c_perf_capture_r2.py",
                     "server/alembic/versions/0020_m17c_dialogue_bound_"
                     "performance.py",
                 )):
@@ -588,8 +592,8 @@ def main(repo: Path = REPO) -> int:
     admitted_0018 = "0018_m17a_dialogue_vocal_foundation.py"
     # M17B (frozen R7): the performance-revisions migration
     admitted_0019 = "0019_m17b_performance_revisions.py"
-    # M17C-A (PR #26, second-review reconciled)
-    admitted_0020 = "0020_m17c_dialogue_bound_performance.py"
+    # M17C-A (PR #26, second-review reconciled); DR26-04 r2 head
+    admitted_0020 = "0020_m17c_perf_capture_r2.py"
     mig_beyond = [
         p.name for p in versions.glob("*.py")
         if p.stem >= "0015" and p.name not in (

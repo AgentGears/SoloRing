@@ -22,6 +22,13 @@ PERFORMANCE_VOCAL_ALIGNMENT_MISMATCH = (
 PERFORMANCE_REQUIRED_ARTICULATION_MISSING = (
     ErrorCode.PERFORMANCE_REQUIRED_ARTICULATION_MISSING)
 
+# DR26-03: explicit verification context. ADMISSION validates a fresh
+# client request (established 4xx codes); HISTORICAL revalidates
+# already-persisted immutable authority, where impossible states are
+# corruption (INTERNAL_INVARIANT_VIOLATION), never client errors.
+ADMISSION = "ADMISSION"
+HISTORICAL = "HISTORICAL"
+
 REQUIRED_ARTICULATION = (
     "profile-1/face.articulation.jaw_open",
     "profile-1/face.articulation.lip_round",

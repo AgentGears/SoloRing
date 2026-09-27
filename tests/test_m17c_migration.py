@@ -10,7 +10,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 SERVER = REPO / "server"
 PY = sys.executable
-HEAD = "0020_m17c_performance_capture"
+HEAD = "0020_m17c_perf_capture_r2"
 TABLES = {
     "performance_candidate_vocal_bindings",
     "performance_revision_vocal_bindings",

@@ -109,7 +109,7 @@ def test_populated_0004_to_head_defaults_and_integrity(
     finally:
         con.close()
 
-    assert rev[0] == "0020_m17c_performance_capture"
+    assert rev[0] == "0020_m17c_perf_capture_r2"
     assert "soft_cancel_selected_at" in cols
     # Documented defaults for pre-existing rows: submission not_started, no
     # attempt, no job, no soft cancel, no artifact.

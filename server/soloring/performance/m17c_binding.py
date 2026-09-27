@@ -20,7 +20,9 @@ from soloring.domain.now import db_now
 from soloring.errors import ErrorCode, SoloRingError, not_found
 from soloring.performance import revision as revision_svc
 from soloring.performance.m17c_contract import (
+    ADMISSION,
     BINDING_FIELDS,
+    HISTORICAL,
     PERFORMANCE_REQUIRED_ARTICULATION_MISSING,
     PERFORMANCE_VOCAL_ALIGNMENT_MISMATCH,
     PERFORMANCE_VOCAL_BINDING_INVALID,
@@ -264,7 +266,8 @@ def _candidate_domain(candidate: PerformanceCandidate) -> tuple[Fraction, Fracti
 
 
 async def _verify_alignment_exact_vp(
-    session: AsyncSession, payload_document: dict, vp_id: str
+    session: AsyncSession, payload_document: dict, vp_id: str,
+    *, context: str = HISTORICAL,
 ) -> None:
     seen: set[str] = set()
     for channel in payload_document["channels"]:
@@ -275,39 +278,55 @@ async def _verify_alignment_exact_vp(
             seen.add(aid)
             alignment = await session.get(DialogueAlignment, aid)
             if alignment is None:
-                # SR26-05: the canonical payload already cited this
-                # alignment at admission; its disappearance is corruption.
+                if context == ADMISSION:
+                    raise not_found(
+                        ErrorCode.PERFORMANCE_ALIGNMENT_NOT_FOUND,
+                        f"dialogue alignment {aid!r} not found")
                 raise corrupt(
                     f"persisted M17C payload cites missing dialogue "
                     f"alignment {aid!r}")
             if alignment.vocal_performance_revision_id != vp_id:
-                raise invalid(
-                    PERFORMANCE_VOCAL_ALIGNMENT_MISMATCH,
-                    "dialogue-bound keyframe cites an alignment derived from "
-                    "a different VocalPerformanceRevision",
-                )
+                if context == ADMISSION:
+                    raise invalid(
+                        PERFORMANCE_VOCAL_ALIGNMENT_MISMATCH,
+                        "dialogue-bound keyframe cites an alignment derived "
+                        "from a different VocalPerformanceRevision",
+                    )
+                raise corrupt(
+                    "persisted M17C payload cites an alignment derived from "
+                    f"a different VocalPerformanceRevision ({aid!r})")
 
 
 def _verify_articulation(payload_document: dict,
-                         interval: tuple[Fraction, Fraction]) -> None:
+                         interval: tuple[Fraction, Fraction],
+                         *, context: str = HISTORICAL) -> None:
     lo, hi = interval
     by_key = {ch["channel_key"]: ch for ch in payload_document["channels"]}
     for key in REQUIRED_ARTICULATION:
         channel = by_key.get(key)
         if channel is None:
-            raise invalid(
-                PERFORMANCE_REQUIRED_ARTICULATION_MISSING,
-                f"dialogue-bound performance requires articulation channel {key!r}",
-            )
+            if context == ADMISSION:
+                raise invalid(
+                    PERFORMANCE_REQUIRED_ARTICULATION_MISSING,
+                    f"dialogue-bound performance requires articulation "
+                    f"channel {key!r}",
+                )
+            raise corrupt(
+                f"persisted dialogue-bound payload lost articulation "
+                f"channel {key!r}")
         if not any(
             lo <= Fraction(kf["time_ms"]["num"], kf["time_ms"]["den"]) < hi
             for kf in channel["keyframes"]
         ):
-            raise invalid(
-                PERFORMANCE_REQUIRED_ARTICULATION_MISSING,
-                f"articulation channel {key!r} has no keyframe inside the "
-                "bound vocal interval",
-            )
+            if context == ADMISSION:
+                raise invalid(
+                    PERFORMANCE_REQUIRED_ARTICULATION_MISSING,
+                    f"articulation channel {key!r} has no keyframe inside "
+                    "the bound vocal interval",
+                )
+            raise corrupt(
+                f"persisted articulation channel {key!r} has no keyframe "
+                "inside the bound vocal interval")
 
 
 async def verify_candidate_vocal_binding(
@@ -318,7 +337,16 @@ async def verify_candidate_vocal_binding(
     *,
     payload_document: dict | None = None,
     pending_binding: PerformanceCandidateVocalBinding | None = None,
+    context: str = HISTORICAL,
 ) -> dict:
+    """Verify a candidate vocal binding under an explicit context.
+
+    DR26-03: ADMISSION validates a fresh client request and keeps the
+    established 4xx codes; HISTORICAL revalidates persisted immutable
+    authority, where impossible states are corruption. ``pending_binding``
+    supplies the in-flight creation row to the discriminator cardinality
+    check (an SR26-01 concern, orthogonal to the error contract).
+    """
     if row.performance_candidate_id != candidate.id:
         raise corrupt("candidate vocal-binding parent id diverges")
     if candidate.performance_kind not in ("FACIAL", "BODY_FACIAL"):
@@ -336,16 +364,12 @@ async def verify_candidate_vocal_binding(
     vp = await session.get(VocalPerformanceRevision,
                            row.vocal_performance_revision_id)
     if vp is None:
-        if pending_binding is not None:
-            # admission: a client-supplied VP id that does not exist is
-            # a request problem (404), not corruption
+        if context == ADMISSION:
             raise not_found(
                 ErrorCode.VOCAL_PERFORMANCE_NOT_FOUND,
                 f"vocal performance revision "
                 f"{row.vocal_performance_revision_id!r} not found",
             )
-        # SR26-05: the binding already persisted this exact VP identity;
-        # its disappearance is corruption, not a client lookup miss.
         raise corrupt(
             "persisted M17C vocal binding names a missing "
             f"VocalPerformanceRevision "
@@ -353,34 +377,47 @@ async def verify_candidate_vocal_binding(
     await verify_vocal_performance_integrity(
         session, settings, vp, expected_project_id=candidate.project_id)
     if candidate.subject_id != vp.speaker_subject_id:
-        raise invalid(
-            PERFORMANCE_VOCAL_SUBJECT_MISMATCH,
-            "Performance subject != bound VP speaker",
-        )
+        if context == ADMISSION:
+            raise invalid(
+                PERFORMANCE_VOCAL_SUBJECT_MISMATCH,
+                "Performance subject != bound VP speaker",
+            )
+        raise corrupt("persisted binding subject != VP speaker")
     if row.sample_rate_hz != vp.native_sample_rate_hz:
-        raise invalid(
-            ErrorCode.SAMPLE_RATE_MISMATCH,
-            "vocal binding sample rate != bound VP native sample rate",
-        )
+        if context == ADMISSION:
+            raise invalid(
+                ErrorCode.SAMPLE_RATE_MISMATCH,
+                "vocal binding sample rate != bound VP native sample rate",
+            )
+        raise corrupt("persisted binding sample rate != VP native rate")
     if not (vp.trim_start_sample <= row.source_start_sample <
             row.source_end_sample_exclusive <= vp.trim_end_sample_exclusive):
-        raise invalid(
-            PERFORMANCE_VOCAL_INTERVAL_INVALID,
-            "vocal binding source interval lies outside the bound VP trim",
-        )
+        if context == ADMISSION:
+            raise invalid(
+                PERFORMANCE_VOCAL_INTERVAL_INVALID,
+                "vocal binding source interval lies outside the bound VP "
+                "trim",
+            )
+        raise corrupt(
+            "persisted binding source interval lies outside the VP trim")
     bound_interval = _vocal_performance_interval(row)
     domain = _candidate_domain(candidate)
     if not (domain[0] <= bound_interval[0] < bound_interval[1] <= domain[1]):
-        raise invalid(
-            PERFORMANCE_VOCAL_INTERVAL_INVALID,
-            "induced vocal Performance interval lies outside candidate domain",
-        )
+        if context == ADMISSION:
+            raise invalid(
+                PERFORMANCE_VOCAL_INTERVAL_INVALID,
+                "induced vocal Performance interval lies outside candidate "
+                "domain",
+            )
+        raise corrupt(
+            "persisted binding interval lies outside the parent domain")
     if payload_document is None:
         payload_document = (await revision_svc.verify_candidate_integrity(
             session, settings, candidate))["payload_document"]
     await _verify_alignment_exact_vp(
-        session, payload_document, row.vocal_performance_revision_id)
-    _verify_articulation(payload_document, bound_interval)
+        session, payload_document, row.vocal_performance_revision_id,
+        context=context)
+    _verify_articulation(payload_document, bound_interval, context=context)
     return {"vp": vp, "payload_document": payload_document,
             "performance_interval": bound_interval}
 
@@ -439,10 +476,12 @@ async def create_dialogue_bound_performance_candidate(
     # pending_binding: the SR26-01 cardinality law normally reads the
     # companion through the session; during creation the row is not yet
     # persisted, so it is handed to the classification check directly.
+    # DR26-03: creation is ADMISSION context — client-shaped failures
+    # keep their 4xx codes.
     await verify_candidate_vocal_binding(
         session, settings, candidate, row,
         payload_document=integrity["payload_document"],
-        pending_binding=row)
+        pending_binding=row, context=ADMISSION)
     session.add(row)
     await session.flush()
     return candidate, row
@@ -492,7 +531,14 @@ async def verify_candidate_sync_classification(
 async def verify_revision_sync_classification(
     session: AsyncSession, revision: PerformanceRevision,
 ) -> PerformanceRevisionSyncClassification:
-    """SR26-01 discriminator law for an adopted revision row."""
+    """SR26-01 discriminator law for an adopted revision row.
+
+    DR26-01 closure invariant: an adopted revision's sync classification
+    must equal its adopted candidate's classification BEFORE either side
+    may interpret NONE or VOCAL_V1 — a divergent pair is corruption even
+    when the revision side alone looks self-consistent (including a
+    corrupted-to-NONE revision with its binding deleted).
+    """
     classification = await session.get(
         PerformanceRevisionSyncClassification, revision.id)
     if classification is None:
@@ -501,6 +547,23 @@ async def verify_revision_sync_classification(
             "classification; applicability cannot be determined")
     if classification.classification_schema_version != 1:
         raise corrupt("PF-03 sync classification schema version is not 1")
+    candidate = await session.get(PerformanceCandidate,
+                                  revision.adopted_candidate_id)
+    if candidate is None:
+        raise corrupt("adopted revision's candidate is missing")
+    candidate_classification = await session.get(
+        PerformanceCandidateSyncClassification, candidate.id)
+    if candidate_classification is None:
+        raise corrupt(
+            f"adopted candidate {candidate.id!r} has no PF-03 sync "
+            "classification; applicability cannot be determined")
+    if candidate_classification.classification_schema_version != 1:
+        raise corrupt("PF-03 sync classification schema version is not 1")
+    if candidate_classification.sync_mode != classification.sync_mode:
+        raise corrupt(
+            f"revision {revision.id!r} PF-03 classification "
+            f"{classification.sync_mode!r} != adopted candidate "
+            f"classification {candidate_classification.sync_mode!r}")
     binding = await session.get(
         PerformanceRevisionVocalBinding, revision.id)
     if classification.sync_mode == "VOCAL_V1":
@@ -552,12 +615,46 @@ async def read_candidate_vocal_binding(
     classification = await verify_candidate_sync_classification(
         session, candidate)
     if classification.sync_mode == "NONE":
+        # DR26-01: an ADOPTED candidate must agree with its revision
+        # before NONE may be interpreted as an honest absence.
+        revision = (await session.execute(
+            select(PerformanceRevision).where(
+                PerformanceRevision.adopted_candidate_id == candidate.id)
+        )).scalar_one_or_none()
+        if revision is not None:
+            revision_classification = await session.get(
+                PerformanceRevisionSyncClassification, revision.id)
+            if revision_classification is None:
+                raise corrupt(
+                    f"adopted revision {revision.id!r} has no PF-03 sync "
+                    "classification; applicability cannot be determined")
+            if revision_classification.sync_mode != "NONE":
+                raise corrupt(
+                    f"candidate {candidate.id!r} PF-03 classification NONE "
+                    f"!= adopted revision classification "
+                    f"{revision_classification.sync_mode!r}")
         raise not_found(
             PERFORMANCE_VOCAL_BINDING_NOT_FOUND,
             f"performance candidate {candidate_id!r} has no vocal binding",
         )
     row = await session.get(PerformanceCandidateVocalBinding, candidate_id)
     # verify_candidate_sync_classification proved existence for VOCAL_V1
+    # DR26-01 (symmetric closure): an adopted VOCAL_V1 candidate must
+    # agree with its revision before the read represents authority.
+    adopted_revision = (await session.execute(
+        select(PerformanceRevision).where(
+            PerformanceRevision.adopted_candidate_id == candidate.id)
+    )).scalar_one_or_none()
+    if adopted_revision is not None:
+        revision_classification = await session.get(
+            PerformanceRevisionSyncClassification, adopted_revision.id)
+        if revision_classification is None or \
+                revision_classification.sync_mode != "VOCAL_V1":
+            raise corrupt(
+                f"candidate {candidate.id!r} PF-03 classification "
+                "VOCAL_V1 != adopted revision classification "
+                f"{(revision_classification.sync_mode
+                    if revision_classification is not None else None)!r}")
     vp = await session.get(VocalPerformanceRevision,
                            row.vocal_performance_revision_id)
     if vp is None:
@@ -575,6 +672,9 @@ async def read_candidate_vocal_binding(
         session, settings, candidate)
     await _verify_alignment_exact_vp(
         session, integrity["payload_document"], vp.id)
+    # DR26-02: the authoritative read enforces the same articulation
+    # law as recovery, over the already-loaded canonical payload.
+    _verify_articulation(integrity["payload_document"], interval)
     return row
 
 
@@ -630,6 +730,9 @@ async def read_revision_vocal_binding(
         session, settings, candidate)
     await _verify_alignment_exact_vp(
         session, integrity["payload_document"], vp.id)
+    # DR26-02: same articulation law as recovery, over the already-loaded
+    # canonical payload.
+    _verify_articulation(integrity["payload_document"], interval)
     return row
 
 
