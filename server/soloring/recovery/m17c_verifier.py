@@ -259,6 +259,12 @@ def _verify_revision_bindings(con) -> None:
                 "classification; applicability cannot be determined")
         if candidate_cls["sync_mode"] != cls["sync_mode"]:
             raise _corrupt(
+                # PAIR-CLASSIFICATION-DISAGREEMENT is the stable
+                # diagnostic marker for the cross-pair branch (C3-02):
+                # regressions assert it plus both conflicting modes so
+                # the proof cannot be satisfied by a missing/malformed
+                # classification or a local cardinality failure.
+                "PAIR-CLASSIFICATION-DISAGREEMENT: "
                 f"performance revision {parent['id']!r} classification "
                 f"{cls['sync_mode']!r} != adopted candidate classification "
                 f"{candidate_cls['sync_mode']!r}")

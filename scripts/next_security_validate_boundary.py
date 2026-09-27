@@ -62,6 +62,7 @@ ALLOWLIST = (
     "tests/test_m17c_sr26_regressions.py",
     "tests/test_m17c_dr26_regressions.py",
     "tests/test_m17c_c2_regressions.py",
+    "tests/test_m17c_c3_regressions.py",
     "server/soloring/recovery/backup.py",
     "server/soloring/recovery/successor_semantics.py",
     "server/soloring/performance/revision.py",

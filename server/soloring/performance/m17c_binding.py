@@ -165,18 +165,21 @@ def _verify_binding_bytes(row) -> dict:
     return doc
 
 
-async def verify_vocal_performance_integrity(
+async def _verify_vp_structural_authority(
     session: AsyncSession,
-    settings,
     vp: VocalPerformanceRevision,
 ) -> str:
-    """Live M17A-recovery-parity verifier for a VP seeding new authority.
+    """C3-01: the CHEAP structural VP authority verifier — no retained
+    blob read/hash/WAVE inspection anywhere.
 
-    C2-02: this function is CONTEXT-NEUTRAL — it verifies the VP's own
-    physical/identity closure and RETURNS the VP/DialogueLine project
-    id. Project agreement with the consuming candidate is the caller's
-    law, so the caller's ADMISSION/HISTORICAL context decides the error
-    contract for a mismatch.
+    Proves: adopted VocalCandidate exists and is adopted exactly once;
+    every immutable VP copied-authority field equals the adopted
+    candidate (including dialogue_line_revision_id); VocalCandidate
+    provenance closed grammar/canonical bytes/hash/source_kind; the VP
+    DialogueLineRevision exists and matches the adopted candidate's; VP
+    speaker == DLR speaker; the DialogueLine exists; the speaker
+    CreativeEntity exists and belongs to that project. Returns the
+    authoritative VP/DialogueLine project id.
     """
     vc = await session.get(VocalCandidate, vp.adopted_candidate_id)
     if vc is None:
@@ -194,7 +197,7 @@ async def verify_vocal_performance_integrity(
         provenance = json.loads(vc.provenance_json)
     except json.JSONDecodeError as exc:
         raise corrupt("bound VocalCandidate provenance is not JSON") from exc
-    from soloring.performance.vocal import _provenance_v1, _verify_blob
+    from soloring.performance.vocal import _provenance_v1
     try:
         normalized = _provenance_v1(provenance)
     except SoloRingError as exc:
@@ -208,6 +211,33 @@ async def verify_vocal_performance_integrity(
     if normalized["source_kind"] != vc.source_kind:
         raise corrupt("bound VocalCandidate source_kind/provenance disagree")
 
+    dlr = await session.get(DialogueLineRevision, vp.dialogue_line_revision_id)
+    if dlr is None:
+        raise corrupt("bound VP DialogueLineRevision is missing")
+    if vc.dialogue_line_revision_id != dlr.id:
+        raise corrupt("bound VocalCandidate and VP name different line revisions")
+    if vp.speaker_subject_id != dlr.speaker_subject_id:
+        raise corrupt("bound VP speaker != DialogueLineRevision speaker")
+    line = await session.get(DialogueLine, dlr.dialogue_line_id)
+    if line is None:
+        raise corrupt("bound VP DialogueLine is missing")
+    from soloring.continuity.models import CreativeEntity
+    speaker = await session.get(CreativeEntity, vp.speaker_subject_id)
+    if speaker is None or speaker.project_id != line.project_id:
+        raise corrupt("bound VP speaker does not belong to DialogueLine project")
+    return line.project_id
+
+
+async def _verify_vp_physical_media(
+    session: AsyncSession,
+    settings,
+    vp: VocalPerformanceRevision,
+) -> None:
+    """C3-01: the EXPENSIVE retained-media verifier — retained blob
+    existence/integrity/rehash, WAVE validity, sample rate, sample-frame
+    count, and authoritative trim containment. Transitions and recovery
+    pay this cost; authoritative reads do not."""
+    from soloring.performance.vocal import _verify_blob
     try:
         blob = await _verify_blob(session, settings, vp.retained_audio_blob_hash)
     except SoloRingError as exc:
@@ -226,21 +256,28 @@ async def verify_vocal_performance_integrity(
             vp.retained_sample_count):
         raise corrupt("bound VP authoritative trim is illegal")
 
-    dlr = await session.get(DialogueLineRevision, vp.dialogue_line_revision_id)
-    if dlr is None:
-        raise corrupt("bound VP DialogueLineRevision is missing")
-    if vc.dialogue_line_revision_id != dlr.id:
-        raise corrupt("bound VocalCandidate and VP name different line revisions")
-    if vp.speaker_subject_id != dlr.speaker_subject_id:
-        raise corrupt("bound VP speaker != DialogueLineRevision speaker")
-    line = await session.get(DialogueLine, dlr.dialogue_line_id)
-    if line is None:
-        raise corrupt("bound VP DialogueLine is missing")
-    from soloring.continuity.models import CreativeEntity
-    speaker = await session.get(CreativeEntity, vp.speaker_subject_id)
-    if speaker is None or speaker.project_id != line.project_id:
-        raise corrupt("bound VP speaker does not belong to DialogueLine project")
-    return line.project_id
+
+async def verify_vocal_performance_integrity(
+    session: AsyncSession,
+    settings,
+    vp: VocalPerformanceRevision,
+) -> str:
+    """Live M17A-recovery-parity verifier for a VP seeding new authority.
+
+    C3-01: implemented as the composition structural-authority verifier
+    + physical retained-media verifier — behaviorally identical to the
+    pre-split law set, so transitions and recovery keep the FULL
+    existing protection.
+
+    C2-02: this function is CONTEXT-NEUTRAL — it verifies the VP's own
+    physical/identity closure and RETURNS the VP/DialogueLine project
+    id. Project agreement with the consuming candidate is the caller's
+    law, so the caller's ADMISSION/HISTORICAL context decides the error
+    contract for a mismatch.
+    """
+    project_id = await _verify_vp_structural_authority(session, vp)
+    await _verify_vp_physical_media(session, settings, vp)
+    return project_id
 
 
 def _vocal_performance_interval(row) -> tuple[Fraction, Fraction]:
@@ -625,20 +662,17 @@ def _read_binding_scalar_laws(row, parent, vp) -> None:
 
 
 async def _read_project_law(session: AsyncSession, parent, vp) -> None:
-    """C2-02: project closure on reads — resolve the VP's project
-    through its DialogueLineRevision/DialogueLine chain (no audio
-    rehash) and require it to equal the reading parent's project."""
-    dlr = await session.get(DialogueLineRevision,
-                            vp.dialogue_line_revision_id)
-    if dlr is None:
-        raise corrupt("bound VP DialogueLineRevision is missing")
-    line = await session.get(DialogueLine, dlr.dialogue_line_id)
-    if line is None:
-        raise corrupt("bound VP DialogueLine is missing")
-    if line.project_id != parent.project_id:
+    """C3-01: reads prove the FULL cheap VP structural authority closure
+    (adopted-candidate identity, copied fields incl. DLR, provenance
+    grammar/hash, speaker/project membership) via the shared structural
+    verifier — never merely VP→DLR→DialogueLine project equality — and
+    then require the verified VP project to equal the reading parent's
+    project. No retained VP audio bytes are read or rehashed here."""
+    vp_project_id = await _verify_vp_structural_authority(session, vp)
+    if vp_project_id != parent.project_id:
         raise corrupt(
             "persisted binding's VP/DialogueLine project "
-            f"{line.project_id!r} disagrees with the reading parent's "
+            f"{vp_project_id!r} disagrees with the reading parent's "
             f"project {parent.project_id!r}")
 
 

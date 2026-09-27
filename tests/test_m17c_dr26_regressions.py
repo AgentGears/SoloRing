@@ -206,7 +206,16 @@ async def test_dr26_01_recovery_refuses_inverse_downgrade(client, tmp_path):
     con.commit()
     con.close()
     exc = await _restore_refuses(root, tmp_path, "dr26b")
-    assert "classification" in str(exc), exc
+    # C3-02: branch-specific proof — the stable marker names the
+    # cross-pair disagreement, and both conflicting modes identify this
+    # exact fixture (revision VOCAL_V1 vs adopted candidate NONE). Not
+    # satisfiable by missing/malformed classifications or by any local
+    # cardinality failure (both sides are locally valid by
+    # construction).
+    msg = str(exc)
+    assert "PAIR-CLASSIFICATION-DISAGREEMENT" in msg, exc
+    assert "adopted candidate" in msg, exc
+    assert "'VOCAL_V1'" in msg and "'NONE'" in msg, exc
 
 
 # ---------------------------------------------------------------------------
