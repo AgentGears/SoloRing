@@ -94,6 +94,7 @@ jobs:
           tests/test_m17c_route_ownership.py
           tests/test_m17c_sr26_regressions.py
           tests/test_m17c_dr26_regressions.py
+          tests/test_m17c_c2_regressions.py
 
       - name: No repo-root generated residue
         run: python -c "from pathlib import Path; assert not Path('m10f-scale-pkgs').exists(), 'repo-root residue present'"
