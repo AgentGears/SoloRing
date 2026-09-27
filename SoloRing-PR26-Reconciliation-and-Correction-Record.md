@@ -176,3 +176,31 @@ The recovery verifier's cross-pair branch now emits the stable diagnostic marker
 ## Frozen for the final delta review (cycle 4)
 
 Cycle-4 delta: `40664f7..NEW_HEAD` (commit `6f9a72d` corrections+regressions+allowlist sweep, plus this record update). Review scope per the handoff: exactly `40664f7..NEW_HEAD`, focused on (1) the structural-vs-physical VP verification split, (2) GET structural closure completeness, (3) confirmation GETs do not rehash VP audio, (4) the C3-02 branch-specific recovery proof, and (5) direct regressions caused by the small refactor. If clean with no new authority defect, M17C-A can be frozen technically sound and work can proceed to M17C-B while PR #26 remains draft.
+
+---
+
+# M17C-B — PF-02 Shot Performance working mappings + readiness — 2026-09-27
+
+**Final reconciliation disposition:** M17C-A technically closed at `c502b81` (final review PASS; no further corrective cycle). M17C-B began immediately after per the handoff, treating `c502b81` as the frozen baseline. **No M17C-A invariant was weakened or reinterpreted** — every M17C-A surface touched here is consumed, not modified (see predecessor-impact note below).
+
+## Delivered (frozen R4 §8–§9, §17, §19, §21 M17C-B slice)
+
+- **Migration:** `0020_m17c_perf_capture_r2` (draft-mutable per plan) gains `shot_performance_segment_mappings` — mutable working intent, PK `(shot_id, position)`, FKs RESTRICT to `shots` + `performance_revisions`, named CHECKs matching the ORM exactly, PR index, covered by the populated-downgrade fence.
+- **Service** (`m17c_shot_mapping.py`): PUT/DELETE/list + readiness projection. Dialogue-bound detection goes through the M17C-A pair verifier (classification + both sides' cardinality + closure BEFORE mode interpretation). Dialogue-bound law set: `vocal_mapping_position` mandatory; paired `ShotVocalSegmentMapping` exists on the same Shot; its VP == the immutable revision-binding VP; rate equality; vocal source interval inside the binding interval; CURRENT-selection policy at PUT (409); and the exact induced interval/anchor with ZERO tolerance (`P0 = origin + (v0−s0)·1000/rate`). Generic law set: `vocal_mapping_position` prohibited; nonempty interval inside the immutable PR domain; picture intersection (J/L-cut lawful); project agreement.
+- **Readiness** (never persisted): `READY / STALE_VOCAL_SELECTION / BLOCKED_BINDING_INTEGRITY / BLOCKED_TIMING_MISMATCH / BLOCKED_SUBJECT_OR_PROJECT / BLOCKED_CHANNEL_CONFLICT / BLOCKED_SHOT_DEPENDENCY` + the pairwise channel-conflict law computed from immutable payload channel keys (not `performance_kind` labels). Selection change projects STALE and never mutates rows; restoring the exact VP restores readiness.
+- **API:** `PUT/DELETE/GET /shots/{shot_id}/performance-segments[/{position}]`, `GET /shots/{shot_id}/performance-readiness` — closed schemas, raw rational `{num, den}` inputs, six new centralized `ErrorCode` members.
+- **Recovery:** the M17C verifier gains working-mapping laws per frozen §13.3 — canonical bytes/hash, rational canonicality, project/reference integrity, VOCAL_V1↔vocal_mapping_position pairing in both directions, and STALE-tolerant (a lawfully STALE mapping is a lawful stored working state; current selection is not historical truth during backup validation).
+
+## Predecessor-impact note (per the final reconciliation requirement)
+
+No M17C-A law, migration row, or verifier branch was modified; M17C-B only **consumes** `verify_revision_sync_classification` and the binding rows. The one addition inside an existing M17C-A file is the working-mapping verification function **appended** to `m17c_verifier.py` (a new law for the new table). Fixture sweeps touched only predecessor test assertions about table sets/heads (mechanical, in-file precedent).
+
+## M17C-B gates (committed head `f505fd2`)
+
+- D01–D16 battery + regressions: **20/20** (new `test_m17c_shot_mapping.py`, wired into the CI focused list).
+- Full M17C battery incl. M17B interaction files (`test_m17b_migration/matrix/recovery/source_gate`): **160/160**.
+- All nineteen validators: **VALID** (after `m14_validate_source_fit` admitted `m17c_shot_mapping.py` as a reviewed successor path — commit `f505fd2`).
+- Full backend suite: **2787 passed / 8 skipped / 0 failed / 0 errors** in 57:09 — fully-green first pass including the three live-GPU exec gates; no flake, no rerun.
+- Frontend (local CI-equivalent): vitest **143/143** (32 files), `tsc --noEmit` clean, `next build` succeeds.
+- **CI run `36346081441` at head `f505fd2a0b76f0d5a2594c96066cb9d7c6aab8bc`: SUCCESS, first attempt.**
+- Residue: none; tracked tree clean. PR #26 remains open, unmerged, draft.
