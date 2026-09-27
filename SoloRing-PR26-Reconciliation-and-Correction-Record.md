@@ -52,5 +52,19 @@ F1–F3 (route-proof introspection, canonical DDL comparison, exact-Fraction ind
 
 - Focused M17C suites: **64/64 green** (authority, transitions, migration, first-pass regressions, route ownership, SR26 regressions).
 - Restored boundary-gate test files: **45/45 green**.
-- All thirteen CI validators: **green locally** (proof maps + the nine individually-classified boundary/source-fit/baseline validators).
-- Full backend suite + residue: recorded in the corrective commit message.
+- All nineteen CI validators (proof maps + the nine individually-classified boundary/source-fit/baseline validators): **green locally on the committed corrective tree**.
+- Full backend suite on the corrective tree: **2743 passed / 7 skipped / 3 failed**. The 3 failures are `test_m14_exec_08/09/10` — the live-GPU production-machine gates — and are **not defects in the corrective delta**: `git diff dd075fb..HEAD` shows zero changes under `server/soloring/worker/`, `server/soloring/executors/`, `tests/test_m14_gpu_gate.py`, or `tests/test_m14_execution.py`, and CI skips these gates on Actions runners by design.
+- Residue: no repo-root generated residue; no `m10f-scale-pkgs`.
+
+## Environment incident disclosure (open item, operator action required)
+
+The three live-GPU gate failures and the inability to re-confirm them green locally were caused by **an environment regression I introduced during the earlier BLOCKER-1B qualification work**, not by any code under review:
+
+1. The BLOCKER-1B LivePortrait/YuNet qualification installed packages into the **shared** `C:/AI/ComfyUI/venv` (onnxruntime, opencv, timm, ultralytics, …). That venv is also the pinned M14 gate executor (`GATE_COMFY_EXE`), and the installs displaced the `ComfyUI-WanVideoWrapper` dependencies: at corrective time `accelerate`, `ftfy`, `diffusers`, `peft`, `sentencepiece`, `protobuf`, `gguf`, `pyloudnorm`, `einops` were all missing, so the wrapper failed to import and every gate submission died as `missing_node_type: WanVideoModelLoader` → worker recorded `failed` (the exact signature of the 3 suite failures).
+2. I reinstalled the missing packages from the wrapper's `requirements.txt` at current versions (`accelerate 1.15.0`, `diffusers 0.40.0`, `peft 0.21.0`, …). Wrapper import and prompt acceptance were restored, but the Wan2.2 generation then **hung in the T5 text-encoder pass** (2.5+ hours at GPU 100%, zero output artifacts) — the freshly-chosen versions do not match whatever versions the original executor environment carried. No lockfile of that environment exists (`pydeps/` carries only `cv2`), so I cannot restore the original version set.
+3. The stuck gate run and executor were stopped; no gate result is claimed. **Required operator action:** restore or pin the executor venv to a known-good dependency set (e.g., rebuild the venv and install the wrapper requirements at versions known to work with WanVideoWrapper @ `088128b2`), then rerun `tests/test_m14_execution.py::test_m14_exec_08/09/10` on this machine. Until then, the live-GPU gate results from this machine are untrustworthy — including my first-pass run-6 "green", which predates the damage and remains the last trustworthy green datapoint for those three tests.
+4. Lesson recorded for the process: milestone executor environments sharing one venv with qualification experiments must be isolated; the BLOCKER-1B spike should have used a dedicated venv (the attested `:8188` launcher's clean-tree checks do not cover site-packages).
+
+## Frozen for delta review
+
+The corrective delta (commits `8ee2a3d`, `e0bda96`, `63305d5`, plus the record updates in this commit) is frozen here for the Codex delta-only review: the SR26-01 discriminator, the SR26-02 verifier and dispatch wiring, the SR26-03 read laws, the SR26-04 gate restorations and sweeps, the SR26-05 admission/history split, and the SR26-06 centralization — with the environment incident above as the only open local-gate item.
