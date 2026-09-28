@@ -470,8 +470,17 @@ async def verify_candidate_vocal_binding(
         raise corrupt(
             "persisted binding interval lies outside the parent domain")
     if payload_document is None:
-        payload_document = (await revision_svc.verify_candidate_integrity(
-            session, settings, candidate))["payload_document"]
+        # IR-03: an already-persisted candidate is authority — load its
+        # integrity through the HISTORICAL seam (admission-shaped
+        # failures become corruption); fresh creation keeps the
+        # admission contract (and always supplies payload_document)
+        if context == ADMISSION:
+            payload_document = (await revision_svc.verify_candidate_integrity(
+                session, settings, candidate))["payload_document"]
+        else:
+            payload_document = (
+                await revision_svc.verify_candidate_integrity_historical(
+                    session, settings, candidate))["payload_document"]
     await _verify_alignment_exact_vp(
         session, payload_document, row.vocal_performance_revision_id,
         context=context)
@@ -719,7 +728,8 @@ async def read_candidate_vocal_binding(
     if not (domain[0] <= interval[0] < interval[1] <= domain[1]):
         raise corrupt(
             "persisted binding interval lies outside the candidate domain")
-    integrity = await revision_svc.verify_candidate_integrity(
+    # IR-03: persisted candidate authority — historical seam
+    integrity = await revision_svc.verify_candidate_integrity_historical(
         session, settings, candidate)
     await _verify_alignment_exact_vp(
         session, integrity["payload_document"], vp.id)
@@ -755,6 +765,21 @@ async def verify_revision_vocal_binding_read_grade(
                                   revision.adopted_candidate_id)
     if candidate is None:
         raise corrupt("dialogue-bound revision adopted candidate is missing")
+    # IR-03 (completing SR2-04 for the authoritative read): the
+    # revision itself must reproduce its adopted candidate's copied
+    # closure with lawful persisted adoption metadata — a
+    # candidate-side tamper (e.g. subject divergence) must refuse the
+    # authoritative revision read too, with admission-shaped grammar
+    # failures translated to the historical corruption contract
+    try:
+        revision_svc.revalidate_winner(revision, candidate)
+    except SoloRingError as exc:
+        if exc.code == ErrorCode.INTERNAL_INVARIANT_VIOLATION \
+                and exc.status_code == 500:
+            raise
+        raise corrupt(
+            f"persisted revision/adopted-candidate closure violates "
+            f"immutable law: {exc.message}") from exc
     # verify_revision_sync_classification already proved the candidate's
     # local law and pair equality (C2-01) — no duplicate comparison here.
     candidate_row = await session.get(
@@ -783,7 +808,8 @@ async def verify_revision_vocal_binding_read_grade(
         raise corrupt(
             "persisted binding interval lies outside the revision's own "
             "temporal domain")
-    integrity = await revision_svc.verify_candidate_integrity(
+    # IR-03: persisted candidate authority — historical seam
+    integrity = await revision_svc.verify_candidate_integrity_historical(
         session, settings, candidate)
     await _verify_alignment_exact_vp(
         session, integrity["payload_document"], vp.id)

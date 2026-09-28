@@ -50,34 +50,257 @@ _M17C_TABLES = (
 # working-mapping pass is conditional on its presence.
 _SHOT_MAPPING_TABLE = "shot_performance_segment_mappings"
 
-# SR2-02: the exact staged head drives the schema contract (mirrors
+# SR2-02/IR-01: the exact staged head drives the schema contract (mirrors
 # recovery.backup's M17C_A/M17C_B constants without importing the
 # backup module — the backup module installs this verifier).
 _HEAD_0020 = "0020_m17c_perf_capture_r2"
 _HEAD_0021 = "0021_m17c_shot_performance_mappings"
 
-# SR2-02 deterministic schema proof for the PF-02 table at 0021:
-# PRAGMA table_info (name -> (notnull, pk ordinal)), foreign_key_list
-# ((table, from, to) -> on_delete), index contract, and the named
-# CHECK constraints in the sqlite_master DDL.
-_SPSM_COLUMNS = {
-    "shot_id": (1, 1), "position": (1, 2),
-    "performance_revision_id": (1, 0),
-    "performance_start_num": (1, 0), "performance_start_den": (1, 0),
-    "performance_end_num": (1, 0), "performance_end_den": (1, 0),
-    "shot_anchor_num": (1, 0), "shot_anchor_den": (1, 0),
-    "vocal_mapping_position": (0, 0),
-    "mapping_schema_version": (1, 0),
-    "mapping_json": (1, 0), "mapping_hash": (1, 0),
-    "created_at": (1, 0), "updated_at": (1, 0),
+# ---------------------------------------------------------------------------
+# IR-01/IR-02: frozen PHYSICAL schema contracts for every migration-0020/0021
+# table, proven from PRAGMA evidence + the stored sqlite_master DDL.
+#
+# The stored DDL is deterministic across the ORM (create_all) and the
+# alembic migrations: SQLAlchemy's metadata naming convention prefixes
+# CHECK and PRIMARY-KEY constraint names with the table name while FK
+# names pass through verbatim (probed against both engines; the stored
+# forms below are the FROZEN contract). Column tuples are
+# (declared type, notnull, pk ordinal) per PRAGMA table_info; FK maps
+# are {(target table, source column, target column):
+# (on_update, on_delete, match)} per PRAGMA foreign_key_list; CHECK
+# maps are {stored constraint name: normalized expression} parsed from
+# the DDL — name-preserving rewrites such as CHECK(1) diverge on the
+# expression and are refused.
+# ---------------------------------------------------------------------------
+
+_FK_RESTRICT = ("NO ACTION", "RESTRICT", "NONE")
+
+
+def _binding_contract(table: str, parent_col: str, parent_table: str,
+                      ck: str) -> dict:
+    return {
+        "columns": {
+            parent_col: ("VARCHAR(36)", 1, 1),
+            "vocal_performance_revision_id": ("VARCHAR(36)", 1, 0),
+            "source_start_sample": ("INTEGER", 1, 0),
+            "source_end_sample_exclusive": ("INTEGER", 1, 0),
+            "sample_rate_hz": ("INTEGER", 1, 0),
+            "performance_origin_num": ("INTEGER", 1, 0),
+            "performance_origin_den": ("INTEGER", 1, 0),
+            "synchronization_basis_version": ("INTEGER", 1, 0),
+            "binding_schema_version": ("INTEGER", 1, 0),
+            "binding_json": ("TEXT", 1, 0),
+            "binding_hash": ("TEXT", 1, 0),
+            "created_at": ("TEXT", 1, 0),
+        },
+        "checks": {
+            f"ck_{table}_ck_{ck}_start_nonneg":
+                "source_start_sample >= 0",
+            f"ck_{table}_ck_{ck}_sample_order":
+                "source_start_sample < source_end_sample_exclusive",
+            f"ck_{table}_ck_{ck}_rate_positive":
+                "sample_rate_hz > 0",
+            f"ck_{table}_ck_{ck}_origin_den_positive":
+                "performance_origin_den > 0",
+            f"ck_{table}_ck_{ck}_sync_basis":
+                "synchronization_basis_version = 1",
+            f"ck_{table}_ck_{ck}_schema":
+                "binding_schema_version = 1",
+            f"ck_{table}_ck_{ck}_hash_hex":
+                "length(binding_hash) = 64 AND "
+                "binding_hash NOT GLOB '*[^0-9a-f]*'",
+        },
+        "fks": {
+            (parent_table, parent_col, "id"): _FK_RESTRICT,
+            ("vocal_performance_revisions",
+             "vocal_performance_revision_id", "id"): _FK_RESTRICT,
+        },
+    }
+
+
+def _classification_contract(table: str, parent_col: str,
+                             parent_table: str, ck: str) -> dict:
+    return {
+        "columns": {
+            parent_col: ("VARCHAR(36)", 1, 1),
+            "sync_mode": ("TEXT", 1, 0),
+            "classification_schema_version": ("INTEGER", 1, 0),
+            "created_at": ("TEXT", 1, 0),
+        },
+        "checks": {
+            f"ck_{table}_ck_{ck}_mode":
+                "sync_mode IN ('NONE', 'VOCAL_V1')",
+            f"ck_{table}_ck_{ck}_schema":
+                "classification_schema_version = 1",
+        },
+        "fks": {
+            (parent_table, parent_col, "id"): _FK_RESTRICT,
+        },
+    }
+
+
+_PF03_CONTRACTS = {
+    "performance_candidate_vocal_bindings": _binding_contract(
+        "performance_candidate_vocal_bindings",
+        "performance_candidate_id", "performance_candidates", "pcvb"),
+    "performance_revision_vocal_bindings": _binding_contract(
+        "performance_revision_vocal_bindings",
+        "performance_revision_id", "performance_revisions", "prvb"),
+    "performance_candidate_sync_classifications":
+        _classification_contract(
+            "performance_candidate_sync_classifications",
+            "performance_candidate_id", "performance_candidates", "pcsc"),
+    "performance_revision_sync_classifications":
+        _classification_contract(
+            "performance_revision_sync_classifications",
+            "performance_revision_id", "performance_revisions", "prsc"),
 }
-_SPSM_FKS = {
-    ("shots", "shot_id", "id"): "RESTRICT",
-    ("performance_revisions", "performance_revision_id", "id"): "RESTRICT",
+
+# IR-01: the migration-0021 working-mapping table contract
+_SPSM_CONTRACT = {
+    "columns": {
+        "shot_id": ("VARCHAR(36)", 1, 1),
+        "position": ("INTEGER", 1, 2),
+        "performance_revision_id": ("VARCHAR(36)", 1, 0),
+        "performance_start_num": ("INTEGER", 1, 0),
+        "performance_start_den": ("INTEGER", 1, 0),
+        "performance_end_num": ("INTEGER", 1, 0),
+        "performance_end_den": ("INTEGER", 1, 0),
+        "shot_anchor_num": ("INTEGER", 1, 0),
+        "shot_anchor_den": ("INTEGER", 1, 0),
+        "vocal_mapping_position": ("INTEGER", 0, 0),
+        "mapping_schema_version": ("INTEGER", 1, 0),
+        "mapping_json": ("TEXT", 1, 0),
+        "mapping_hash": ("TEXT", 1, 0),
+        "created_at": ("TEXT", 1, 0),
+        "updated_at": ("TEXT", 1, 0),
+    },
+    "checks": {
+        "ck_shot_performance_segment_mappings_ck_spsm_position":
+            "position >= 0",
+        "ck_shot_performance_segment_mappings_"
+        "ck_spsm_start_den_positive":
+            "performance_start_den > 0",
+        "ck_shot_performance_segment_mappings_"
+        "ck_spsm_end_den_positive":
+            "performance_end_den > 0",
+        "ck_shot_performance_segment_mappings_"
+        "ck_spsm_anchor_den_positive":
+            "shot_anchor_den > 0",
+        "ck_shot_performance_segment_mappings_"
+        "ck_spsm_mapping_schema":
+            "mapping_schema_version = 1",
+        "ck_shot_performance_segment_mappings_"
+        "ck_spsm_mapping_hash_len":
+            "length(mapping_hash) = 64",
+    },
+    "fks": {
+        ("shots", "shot_id", "id"): _FK_RESTRICT,
+        ("performance_revisions", "performance_revision_id", "id"):
+            _FK_RESTRICT,
+    },
 }
-_SPSM_CHECKS = ("ck_spsm_position", "ck_spsm_start_den_positive",
-                "ck_spsm_end_den_positive", "ck_spsm_anchor_den_positive",
-                "ck_spsm_mapping_schema", "ck_spsm_mapping_hash_len")
+
+
+def _named_checks(sql: str) -> dict:
+    """Parse every ``CONSTRAINT <name> CHECK (<expr>)`` pair from a
+    stored CREATE TABLE statement (IR-01/02). The expression is
+    captured with balanced nested parentheses and quote-aware scanning
+    and whitespace-normalized — a right-named ``CHECK(1)`` produces a
+    different expression and is rejected by the contract comparison."""
+    checks: dict[str, str] = {}
+    i = 0
+    while True:
+        c = sql.find("CONSTRAINT", i)
+        if c == -1:
+            return checks
+        rest = sql[c + len("CONSTRAINT"):].lstrip()
+        name_end = 0
+        while name_end < len(rest) and rest[name_end] not in " \t\n\r(":
+            name_end += 1
+        name = rest[:name_end]
+        after = rest[name_end:].lstrip()
+        if not after[:5].upper() == "CHECK":
+            # a named non-CHECK constraint (e.g. FOREIGN KEY) — skip
+            i = c + len("CONSTRAINT") + name_end
+            continue
+        p = after.find("(")
+        depth = 0
+        in_string = False
+        j = p
+        while j < len(after):
+            ch = after[j]
+            if in_string:
+                if ch == "'":
+                    in_string = False
+            elif ch == "'":
+                in_string = True
+            elif ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+                if depth == 0:
+                    break
+            j += 1
+        if depth != 0:
+            raise _corrupt("unbalanced CHECK expression in stored DDL")
+        checks[name] = " ".join(after[p + 1:j].split())
+        i = c + len("CONSTRAINT") + name_end + (j + 1)
+
+
+def _verify_table_schema(con: sqlite3.Connection, table: str,
+                         contract: dict) -> None:
+    """IR-01/IR-02: prove the EXACT stored physical schema of one
+    migration-owned table — declared column names/types/nullability/PK
+    ordinals, the complete FK contract (source column, target
+    table/column, ON DELETE RESTRICT, deterministic ON UPDATE/MATCH),
+    and every named CHECK's exact semantic expression. Never accept a
+    table that merely has the right names."""
+    cols = {r[1]: (r[2], r[3], r[5]) for r in con.execute(
+        f"PRAGMA table_info({table})")}
+    if cols != contract["columns"]:
+        raise _corrupt(
+            f"{table} column contract diverges: expected "
+            f"{sorted(contract['columns'].items())}, got "
+            f"{sorted(cols.items())}")
+    fks = {(r[2], r[3], r[4]): (r[5], r[6], r[7]) for r in con.execute(
+        f"PRAGMA foreign_key_list({table})")}
+    if fks != contract["fks"]:
+        raise _corrupt(
+            f"{table} foreign-key contract diverges: expected "
+            f"{sorted(contract['fks'].items())}, got "
+            f"{sorted(fks.items())}")
+    row = con.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' "
+        f"AND name = '{table}'").fetchone()
+    if row is None:
+        raise _corrupt(f"{table} missing from sqlite_master DDL")
+    checks = _named_checks(row[0])
+    if checks != contract["checks"]:
+        raise _corrupt(
+            f"{table} CHECK-contract diverges: expected "
+            f"{sorted(contract['checks'].items())}, got "
+            f"{sorted(checks.items())}")
+
+
+def _verify_spsm_schema(con: sqlite3.Connection) -> None:
+    """IR-01: the full working-mapping table contract — exact columns,
+    exact FKs, exact named CHECK expressions, and the explicit
+    ix_spsm_pr index (non-unique, non-partial, CREATE-INDEX origin,
+    exactly one indexed column)."""
+    _verify_table_schema(con, _SHOT_MAPPING_TABLE, _SPSM_CONTRACT)
+    # PRAGMA index_list rows: (seq, name, unique, origin, partial)
+    indexes = {r[1]: (r[2], r[3], r[4]) for r in con.execute(
+        f"PRAGMA index_list({_SHOT_MAPPING_TABLE})")}
+    if indexes.get("ix_spsm_pr") != (0, "c", 0):
+        raise _corrupt(
+            f"{_SHOT_MAPPING_TABLE} index contract diverges: ix_spsm_pr "
+            "must be a non-unique, non-partial CREATE INDEX; got "
+            f"{sorted(indexes.items())}")
+    ix_cols = [r[2] for r in con.execute("PRAGMA index_info(ix_spsm_pr)")]
+    if ix_cols != ["performance_revision_id"]:
+        raise _corrupt(
+            "ix_spsm_pr does not index exactly performance_revision_id")
 
 
 def _corrupt(msg: str) -> Exception:
@@ -120,7 +343,20 @@ def verify_m17c_binding_state(staged_db: Path,
                 raise _corrupt(
                     "staged head 0021 is missing the PF-02 "
                     "working-mapping table")
-            _verify_spsm_schema(con)
+        # IR-01/IR-02: the COMPLETE physical-schema phase runs BEFORE
+        # any semantic row traversal — head 0021 inherits the frozen
+        # 0020 PF-03 schemas physically and must not weaken their
+        # certification. A structurally damaged table surfaces as the
+        # recovery-corruption contract, never a raw sqlite3 error.
+        try:
+            for table, contract in _PF03_CONTRACTS.items():
+                _verify_table_schema(con, table, contract)
+            if head == _HEAD_0021:
+                _verify_spsm_schema(con)
+        except sqlite3.Error as exc:
+            raise _corrupt(
+                f"physical schema verification failed structurally on "
+                f"the staged M17C tables: {exc}") from exc
         _verify_classifications(con)
         _verify_candidate_bindings(con, blob_root)
         _verify_revision_bindings(con)
@@ -129,45 +365,6 @@ def verify_m17c_binding_state(staged_db: Path,
             _verify_shot_performance_mappings(con)
     finally:
         con.close()
-
-
-def _verify_spsm_schema(con: sqlite3.Connection) -> None:
-    """SR2-02: deterministic physical-schema proof for the PF-02 table
-    (columns/nullability/PK, FKs with RESTRICT, the PR index, and the
-    named CHECK contract) — never trust row laws alone."""
-    cols = {r[1]: (r[3], r[5]) for r in con.execute(
-        f"PRAGMA table_info({_SHOT_MAPPING_TABLE})")}
-    if cols != _SPSM_COLUMNS:
-        raise _corrupt(
-            f"{_SHOT_MAPPING_TABLE} column contract diverges: got "
-            f"{sorted(cols.items())}")
-    fks = {(r[2], r[3], r[4]): r[6] for r in con.execute(
-        f"PRAGMA foreign_key_list({_SHOT_MAPPING_TABLE})")}
-    if fks != _SPSM_FKS:
-        raise _corrupt(
-            f"{_SHOT_MAPPING_TABLE} foreign-key contract diverges: got "
-            f"{sorted(fks.items())}")
-    # PRAGMA index_list rows: (seq, name, unique, origin, partial) —
-    # the contract is on ORIGIN 'c' (an explicit CREATE INDEX), not the
-    # uniqueness flag (the PK's sqlite_autoindex is a separate index)
-    indexes = {r[1]: r[3] for r in con.execute(
-        f"PRAGMA index_list({_SHOT_MAPPING_TABLE})")}
-    if indexes.get("ix_spsm_pr") != "c":
-        raise _corrupt(
-            f"{_SHOT_MAPPING_TABLE} index contract diverges: expected "
-            f"ix_spsm_pr as a CREATE INDEX index, got {sorted(indexes.items())}")
-    ix_cols = [r[2] for r in con.execute("PRAGMA index_info(ix_spsm_pr)")]
-    if ix_cols != ["performance_revision_id"]:
-        raise _corrupt(
-            "ix_spsm_pr does not index exactly performance_revision_id")
-    sql = con.execute(
-        "SELECT sql FROM sqlite_master WHERE type='table' "
-        f"AND name = '{_SHOT_MAPPING_TABLE}'").fetchone()[0]
-    for name in _SPSM_CHECKS:
-        if name not in sql:
-            raise _corrupt(
-                f"{_SHOT_MAPPING_TABLE} DDL lost CHECK constraint "
-                f"{name!r}")
 
 
 def _canonical(obj) -> str:

@@ -250,6 +250,34 @@ async def verify_candidate_integrity(
     return result
 
 
+async def verify_candidate_integrity_historical(
+        session: AsyncSession, settings, candidate: PerformanceCandidate,
+) -> dict:
+    """IR-03: the ONE shared persisted-history candidate-integrity
+    seam. Executes the SAME underlying immutable verifier as admission,
+    but translates admission-oriented ``SoloRingError`` failures into
+    the historical corruption contract (``INTERNAL_INVARIANT_VIOLATION``,
+    500) with the original diagnostic preserved — an ALREADY-PERSISTED
+    candidate is authority, so its defects are corruption, never a
+    client-input 4xx. Failures that are already the correct historical
+    500 invariant pass through unchanged. Fresh candidate creation
+    keeps calling ``verify_candidate_integrity`` directly and keeps
+    its admission 4xx contract."""
+    try:
+        return await verify_candidate_integrity(session, settings, candidate)
+    except SoloRingError as exc:
+        if exc.code == ErrorCode.INTERNAL_INVARIANT_VIOLATION \
+                and exc.status_code == 500:
+            raise
+        raise SoloRingError(
+            ErrorCode.INTERNAL_INVARIANT_VIOLATION,
+            f"persisted performance candidate "
+            f"{getattr(candidate, 'id', None)!r} violates immutable "
+            f"authority: {exc.message}",
+            status_code=500,
+        ) from exc
+
+
 # the semantic fields a retarget candidate copies byte/scalar-exact
 # from its source revision (creation law == recovery law; the payload
 # hash columns carry the payload equality)

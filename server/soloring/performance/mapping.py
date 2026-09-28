@@ -19,8 +19,11 @@ from soloring.domain.ids import new_uuid
 from soloring.errors import ErrorCode, SoloRingError, not_found
 from soloring.performance.models import (ShotVocalSegmentMapping,
                                          VocalPerformanceSelection)
-from soloring.performance.temporal import (RationalError,
-                                           canonical_rational, shot_ms)
+from soloring.performance.temporal import (PositionError,
+                                           RationalError,
+                                           canonical_rational,
+                                           shot_ms,
+                                           validate_mapping_position)
 from soloring.performance.vocal import get_vocal_performance_revision
 
 
@@ -33,9 +36,15 @@ async def put_shot_vocal_segment_mapping(
         shot_anchor_num: int, shot_anchor_den: int
         ) -> ShotVocalSegmentMapping:
     from soloring.domain.models import Shot
-    if position < 0:
+    # IR-04: the shared position-domain law runs BEFORE any ORM or
+    # SQLite access; failures keep this service's established 4xx
+    # vocabulary (an unbounded Python int would otherwise reach SQLite
+    # and surface as a raw OverflowError)
+    try:
+        validate_mapping_position(position)
+    except PositionError as exc:
         raise SoloRingError(ErrorCode.INVALID_SAMPLE_INTERVAL,
-                            "position must be >= 0", status_code=422)
+                            str(exc), status_code=422) from exc
     shot = await session.get(Shot, shot_id)
     if shot is None:
         raise not_found(ErrorCode.SHOT_NOT_FOUND,
@@ -173,6 +182,14 @@ async def put_shot_vocal_segment_mapping(
 
 async def delete_shot_vocal_segment_mapping(
         session: AsyncSession, *, shot_id: str, position: int) -> None:
+    # IR-04: the shared position-domain law on the DELETE path too —
+    # stable 4xx BEFORE any storage access; 2^63-1 stays DB-safe and
+    # the delete of an absent position stays an idempotent no-op.
+    try:
+        validate_mapping_position(position)
+    except PositionError as exc:
+        raise SoloRingError(ErrorCode.INVALID_SAMPLE_INTERVAL,
+                            str(exc), status_code=422) from exc
     row = await session.get(ShotVocalSegmentMapping, (shot_id, position))
     if row is not None:
         await session.delete(row)

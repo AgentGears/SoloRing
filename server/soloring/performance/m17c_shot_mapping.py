@@ -74,12 +74,16 @@ def _invalid(message: str) -> SoloRingError:
 
 
 def _validate_position(position, *, what: str = "position") -> None:
-    """SR2-09: the ONE shared path-position law for PUT and DELETE —
-    SQLite-i64 domain, bool excluded (a bool is an int subclass and
-    must never reach storage)."""
-    if not isinstance(position, int) or isinstance(position, bool) \
-            or position < 0 or position > SQLITE_INT_MAX:
-        raise _invalid(f"{what} must be an integer in [0, 2^63-1]")
+    """SR2-09/IR-04: the shared path-position law for PUT and DELETE —
+    the ONE neutral primitive from ``temporal`` (integer, bool
+    excluded, SQLite-i64 domain), mapped into this service's stable
+    error vocabulary."""
+    from soloring.performance.temporal import (
+        PositionError, validate_mapping_position)
+    try:
+        validate_mapping_position(position)
+    except PositionError as exc:
+        raise _invalid(f"{what}: {exc}") from exc
 
 
 def _mismatch(message: str) -> SoloRingError:
@@ -152,7 +156,10 @@ async def verify_performance_revision_for_shot_use(
                                   pr.adopted_candidate_id)
     if candidate is None:
         raise _corrupt("adopted revision's candidate is missing")
-    integrity = await revision_svc.verify_candidate_integrity(
+    # IR-03: persisted candidate authority goes through the shared
+    # HISTORICAL seam — admission-shaped defects of an already-persisted
+    # candidate are corruption (500), preserving the diagnostic
+    integrity = await revision_svc.verify_candidate_integrity_historical(
         session, settings, candidate)
     # SR2-04: revision copied closure == adopted candidate + persisted
     # adoption-metadata grammar, with the 500 corruption contract — an
