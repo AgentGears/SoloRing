@@ -275,3 +275,65 @@ The initial M17C-B implementation modified migration `0020` **in place** — the
 ## Frozen for the independent second review
 
 Delta `f39eb9f..f0a9e32` exactly (two commits: `6dca4e2`, `f0a9e32`). No merge, no ready-mark, no Codex invocation yet — the corrected first pass freezes here and the independent second review of exactly this range is the next protocol step, per the controlling disposition.
+
+*(Superseded: the independent second review of that delta returned **NO-GO with ten findings (SR2-01..SR2-10), all accepted** — see the SR2 cycle below. The B-F section above remains historical evidence; its "B-F1..B-F9 all implemented" statement is superseded where SR2 overturned it (most materially B-F4's paired-VP-divergence-as-corruption premise and B-F2's incomplete seam).)*
+
+---
+
+# M17C-B SR2 corrective cycle (SR2-01..SR2-10) — 2026-09-28
+
+The independent second review of `f39eb9f..f0a9e32` found six High, three Medium, and one Low residual/new finding; the reconciliation accepted all ten. **Product correction base: `f0a9e32`** (the later `b74aa73` record commit is documentation-only and is not the review base). Corrected code head: **`a5f9d2d`** (`eb47648` product correction + `a5f9d2d` validator carve). No M17C-C started; PR #26 remains open, draft, unmerged.
+
+## SR2-01 — restore the lost 0020 head (blocker): IMPLEMENTED
+
+`M17C_A_ALEMBIC_HEAD = "0020_m17c_perf_capture_r2"`, `M17C_B_ALEMBIC_HEAD = "0021_m17c_shot_performance_mappings"`, `EXPECTED_ALEMBIC_HEAD = M17C_B_ALEMBIC_HEAD`; both distinct heads in `SUPPORTED_RESTORE_ALEMBIC_HEADS`, sharing the 13-path M17B Blob-FK inventory (the policy tuple already keyed on the constants). Audit findings fixed beyond the constant: the **manifest writer** hardcoded `EXPECTED_ALEMBIC_HEAD` and now records the ACTUAL staged head; the **M14-observation dispatch set** had silently dropped 0021 (the sweep added `M17C_B` to five of six sets only) and is restored; **four historical recovery tests** (m12/m13/m14-derived/m16) hardcode the expected supported-head set and regain the `0020` entry the original sweep renamed away. The **backup-side staged-head guard deliberately keeps the M12-era staleness law** (exactly the EXPECTED head — a stale-headed live database must migrate before backing up as current): an earlier draft of this correction loosened it to "any supported head", the local full suite's four historical-test failures exposed that as an overreach, and it was reverted; SR2-01's restorability requirement is satisfied RESTORE-side (below). Tests: distinct-heads/membership; a genuine 0020 backup tree (a real current backup reshaped to the 0020 identity: PF-02 table dropped, staged head + canonical manifest both 0020) restores successfully with PF-03 rows intact and restored head exactly 0020; an unknown future head refuses at the backup guard.
+
+## SR2-02 — head-aware M17C recovery verifier (blocker): IMPLEMENTED
+
+`verify_m17c_binding_state(staged_db, blob_root, *, head)` receives the exact staged head from BOTH successor-dispatch chains. At 0020: four PF-03 tables required and the PF-02 table MUST be absent. At 0021: the PF-02 table REQUIRED plus a deterministic physical-schema proof — PRAGMA `table_info` (exact columns, nullability, `shot_id`+`position` PK ordinals), `foreign_key_list` (both FKs with `RESTRICT`), `ix_spsm_pr` as an origin-`c` CREATE INDEX on exactly `performance_revision_id`, and the six named CHECK constraints in the sqlite_master DDL. Adversarial tests: 0021 + dropped table refuses; 0021 + malformed substitute table refuses on the column contract; 0020-genuine restores; 0020 + illicit successor table refuses at restore. (Development note, recorded: the first schema proof read `index_list`'s uniqueness flag instead of its origin column — caught by the SR2 battery itself.)
+
+## SR2-03 — paired-vocal VP drift is lawful blocked working state (blocker): IMPLEMENTED
+
+Live `_project_one`: a paired vocal mapping whose VP differs from the immutable revision binding projects `BLOCKED_BINDING_INTEGRITY` with drift diagnostics (paired vs bound VP ids) — never 500; neither row is rewritten during diagnosis. Recovery: the pair-VP refusal is REMOVED (missing pair and repointed pair are both preserved lawful working states; shape violations stay corruption). The B-F regression asserting refusal for that state is superseded and replaced by the **API-only 11-step lifecycle**: lawful READY world → select VP-B → supported M17A PUT repoints the existing vocal position to VP-B → readiness `BLOCKED_BINDING_INTEGRITY` → backup/restore succeeds with both rows byte-identical → restored readiness re-projected (against the restored tree) still blocked → select VP-A + PUT the pair back → readiness READY. A companion regression guards the creation law: a FRESH PF-02 PUT pairing a drifted position still refuses 422 `PERFORMANCE_VOCAL_MAPPING_MISMATCH`.
+
+## SR2-04 — immutable PerformanceRevision copied closure (blocker): IMPLEMENTED
+
+Both seam grades now run, BEFORE any PF-02 consumption of revision authority: adopted-candidate integrity + `revalidate_winner(pr, candidate)` (the frozen M17B `_CLOSURE_FIELDS` equality + `validate_adoption_metadata`), with admission-shaped grammar failures TRANSLATED to `INTERNAL_INVARIANT_VIOLATION` (a draft leaked the adoption branch as 422 — caught by the battery and wrapped). Six-case revision tamper matrix (project, subject, temporal domain, payload blob/hash identity reusing a REAL blobs row so only the closure law can refuse, provenance hash, adoption metadata): each refuses PUT 500 with zero new rows for that Shot, fails readiness/list closed, and the backup-side recovery enumeration refuses with the matching closure/adoption fragment.
+
+## SR2-05 — one shared read-grade PF-03 verifier (blocker): IMPLEMENTED
+
+`verify_revision_vocal_binding_read_grade` is extracted from the authoritative binding GET (parent identity, candidate + source-candidate-binding presence, candidate↔revision binding equality, scalar laws incl. rate/trim/subject/kind, full cheap VP structural authority + VP/Performance project agreement, induced interval inside the REVISION-owned domain, candidate payload integrity, exact-VP cited alignments, articulation). The binding GET and the PF-02 read-grade seam consume THIS verifier; the weaker parallel `verify_revision_vocal_binding_structural` is DELETED. Neither grade touches retained VP audio/WAVE. Five coordinated-tamper regressions (BOTH binding rows coherently rehashed): wrong sample rate; real alternate same-line VP (on a cited-alignment world — see the seed fact below); out-of-trim interval; origin outside the revision domain; wrong-VP cited alignment — each refuses readiness with the targeted law's fragment and the backup-side enumeration refuses with the same law's recovery fragment (branch-specific). **Recorded seed fact:** the default fixture payload cites NO alignments, so on an uncited world a coordinated binding move to a same-line alternate VP is indistinguishable from lawful history and correctly manifests as SR2-03 working drift — the exact-VP laws bite only where alignments are cited (the production shape). **Recorded layering:** for the cited-alignment tamper, M17A's derivation-run-digest law (which embeds VP identity) refuses in recovery BEFORE the M17C cited-alignment law is reached; the state is refused either way and the regression pins the actual firing branch.
+
+## SR2-06 — M17A stored integrity vs current Shot readiness (blocker): IMPLEMENTED (predecessor recovery correction, documented in-source)
+
+M17A recovery's `_verify_mappings` no longer certifies current Shot duration (NULL/≤0) or current picture intersection — structural/authority laws only (canonical bytes/hash, rationals, VP existence/rate/trim, project agreement). Regression: the lawful L-cut mapping goes `BLOCKED_TIMING_MISMATCH` under both PATCH duration 1000 (shrunken, non-intersecting) and PATCH duration 0 (API-legal `ge=0`); backup/restore succeeds in both states with the mapping row byte-identical and readiness re-projected against the restored tree still blocked. No test pinned the removed refusals (verified by grep before the change).
+
+## SR2-07 — M17A vocal PUT selection split (Medium): IMPLEMENTED
+
+Missing selection row → `INTERNAL_INVARIANT_VIOLATION` 500; lawful UNSET/different selection → the existing 409 `VOCAL_MAPPING_SELECTION_STALE`; selected requested VP → ordinary validation. Regression covers all three.
+
+## SR2-08 — concurrent same-position PUT (Medium): IMPLEMENTED (preferred solution)
+
+`put_shot_performance_segment_mapping` now issues ONE atomic SQLite upsert (`INSERT ... ON CONFLICT(shot_id, position) DO UPDATE`): the canonical document/hash are constructed deterministically before persistence, the conflict path replaces the complete mutable mapping in a single statement, and `created_at` is not in the update set (preserved; regression asserts). Concurrent first PUTs serialize on SQLite's single writer and BOTH return ordinary 200s — no raw Python/SQLAlchemy/SQLite exception escapes. Regression runs under an `httpx.ASGITransport(raise_app_exceptions=False)` client: both responses 200, exactly one complete coherent row, projection live afterwards. The B-F-era regression that accepted an escaped exception as success evidence is rewritten to this contract; no deterministic parallel ORDERING is claimed.
+
+## SR2-09 — DELETE position domain (Medium): IMPLEMENTED
+
+One shared `_validate_position` (integer, bool excluded, `[0, 2^63−1]`) for PUT and DELETE, applied BEFORE any storage access. Regression: DELETE −1 and 2^63 → stable 422 `PERFORMANCE_SHOT_MAPPING_INVALID`; 2^63−1 → 204, idempotent, other rows untouched.
+
+## SR2-10 — 0021 documentation (Low): IMPLEMENTED
+
+The 0021 docstring now states: frozen M17C-A migration `0020_m17c_perf_capture_r2` retained UNCHANGED; NEW successor `0021` creates the PF-02 storage; 0021 was NOT frozen with M17C-A. Git-based history proofs added as tests: the frozen 0020 blob at HEAD equals the `c502b81` blob byte-for-byte; `0021` did not exist at `c502b81` (`cat-file -e` refuses); `0021.down_revision` equals the imported `M17C_A_ALEMBIC_HEAD` constant (no hand-typed identity).
+
+## Gates (corrected tree, first-run dispositions recorded exactly)
+
+- New SR2 battery (`test_m17c_sr2_regressions.py`): **20/20**.
+- B-F regression battery **12/12**; B-F7 recovery battery **8/8** (the premise-overturned paired-VP refusal test replaced per SR2-03, noted in-file).
+- Focused M17A/M17B/M17C battery incl. the historical recovery families (m12/m13/m14-derived/m15/m16 + all M17C files): **379/379**.
+- All 21 validators green **on the committed tree** (the two npm-audit validators via piped stdin). Disclosed: my pre-commit validator runs could not see the then-untracked SR2 battery file — CI on `eb47648` failed the Hygiene boundary step for exactly that one path (run `36428413488`); the carve `a5f9d2d` admits it and all 19 standalone validators are green on the committed tree. This is the same commit-dependent-allowlist failure mode as the B-F cycle, now repeated despite the recorded lesson — the process fix (run gates against the COMMITTED tree before pushing) is recorded again in the commit message.
+- Frontend: vitest **143/143** (32 files), `tsc --noEmit` clean, `next build` succeeds.
+- Local full backend suite, FIRST RUN: **2824 passed / 8 skipped / 4 failed** in **2:16:21** (wall time inflated by a concurrent user GPU workload — `systems_matrix.py` saturating the 12 GiB GPU for part of the run; the three live-GPU exec gates PASSED in-suite under that contention). The 4 failures were the m12/m13/m14-derived/m16 expected-head-set literals above (sweep fallout from the ORIGINAL 0020→0021 rename, exposed by restoring 0020 to the supported set) — all four fixed in `eb47648` and green in the focused rerun. No full local rerun claimed: **CI on the corrected code head is the full-suite authority** (below).
+- Residue: this cycle's only new file is the SR2 battery; no new repo-root generated residue.
+
+## Frozen for the independent Codex delta review
+
+**Product delta `f0a9e32..a5f9d2d`** (`eb47648` product correction + `a5f9d2d` validator carve). CI: run `36428413488` on `eb47648` FAILURE (the allowlist fallout above, carve follows); **run `36428850548` on `a5f9d2d`: SUCCESS, attempt 1** (Backend **2816 passed / 20 skipped / 0 failed** in 27:55 — GPU gates skipped on Actions runners by design; Frontend green). Per the controlling disposition, the next protocol step after this freeze is ONE independent Codex delta-only review of exactly `f0a9e32..a5f9d2d` plus direct predecessor implications, WITHOUT this reconciliation register. No merge, no ready-mark, no M17C-C.
