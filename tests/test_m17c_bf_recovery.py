@@ -211,8 +211,10 @@ async def test_bf07_staged_0020_upgrades_to_0021_retaining_pf03(
     assert pf03_after == pf03_before
     assert modes == ["VOCAL_V1"]
     # the upgraded database passes the FULL M17C recovery verification
-    # (successor semantics chain + binding verifier + empty mapping pass)
-    verify_m17c_binding_state(root / "soloring.db", root / "blobs")
+    # at its exact head (successor semantics chain + binding verifier +
+    # 0021 schema proof + empty mapping pass)
+    verify_m17c_binding_state(root / "soloring.db", root / "blobs",
+                              head=_HEAD_0021)
 
 
 # ---------------------------------------------------------------------------
@@ -323,44 +325,13 @@ async def test_bf07_refuses_generic_position_shape(client, tmp_path):
         "is not VOCAL_V1" in str(exc)
 
 
-@pytest.mark.asyncio
-async def test_bf07_refuses_paired_vp_divergence(client, tmp_path):
-    """Coordinated tamper: the paired vocal mapping's VP is moved to a
-    REAL alternate VP on the same line WITH its own canonical JSON/hash
-    recomputed, so the M17A vocal-mapping verifier passes (same seed
-    audio: same rate/trim) and every other row stays canonical — a
-    state the supported API cannot create (PUT enforces VP equality),
-    so only the mapping-pair law can refuse (B-F4 tampering side)."""
-    from tests.test_m17c_binding_transitions import _same_line_alternate_vp
-    world = await _bound_world(client)
-    await _lawful_put(client, world)
-    alternate = await _same_line_alternate_vp(client, world)
-    root = await _backup_m17c(client, tmp_path, "bf-vpdiv")
-    con = sqlite3.connect(root / "soloring.db")
-    con.row_factory = sqlite3.Row
-    vm = con.execute(
-        "SELECT * FROM shot_vocal_segment_mappings "
-        "WHERE shot_id = ? AND position = 0",
-        (world["shot"],)).fetchone()
-    doc = {
-        "mapping_schema_version": 1,
-        "vocal_performance_revision_id": alternate["id"],
-        "source_start_sample": vm["source_start_sample"],
-        "source_end_sample_exclusive": vm["source_end_sample_exclusive"],
-        "sample_rate_hz": vm["sample_rate_hz"],
-        "performance_origin_ms": {
-            "num": vm["performance_origin_num"],
-            "den": vm["performance_origin_den"]},
-        "shot_anchor_ms": {"num": vm["shot_anchor_num"],
-                           "den": vm["shot_anchor_den"]},
-    }
-    con.execute(
-        "UPDATE shot_vocal_segment_mappings SET "
-        "vocal_performance_revision_id = ?, mapping_json = ?, "
-        "mapping_hash = ? WHERE shot_id = ? AND position = 0",
-        (alternate["id"], canonical_json_str(doc), canonical_hash(doc),
-         world["shot"]))
-    con.commit()
-    con.close()
-    exc = await _restore_refuses(root, tmp_path, "bf-vpdiv")
-    assert "differs from the immutable revision binding VP" in str(exc)
+# NOTE (SR2-03 supersession): this file previously carried
+# test_bf07_refuses_paired_vp_divergence, which coherently rehashed a
+# paired vocal mapping to a REAL alternate VP and asserted restore
+# refusal. The M17C-B second review overturned that premise: the
+# supported M17A vocal PUT can lawfully repoint an existing working
+# vocal position to the now-current selection, so paired-VP divergence
+# is mutable working drift — live readiness reports
+# BLOCKED_BINDING_INTEGRITY and recovery preserves the row. The
+# end-to-end API lifecycle + backup/restore proof now lives in
+# tests/test_m17c_sr2_regressions.py (SR2-03).

@@ -435,6 +435,7 @@ async def test_recovery_07(client, factory):
         "0017_m16_intra_shot_consequences",
         "0018_m17a_dialogue_vocal_foundation",
         "0019_m17b_performance_revisions",
+        "0020_m17c_perf_capture_r2",
         "0021_m17c_shot_performance_mappings",
     }
 

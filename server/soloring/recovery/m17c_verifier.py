@@ -50,16 +50,57 @@ _M17C_TABLES = (
 # working-mapping pass is conditional on its presence.
 _SHOT_MAPPING_TABLE = "shot_performance_segment_mappings"
 
+# SR2-02: the exact staged head drives the schema contract (mirrors
+# recovery.backup's M17C_A/M17C_B constants without importing the
+# backup module — the backup module installs this verifier).
+_HEAD_0020 = "0020_m17c_perf_capture_r2"
+_HEAD_0021 = "0021_m17c_shot_performance_mappings"
+
+# SR2-02 deterministic schema proof for the PF-02 table at 0021:
+# PRAGMA table_info (name -> (notnull, pk ordinal)), foreign_key_list
+# ((table, from, to) -> on_delete), index contract, and the named
+# CHECK constraints in the sqlite_master DDL.
+_SPSM_COLUMNS = {
+    "shot_id": (1, 1), "position": (1, 2),
+    "performance_revision_id": (1, 0),
+    "performance_start_num": (1, 0), "performance_start_den": (1, 0),
+    "performance_end_num": (1, 0), "performance_end_den": (1, 0),
+    "shot_anchor_num": (1, 0), "shot_anchor_den": (1, 0),
+    "vocal_mapping_position": (0, 0),
+    "mapping_schema_version": (1, 0),
+    "mapping_json": (1, 0), "mapping_hash": (1, 0),
+    "created_at": (1, 0), "updated_at": (1, 0),
+}
+_SPSM_FKS = {
+    ("shots", "shot_id", "id"): "RESTRICT",
+    ("performance_revisions", "performance_revision_id", "id"): "RESTRICT",
+}
+_SPSM_CHECKS = ("ck_spsm_position", "ck_spsm_start_den_positive",
+                "ck_spsm_end_den_positive", "ck_spsm_anchor_den_positive",
+                "ck_spsm_mapping_schema", "ck_spsm_mapping_hash_len")
+
 
 def _corrupt(msg: str) -> Exception:
     return SoloRingError("RECOVERY_CORRUPTION", msg, status_code=500)
 
 
 def verify_m17c_binding_state(staged_db: Path,
-                              blob_root: Path | None = None) -> None:
+                              blob_root: Path | None = None,
+                              *, head: str) -> None:
+    """SR2-02: head-aware M17C recovery verification.
+
+    At head 0020 the four PF-03 companion tables are REQUIRED and the
+    PF-02 working-mapping table MUST be absent (it is created by
+    successor migration 0021 only). At head 0021 the PF-02 table is
+    REQUIRED, its physical schema is proven deterministically, and the
+    working-mapping row laws run. Schema shape is NEVER inferred from
+    optional table presence."""
     if blob_root is None:
         from soloring.settings import get_settings
         blob_root = get_settings().blob_dir
+    if head not in (_HEAD_0020, _HEAD_0021):
+        raise _corrupt(
+            f"M17C verifier invoked at unsupported staged head {head!r}")
     con = sqlite3.connect(staged_db)
     con.row_factory = sqlite3.Row
     try:
@@ -67,14 +108,66 @@ def verify_m17c_binding_state(staged_db: Path,
             "SELECT name FROM sqlite_master WHERE type='table'")}
         if not set(_M17C_TABLES) <= present:
             raise _corrupt("M17C tables missing from staged schema")
+        if head == _HEAD_0020:
+            if _SHOT_MAPPING_TABLE in present:
+                raise _corrupt(
+                    "staged head 0020 carries the PF-02 working-mapping "
+                    "table — that table is created by successor "
+                    "migration 0021 only; a 0020 database must not have "
+                    "it")
+        else:
+            if _SHOT_MAPPING_TABLE not in present:
+                raise _corrupt(
+                    "staged head 0021 is missing the PF-02 "
+                    "working-mapping table")
+            _verify_spsm_schema(con)
         _verify_classifications(con)
         _verify_candidate_bindings(con, blob_root)
         _verify_revision_bindings(con)
         _verify_retarget_lineage(con)
-        if _SHOT_MAPPING_TABLE in present:
+        if head == _HEAD_0021:
             _verify_shot_performance_mappings(con)
     finally:
         con.close()
+
+
+def _verify_spsm_schema(con: sqlite3.Connection) -> None:
+    """SR2-02: deterministic physical-schema proof for the PF-02 table
+    (columns/nullability/PK, FKs with RESTRICT, the PR index, and the
+    named CHECK contract) — never trust row laws alone."""
+    cols = {r[1]: (r[3], r[5]) for r in con.execute(
+        f"PRAGMA table_info({_SHOT_MAPPING_TABLE})")}
+    if cols != _SPSM_COLUMNS:
+        raise _corrupt(
+            f"{_SHOT_MAPPING_TABLE} column contract diverges: got "
+            f"{sorted(cols.items())}")
+    fks = {(r[2], r[3], r[4]): r[6] for r in con.execute(
+        f"PRAGMA foreign_key_list({_SHOT_MAPPING_TABLE})")}
+    if fks != _SPSM_FKS:
+        raise _corrupt(
+            f"{_SHOT_MAPPING_TABLE} foreign-key contract diverges: got "
+            f"{sorted(fks.items())}")
+    # PRAGMA index_list rows: (seq, name, unique, origin, partial) —
+    # the contract is on ORIGIN 'c' (an explicit CREATE INDEX), not the
+    # uniqueness flag (the PK's sqlite_autoindex is a separate index)
+    indexes = {r[1]: r[3] for r in con.execute(
+        f"PRAGMA index_list({_SHOT_MAPPING_TABLE})")}
+    if indexes.get("ix_spsm_pr") != "c":
+        raise _corrupt(
+            f"{_SHOT_MAPPING_TABLE} index contract diverges: expected "
+            f"ix_spsm_pr as a CREATE INDEX index, got {sorted(indexes.items())}")
+    ix_cols = [r[2] for r in con.execute("PRAGMA index_info(ix_spsm_pr)")]
+    if ix_cols != ["performance_revision_id"]:
+        raise _corrupt(
+            "ix_spsm_pr does not index exactly performance_revision_id")
+    sql = con.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' "
+        f"AND name = '{_SHOT_MAPPING_TABLE}'").fetchone()[0]
+    for name in _SPSM_CHECKS:
+        if name not in sql:
+            raise _corrupt(
+                f"{_SHOT_MAPPING_TABLE} DDL lost CHECK constraint "
+                f"{name!r}")
 
 
 def _canonical(obj) -> str:
@@ -484,15 +577,19 @@ def _verify_shot_performance_mappings(con) -> None:
             raise _corrupt(
                 f"performance mapping {row['shot_id']!r}@"
                 f"{row['position']} canonical bytes/hash diverge")
-        # B-F3/B-F4 pairing laws. Applicability comes from the
+        # B-F3/SR2-03 pairing laws. Applicability comes from the
         # immutable discriminator, never from the nullable payload
         # shape: a shape that the supported API cannot create (VOCAL_V1
         # without a position; a position on a non-VOCAL_V1 revision)
-        # is corruption. A MISSING paired vocal mapping, by contrast, is
-        # an API-creatable lawful BLOCKED working state (DELETE of the
-        # vocal mapping is supported and readiness reports
-        # BLOCKED_BINDING_INTEGRITY) — recovery preserves it and
-        # verifies everything else about the row.
+        # is corruption. A MISSING paired vocal mapping is an
+        # API-creatable lawful BLOCKED working state (supported DELETE;
+        # readiness reports BLOCKED_BINDING_INTEGRITY). SR2-03: so is a
+        # paired vocal mapping whose VP was REPOINTED through the
+        # supported M17A PUT to the now-current selection — mutable
+        # working drift against the immutable revision binding, never
+        # rewritten by diagnosis and never refused here. Other
+        # structural corruption of the vocal row stays the M17A
+        # verifier's concern.
         cls = con.execute(
             "SELECT sync_mode FROM "
             "performance_revision_sync_classifications "
@@ -505,27 +602,6 @@ def _verify_shot_performance_mappings(con) -> None:
                     f"performance mapping {row['shot_id']!r}@"
                     f"{row['position']} carries vocal_mapping_position "
                     "but the PerformanceRevision is not VOCAL_V1")
-            # when the pair EXISTS, its VP identity must agree with the
-            # immutable revision binding (PUT-enforced; divergence is
-            # tampering, not a creatable blocked state)
-            vocal = con.execute(
-                "SELECT vocal_performance_revision_id FROM "
-                "shot_vocal_segment_mappings WHERE shot_id = ? "
-                "AND position = ?",
-                (row["shot_id"], row["vocal_mapping_position"])
-            ).fetchone()
-            binding_vp = con.execute(
-                "SELECT vocal_performance_revision_id FROM "
-                "performance_revision_vocal_bindings WHERE "
-                "performance_revision_id = ?",
-                (row["performance_revision_id"],)).fetchone()
-            if vocal is not None and binding_vp is not None and \
-                    vocal["vocal_performance_revision_id"] != \
-                    binding_vp["vocal_performance_revision_id"]:
-                raise _corrupt(
-                    f"performance mapping {row['shot_id']!r}@"
-                    f"{row['position']} pairs a vocal mapping whose VP "
-                    "differs from the immutable revision binding VP")
         else:
             if vocal_v1:
                 raise _corrupt(

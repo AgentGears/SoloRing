@@ -729,23 +729,28 @@ async def read_candidate_vocal_binding(
     return row
 
 
-async def read_revision_vocal_binding(
-    session: AsyncSession, settings, *, revision_id: str,
-) -> PerformanceRevisionVocalBinding:
-    """SR26-03: fail-closed authoritative revision binding read."""
-    revision = await session.get(PerformanceRevision, revision_id)
-    if revision is None:
-        raise not_found(
-            ErrorCode.PERFORMANCE_REVISION_NOT_FOUND,
-            f"performance revision {revision_id!r} not found")
-    classification = await verify_revision_sync_classification(
-        session, revision)
-    if classification.sync_mode == "NONE":
-        raise not_found(
-            PERFORMANCE_VOCAL_BINDING_NOT_FOUND,
-            f"performance revision {revision_id!r} has no vocal binding",
-        )
-    row = await session.get(PerformanceRevisionVocalBinding, revision_id)
+async def verify_revision_vocal_binding_read_grade(
+        session: AsyncSession, settings, revision: PerformanceRevision,
+        row: PerformanceRevisionVocalBinding, *,
+        classification) -> dict:
+    """SR2-05: the ONE authoritative READ-GRADE revision-binding
+    verifier — semantically complete except for the expensive retained
+    VP audio/WAVE verification (``_verify_vp_physical_media``; the
+    C3-01 read cost boundary). The authoritative binding GET and the
+    PF-02 readiness/list seam consume THIS verifier, never a weaker
+    parallel copy.
+
+    Proves: parent identity; adopted candidate + source candidate
+    binding presence; candidate↔revision binding semantic equality;
+    binding scalar laws (schema versions, canonical bytes/hash, kind,
+    rate == VP native rate, source interval inside the VP trim,
+    subject == speaker); the full cheap VP structural authority closure
+    plus VP/Performance project agreement; the induced interval inside
+    the REVISION-owned temporal domain; the adopted candidate's
+    immutable payload closure; exact-VP cited alignments; and required
+    articulation inside the bound interval."""
+    if row.performance_revision_id != revision.id:
+        raise corrupt("revision vocal-binding parent id diverges")
     candidate = await session.get(PerformanceCandidate,
                                   revision.adopted_candidate_id)
     if candidate is None:
@@ -785,6 +790,32 @@ async def read_revision_vocal_binding(
     # DR26-02: same articulation law as recovery, over the already-loaded
     # canonical payload.
     _verify_articulation(integrity["payload_document"], interval)
+    return {"classification": classification, "binding": row,
+            "candidate": candidate, "vp": vp,
+            "payload_document": integrity["payload_document"]}
+
+
+async def read_revision_vocal_binding(
+        session: AsyncSession, settings, *, revision_id: str,
+) -> PerformanceRevisionVocalBinding:
+    """SR26-03: fail-closed authoritative revision binding read. The
+    semantic laws live in the shared read-grade verifier above — the
+    GET and PF-02 reads consume the SAME verifier (SR2-05)."""
+    revision = await session.get(PerformanceRevision, revision_id)
+    if revision is None:
+        raise not_found(
+            ErrorCode.PERFORMANCE_REVISION_NOT_FOUND,
+            f"performance revision {revision_id!r} not found")
+    classification = await verify_revision_sync_classification(
+        session, revision)
+    if classification.sync_mode == "NONE":
+        raise not_found(
+            PERFORMANCE_VOCAL_BINDING_NOT_FOUND,
+            f"performance revision {revision_id!r} has no vocal binding",
+        )
+    row = await session.get(PerformanceRevisionVocalBinding, revision_id)
+    await verify_revision_vocal_binding_read_grade(
+        session, settings, revision, row, classification=classification)
     return row
 
 

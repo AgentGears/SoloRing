@@ -14,7 +14,6 @@ import json
 import math
 import re
 import sqlite3
-from fractions import Fraction
 from pathlib import Path
 
 from soloring.domain.canonical import canonical_hash, canonical_json_str
@@ -279,20 +278,15 @@ def _verify_mappings(con: sqlite3.Connection) -> None:
         if shot is None or line is None or \
                 shot["project_id"] != line["project_id"]:
             raise _corrupt("mapping Shot/VP project mismatch")
-        if shot["duration_ms"] is None or shot["duration_ms"] <= 0:
-            raise _corrupt("mapping Shot lacks positive duration")
-        # picture intersection (readiness invariant restored historically)
-        # — EXACT rational arithmetic (source review finding 2): the
-        # anchor carries its own denominator, so the comparison is
-        # Fraction(anchor) + Fraction(delta_ms) vs the picture window;
-        # integer num*rate arithmetic silently drops anchor_den != 1
-        anchor_ms = Fraction(r["shot_anchor_num"], r["shot_anchor_den"])
-        seg_ms = Fraction(
-            (r["source_end_sample_exclusive"]
-             - r["source_start_sample"]) * 1000, r["sample_rate_hz"])
-        if not (anchor_ms + seg_ms > 0
-                and anchor_ms < Fraction(shot["duration_ms"])):
-            raise _corrupt("mapping does not intersect Shot picture")
+        # SR2-06 predecessor recovery correction: current Shot duration
+        # and picture intersection are MUTABLE current-context
+        # readiness conditions (the live M17A/PF-02 projections report
+        # them as blocked working states), not immutable vocal-mapping
+        # corruption. Restore certification proves stored
+        # structure/authority only — a lawfully created mapping whose
+        # Shot duration later drifted to NULL/0 or shrank past
+        # intersection must survive backup/restore unchanged (still
+        # blocked at read time), exactly as the live projection says.
 
 
 def _verify_alignments(con: sqlite3.Connection,

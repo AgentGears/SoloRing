@@ -43,12 +43,16 @@ from soloring.workflows.artifact_store import WorkflowArtifactStore
 # verified through M13 + M14 + M15 + M16 semantics.
 # M17A (frozen R5 §12): the dialogue/vocal verifier advances the
 # expected head to 0018 and adds three physical Blob-FK paths.
-# M17C-A (PR #26 first-pass sweep): migration 0020 adds the two
-# dialogue-bound binding companion tables and NO new Blob-FK paths, so
-# the expected head advances to 0020 while restores verify through the
-# exact published M17B-depth semantics; the dedicated M17C recovery
-# verifier lands with the M17C-C slice before publication.
-EXPECTED_ALEMBIC_HEAD = "0021_m17c_shot_performance_mappings"
+# M17C-A (PR #26, frozen at c502b81): migration 0020 adds the four
+# PF-03 binding/classification companion tables and NO new Blob-FK
+# paths. M17C-B (PR #26, SR2-01 corrective): successor migration 0021
+# adds the PF-02 working-mapping table (also no new Blob-FK path), so
+# the EXPECTED head advances to 0021 while 0020 remains a DISTINCT
+# supported restore head — both share the exact thirteen-path M17B
+# Blob-FK inventory.
+M17C_A_ALEMBIC_HEAD = "0020_m17c_perf_capture_r2"
+M17C_B_ALEMBIC_HEAD = "0021_m17c_shot_performance_mappings"
+EXPECTED_ALEMBIC_HEAD = M17C_B_ALEMBIC_HEAD
 BACKUP_MANIFEST_SCHEMA_VERSION = 1
 
 # M13 (frozen R3 §23): restore is head-dispatched across five heads. M14
@@ -64,8 +68,6 @@ M15_ALEMBIC_HEAD = "0016_m15_revision_compatibility"
 M16_ALEMBIC_HEAD = "0017_m16_intra_shot_consequences"
 M17A_ALEMBIC_HEAD = "0018_m17a_dialogue_vocal_foundation"
 M17B_ALEMBIC_HEAD = "0019_m17b_performance_revisions"
-M17C_A_ALEMBIC_HEAD = "0021_m17c_shot_performance_mappings"
-M17C_B_ALEMBIC_HEAD = "0021_m17c_shot_performance_mappings"
 SUPPORTED_RESTORE_ALEMBIC_HEADS = frozenset({
     PRE_M11_ALEMBIC_HEAD,
     M11_ALEMBIC_HEAD,
@@ -86,11 +88,14 @@ SUPPORTED_RESTORE_ALEMBIC_HEADS = frozenset({
     # performance/retarget semantic verifier; physical Blob inventory
     # is exactly thirteen paths.
     M17B_ALEMBIC_HEAD,
-    # M17C-A head (PR #26): restores at 0020 verify through the exact
-    # published M17B-depth semantics — the binding companions add no
-    # Blob-FK path, so the physical inventory stays thirteen paths
-    # until the M17C-C recovery slice.
+    # M17C-A head (PR #26, frozen at c502b81): restores at 0020 verify
+    # through M17B depth PLUS the M17C binding-state verifier in its
+    # 0020 form (four PF-03 tables required; the PF-02 table must be
+    # absent); thirteen-path physical inventory.
     M17C_A_ALEMBIC_HEAD,
+    # M17C-B head (PR #26, SR2-01/02 corrective): restores at 0021 run
+    # the same M17C verifier in its 0021 form — the PF-02 table is
+    # REQUIRED with a deterministic schema proof; still thirteen paths.
     M17C_B_ALEMBIC_HEAD,
 })
 
@@ -342,7 +347,8 @@ def _drop_sidecar_files(staged_db: Path) -> None:
             side.unlink()
 
 
-def _verify_staged_db(staged_db: Path, expected_head: str = EXPECTED_ALEMBIC_HEAD) -> None:
+def _verify_staged_db(staged_db: Path,
+                      expected_head: str = EXPECTED_ALEMBIC_HEAD) -> None:
     con = sqlite3.connect(str(staged_db))
     try:
         row = con.execute("PRAGMA quick_check").fetchone()
@@ -362,6 +368,12 @@ def _verify_staged_db(staged_db: Path, expected_head: str = EXPECTED_ALEMBIC_HEA
                 "staged DB has no alembic_version table; cannot prove the "
                 "migration head."
             ) from exc
+        # SR2-01 note: the BACKUP-side guard keeps requiring exactly the
+        # EXPECTED head (the M12-era staleness law: a database stamped
+        # at an old head must migrate before backing up as current);
+        # SUPPORTED historical heads (0020 included) are RESTORE-side
+        # concepts — genuine historical backups restore, stale-headed
+        # live databases do not back up.
         if versions != [expected_head]:
             raise RecoveryCorruption(
                 f"staged DB migration head is {versions!r}; recovery "
@@ -1031,11 +1043,16 @@ def parse_backup_manifest_v1(raw: bytes) -> dict:
 
 
 def build_backup_manifest(
-    *, database_sha256: str, liveness: _Liveness
+    *, database_sha256: str, liveness: _Liveness, head: str
 ) -> dict:
+    """SR2-01: the manifest records the ACTUAL staged migration head
+    (already proven to be exactly one SUPPORTED restore head by
+    ``_verify_staged_db``) — never a hardcoded expected head, so a
+    database backed up at a supported historical head restores against
+    its own head."""
     return {
         "schema_version": BACKUP_MANIFEST_SCHEMA_VERSION,
-        "alembic_version": EXPECTED_ALEMBIC_HEAD,
+        "alembic_version": head,
         "database_sha256": database_sha256,
         "blob_hashes": list(liveness.blob_hashes),
         "workflow_artifacts": [
@@ -1877,7 +1894,8 @@ async def backup(
 
         db_hash, db_bytes = await asyncio.to_thread(_stream_hash, staged_db)
         manifest = build_backup_manifest(
-            database_sha256=db_hash, liveness=liveness)
+            database_sha256=db_hash, liveness=liveness,
+            head=await asyncio.to_thread(_staged_db_head, staged_db))
         (stage / "backup-manifest.json").write_bytes(
             canonical_json_bytes(manifest))
 

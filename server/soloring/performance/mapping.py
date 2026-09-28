@@ -58,10 +58,19 @@ async def put_shot_vocal_segment_mapping(
                             "Shot and VP resolve to different projects",
                             status_code=422)
     # M17A working-readiness: mapping may reference only the explicitly
-    # selected VP for its own DialogueLineRevision
+    # selected VP for its own DialogueLineRevision. SR2-07 split: a
+    # MISSING selection row is corruption (every DLR is created with
+    # one — the same law as the M17A readiness/read paths); a LAWFUL
+    # UNSET or different selection keeps the admission-shaped 409.
     sel = await session.get(VocalPerformanceSelection, rev.id)
-    if sel is None or \
-            sel.selected_vocal_performance_revision_id != vp.id:
+    if sel is None:
+        raise SoloRingError(
+            ErrorCode.INTERNAL_INVARIANT_VIOLATION,
+            f"DialogueLineRevision {rev.id!r} has no selection row — "
+            "every revision is created with one; this is corruption, "
+            "not a readiness state",
+            status_code=500)
+    if sel.selected_vocal_performance_revision_id != vp.id:
         raise SoloRingError(
             ErrorCode.VOCAL_MAPPING_SELECTION_STALE,
             "the referenced VocalPerformanceRevision is not the "

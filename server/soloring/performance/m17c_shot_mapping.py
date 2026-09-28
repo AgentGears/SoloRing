@@ -39,13 +39,11 @@ from soloring.domain.now import db_now
 from soloring.errors import ErrorCode, SoloRingError, not_found
 from soloring.performance import revision as revision_svc
 from soloring.performance.m17c_binding import (
-    _verify_binding_bytes,
-    _verify_vp_structural_authority,
     verify_revision_sync_classification,
     verify_revision_vocal_binding,
+    verify_revision_vocal_binding_read_grade,
 )
 from soloring.performance.m17c_models import (
-    PerformanceCandidateVocalBinding,
     PerformanceRevisionVocalBinding,
     ShotPerformanceSegmentMapping,
 )
@@ -73,6 +71,15 @@ SQLITE_INT_MAX = 2 ** 63 - 1
 def _invalid(message: str) -> SoloRingError:
     return SoloRingError(ErrorCode.PERFORMANCE_SHOT_MAPPING_INVALID,
                          message, status_code=422)
+
+
+def _validate_position(position, *, what: str = "position") -> None:
+    """SR2-09: the ONE shared path-position law for PUT and DELETE —
+    SQLite-i64 domain, bool excluded (a bool is an int subclass and
+    must never reach storage)."""
+    if not isinstance(position, int) or isinstance(position, bool) \
+            or position < 0 or position > SQLITE_INT_MAX:
+        raise _invalid(f"{what} must be an integer in [0, 2^63-1]")
 
 
 def _mismatch(message: str) -> SoloRingError:
@@ -121,93 +128,55 @@ def _induced_interval(binding, vocal_mapping) -> tuple[Fraction, Fraction]:
 
 
 # ---------------------------------------------------------------------------
-# B-F2: the downstream PerformanceRevision integrity seam
+# B-F2/SR2-04/SR2-05: the downstream PerformanceRevision integrity seam
 # ---------------------------------------------------------------------------
-
-async def verify_revision_vocal_binding_structural(
-        session: AsyncSession, settings, pr: PerformanceRevision,
-        binding) -> dict:
-    """Read-grade (no retained-media) full revision vocal-binding
-    closure: classification/cardinality/pair closure, binding canonical
-    bytes/hash on BOTH sides, candidate↔revision binding semantic
-    equality, structural VP authority, and the adopted candidate's
-    immutable payload closure."""
-    from soloring.performance.m17c_binding import (
-        _semantic_binding_equal)
-    classification = await verify_revision_sync_classification(session, pr)
-    if row_parent_diverges(binding, pr):
-        raise _corrupt("revision vocal-binding parent id diverges")
-    _verify_binding_bytes(binding)
-    candidate = await session.get(PerformanceCandidate,
-                                  pr.adopted_candidate_id)
-    if candidate is None:
-        raise _corrupt("dialogue-bound revision adopted candidate missing")
-    candidate_binding = await session.get(
-        PerformanceCandidateVocalBinding, candidate.id)
-    if candidate_binding is None:
-        raise _corrupt(
-            "dialogue-bound revision source candidate binding is missing")
-    if not _semantic_binding_equal(candidate_binding, binding):
-        raise _corrupt(
-            "revision vocal binding != adopted candidate binding closure")
-    _verify_binding_bytes(candidate_binding)
-    vp = await session.get(VocalPerformanceRevision,
-                           binding.vocal_performance_revision_id)
-    if vp is None:
-        raise _corrupt(
-            "revision vocal binding names a missing "
-            "VocalPerformanceRevision")
-    await _verify_vp_structural_authority(session, vp)
-    integrity = await revision_svc.verify_candidate_integrity(
-        session, settings, candidate)
-    return {"classification": classification, "binding": binding,
-            "candidate": candidate, "vp": vp,
-            "payload_document": integrity["payload_document"]}
-
-
-def row_parent_diverges(binding, pr) -> bool:
-    return binding.performance_revision_id != pr.id
-
 
 async def verify_performance_revision_for_shot_use(
         session: AsyncSession, settings, pr: PerformanceRevision, *,
         media: bool) -> dict:
-    """The ONE downstream seam PF-02 consumes (B-F2).
+    """The ONE downstream seam PF-02 consumes (B-F2 + SR2-04/SR2-05).
 
-    media=True (PUT / a fresh-authority transition): dialogue-bound
-    revisions pay the FULL M17C-A verifier incl. retained media.
-    media=False (readiness / list — the C3-01 read cost boundary):
-    full structural closure without VP audio rehash.
+    Both grades first prove the adopted candidate's immutable closure
+    (canonical payload included) AND — SR2-04 — that the
+    PerformanceRevision itself reproduces its adopted candidate's
+    copied closure with lawful persisted adoption metadata
+    (``revalidate_winner``; candidate integrity alone is never treated
+    as revision integrity). ``media=True`` (PUT — fresh authority) then
+    pays the FULL M17C-A binding verifier including retained VP media;
+    ``media=False`` (readiness/list — the C3-01 read cost boundary)
+    runs the SHARED authoritative read-grade binding verifier
+    (SR2-05 — never a weaker parallel copy); neither grade rehashes
+    VP audio on the read path.
     """
-    if media:
-        classification = await verify_revision_sync_classification(
-            session, pr)
-        candidate = await session.get(PerformanceCandidate,
-                                      pr.adopted_candidate_id)
-        integrity = await revision_svc.verify_candidate_integrity(
-            session, settings, candidate)
-        if classification.sync_mode == "VOCAL_V1":
-            binding = await session.get(
-                PerformanceRevisionVocalBinding, pr.id)
-            await verify_revision_vocal_binding(
-                session, settings, pr, binding)
-            return {"classification": classification,
-                    "binding": binding, "candidate": candidate,
-                    "payload_document": integrity["payload_document"]}
-        return {"classification": classification, "binding": None,
-                "candidate": candidate,
-                "payload_document": integrity["payload_document"]}
-    classification = await verify_revision_sync_classification(session, pr)
-    if classification.sync_mode == "VOCAL_V1":
-        binding = await session.get(PerformanceRevisionVocalBinding,
-                                    pr.id)
-        result = await verify_revision_vocal_binding_structural(
-            session, settings, pr, binding)
-        return result
     candidate = await session.get(PerformanceCandidate,
                                   pr.adopted_candidate_id)
+    if candidate is None:
+        raise _corrupt("adopted revision's candidate is missing")
     integrity = await revision_svc.verify_candidate_integrity(
         session, settings, candidate)
+    # SR2-04: revision copied closure == adopted candidate + persisted
+    # adoption-metadata grammar, with the 500 corruption contract — an
+    # admission-shaped failure from the shared grammar validator is
+    # TRANSLATED here (this is a persisted-history read, never a fresh
+    # client request)
+    try:
+        revision_svc.revalidate_winner(pr, candidate)
+    except SoloRingError as exc:
+        raise _corrupt(
+            f"adopted revision closure/adoption metadata violates "
+            f"persisted law: {exc.message}") from exc
+    classification = await verify_revision_sync_classification(session, pr)
+    if classification.sync_mode == "VOCAL_V1":
+        binding = await session.get(PerformanceRevisionVocalBinding, pr.id)
+        if media:
+            await verify_revision_vocal_binding(
+                session, settings, pr, binding)
+            return {"classification": classification, "binding": binding,
+                    "candidate": candidate,
+                    "payload_document": integrity["payload_document"]}
+        return await verify_revision_vocal_binding_read_grade(
+            session, settings, pr, binding,
+            classification=classification)
     return {"classification": classification, "binding": None,
             "candidate": candidate,
             "payload_document": integrity["payload_document"]}
@@ -322,14 +291,10 @@ async def put_shot_performance_segment_mapping(
         shot_anchor_num: int, shot_anchor_den: int,
         vocal_mapping_position: int | None) -> ShotPerformanceSegmentMapping:
     from soloring.domain.models import Shot
-    if not isinstance(position, int) or isinstance(position, bool) or \
-            position < 0 or position > SQLITE_INT_MAX:
-        raise _invalid("position must be an integer in [0, 2^63-1]")
-    if vocal_mapping_position is not None and \
-            (vocal_mapping_position < 0
-             or vocal_mapping_position > SQLITE_INT_MAX):
-        raise _invalid(
-            "vocal_mapping_position must be an integer in [0, 2^63-1]")
+    _validate_position(position)
+    if vocal_mapping_position is not None:
+        _validate_position(vocal_mapping_position,
+                           what="vocal_mapping_position")
     shot = await session.get(Shot, shot_id)
     if shot is None:
         raise not_found(ErrorCode.SHOT_NOT_FOUND,
@@ -454,42 +419,52 @@ async def put_shot_performance_segment_mapping(
            "vocal_mapping_position": vocal_mapping_position}
     mapping_json = canonical_json_str(doc)
     mapping_hash = canonical_hash(doc)
-    existing = await session.get(ShotPerformanceSegmentMapping,
-                                 (shot_id, position))
-    if existing is None:
-        row = ShotPerformanceSegmentMapping(
-            shot_id=shot_id, position=position,
-            performance_revision_id=pr.id,
-            performance_start_num=sn, performance_start_den=sd,
-            performance_end_num=en, performance_end_den=ed,
-            shot_anchor_num=an, shot_anchor_den=ad,
-            vocal_mapping_position=vocal_mapping_position,
-            mapping_schema_version=1,
-            mapping_json=mapping_json, mapping_hash=mapping_hash,
-            created_at=await db_now(session),
-            updated_at=await db_now(session))
-        session.add(row)
-        await session.flush()
-        return row
-    for attr, value in (
-            ("performance_revision_id", pr.id),
-            ("performance_start_num", sn),
-            ("performance_start_den", sd),
-            ("performance_end_num", en),
-            ("performance_end_den", ed),
-            ("shot_anchor_num", an),
-            ("shot_anchor_den", ad),
-            ("vocal_mapping_position", vocal_mapping_position),
-            ("mapping_json", mapping_json),
-            ("mapping_hash", mapping_hash)):
-        setattr(existing, attr, value)
-    existing.updated_at = await db_now(session)
+    # SR2-08: ONE atomic SQLite upsert on the (shot_id, position) key —
+    # the canonical document/hash are constructed deterministically
+    # BEFORE persistence, the conflict path replaces the complete
+    # mutable mapping in a single statement, and created_at is NOT in
+    # the update set (the original creation timestamp is preserved).
+    # Concurrent first PUTs to the same position therefore serialize on
+    # SQLite's single writer and BOTH commit as ordinary 200s — no raw
+    # uniqueness/lock exception escapes the API, no duplicate or torn
+    # row can exist, and the durable row always equals exactly one
+    # complete submitted payload.
+    from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+    now = await db_now(session)
+    stmt = sqlite_insert(ShotPerformanceSegmentMapping).values(
+        shot_id=shot_id, position=position,
+        performance_revision_id=pr.id,
+        performance_start_num=sn, performance_start_den=sd,
+        performance_end_num=en, performance_end_den=ed,
+        shot_anchor_num=an, shot_anchor_den=ad,
+        vocal_mapping_position=vocal_mapping_position,
+        mapping_schema_version=1,
+        mapping_json=mapping_json, mapping_hash=mapping_hash,
+        created_at=now, updated_at=now)
+    stmt = stmt.on_conflict_do_update(
+        index_elements=["shot_id", "position"],
+        set_={"performance_revision_id": pr.id,
+              "performance_start_num": sn, "performance_start_den": sd,
+              "performance_end_num": en, "performance_end_den": ed,
+              "shot_anchor_num": an, "shot_anchor_den": ad,
+              "vocal_mapping_position": vocal_mapping_position,
+              "mapping_json": mapping_json,
+              "mapping_hash": mapping_hash,
+              "updated_at": now})
+    await session.execute(stmt)
+    row = await session.get(ShotPerformanceSegmentMapping,
+                            (shot_id, position))
     await session.flush()
-    return existing
+    return row
 
 
 async def delete_shot_performance_segment_mapping(
         session: AsyncSession, *, shot_id: str, position: int) -> None:
+    # SR2-09: the shared position law — DELETE must refuse an
+    # out-of-domain integer with a stable 4xx BEFORE any storage access
+    # (an unbounded Python int would otherwise reach SQLite and surface
+    # as a raw OverflowError 500); 2^63-1 stays DB-safe and idempotent.
+    _validate_position(position)
     row = await session.get(ShotPerformanceSegmentMapping,
                             (shot_id, position))
     if row is not None:
@@ -581,11 +556,22 @@ async def _project_one(session, settings, shot, row, seam_by_pr,
                     {"reason": "the paired vocal mapping is missing"})
         if vocal.vocal_performance_revision_id != \
                 binding.vocal_performance_revision_id:
-            raise _corrupt(
-                f"stored mapping {row.shot_id!r}@{row.position} pairs "
-                "a vocal mapping whose VP differs from the immutable "
-                "revision binding VP — tampering, not a creatable "
-                "working state")
+            # SR2-03: the supported M17A vocal PUT can repoint the
+            # paired working vocal mapping to the now-current
+            # selection — lawful mutable working drift against the
+            # immutable revision binding. Readiness reports blocked
+            # (never 500), and neither the working mapping nor the
+            # immutable binding is rewritten during diagnosis.
+            return (BLOCKED_BINDING_INTEGRITY,
+                    {"reason": "the paired vocal mapping is currently "
+                               "bound to a different "
+                               "VocalPerformanceRevision (lawful "
+                               "working drift; the immutable revision "
+                               "binding is unchanged)",
+                     "paired_vocal_performance_revision_id":
+                         vocal.vocal_performance_revision_id,
+                     "bound_vocal_performance_revision_id":
+                         binding.vocal_performance_revision_id})
         # B-F8: missing selection row is corruption inside
         # _selection_posture; lawful UNSET/different selection is STALE
         state, selected = await _selection_posture(session, binding)

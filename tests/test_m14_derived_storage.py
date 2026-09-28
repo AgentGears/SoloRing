@@ -393,6 +393,7 @@ async def test_recovery_blob_fk_inventory_eight_paths(
         "0017_m16_intra_shot_consequences",
             "0018_m17a_dialogue_vocal_foundation",
         "0019_m17b_performance_revisions",
+        "0020_m17c_perf_capture_r2",
         "0021_m17c_shot_performance_mappings",
     }), SUPPORTED_RESTORE_ALEMBIC_HEADS
     assert _blob_fk_policy_for_head(

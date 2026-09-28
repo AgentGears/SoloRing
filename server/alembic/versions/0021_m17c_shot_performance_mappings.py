@@ -1,9 +1,12 @@
 """M17C-B: Shot-local Performance working mappings (PF-02).
 
-B-F1 corrective: migration identity 0021_m17c_shot_performance_mappings was
-frozen with M17C-A (its exact c502b81 definition is untouched); this
-successor creates the PF-02 working-mapping table so databases already
-stamped at 0020 upgrade mechanically.
+SR2-10 documentation correction: the frozen M17C-A migration
+``0020_m17c_perf_capture_r2`` is retained UNCHANGED (its blob is
+byte-identical to the c502b81 M17C-A baseline); this NEW successor
+``0021_m17c_shot_performance_mappings`` creates the PF-02
+working-mapping storage so databases stamped at 0020 upgrade
+mechanically. 0021 itself was NOT frozen with M17C-A — it did not
+exist at the c502b81 baseline.
 
 Downgrade refuses if the working-mapping table contains rows (working
 intent is not deleted by schema downgrade).
