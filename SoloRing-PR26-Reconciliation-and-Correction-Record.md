@@ -208,3 +208,70 @@ No M17C-A law, migration row, or verifier branch was modified; M17C-B only **con
 - Frontend (local CI-equivalent): vitest **143/143** (32 files), `tsc --noEmit` clean, `next build` succeeds.
 - **CI run `36346081441` at head `f505fd2a0b76f0d5a2594c96066cb9d7c6aab8bc`: SUCCESS, first attempt.**
 - Residue: none; tracked tree clean. PR #26 remains open, unmerged, draft.
+
+---
+
+# M17C-B corrective cycle (B-F1..B-F9) — 2026-09-28
+
+The controlling primary review returned **NO-GO at `f39eb9f`** with findings B-F1..B-F9. All nine are implemented; this section is the corrected primary register for the delta `f39eb9f..f0a9e32` (commits `6dca4e2` corrective delta + `f0a9e32` validator fix-forward). PR #26 remains draft.
+
+## B-F1 — migration identity immutability (blocker): IMPLEMENTED
+
+`0020_m17c_perf_capture_r2.py` restored **byte-identical to the frozen `c502b81` form** (verified at the commit: `git diff c502b81 6dca4e2 -- <file>` = 0; creates only the four PF-03 companion tables). Successor migration `0021_m17c_shot_performance_mappings` creates `shot_performance_segment_mappings` (PK `shot_id+position`, FKs RESTRICT, named CHECKs matching the ORM, `ix_spsm_pr`); downgrade refuses on populated rows with a count fence naming the table. Recovery: `EXPECTED_ALEMBIC_HEAD`/`SUPPORTED_RESTORE_ALEMBIC_HEADS` advanced to 0021; the 13-path M17B Blob-FK inventory shared (0021 adds no Blob FK); both `successor_semantics` dispatch chains run the M17C verifier at 0021, with the working-mapping pass conditional on table presence (lawful absent at 0020). 36-file head sweep with two special cases: `test_m17c_dr26_regressions` keeps its superseded-draft rejection strings and pins the fresh-0019 upgrade target to the frozen `0020` identity (mapping table's lawful absence asserted there); the frozen 0020 file itself excluded from the sweep.
+
+## B-F2 — downstream PerformanceRevision integrity seam: IMPLEMENTED
+
+`verify_performance_revision_for_shot_use(session, settings, pr, *, media)` is the ONE seam PF-02 consumes. `media=True` (PUT — fresh authority) pays the FULL M17C-A verifier including retained media; `media=False` (readiness/list — the C3-01 read cost boundary) proves full structural closure without VP-audio rehash via `verify_revision_vocal_binding_structural` (classification/pair closure, binding canonical bytes on BOTH sides, candidate↔revision binding semantic equality, VP structural authority, adopted-candidate immutable payload closure). No PF-02 path reads raw binding scalars without the seam. Regressions: revision-binding hash tamper, coherently-rehashed candidate↔revision divergence (FK-satisfying REAL alternate VP so only the equality law can refuse), and candidate binding-bytes tamper each refuse PUT with **zero new mapping rows** and fail readiness/list closed (500 `INTERNAL_INVARIANT_VIOLATION`, never a 4xx stale answer).
+
+## B-F3 — applicability from the discriminator: IMPLEMENTED
+
+Mode gating reads `classification.sync_mode` only; `_verify_stored_mapping(row, pr, *, expected_mode)` enforces the mode/position shape law BEFORE any current-context law. Regressions prove the escape with canonical JSON/hash COHERENTLY rewritten (so only the shape law can refuse, not B-F6): VOCAL_V1 with NULLed position and generic with a position each refuse readiness as corruption.
+
+## B-F4 — supported-DELETE vs recovery-corruption boundary: IMPLEMENTED
+
+Live: a missing paired vocal mapping (API-creatable via the supported DELETE) is the lawful `BLOCKED_BINDING_INTEGRITY` working state; VP-id divergence of an EXISTING pair is corruption. Recovery (`_verify_shot_performance_mappings` rewritten): same split — the missing pair is preserved and everything else about the row verified; shape violations and pair VP divergence refuse.
+
+## B-F5 — current-duration revalidation: IMPLEMENTED
+
+`_project_one` revalidates the stored mapping's picture intersection against the CURRENT `shot.duration_ms` (and blocks on missing/nonpositive duration) → `BLOCKED_TIMING_MISMATCH` without rewriting stored intent. Regression: the lawful L-cut `[0,4500)@2000` is READY at duration 3000 and BLOCKED at 1000 with the stored row bytes and hash unchanged.
+
+## B-F6 — stored-mapping integrity verifier: IMPLEMENTED
+
+Schema version, per-column rational canonicality, canonical JSON/hash reproduction, nonempty interval, immutable-PR-domain containment, and the B-F3 mode shape — one verifier gating live reads. Regressions: stored hash tamper and a noncanonical persisted rational (0/5) refuse readiness/list closed.
+
+## B-F7 — full recovery battery: IMPLEMENTED
+
+New `tests/test_m17c_bf_recovery.py` (**9/9**): clean round trip preserving mapping rows byte-for-byte at head 0021; lawful blocked working-state round trip (missing pair preserved through backup/restore); **staged migration proof** — a REAL 0020-stamped database (a backup reshaped to exactly a 0020 database's shape: version stamped `0020`, mapping table dropped) upgraded to 0021 via the alembic CLI **retains every PF-03 row** (binding hashes identical before/after), gains the empty mapping table, and passes the FULL M17C recovery verifier afterwards — no rebuild of valid M17C-A draft databases required; adversarial matrix — canonical-hash tamper, noncanonical rational, cross-project revision (coherently rehashed so only the project law can refuse), both mode/position shapes (coherently rehashed), and a coordinated pair-VP divergence (the vocal mapping coherently rehashed to a REAL alternate VP so the M17A vocal verifier passes and only the mapping-pair law refuses) each refuse restore fail-closed.
+
+## B-F8 — M17A missing-selection-row semantics: IMPLEMENTED
+
+`_selection_posture`: a MISSING `VocalPerformanceSelection` row is corruption (every DLR is created with one) at PUT and readiness; lawful UNSET/different selection is STALE. Regressions: deletion refuses PUT (never a stale 409) and readiness, and the projection recovers exactly when the lawful row shape is restored; UNSET (all-three-null per `ck_vps_selection_shape`) projects `STALE_VOCAL_SELECTION` with `selection_state: UNSET`.
+
+## B-F9 — record accuracy: this section
+
+## Secondary cleanups (same cycle)
+
+- `PerformanceSegmentPut.vocal_mapping_position` and the path `position` carry SQLite-i64 bounds (`le=2**63-1` in schema and service).
+- Duplicate `created_at` removed from `PerformanceSegmentRead`.
+- Error-code count corrected: **seven** new centralized members (`errors.py:308–314`). `PERFORMANCE_CAPTURE_NOT_READY` is registered for the frozen §17 capture-refusal grammar and has **no live consumer in this slice** — recorded as-is.
+- **Concurrency narrowed and proven** (`test_m17c_bf_regressions`): sequential same-position PUTs converge last-committed-wins to exactly one row; truly concurrent same-position PUTs serialize on SQLite's single writer — one request commits its exact payload and the loser's unique-key/write-lock race escapes the app **untranslated** (an unhandled 5xx under a real server; an ASGI-transport exception under test transport) — never a duplicate or torn row, and the projection surface stays live afterwards. "Last committed PUT wins" is therefore the SEQUENTIAL upsert contract, not a claim about parallel-request ordering.
+
+## Predecessor impact (corrected, supersedes the note above)
+
+The initial M17C-B implementation modified migration `0020` **in place** — the delivered-state section's "no M17C-A migration row modified" claim was wrong. The corrected tree restores `0020` byte-identical to `c502b81`. Every other M17C-A surface is consumed, not modified; the working-mapping verification function remains the one M17C-B-owned addition inside `m17c_verifier.py` (its B-F4 pairing-law rewrite is confined to that function).
+
+## Gates (corrected tree)
+
+- New B-F regression battery: **12/12**; new B-F7 recovery battery: **9/9**.
+- Focused M17A/M17B/M17C battery (27 files incl. migrations and M17B interaction): **319/319**.
+- All 21 validator scripts green against the committed tree. Disclosed exactly: my first standalone runs of the two npm-audit validators failed on empty stdin (my invocation error — they consume `npm audit --omit=dev --json` via stdin); corrected invocation green, no environment or product failure. Six boundary/baseline validators required admitted-set repair (the head sweep had RENAMED their M17C-A admission entries to 0021 instead of admitting 0021 alongside the still-present frozen 0020); both migrations now admitted with per-file table sets in the hygiene validator. `test_m10a` chain-tail and `test_m7c` count companions completed for 0021; `test_m15_baseline`'s head listing is commit-dependent (proven via stash round-trip: the pre-cycle assertion passes against the pre-commit tree, the corrected one against the committed tree).
+- Full backend suite (local, first run on the uncommitted corrective tree): **2806 passed / 8 skipped / 3 failed** in 58:00. The 3 failures are the `test_m10a` chain-tail, `test_m7c` count, and `test_m15` head-listing companions above — my sweep's incomplete companion assertions, fixed in the same cycle; the two glob-based files green post-fix locally, the head-listing one green at the committed tree. No rerun of the full local suite: **CI on the committed head is the full-suite authority** (below).
+- Frontend: vitest **143/143**, `tsc --noEmit` clean, `next build` succeeds.
+- **CI run `36379941278` at `6dca4e2`: FAILURE, attempt 1 — Backend job, "Hygiene boundary" step.** Root cause: the hygiene and next-security allowlists enumerate M17C test files by exact name; the two new B-F battery files were untracked during local validation and entered the changed-set only once committed. Not a flake, not an environment failure — my commit-dependent fallout, reported as the first-run result. Fixed forward in `f0a9e32` (both batteries admitted; the 0021 migration prefix admitted to the next-security backend slice; all 21 validators then green against the committed tree, validator-gate tests 15/15).
+- **CI run `36380259599` at `f0a9e32`: SUCCESS, attempt 1** (Backend **2797 passed / 20 skipped / 0 failed** in 30:22 — GPU gates skipped on Actions runners by design; Frontend green).
+- Residue: this cycle's only new files are the three intended sources (0021 migration + two batteries) plus this record; no new repo-root generated residue.
+- Live-GPU exec gates: no GPU/evidence/certification work in this delta; the BLOCKER-1B executor-venv operator item recorded above remains the standing caveat for local GPU runs (CI skips those gates by design).
+
+## Frozen for the independent second review
+
+Delta `f39eb9f..f0a9e32` exactly (two commits: `6dca4e2`, `f0a9e32`). No merge, no ready-mark, no Codex invocation yet — the corrected first pass freezes here and the independent second review of exactly this range is the next protocol step, per the controlling disposition.
