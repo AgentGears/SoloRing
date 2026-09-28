@@ -375,3 +375,53 @@ The low-level law lives in ONE neutral primitive (`temporal.validate_mapping_pos
 ## Frozen for the independent Codex delta review
 
 **Product delta `a5f9d2d..e0c4e07`** (`4c80d80` + `e0c4e07`; the `0d0f403` record commit rides inside the range as documentation-only ancestry). Per the controlling disposition, the next protocol step is ONE independent Codex delta-only review of exactly `a5f9d2d..e0c4e07` plus direct predecessor implications, WITHOUT this reconciliation. No merge, no ready-mark, no M17C-C.
+
+*(Superseded: the independent Codex review of that range returned six findings — M17C-IR-01..06, all accepted and corrected below.)*
+
+---
+
+# M17C-B IR-final corrective cycle (M17C-IR-01..06) — 2026-09-28/29
+
+The independent Codex review of `a5f9d2d..e0c4e07` returned six findings (two schema-proof exactness gaps, a shared persisted PF-02 law gap, mode-dependent historical verification, unnormalized blob-byte failures, and loose test evidence); all six are accepted and implemented. **Product correction base: `e0c4e07`.** Corrected code head: **`f84e6f9`** (`b6fcd3f` product correction + `f84e6f9` validator carve). No M17C-C; PR #26 remains open, draft, unmerged.
+
+## M17C-IR-01 — closed-world, multiplicity-preserving physical-schema proof: IMPLEMENTED
+
+`parse_table_checks` parses every table-level CHECK occurrence into a **complete ordered multiset** `[(name_or_none, normalized_expression), ...]` — case-insensitive whole-word scanning for CONSTRAINT/CHECK; anonymous CHECKs captured; duplicate names preserved; malformed/truncated syntax (no paren after CHECK, unbalanced parens, unterminated string, unnamed/unsupported constraint kinds) fails closed; nested parentheses and quoted strings balanced. The COMPLETE multiset must equal the frozen contract — anonymous extras, lowercase `constraint … check (…)`, duplicate same-name bad+good, and right-name-wrong-expression all refuse. FKs compare as the COMPLETE `PRAGMA foreign_key_list` row multiset (seq, target table, source/target column, ON UPDATE, ON DELETE, MATCH) — duplicate same-key rows with conflicting ON DELETE or ON UPDATE/MATCH cannot collapse. Explicit indexes are a **closed inventory** per migration-owned table (PF-03 tables: exactly none; PF-02: exactly `ix_spsm_pr`, non-unique/non-partial/origin-`c` over exactly `performance_revision_id`) while SQLite's PK/UNIQUE autoindexes are lawful and never rejected for existing. Adversarial matrix: eight 0021 DDL surgeries (anonymous CHECK, lowercase named CHECK, duplicate name bad+good, extra ordinary/UNIQUE/partial index, duplicate FK conflicting ON DELETE, conflicting ON UPDATE) plus two 0020 predecessor-table surgeries — all refuse at the schema phase, before semantic row traversal, with empty tables where possible.
+
+## M17C-IR-02 — one transport-neutral persisted PF-02 mapping law: IMPLEMENTED
+
+`verify_persisted_mapping_structural` is the ONE shared law (live readiness/list + staged recovery, field-extracted at each boundary): row `position` and `vocal_mapping_position` are actual-integral SQLite-safe mapping positions (SQLite affinity can persist TEXT/REAL there — non-integral and beyond-i64 storages refuse; the beyond-i64 tamper is constructed via an in-statement SQL literal because Python's driver refuses to bind 2^63, with SQLite demoting it to REAL); schema version; three canonical integer-pair rationals; nonempty interval; immutable PR-domain containment; discriminator↔position shape; canonical json/hash. Kept OUT (readiness concerns): current duration, picture intersection, current selection, paired mapping existence, paired CURRENT VP. Recovery independently keeps Shot/PR existence + project agreement. Coherent-rehash matrix: start==end, start>end, before/after/straddling PR domain, vocal position −1, non-integral, beyond-i64 — all refuse recovery; the lawful working-state positives (missing pair, VP drift, stale selection, duration 0, non-intersection) are anchored as still-restoring.
+
+## M17C-IR-03 — historical parent authority BEFORE mode interpretation: IMPLEMENTED
+
+`verify_candidate_authority_historical` (the previous cycle's seam, promoted to the clear IR name with the old name kept as alias) and the new `verify_revision_authority_historical` (+`revalidate_winner_historical`) are the mode-independent pair. Wiring: both binding GETs prove parent authority BEFORE the lawful NONE 404; adoption — first AND replay, changed in the SHARED revision service so both the M17B and M17C routes inherit it — consumes persisted candidate integrity through the corruption seam (active-subject stays admission); the M17C retarget wrapper proves complete source authority BEFORE `create_retarget_candidate`. **Battery-exposed leaks fixed:** the adoption replay leaked `adoption_id must be an exact UUID` as 422 (now wrapped); three M17B refusals legitimately moved EARLIER to retarget CREATION with the identical verdict and branch (x21f paired provenance, x21g transitive review-law-chain, x22 lineage) — tests updated to the historical 500 contract with the same diagnostics. The generic-NONE matrix (six corruptions of adopted NONE history): candidate binding GET 500 (not 404), revision binding GET 500, adoption replay 500, retarget 500 with ZERO new candidates and companions; lawful NONE history keeps honest 404s; fresh malformed creation keeps admission 4xx.
+
+## M17C-IR-04 — complete adopted-pair closure on candidate binding reads: IMPLEMENTED
+
+`verify_adopted_pair_closure` (non-media): revision authority + classification equality with both sides' cardinality + the FULL read-grade VOCAL_V1 pair closure by REUSE of `verify_revision_vocal_binding_read_grade` — no retained VP audio. The candidate binding GET proves it whenever the candidate is adopted, before returning the binding; a pre-adoption candidate proves only its own authority. Asymmetric matrix (one-sided coherent binding rehash on either side; one-sided copied-closure field on either side): candidate GET, revision GET, PF-02 readiness, and recovery all agree on corruption. **Recorded supersession:** c2_03's "candidate side stays lawful" expectation is overturned — revision temporal columns are copied-closure fields, so the closure branch subsumes copied-field tampering (the revision-owned domain law remains independently proven by the SR2-05 origin-domain coherent-binding case).
+
+## M17C-IR-05 — normalized missing retained payload bytes: IMPLEMENTED
+
+`read_verified_blob_bytes` at the immutable-candidate blob boundary: narrow catches for `FileNotFoundError`/`PermissionError`/`OSError` → structured `BLOB_BYTES_MISSING` SoloRingError (never a broad Exception catch); the historical seam translates to 500 with the diagnostic; fresh admission keeps structured codes. Recovery additionally hardens the payload JSON decode — a coherent audio-bytes swap previously escaped as a raw `UnicodeDecodeError` and is now structured recovery corruption ("is not UTF-8 JSON"). Regression: payload physical file deleted (Blob row kept) — PF-02 PUT 500 + zero rows, readiness/list 500, both binding GETs 500, adoption replay 500, retarget 500 + zero new candidates, recovery refuses via the M17B blob branch ("missing from Blob root"); every message pinned.
+
+## M17C-IR-06 — branch-specific recovery evidence: IMPLEMENTED
+
+The IR battery's `pytest.raises(Exception)` sites now assert the stable `SoloRingError` + `RECOVERY_CORRUPTION` contract plus a law-specific fragment per tamper (dual-hash disagreement, non-JSON payload, provenance, closure-diverges-on-subject_id with the layering comment that the M17B revision verifier legitimately fires after the candidate core passes). The IR-final battery is branch-specific from birth.
+
+## Additional targeted sweep
+
+Verified no other M17C route/transition interprets a classification without first proving parent authority: the adoption precheck/converge paths are always preceded (adoption) or followed (replay convergence) by the authority seam; collection endpoints are deliberately left as non-scanning per the disposition.
+
+## Gates (first-run dispositions recorded exactly)
+
+- New IR-final battery (`test_m17c_irf_regressions.py`): **31/31**; hardened IR battery: **40/40**.
+- Focused M17A/M17B/M17C battery incl. M17B NONE/adoption/retarget matrices and the historical recovery families (35 files): **450/450**. First run 438/12: one legitimate IR-04 supersession (c2_03) and eleven M17B adoption/retarget tests asserting the superseded 4xx contract — all updated to the historical 500 with identical diagnostics, and three whose refusal moved earlier to creation.
+- **Hard process gate honored**: committed (`b6fcd3f`) BEFORE validators; the two exact-name allowlist validators failed locally on the IR-final battery path (caught pre-push, third consecutive cycle); carve (`f84e6f9`) precedes the push. All 21 validators green on the committed tree.
+- Frontend: vitest **143/143** (32 files), `tsc --noEmit` clean, `next build` succeeds.
+- Local full backend suite: **2899 passed / 8 skipped / 0 failed in 43:10** — fully-green FIRST pass including the three live-GPU exec gates (no rerun, no flake).
+- **CI run `36491026625` on `f84e6f9`: SUCCESS, attempt 1** — Backend **2887 passed / 20 skipped / 0 failed** in 27:37 (GPU gates skipped on Actions runners by design); Frontend green.
+- Residue: this cycle's only new file is the IR-final battery; no new repo-root generated residue.
+
+## Frozen for the independent Codex delta review
+
+**Product delta `e0c4e07..f84e6f9`** (`b6fcd3f` + `f84e6f9`). Per the controlling disposition: after this freeze is green, ONE independent Codex delta-only review of exactly `e0c4e07..f84e6f9` plus direct implications, WITHOUT this reconciliation; if clean, M17C-B closes technically and M17C-C may proceed while PR #26 remains draft.
