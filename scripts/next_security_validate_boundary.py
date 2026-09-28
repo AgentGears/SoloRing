@@ -67,6 +67,9 @@ ALLOWLIST = (
     "tests/test_m17c_c2_regressions.py",
     "tests/test_m17c_c3_regressions.py",
     "tests/test_m17c_shot_mapping.py",
+    # M17C-B B-F cycle batteries
+    "tests/test_m17c_bf_regressions.py",
+    "tests/test_m17c_bf_recovery.py",
     "server/soloring/recovery/backup.py",
     "server/soloring/recovery/successor_semantics.py",
     "server/soloring/performance/revision.py",
@@ -559,9 +562,12 @@ def main(repo: Path = REPO) -> int:
                 "server/soloring/api/m17b_")
             or f.startswith(
                 "server/soloring/api/schemas/m17b_")
-            # M17C-A (PR #26, second-review reconciled)
+            # M17C-A (PR #26): frozen 0020 migrations (incl. the
+            # superseded draft); M17C-B (PR #26, B-F1): successor 0021
             or f.startswith(
                 "server/alembic/versions/0020_")
+            or f.startswith(
+                "server/alembic/versions/0021_")
             or f.startswith(
                 "server/soloring/recovery/m17c_")
             or f.startswith(
