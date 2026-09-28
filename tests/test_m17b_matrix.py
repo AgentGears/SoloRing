@@ -223,7 +223,11 @@ async def test_x3a_physical_blob_corruption_before_adoption_rejects(client):
     await _corrupt_payload_blob(client, c)
     r = await client.post(f"/performance-candidates/{c['id']}/adopt",
                           json={"adopted_by": "d"})
-    assert r.status_code == 422, r.text
+    # IR-03 (M17C): persisted-candidate corruption at adoption now carries
+    # the HISTORICAL corruption contract (500 INTERNAL_INVARIANT_VIOLATION,
+    # original diagnostic preserved) — never a fresh-request 4xx
+    assert r.status_code == 500, r.text
+    assert r.json()["error_code"] == "INTERNAL_INVARIANT_VIOLATION", r.text
     engine = client._transport.app.state.engine
     async with engine.connect() as conn:
         n = (await conn.execute(text(
@@ -244,7 +248,11 @@ async def test_x3b_dual_hash_disagreement_rejects(client):
             "' WHERE id = :i"), {"i": c["id"]})
     r = await client.post(f"/performance-candidates/{c['id']}/adopt",
                           json={"adopted_by": "d"})
-    assert r.status_code == 422
+    # IR-03 (M17C): persisted-candidate corruption at adoption now carries
+    # the HISTORICAL corruption contract (500 INTERNAL_INVARIANT_VIOLATION,
+    # original diagnostic preserved) — never a fresh-request 4xx
+    assert r.status_code == 500
+    assert r.json()["error_code"] == "INTERNAL_INVARIANT_VIOLATION"
 
 
 @pytest.mark.asyncio
@@ -282,7 +290,11 @@ async def test_x3c_noncanonical_payload_rejects(client):
     np_.write_bytes(noncanon)
     r = await client.post(f"/performance-candidates/{c['id']}/adopt",
                           json={"adopted_by": "d"})
-    assert r.status_code == 422, r.text
+    # IR-03 (M17C): persisted-candidate corruption at adoption now carries
+    # the HISTORICAL corruption contract (500 INTERNAL_INVARIANT_VIOLATION,
+    # original diagnostic preserved) — never a fresh-request 4xx
+    assert r.status_code == 500, r.text
+    assert r.json()["error_code"] == "INTERNAL_INVARIANT_VIOLATION", r.text
 
 
 @pytest.mark.asyncio
@@ -296,7 +308,11 @@ async def test_x3d_provenance_hash_drift_rejects(client):
             + "d" * 64 + "' WHERE id = :i"), {"i": c["id"]})
     r = await client.post(f"/performance-candidates/{c['id']}/adopt",
                           json={"adopted_by": "d"})
-    assert r.status_code == 422
+    # IR-03 (M17C): persisted-candidate corruption at adoption now carries
+    # the HISTORICAL corruption contract (500 INTERNAL_INVARIANT_VIOLATION,
+    # original diagnostic preserved) — never a fresh-request 4xx
+    assert r.status_code == 500
+    assert r.json()["error_code"] == "INTERNAL_INVARIANT_VIOLATION"
 
 
 @pytest.mark.asyncio
@@ -310,7 +326,11 @@ async def test_x3e_selfconsistent_provenance_grammar_violation_rejects(client):
         "retarget": None, "extra_forbidden_key": True})
     r = await client.post(f"/performance-candidates/{c['id']}/adopt",
                           json={"adopted_by": "d"})
-    assert r.status_code == 422, r.text
+    # IR-03 (M17C): persisted-candidate corruption at adoption now carries
+    # the HISTORICAL corruption contract (500 INTERNAL_INVARIANT_VIOLATION,
+    # original diagnostic preserved) — never a fresh-request 4xx
+    assert r.status_code == 500, r.text
+    assert r.json()["error_code"] == "INTERNAL_INVARIANT_VIOLATION", r.text
 
 
 @pytest.mark.asyncio
@@ -324,7 +344,11 @@ async def test_x3f_source_identity_path_form_rejects(client):
         "retarget": None})
     r = await client.post(f"/performance-candidates/{c['id']}/adopt",
                           json={"adopted_by": "d"})
-    assert r.status_code == 422
+    # IR-03 (M17C): persisted-candidate corruption at adoption now carries
+    # the HISTORICAL corruption contract (500 INTERNAL_INVARIANT_VIOLATION,
+    # original diagnostic preserved) — never a fresh-request 4xx
+    assert r.status_code == 500
+    assert r.json()["error_code"] == "INTERNAL_INVARIANT_VIOLATION"
 
 
 @pytest.mark.asyncio
@@ -708,7 +732,8 @@ async def test_x13_alignment_from_another_project_rejects_at_creation_and_adopti
     body = candidate_body([channel(SMILE, [kf(0, 1, 0, kind="DERIVED",
                                                alignment=aid)])])
     r = await _post(client, eid, body)
-    assert r.status_code in (403, 422), r.text
+    # fresh creation keeps the admission 4xx (IR-03)
+    assert r.status_code == 422, r.text
     assert r.json()["error_code"] == \
         "PERFORMANCE_ALIGNMENT_PROJECT_MISMATCH", r.text
 
@@ -768,9 +793,13 @@ async def test_x13_alignment_from_another_project_rejects_at_creation_and_adopti
             {"i": cid, "n": now})
     r2 = await client.post(f"/performance-candidates/{cid}/adopt",
                            json={"adopted_by": "d"})
-    assert r2.status_code in (403, 422), r2.text
-    assert r2.json()["error_code"] == \
-        "PERFORMANCE_ALIGNMENT_PROJECT_MISMATCH", r2.text
+    # IR-03 (M17C): the DB-crafted PERSISTED candidate is historical
+    # authority at adoption — the historical 500 contract with the
+    # original cross-project-alignment diagnostic preserved
+    assert r2.status_code == 500, r2.text
+    assert r2.json()["error_code"] == "INTERNAL_INVARIANT_VIOLATION", \
+        r2.text
+    assert "alignment" in r2.json()["message"], r2.text
     async with engine.connect() as conn:
         n = (await conn.execute(text(
             "SELECT COUNT(*) FROM performance_revisions"))).scalar()
@@ -1008,8 +1037,12 @@ async def test_x18_adoption_rejects_subject_project_disagreement(client):
             "WHERE id = :i"), {"p": p2, "i": c["id"]})
     r = await client.post(f"/performance-candidates/{c['id']}/adopt",
                           json={"adopted_by": "d"})
-    assert r.status_code in (403, 422), r.text
-    assert r.json()["error_code"] == "PERFORMANCE_PROJECT_MISMATCH"
+    # IR-03 (M17C): persisted-candidate corruption at adoption now carries
+    # the HISTORICAL corruption contract (500 INTERNAL_INVARIANT_VIOLATION,
+    # original diagnostic preserved) — never a fresh-request 4xx
+    assert r.status_code == 500, r.text
+    assert r.json()["error_code"] == "INTERNAL_INVARIANT_VIOLATION", r.text
+    assert "subject/project" in r.json()["message"], r.text
     async with engine.connect() as conn:
         n = (await conn.execute(text(
             "SELECT COUNT(*) FROM performance_revisions"))).scalar()
@@ -1128,7 +1161,10 @@ async def test_x19_adoption_rejects_unresolved_retarget_evidence(client):
             "00000000-0000-4000-8000-00000000f002"})
     cid = _retarget_candidate(pj, ph, producer_label)
     r = await _try_adopt(cid)
-    assert r.status_code in (403, 422), r.text
+    # IR-03 (M17C): persisted-candidate corruption at adoption
+    # carries the historical 500 contract, diagnostic kept
+    assert r.status_code == 500, r.text
+    assert r.json()["error_code"] == "INTERNAL_INVARIANT_VIOLATION", r.text
 
     # 1b. FULLY VALID evidence chain but DIVERGENT semantic closure:
     # the crafted payload is lawful and internally canonical yet uses
@@ -1199,7 +1235,8 @@ async def test_x19_adoption_rejects_unresolved_retarget_evidence(client):
         "/performance-candidates/"
         "00000000-0000-4000-8000-0000000x19b/adopt",
         json={"adopted_by": "d"})
-    assert r.status_code in (403, 422), r.text
+    assert r.status_code == 500, r.text  # IR-03 historical contract
+    assert r.json()["error_code"] == "INTERNAL_INVARIANT_VIOLATION", r.text
     assert "diverges from" in r.json()["message"], r.text
 
     # 2. real assessment id but stale coordinate (pr3, not pr2)
@@ -1214,7 +1251,10 @@ async def test_x19_adoption_rejects_unresolved_retarget_evidence(client):
         "accepted_review_id": accept["id"]})
     cid = _retarget_candidate(pj, ph, producer_label)
     r = await _try_adopt(cid)
-    assert r.status_code in (403, 422), r.text
+    # IR-03 (M17C): persisted-candidate corruption at adoption
+    # carries the historical 500 contract, diagnostic kept
+    assert r.status_code == 500, r.text
+    assert r.json()["error_code"] == "INTERNAL_INVARIANT_VIOLATION", r.text
 
     # 3. real coordinate but non-accepting review (REJECT exists on a
     #    second assessment)
@@ -1239,7 +1279,10 @@ async def test_x19_adoption_rejects_unresolved_retarget_evidence(client):
         "accepted_review_id": reject["id"]})
     cid = _retarget_candidate(pj, ph, producer_label)
     r = await _try_adopt(cid)
-    assert r.status_code in (403, 422), r.text
+    # IR-03 (M17C): persisted-candidate corruption at adoption
+    # carries the historical 500 contract, diagnostic kept
+    assert r.status_code == 500, r.text
+    assert r.json()["error_code"] == "INTERNAL_INVARIANT_VIOLATION", r.text
     engine2 = client._transport.app.state.engine
     async with engine2.connect() as conn:
         n = (await conn.execute(text(
@@ -1343,7 +1386,11 @@ async def test_x21_adoption_rejects_tampered_assessment_verdict(client):
     r = await client.post(
         f"/performance-candidates/{rc.json()['id']}/adopt",
         json={"adopted_by": "d"})
-    assert r.status_code in (403, 422), r.text
+    # IR-03 (M17C): persisted-candidate corruption at adoption now carries
+    # the HISTORICAL corruption contract (500 INTERNAL_INVARIANT_VIOLATION,
+    # original diagnostic preserved) — never a fresh-request 4xx
+    assert r.status_code == 500, r.text
+    assert r.json()["error_code"] == "INTERNAL_INVARIANT_VIOLATION", r.text
 
     # ---- delta-review subcases: the four tamper shapes the
     # recomputation alone (or a stale-hash check alone) cannot catch
@@ -1412,7 +1459,11 @@ async def test_x21_adoption_rejects_tampered_assessment_verdict(client):
             "= :j, report_hash = :h WHERE id = :i"),
             {"j": forged_json, "h": forged_hash, "i": a_a["id"]})
     r = await _try_adopt_forge(rev_a, a_a, acc_a)
-    assert r.status_code in (403, 422), r.text
+    # IR-03 (M17C): persisted-candidate corruption at adoption now carries
+    # the HISTORICAL corruption contract (500 INTERNAL_INVARIANT_VIOLATION,
+    # original diagnostic preserved) — never a fresh-request 4xx
+    assert r.status_code == 500, r.text
+    assert r.json()["error_code"] == "INTERNAL_INVARIANT_VIOLATION", r.text
     assert "recomputation" in r.json()["message"], r.text
 
     # (b) assessment.project_id tampered to another project
@@ -1425,7 +1476,11 @@ async def test_x21_adoption_rejects_tampered_assessment_verdict(client):
             "UPDATE performance_retarget_assessments SET project_id = "
             ":p WHERE id = :i"), {"p": p_other, "i": a_b["id"]})
     r = await _try_adopt_forge(rev_b, a_b, acc_b)
-    assert r.status_code in (403, 422), r.text
+    # IR-03 (M17C): persisted-candidate corruption at adoption now carries
+    # the HISTORICAL corruption contract (500 INTERNAL_INVARIANT_VIOLATION,
+    # original diagnostic preserved) — never a fresh-request 4xx
+    assert r.status_code == 500, r.text
+    assert r.json()["error_code"] == "INTERNAL_INVARIANT_VIOLATION", r.text
     assert "project" in r.json()["message"], r.text
 
     # (c) duplicated snapshot-hash column tampered
@@ -1437,7 +1492,11 @@ async def test_x21_adoption_rejects_tampered_assessment_verdict(client):
             "from_production_revision_hash = :h WHERE id = :i"),
             {"h": "b" * 64, "i": a_c["id"]})
     r = await _try_adopt_forge(rev_c, a_c, acc_c)
-    assert r.status_code in (403, 422), r.text
+    # IR-03 (M17C): persisted-candidate corruption at adoption now carries
+    # the HISTORICAL corruption contract (500 INTERNAL_INVARIANT_VIOLATION,
+    # original diagnostic preserved) — never a fresh-request 4xx
+    assert r.status_code == 500, r.text
+    assert r.json()["error_code"] == "INTERNAL_INVARIANT_VIOLATION", r.text
     assert "snapshot-hash" in r.json()["message"], r.text
 
     # (d) referenced ProductionObject moved to another project —
@@ -1450,7 +1509,9 @@ async def test_x21_adoption_rejects_tampered_assessment_verdict(client):
             "UPDATE production_objects SET project_id = :p WHERE id = "
             ":o"), {"p": p_other, "o": obj_d})
     r = await _try_adopt_forge(rev_d, a_d, acc_d)
-    assert r.status_code in (403, 422), r.text
+    # IR-03 (M17C): historical 500 contract, diagnostic kept
+    assert r.status_code == 500, r.text
+    assert r.json()["error_code"] == "INTERNAL_INVARIANT_VIOLATION", r.text
     assert "project" in r.json()["message"], r.text
 
     # (e) delta-review residue: DB-tamper the ACCEPTED REVIEW's
@@ -1467,7 +1528,9 @@ async def test_x21_adoption_rejects_tampered_assessment_verdict(client):
             ":rb WHERE id = :i"),
             {"rb": "x" * 300, "i": acc_e["id"]})
     r = await _try_adopt_forge(rev_e, a_e, acc_e)
-    assert r.status_code in (403, 422), r.text
+    # IR-03 (M17C): historical 500 contract, diagnostic kept
+    assert r.status_code == 500, r.text
+    assert r.json()["error_code"] == "INTERNAL_INVARIANT_VIOLATION", r.text
     assert "reviewed_by" in r.json()["message"], r.text
 
     # (f) fourth-Codex P1: PAIRED source provenance tamper — mutate
@@ -1496,12 +1559,16 @@ async def test_x21_adoption_rejects_tampered_assessment_verdict(client):
               "accepted_review_id": acc_f["id"],
               "producer_id": "x21f", "producer_version": "1",
               "source_identity": None, "parameters_sha256": None})
-    assert rc.status_code == 201, rc.text
-    r = await client.post(
-        f"/performance-candidates/{rc.json()['id']}/adopt",
-        json={"adopted_by": "d"})
-    assert r.status_code in (403, 422), r.text
-    assert "provenance" in r.json()["message"], r.text
+    # IR-03 (M17C): the M17C retarget wrapper proves complete SOURCE
+    # authority BEFORE creating any new evidence, so the paired
+    # provenance tamper now refuses at CREATION with the historical
+    # 500 contract (source candidate historical integrity) and zero
+    # new retarget candidates — the refusal moved earlier than
+    # adoption-time; the verdict is identical
+    assert rc.status_code == 500, rc.text
+    assert rc.json()["error_code"] == \
+        "INTERNAL_INVARIANT_VIOLATION", rc.text
+    assert "provenance" in rc.json()["message"], rc.text
 
     # (g) delta review of the fourth-Codex fix: TRANSITIVE ancestry —
     # lawful two-hop chain C0->R0->C1->R1; AFTER R1's adoption,
@@ -1569,12 +1636,15 @@ async def test_x21_adoption_rejects_tampered_assessment_verdict(client):
               "producer_id": "hop2", "producer_version": "1",
               "source_identity": None,
               "parameters_sha256": None})
-    assert rc2.status_code == 201, rc2.text
-    r = await client.post(
-        f"/performance-candidates/{rc2.json()['id']}/adopt",
-        json={"adopted_by": "d"})
-    assert r.status_code in (403, 422), r.text
-    assert "review law chain" in r.json()["message"], r.text
+    # IR-03 (M17C): the M17C retarget wrapper proves SOURCE authority
+    # (whose historical integrity walks the retarget ancestry) BEFORE
+    # creating C2 — the post-adoption ACCEPT->REJECT tamper now refuses
+    # at CREATION on the SAME review-law-chain branch, with zero new
+    # candidates; the refusal moved earlier, the verdict is identical
+    assert rc2.status_code == 500, rc2.text
+    assert rc2.json()["error_code"] == \
+        "INTERNAL_INVARIANT_VIOLATION", rc2.text
+    assert "review law chain" in rc2.json()["message"], rc2.text
 
 
 @pytest.mark.asyncio
@@ -1623,11 +1693,21 @@ async def test_x22_retarget_rejects_tampered_source_revision_lineage(client):
               "accepted_review_id": accept["id"],
               "producer_id": "x22", "producer_version": "1",
               "source_identity": None, "parameters_sha256": None})
-    r = await client.post(
-        f"/performance-candidates/{rc.json()['id']}/adopt",
-        json={"adopted_by": "d"})
-    assert r.status_code in (403, 422), r.text
-    assert "adopted candidate closure" in r.json()["message"], r.text
+    # IR-03 (M17C): the M17C retarget wrapper now proves complete
+    # SOURCE authority (historical candidate integrity + copied
+    # closure + adoption metadata) BEFORE any new evidence is created,
+    # so the tampered lineage refuses at CREATION with the historical
+    # 500 contract and ZERO new retarget candidates — the refusal
+    # moved earlier than adoption-time; the verdict is identical
+    assert rc.status_code == 500, rc.text
+    assert rc.json()["error_code"] == \
+        "INTERNAL_INVARIANT_VIOLATION", rc.text
+    assert "closure does not reproduce" in rc.json()["message"], rc.text
+    async with engine.connect() as conn:
+        n = (await conn.execute(text(
+            "SELECT COUNT(*) FROM performance_candidates WHERE "
+            "source_kind = 'retargeted'"))).scalar()
+    assert n == 0
 
 
 @pytest.mark.asyncio

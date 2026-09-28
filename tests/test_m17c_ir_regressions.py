@@ -28,6 +28,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import text
 
+from soloring.errors import SoloRingError
 from tests.test_m17c_binding_transitions import _same_line_alternate_vp
 from tests.test_m17c_shot_mapping import (
     _bound_world,
@@ -285,39 +286,43 @@ async def test_ir02_clean_0020_and_0021_restore_paths_preserved(client,
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("name,stmt_builder,needs_alternate", [
+@pytest.mark.parametrize("name,stmt_builder,needs_alternate,fragment", [
     ("payload dual-hash disagreement",
      lambda w, extra: (
          "UPDATE performance_candidates SET "
          "canonical_channel_payload_sha256 = :v WHERE id = :c",
-         {"v": "a" * 64, "c": w["candidate"]["id"]}), False),
+         {"v": "a" * 64, "c": w["candidate"]["id"]}), False,
+     "dual payload hash columns disagree"),
     ("payload identity coherent real-blob swap",
      lambda w, extra: (
          "UPDATE performance_candidates SET "
          "canonical_channel_payload_blob_hash = :v, "
          "canonical_channel_payload_sha256 = :v WHERE id = :c",
-         {"v": extra, "c": w["candidate"]["id"]}), False),
+         {"v": extra, "c": w["candidate"]["id"]}), False,
+     "is not UTF-8 JSON"),
     ("provenance hash",
      lambda w, extra: (
          "UPDATE performance_candidates SET provenance_hash = :v "
          "WHERE id = :c", {"v": "f" * 64, "c": w["candidate"]["id"]}),
-     False),
+     False, "provenance"),
     ("provenance json canonicality",
      lambda w, extra: (
          "UPDATE performance_candidates SET provenance_json = '{}' "
-         "WHERE id = :c", {"c": w["candidate"]["id"]}), False),
+         "WHERE id = :c", {"c": w["candidate"]["id"]}), False,
+     "provenance"),
     ("temporal domain law",
      lambda w, extra: (
          "UPDATE performance_candidates SET temporal_end_num = 0 "
-         "WHERE id = :c", {"c": w["candidate"]["id"]}), False),
+         "WHERE id = :c", {"c": w["candidate"]["id"]}), False,
+     "payload"),
     ("subject disagreement",
      lambda w, extra: (
          "UPDATE performance_candidates SET subject_id = :v "
          "WHERE id = :c", {"v": extra, "c": w["candidate"]["id"]}),
-     True),
+     True, "closure diverges on subject_id"),
 ])
 async def test_ir03_candidate_tamper_matrix(
-        client, tmp_path, name, stmt_builder, needs_alternate):
+        client, tmp_path, name, stmt_builder, needs_alternate, fragment):
     from tests.m17b_seed import make_entity
     from tests.test_m17c_sr26_regressions import _backup_m17c
     world = await _bound_world(client)
@@ -354,11 +359,17 @@ async def test_ir03_candidate_tamper_matrix(
     got = await client.get(
         f"/performance-revisions/{world['pr']['id']}/vocal-binding")
     _corrupt(got)
-    # recovery agrees: the backup-side enumeration runs the same
-    # candidate core and refuses the corrupted row (the refusal itself
-    # is the verdict; the firing law varies per tamper)
-    with pytest.raises(Exception):
+    # IR-06: branch-specific recovery evidence — the backup-side
+    # enumeration refuses through the STABLE recovery-corruption
+    # contract on the intended M17B candidate-history branch, with a
+    # law-specific diagnostic (never pytest.raises(Exception)). For
+    # the subject case the candidate core passes (same-project entity)
+    # and the M17B revision copied-closure branch fires — that exact
+    # predecessor branch is asserted.
+    with pytest.raises(SoloRingError) as excinfo:
         await _backup_m17c(client, tmp_path, "ir03")
+    assert excinfo.value.code == "RECOVERY_CORRUPTION", excinfo.value
+    assert fragment in str(excinfo.value), (name, excinfo.value)
 
 
 @pytest.mark.asyncio

@@ -167,7 +167,7 @@ async def verify_performance_revision_for_shot_use(
     # TRANSLATED here (this is a persisted-history read, never a fresh
     # client request)
     try:
-        revision_svc.revalidate_winner(pr, candidate)
+        revision_svc.revalidate_winner_historical(pr, candidate)
     except SoloRingError as exc:
         raise _corrupt(
             f"adopted revision closure/adoption metadata violates "
@@ -203,59 +203,124 @@ def _mapping_doc(row) -> dict:
     }
 
 
-def _verify_stored_mapping(row, pr, *, expected_mode: str) -> None:
-    """B-F6: shared stored-mapping integrity verifier — structural
-    correctness of the stored row itself, independent of current
-    context. Raises corruption (the row is damaged history)."""
-    if row.mapping_schema_version != 1:
-        raise _corrupt(
-            f"stored mapping {row.shot_id!r}@{row.position} schema "
-            "version is not 1")
+def verify_persisted_mapping_structural(
+        *, shot_id, position, performance_revision_id,
+        mapping_schema_version,
+        performance_start_num, performance_start_den,
+        performance_end_num, performance_end_den,
+        shot_anchor_num, shot_anchor_den,
+        vocal_mapping_position, mapping_json, mapping_hash,
+        domain_start_num, domain_start_den,
+        domain_end_num, domain_end_den,
+        expected_mode: str) -> None:
+    """IR-02: the ONE transport-neutral persisted PF-02 mapping law —
+    every STORED structural/immutable property, shared verbatim by the
+    live readiness/list path (ORM rows) and staged-sqlite recovery.
+    Deliberately excludes ALL mutable current-readiness concerns
+    (current Shot duration, picture intersection, current selection,
+    paired vocal mapping existence or CURRENT VP identity). Raises the
+    500 corruption contract on any violation."""
+    def _fail(what: str):
+        return _corrupt(
+            f"stored mapping {shot_id!r}@{position!r} {what}")
+
+    # the row's position and vocal_mapping_position are actual
+    # SQLite-safe mapping positions wherever storage could represent a
+    # non-position (SQLite affinity can persist TEXT/REAL there)
+    if not isinstance(position, int) or isinstance(position, bool) \
+            or position < 0 or position > SQLITE_INT_MAX:
+        raise _fail(
+            f"row position {position!r} is not a SQLite-safe mapping "
+            "position")
+    if isinstance(mapping_schema_version, bool) \
+            or not isinstance(mapping_schema_version, int) \
+            or mapping_schema_version != 1:
+        raise _fail("schema version is not 1")
     for num, den, what in (
-            (row.performance_start_num, row.performance_start_den,
+            (performance_start_num, performance_start_den,
              "performance_start"),
-            (row.performance_end_num, row.performance_end_den,
+            (performance_end_num, performance_end_den,
              "performance_end"),
-            (row.shot_anchor_num, row.shot_anchor_den, "shot_anchor")):
+            (shot_anchor_num, shot_anchor_den, "shot_anchor")):
+        if isinstance(num, bool) or isinstance(den, bool) \
+                or not isinstance(num, int) or not isinstance(den, int):
+            raise _fail(f"{what} rational is not an integer pair")
         try:
             cn, cd = canonical_rational(num, den)
         except RationalError as exc:
-            raise _corrupt(
-                f"stored mapping {row.shot_id!r}@{row.position} "
+            raise _fail(
                 f"{what} rational invalid: {exc.message}") from exc
         if (cn, cd) != (num, den):
-            raise _corrupt(
-                f"stored mapping {row.shot_id!r}@{row.position} "
-                f"{what} rational is not canonical")
-    doc = _mapping_doc(row)
-    if row.mapping_json != canonical_json_str(doc) or \
-            row.mapping_hash != canonical_hash(doc):
-        raise _corrupt(
-            f"stored mapping {row.shot_id!r}@{row.position} canonical "
-            "bytes/hash diverge")
-    start, end = _stored_interval(row)
-    if start >= end:
-        raise _corrupt(
-            f"stored mapping {row.shot_id!r}@{row.position} interval "
-            "is empty or inverted")
-    domain = _pr_domain(pr)
-    if not (domain[0] <= start and end <= domain[1]):
-        raise _corrupt(
-            f"stored mapping {row.shot_id!r}@{row.position} interval "
-            "lies outside the immutable PerformanceRevision domain")
-    # B-F3: mode/position shape — applicability from the discriminator
+            raise _fail(f"{what} rational is not canonical")
+    if not performance_start_num < performance_end_num:
+        raise _fail("interval is empty or inverted")
+    domain_lo = Fraction(domain_start_num, domain_start_den)
+    domain_hi = Fraction(domain_end_num, domain_end_den)
+    start = Fraction(performance_start_num, performance_start_den)
+    end = Fraction(performance_end_num, performance_end_den)
+    if not (domain_lo <= start and end <= domain_hi):
+        raise _fail(
+            "interval lies outside the immutable PerformanceRevision "
+            "domain")
+    # IR-03/B-F3: immutable classification ↔ vocal_mapping_position
+    # shape — applicability from the discriminator, never from the
+    # nullable payload shape
     if expected_mode == "VOCAL_V1":
-        if row.vocal_mapping_position is None:
-            raise _corrupt(
-                f"stored mapping {row.shot_id!r}@{row.position} maps a "
-                "VOCAL_V1 PerformanceRevision without "
+        if vocal_mapping_position is None:
+            raise _fail(
+                "maps a VOCAL_V1 PerformanceRevision without "
                 "vocal_mapping_position")
-    else:
-        if row.vocal_mapping_position is not None:
-            raise _corrupt(
-                f"stored mapping {row.shot_id!r}@{row.position} carries "
-                "vocal_mapping_position on a non-VOCAL_V1 "
-                "PerformanceRevision")
+    elif vocal_mapping_position is not None:
+        raise _fail(
+            "carries vocal_mapping_position on a non-VOCAL_V1 "
+            "PerformanceRevision")
+    if vocal_mapping_position is not None \
+            and (not isinstance(vocal_mapping_position, int)
+                 or isinstance(vocal_mapping_position, bool)
+                 or vocal_mapping_position < 0
+                 or vocal_mapping_position > SQLITE_INT_MAX):
+        raise _fail(
+            f"persists vocal_mapping_position "
+            f"{vocal_mapping_position!r} that is not a SQLite-safe "
+            "mapping position")
+    doc = {
+        "mapping_schema_version": 1,
+        "performance_revision_id": performance_revision_id,
+        "performance_start_ms": {"num": performance_start_num,
+                                 "den": performance_start_den},
+        "performance_end_ms": {"num": performance_end_num,
+                               "den": performance_end_den},
+        "shot_anchor_ms": {"num": shot_anchor_num,
+                           "den": shot_anchor_den},
+        "vocal_mapping_position": vocal_mapping_position,
+    }
+    if mapping_json != canonical_json_str(doc) or \
+            mapping_hash != canonical_hash(doc):
+        raise _fail("canonical bytes/hash diverge")
+
+
+def _verify_stored_mapping(row, pr, *, expected_mode: str) -> None:
+    """B-F6/IR-02: live-side adapter — the stored ORM row through the
+    ONE shared transport-neutral persisted law."""
+    verify_persisted_mapping_structural(
+        shot_id=row.shot_id,
+        position=row.position,
+        performance_revision_id=row.performance_revision_id,
+        mapping_schema_version=row.mapping_schema_version,
+        performance_start_num=row.performance_start_num,
+        performance_start_den=row.performance_start_den,
+        performance_end_num=row.performance_end_num,
+        performance_end_den=row.performance_end_den,
+        shot_anchor_num=row.shot_anchor_num,
+        shot_anchor_den=row.shot_anchor_den,
+        vocal_mapping_position=row.vocal_mapping_position,
+        mapping_json=row.mapping_json,
+        mapping_hash=row.mapping_hash,
+        domain_start_num=pr.temporal_start_num,
+        domain_start_den=pr.temporal_start_den,
+        domain_end_num=pr.temporal_end_num,
+        domain_end_den=pr.temporal_end_den,
+        expected_mode=expected_mode)
 
 
 async def _dependency_ids(session, shot_id: str) -> set[str]:

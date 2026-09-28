@@ -102,6 +102,34 @@ def validate_review_metadata(*, decision, reviewed_by, rationale) -> None:
             "code points")
 
 
+def read_verified_blob_bytes(settings, payload_hash: str) -> bytes:
+    """IR-05: read the physical content-addressed Blob bytes for an
+    immutable retained payload, translating the EXPECTED storage
+    failures — missing content-addressed file, unreadable through
+    permission/OS error — into structured SoloRingError domain
+    failures. Deliberately narrow: never a broad ``Exception`` catch,
+    so programming errors still surface unmasked."""
+    store = BlobStore(settings)
+    path = store.path_for_hash(payload_hash)
+    try:
+        return path.read_bytes()
+    except FileNotFoundError as exc:
+        raise _invalid(
+            ErrorCode.BLOB_BYTES_MISSING,
+            f"retained payload blob file for {payload_hash!r} is "
+            "missing from storage") from exc
+    except PermissionError as exc:
+        raise _invalid(
+            ErrorCode.BLOB_BYTES_MISSING,
+            f"retained payload blob file for {payload_hash!r} is "
+            "unreadable (permission denied)") from exc
+    except OSError as exc:
+        raise _invalid(
+            ErrorCode.BLOB_BYTES_MISSING,
+            f"retained payload blob file for {payload_hash!r} is "
+            f"unreadable through a storage error: {exc}") from exc
+
+
 async def _verify_candidate_core(
         session: AsyncSession, settings, candidate: PerformanceCandidate,
         *, row_lookup=None, blob_reader=None) -> dict:
@@ -146,8 +174,7 @@ async def _verify_candidate_core(
             raise _invalid(
                 ErrorCode.BLOB_NOT_FOUND,
                 f"candidate payload blob row {payload_hash!r} missing")
-        store = BlobStore(settings)
-        data = store.path_for_hash(payload_hash).read_bytes()
+        data = read_verified_blob_bytes(settings, payload_hash)
     actual = hashlib.sha256(data).hexdigest()
     if actual != payload_hash:
         raise _invalid(
@@ -250,19 +277,20 @@ async def verify_candidate_integrity(
     return result
 
 
-async def verify_candidate_integrity_historical(
+async def verify_candidate_authority_historical(
         session: AsyncSession, settings, candidate: PerformanceCandidate,
 ) -> dict:
-    """IR-03: the ONE shared persisted-history candidate-integrity
-    seam. Executes the SAME underlying immutable verifier as admission,
-    but translates admission-oriented ``SoloRingError`` failures into
-    the historical corruption contract (``INTERNAL_INVARIANT_VIOLATION``,
-    500) with the original diagnostic preserved — an ALREADY-PERSISTED
-    candidate is authority, so its defects are corruption, never a
-    client-input 4xx. Failures that are already the correct historical
-    500 invariant pass through unchanged. Fresh candidate creation
-    keeps calling ``verify_candidate_integrity`` directly and keeps
-    its admission 4xx contract."""
+    """IR-03: the shared persisted-history CANDIDATE authority seam —
+    mode-independent. Executes the SAME underlying immutable verifier
+    as admission, but translates admission-oriented ``SoloRingError``
+    failures into the historical corruption contract
+    (``INTERNAL_INVARIANT_VIOLATION``, 500) with the original
+    diagnostic preserved — an ALREADY-PERSISTED candidate is authority,
+    so its defects (including structured storage failures, IR-05) are
+    corruption, never a client-input 4xx. Failures that are already
+    the correct historical 500 invariant pass through unchanged. Fresh
+    candidate creation keeps calling ``verify_candidate_integrity``
+    directly and keeps its admission 4xx contract."""
     try:
         return await verify_candidate_integrity(session, settings, candidate)
     except SoloRingError as exc:
@@ -276,6 +304,55 @@ async def verify_candidate_integrity_historical(
             f"authority: {exc.message}",
             status_code=500,
         ) from exc
+
+
+# legacy alias from the previous IR cycle (same law, older name)
+verify_candidate_integrity_historical = (
+    verify_candidate_authority_historical)
+
+
+def revalidate_winner_historical(revision: PerformanceRevision,
+                                 candidate: PerformanceCandidate) -> None:
+    """IR-03: ``revalidate_winner`` under the HISTORICAL corruption
+    contract — used wherever a PERSISTED revision's copied closure or
+    adoption metadata is being treated as authority, so grammar
+    failures of already-stored history can never leak as fresh-request
+    4xx."""
+    try:
+        revalidate_winner(revision, candidate)
+    except SoloRingError as exc:
+        if exc.code == ErrorCode.INTERNAL_INVARIANT_VIOLATION \
+                and exc.status_code == 500:
+            raise
+        raise SoloRingError(
+            ErrorCode.INTERNAL_INVARIANT_VIOLATION,
+            f"persisted revision {revision.id!r} closure/adoption "
+            f"violates immutable law: {exc.message}",
+            status_code=500,
+        ) from exc
+
+
+async def verify_revision_authority_historical(
+        session: AsyncSession, settings, revision: PerformanceRevision,
+) -> PerformanceCandidate:
+    """IR-03: the shared persisted-history REVISION authority seam —
+    mode-independent historical parent authority for any consumer that
+    is about to interpret a PerformanceRevision (classification
+    NONE/VOCAL_V1 included). Proves: the adopted candidate exists;
+    FULL historical candidate integrity; the PerformanceRevision
+    copied closure equals its adopted candidate (the frozen M17B
+    closure fields); and valid persisted adoption metadata."""
+    candidate = await session.get(PerformanceCandidate,
+                                  revision.adopted_candidate_id)
+    if candidate is None:
+        raise SoloRingError(
+            ErrorCode.INTERNAL_INVARIANT_VIOLATION,
+            "adopted revision's candidate is missing",
+            status_code=500)
+    await verify_candidate_authority_historical(
+        session, settings, candidate)
+    revalidate_winner_historical(revision, candidate)
+    return candidate
 
 
 # the semantic fields a retarget candidate copies byte/scalar-exact
@@ -828,12 +905,18 @@ async def adopt_performance_candidate(
     ).scalar_one_or_none()
     if existing is not None:
         # historical replay: winner + source-candidate integrity,
-        # never vetoed by current subject state
-        await verify_candidate_integrity(session, settings, candidate)
-        revalidate_winner(existing, candidate)
+        # never vetoed by current subject state. IR-03: the persisted
+        # candidate is HISTORICAL AUTHORITY at adoption time — its
+        # immutable integrity is consumed through the corruption seam
+        # so persisted defects can never leak as fresh-request 4xx.
+        await verify_candidate_authority_historical(
+            session, settings, candidate)
+        revalidate_winner_historical(existing, candidate)
         return existing
 
-    # first adoption: active-subject admission + full integrity
+    # first adoption: active-subject admission (an admission policy,
+    # kept plain per IR-03) + full integrity through the HISTORICAL
+    # seam — the candidate already exists in storage
     from soloring.continuity.models import CreativeEntity
     entity = await session.get(CreativeEntity, candidate.subject_id)
     if entity is None or entity.deleted_at is not None:
@@ -842,7 +925,8 @@ async def adopt_performance_candidate(
             "subject is deleted — first adoption requires an active "
             "subject; later soft deletion never invalidates adopted "
             "history")
-    await verify_candidate_integrity(session, settings, candidate)
+    await verify_candidate_authority_historical(
+        session, settings, candidate)
 
     revision = PerformanceRevision(
         id=new_uuid(), **{f: getattr(candidate, f)

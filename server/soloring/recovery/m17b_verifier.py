@@ -239,7 +239,16 @@ def _verify_candidates(con: sqlite3.Connection, blob_root: Path) -> None:
             raise _corrupt("candidate payload blob row missing")
         data = _blob_bytes(blob_root,
                            r["canonical_channel_payload_blob_hash"])
-        doc = json.loads(data.decode("utf-8"))
+        try:
+            doc = json.loads(data.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            # IR-05/IR-06: non-JSON retained payload bytes (e.g. a
+            # coherent swap to audio bytes) surface as the structured
+            # recovery-corruption contract, never a raw parser error
+            raise _corrupt(
+                f"M17B payload blob "
+                f"{r['canonical_channel_payload_blob_hash']} for "
+                f"candidate {r['id']!r} is not UTF-8 JSON") from exc
         _verify_payload_document(
             doc, kind=r["performance_kind"],
             sn=r["temporal_start_num"], sd=r["temporal_start_den"],

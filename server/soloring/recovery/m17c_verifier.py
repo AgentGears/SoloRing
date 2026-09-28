@@ -78,6 +78,7 @@ _FK_RESTRICT = ("NO ACTION", "RESTRICT", "NONE")
 
 def _binding_contract(table: str, parent_col: str, parent_table: str,
                       ck: str) -> dict:
+    n = f"ck_{table}_ck_{ck}"
     return {
         "columns": {
             parent_col: ("VARCHAR(36)", 1, 1),
@@ -93,33 +94,37 @@ def _binding_contract(table: str, parent_col: str, parent_table: str,
             "binding_hash": ("TEXT", 1, 0),
             "created_at": ("TEXT", 1, 0),
         },
-        "checks": {
-            f"ck_{table}_ck_{ck}_start_nonneg":
-                "source_start_sample >= 0",
-            f"ck_{table}_ck_{ck}_sample_order":
-                "source_start_sample < source_end_sample_exclusive",
-            f"ck_{table}_ck_{ck}_rate_positive":
-                "sample_rate_hz > 0",
-            f"ck_{table}_ck_{ck}_origin_den_positive":
-                "performance_origin_den > 0",
-            f"ck_{table}_ck_{ck}_sync_basis":
-                "synchronization_basis_version = 1",
-            f"ck_{table}_ck_{ck}_schema":
-                "binding_schema_version = 1",
-            f"ck_{table}_ck_{ck}_hash_hex":
-                "length(binding_hash) = 64 AND "
-                "binding_hash NOT GLOB '*[^0-9a-f]*'",
-        },
-        "fks": {
-            (parent_table, parent_col, "id"): _FK_RESTRICT,
-            ("vocal_performance_revisions",
-             "vocal_performance_revision_id", "id"): _FK_RESTRICT,
-        },
+        # IR-01: the COMPLETE ordered CHECK multiset — closed world
+        "checks": [
+            (f"{n}_start_nonneg", "source_start_sample >= 0"),
+            (f"{n}_sample_order",
+             "source_start_sample < source_end_sample_exclusive"),
+            (f"{n}_rate_positive", "sample_rate_hz > 0"),
+            (f"{n}_origin_den_positive", "performance_origin_den > 0"),
+            (f"{n}_sync_basis", "synchronization_basis_version = 1"),
+            (f"{n}_schema", "binding_schema_version = 1"),
+            (f"{n}_hash_hex",
+             "length(binding_hash) = 64 AND "
+             "binding_hash NOT GLOB '*[^0-9a-f]*'"),
+        ],
+        # IR-01: the COMPLETE FK row multiset (seq, target table,
+        # source col, target col, ON UPDATE, ON DELETE, MATCH) —
+        # duplicates and conflicting actions cannot collapse
+        "fks": sorted([
+            (0, "vocal_performance_revisions",
+             "vocal_performance_revision_id", "id") + _FK_RESTRICT,
+            (0, parent_table, parent_col, "id") + _FK_RESTRICT,
+        ]),
+        # IR-01: the closed explicit-index inventory (origin-'c'
+        # indexes only; SQLite autoindexes implied by PK/UNIQUE are
+        # lawful here) — the PF-03 tables carry none
+        "explicit_indexes": {},
     }
 
 
 def _classification_contract(table: str, parent_col: str,
                              parent_table: str, ck: str) -> dict:
+    n = f"ck_{table}_ck_{ck}"
     return {
         "columns": {
             parent_col: ("VARCHAR(36)", 1, 1),
@@ -127,15 +132,14 @@ def _classification_contract(table: str, parent_col: str,
             "classification_schema_version": ("INTEGER", 1, 0),
             "created_at": ("TEXT", 1, 0),
         },
-        "checks": {
-            f"ck_{table}_ck_{ck}_mode":
-                "sync_mode IN ('NONE', 'VOCAL_V1')",
-            f"ck_{table}_ck_{ck}_schema":
-                "classification_schema_version = 1",
-        },
-        "fks": {
-            (parent_table, parent_col, "id"): _FK_RESTRICT,
-        },
+        "checks": [
+            (f"{n}_mode", "sync_mode IN ('NONE', 'VOCAL_V1')"),
+            (f"{n}_schema", "classification_schema_version = 1"),
+        ],
+        "fks": sorted([
+            (0, parent_table, parent_col, "id") + _FK_RESTRICT,
+        ]),
+        "explicit_indexes": {},
     }
 
 
@@ -175,61 +179,111 @@ _SPSM_CONTRACT = {
         "created_at": ("TEXT", 1, 0),
         "updated_at": ("TEXT", 1, 0),
     },
-    "checks": {
-        "ck_shot_performance_segment_mappings_ck_spsm_position":
-            "position >= 0",
-        "ck_shot_performance_segment_mappings_"
-        "ck_spsm_start_den_positive":
-            "performance_start_den > 0",
-        "ck_shot_performance_segment_mappings_"
-        "ck_spsm_end_den_positive":
-            "performance_end_den > 0",
-        "ck_shot_performance_segment_mappings_"
-        "ck_spsm_anchor_den_positive":
-            "shot_anchor_den > 0",
-        "ck_shot_performance_segment_mappings_"
-        "ck_spsm_mapping_schema":
-            "mapping_schema_version = 1",
-        "ck_shot_performance_segment_mappings_"
-        "ck_spsm_mapping_hash_len":
-            "length(mapping_hash) = 64",
-    },
-    "fks": {
-        ("shots", "shot_id", "id"): _FK_RESTRICT,
-        ("performance_revisions", "performance_revision_id", "id"):
-            _FK_RESTRICT,
-    },
+    "checks": [
+        ("ck_shot_performance_segment_mappings_ck_spsm_position",
+         "position >= 0"),
+        ("ck_shot_performance_segment_mappings_"
+         "ck_spsm_start_den_positive",
+         "performance_start_den > 0"),
+        ("ck_shot_performance_segment_mappings_"
+         "ck_spsm_end_den_positive",
+         "performance_end_den > 0"),
+        ("ck_shot_performance_segment_mappings_"
+         "ck_spsm_anchor_den_positive",
+         "shot_anchor_den > 0"),
+        ("ck_shot_performance_segment_mappings_"
+         "ck_spsm_mapping_schema",
+         "mapping_schema_version = 1"),
+        ("ck_shot_performance_segment_mappings_"
+         "ck_spsm_mapping_hash_len",
+         "length(mapping_hash) = 64"),
+    ],
+    "fks": sorted([
+        (0, "shots", "shot_id", "id") + _FK_RESTRICT,
+        (0, "performance_revisions", "performance_revision_id", "id")
+        + _FK_RESTRICT,
+    ]),
+    "explicit_indexes": {"ix_spsm_pr": (0, "c", 0)},
 }
 
 
-def _named_checks(sql: str) -> dict:
-    """Parse every ``CONSTRAINT <name> CHECK (<expr>)`` pair from a
-    stored CREATE TABLE statement (IR-01/02). The expression is
-    captured with balanced nested parentheses and quote-aware scanning
-    and whitespace-normalized — a right-named ``CHECK(1)`` produces a
-    different expression and is rejected by the contract comparison."""
-    checks: dict[str, str] = {}
+def _find_word(sql: str, word: str, start: int):
+    """Case-insensitive WHOLE-WORD find (identifier boundaries)."""
+    low = sql.lower()
+    w = word.lower()
+    n = len(sql)
+    i = start
+    while True:
+        i = low.find(w, i)
+        if i == -1:
+            return None
+        before_ok = i == 0 or not (
+            sql[i - 1].isalnum() or sql[i - 1] == "_")
+        j = i + len(w)
+        after_ok = j >= n or not (sql[j].isalnum() or sql[j] == "_")
+        if before_ok and after_ok:
+            return i
+        i += 1
+
+
+def parse_table_checks(sql: str) -> list:
+    """IR-01: parse EVERY table-level CHECK occurrence into a complete
+    ordered multiset ``[(name_or_none, normalized_expression), ...]``.
+
+    CONSTRAINT/CHECK are matched case-insensitively; anonymous CHECKs
+    are captured with name ``None``; duplicate constraint names are
+    preserved; malformed/truncated CHECK syntax fails closed; nested
+    parentheses and quoted strings inside repository-generated
+    expressions are balanced correctly; a named CONSTRAINT clause of
+    an unrecognized non-CHECK kind is rejected instead of silently
+    skipped."""
+    checks: list = []
+    pending_name = None
     i = 0
     while True:
-        c = sql.find("CONSTRAINT", i)
-        if c == -1:
-            return checks
-        rest = sql[c + len("CONSTRAINT"):].lstrip()
-        name_end = 0
-        while name_end < len(rest) and rest[name_end] not in " \t\n\r(":
-            name_end += 1
-        name = rest[:name_end]
-        after = rest[name_end:].lstrip()
-        if not after[:5].upper() == "CHECK":
-            # a named non-CHECK constraint (e.g. FOREIGN KEY) — skip
-            i = c + len("CONSTRAINT") + name_end
+        c = _find_word(sql, "constraint", i)
+        k = _find_word(sql, "check", i)
+        if c is not None and (k is None or c < k):
+            j = c + len("constraint")
+            while j < len(sql) and sql[j].isspace():
+                j += 1
+            e = j
+            while e < len(sql) and (sql[e].isalnum() or sql[e] == "_"):
+                e += 1
+            if e == j:
+                raise _corrupt(
+                    "malformed CONSTRAINT clause in stored DDL")
+            name = sql[j:e]
+            p = e
+            while p < len(sql) and sql[p].isspace():
+                p += 1
+            if _find_word(sql, "check", p) == p:
+                pending_name = name
+                i = p
+            else:
+                firsts = [x for x in (
+                    _find_word(sql, "foreign", p),
+                    _find_word(sql, "primary", p),
+                    _find_word(sql, "unique", p)) if x is not None]
+                if not firsts or min(firsts) != p:
+                    raise _corrupt(
+                        "unsupported table-level CONSTRAINT syntax in "
+                        "stored DDL")
+                pending_name = None
+                i = p
             continue
-        p = after.find("(")
+        if k is None:
+            return checks
+        p = k + len("check")
+        while p < len(sql) and sql[p].isspace():
+            p += 1
+        if p >= len(sql) or sql[p] != "(":
+            raise _corrupt("malformed CHECK syntax in stored DDL")
         depth = 0
         in_string = False
         j = p
-        while j < len(after):
-            ch = after[j]
+        while j < len(sql):
+            ch = sql[j]
             if in_string:
                 if ch == "'":
                     in_string = False
@@ -242,20 +296,28 @@ def _named_checks(sql: str) -> dict:
                 if depth == 0:
                     break
             j += 1
-        if depth != 0:
-            raise _corrupt("unbalanced CHECK expression in stored DDL")
-        checks[name] = " ".join(after[p + 1:j].split())
-        i = c + len("CONSTRAINT") + name_end + (j + 1)
+        if j >= len(sql) or in_string:
+            raise _corrupt(
+                "unbalanced or unterminated CHECK expression in "
+                "stored DDL")
+        checks.append((pending_name,
+                       " ".join(sql[p + 1:j].split())))
+        pending_name = None
+        i = j + 1
 
 
 def _verify_table_schema(con: sqlite3.Connection, table: str,
                          contract: dict) -> None:
     """IR-01/IR-02: prove the EXACT stored physical schema of one
     migration-owned table — declared column names/types/nullability/PK
-    ordinals, the complete FK contract (source column, target
-    table/column, ON DELETE RESTRICT, deterministic ON UPDATE/MATCH),
-    and every named CHECK's exact semantic expression. Never accept a
-    table that merely has the right names."""
+    ordinals; the COMPLETE FK row multiset (seq, target table, source
+    column, target column, ON UPDATE, ON DELETE, MATCH — multiplicity
+    preserved, duplicate/conflicting rows cannot collapse); the
+    COMPLETE ordered CHECK multiset of stored-name + normalized
+    expression pairs (anonymous/lowercase/duplicate/right-name-wrong-
+    expression CHECKs all diverge); and the closed explicit-index
+    inventory (SQLite autoindexes implied by PK/UNIQUE constraints are
+    lawful and never rejected merely for existing)."""
     cols = {r[1]: (r[2], r[3], r[5]) for r in con.execute(
         f"PRAGMA table_info({table})")}
     if cols != contract["columns"]:
@@ -263,40 +325,37 @@ def _verify_table_schema(con: sqlite3.Connection, table: str,
             f"{table} column contract diverges: expected "
             f"{sorted(contract['columns'].items())}, got "
             f"{sorted(cols.items())}")
-    fks = {(r[2], r[3], r[4]): (r[5], r[6], r[7]) for r in con.execute(
-        f"PRAGMA foreign_key_list({table})")}
+    fks = sorted((r[1], r[2], r[3], r[4], r[5], r[6], r[7])
+                 for r in con.execute(f"PRAGMA foreign_key_list({table})"))
     if fks != contract["fks"]:
         raise _corrupt(
             f"{table} foreign-key contract diverges: expected "
-            f"{sorted(contract['fks'].items())}, got "
-            f"{sorted(fks.items())}")
+            f"{contract['fks']}, got {fks}")
     row = con.execute(
         "SELECT sql FROM sqlite_master WHERE type='table' "
         f"AND name = '{table}'").fetchone()
     if row is None:
         raise _corrupt(f"{table} missing from sqlite_master DDL")
-    checks = _named_checks(row[0])
+    checks = parse_table_checks(row[0])
     if checks != contract["checks"]:
         raise _corrupt(
             f"{table} CHECK-contract diverges: expected "
-            f"{sorted(contract['checks'].items())}, got "
-            f"{sorted(checks.items())}")
+            f"{contract['checks']}, got {checks}")
+    explicit = {r[1]: (r[2], r[3], r[4]) for r in con.execute(
+        f"PRAGMA index_list({table})") if r[3] == "c"}
+    if explicit != contract["explicit_indexes"]:
+        raise _corrupt(
+            f"{table} explicit-index contract diverges: expected "
+            f"{contract['explicit_indexes']}, got {explicit}")
 
 
 def _verify_spsm_schema(con: sqlite3.Connection) -> None:
     """IR-01: the full working-mapping table contract — exact columns,
-    exact FKs, exact named CHECK expressions, and the explicit
-    ix_spsm_pr index (non-unique, non-partial, CREATE-INDEX origin,
-    exactly one indexed column)."""
+    exact FK multiset, exact ordered CHECK multiset, and the closed
+    explicit-index inventory: exactly one migration-owned index,
+    ix_spsm_pr, a non-unique, non-partial CREATE INDEX over exactly
+    performance_revision_id."""
     _verify_table_schema(con, _SHOT_MAPPING_TABLE, _SPSM_CONTRACT)
-    # PRAGMA index_list rows: (seq, name, unique, origin, partial)
-    indexes = {r[1]: (r[2], r[3], r[4]) for r in con.execute(
-        f"PRAGMA index_list({_SHOT_MAPPING_TABLE})")}
-    if indexes.get("ix_spsm_pr") != (0, "c", 0):
-        raise _corrupt(
-            f"{_SHOT_MAPPING_TABLE} index contract diverges: ix_spsm_pr "
-            "must be a non-unique, non-partial CREATE INDEX; got "
-            f"{sorted(indexes.items())}")
     ix_cols = [r[2] for r in con.execute("PRAGMA index_info(ix_spsm_pr)")]
     if ix_cols != ["performance_revision_id"]:
         raise _corrupt(
@@ -708,15 +767,22 @@ def _verify_retarget_lineage(con) -> None:
 
 
 def _verify_shot_performance_mappings(con) -> None:
-    """frozen R4 §13.3: working mapping rows are verified for canonical
-    storage/project/reference integrity (current VP selection is NOT
-    historical truth during backup validation — a lawfully STALE
-    working mapping remains a lawful stored working state)."""
-    import math
+    """frozen R4 §13.3 + IR-02: the STORED structural laws of every
+    working mapping row run through the ONE transport-neutral shared
+    law (``verify_persisted_mapping_structural`` — the same law the
+    live readiness/list path runs); recovery additionally and
+    independently proves the referenced PerformanceRevision and Shot
+    exist and agree on project. Current VP selection, paired vocal
+    mapping existence/VP identity, and current Shot duration/picture
+    are working-readiness concerns and deliberately NOT certified
+    here."""
+    from soloring.performance.m17c_shot_mapping import (
+        verify_persisted_mapping_structural,
+    )
     for row in con.execute(
             "SELECT * FROM shot_performance_segment_mappings"):
         pr = con.execute(
-            "SELECT project_id FROM performance_revisions WHERE id = ?",
+            "SELECT * FROM performance_revisions WHERE id = ?",
             (row["performance_revision_id"],)).fetchone()
         if pr is None:
             raise _corrupt(
@@ -734,74 +800,45 @@ def _verify_shot_performance_mappings(con) -> None:
             raise _corrupt(
                 f"performance mapping {row['shot_id']!r}@"
                 f"{row['position']} crosses projects")
-        if row["mapping_schema_version"] != 1:
-            raise _corrupt(
-                f"performance mapping {row['shot_id']!r}@"
-                f"{row['position']} schema version is not 1")
-        if row["performance_start_den"] <= 0 or \
-                row["performance_end_den"] <= 0 or \
-                row["shot_anchor_den"] <= 0:
-            raise _corrupt(
-                f"performance mapping {row['shot_id']!r}@"
-                f"{row['position']} stores a nonpositive rational "
-                "denominator")
-        if math.gcd(abs(row["performance_start_num"]),
-                    row["performance_start_den"]) != 1 or \
-                math.gcd(abs(row["performance_end_num"]),
-                         row["performance_end_den"]) != 1 or \
-                math.gcd(abs(row["shot_anchor_num"]),
-                         row["shot_anchor_den"]) != 1:
-            raise _corrupt(
-                f"performance mapping {row['shot_id']!r}@"
-                f"{row['position']} stores a noncanonical rational")
-        doc = {
-            "mapping_schema_version": row["mapping_schema_version"],
-            "performance_revision_id": row["performance_revision_id"],
-            "performance_start_ms": {
-                "num": row["performance_start_num"],
-                "den": row["performance_start_den"]},
-            "performance_end_ms": {
-                "num": row["performance_end_num"],
-                "den": row["performance_end_den"]},
-            "shot_anchor_ms": {
-                "num": row["shot_anchor_num"],
-                "den": row["shot_anchor_den"]},
-            "vocal_mapping_position":
-                row["vocal_mapping_position"],
-        }
-        if row["mapping_json"] != _canonical(doc) or \
-                row["mapping_hash"] != _hash(doc):
-            raise _corrupt(
-                f"performance mapping {row['shot_id']!r}@"
-                f"{row['position']} canonical bytes/hash diverge")
-        # B-F3/SR2-03 pairing laws. Applicability comes from the
-        # immutable discriminator, never from the nullable payload
-        # shape: a shape that the supported API cannot create (VOCAL_V1
-        # without a position; a position on a non-VOCAL_V1 revision)
-        # is corruption. A MISSING paired vocal mapping is an
-        # API-creatable lawful BLOCKED working state (supported DELETE;
-        # readiness reports BLOCKED_BINDING_INTEGRITY). SR2-03: so is a
-        # paired vocal mapping whose VP was REPOINTED through the
-        # supported M17A PUT to the now-current selection — mutable
-        # working drift against the immutable revision binding, never
-        # rewritten by diagnosis and never refused here. Other
-        # structural corruption of the vocal row stays the M17A
-        # verifier's concern.
         cls = con.execute(
             "SELECT sync_mode FROM "
             "performance_revision_sync_classifications "
             "WHERE performance_revision_id = ?",
             (row["performance_revision_id"],)).fetchone()
-        vocal_v1 = cls is not None and cls["sync_mode"] == "VOCAL_V1"
-        if row["vocal_mapping_position"] is not None:
-            if not vocal_v1:
-                raise _corrupt(
-                    f"performance mapping {row['shot_id']!r}@"
-                    f"{row['position']} carries vocal_mapping_position "
-                    "but the PerformanceRevision is not VOCAL_V1")
-        else:
-            if vocal_v1:
-                raise _corrupt(
-                    f"performance mapping {row['shot_id']!r}@"
-                    f"{row['position']} maps a VOCAL_V1 "
-                    "PerformanceRevision without vocal_mapping_position")
+        # IR-02: the shared persisted law — structural rows through the
+        # SAME verifier the live path uses (transport-neutral). The
+        # historical corruption contract of the shared law is the
+        # recovery-corruption family by construction.
+        try:
+            verify_persisted_mapping_structural(
+                shot_id=row["shot_id"],
+                position=row["position"],
+                performance_revision_id=row["performance_revision_id"],
+                mapping_schema_version=row["mapping_schema_version"],
+                performance_start_num=row["performance_start_num"],
+                performance_start_den=row["performance_start_den"],
+                performance_end_num=row["performance_end_num"],
+                performance_end_den=row["performance_end_den"],
+                shot_anchor_num=row["shot_anchor_num"],
+                shot_anchor_den=row["shot_anchor_den"],
+                vocal_mapping_position=row["vocal_mapping_position"],
+                mapping_json=row["mapping_json"],
+                mapping_hash=row["mapping_hash"],
+                domain_start_num=pr["temporal_start_num"],
+                domain_start_den=pr["temporal_start_den"],
+                domain_end_num=pr["temporal_end_num"],
+                domain_end_den=pr["temporal_end_den"],
+                expected_mode=(cls["sync_mode"] if cls is not None
+                               else "NONE"))
+        except SoloRingError as exc:
+            raise _corrupt(f"IR-02 shared persisted mapping law: "
+                           f"{exc.message}") from exc
+        # B-F3/SR2-03 pairing preservation: a MISSING paired vocal
+        # mapping is an API-creatable lawful BLOCKED working state
+        # (supported DELETE; readiness reports BLOCKED_BINDING_INTEGRITY);
+        # so is a paired vocal mapping whose VP was REPOINTED through
+        # the supported M17A PUT to the now-current selection — mutable
+        # working drift against the immutable revision binding, never
+        # rewritten by diagnosis and never refused here. Other
+        # structural corruption of the vocal row stays the M17A
+        # verifier's concern.

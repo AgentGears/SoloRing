@@ -685,28 +685,61 @@ async def _read_project_law(session: AsyncSession, parent, vp) -> None:
             f"project {parent.project_id!r}")
 
 
+async def verify_adopted_pair_closure(
+        session: AsyncSession, settings, revision: PerformanceRevision,
+) -> dict:
+    """IR-04: the complete NON-MEDIA adopted-pair closure — historical
+    candidate integrity + revision copied closure/adoption metadata
+    (``verify_revision_authority_historical``), candidate↔revision
+    classification equality with each side's local cardinality, and
+    for VOCAL_V1 the FULL read-grade PF-03 pair closure by REUSE of
+    ``verify_revision_vocal_binding_read_grade`` (canonical bytes both
+    sides, binding equality, exact historical VP identity, cheap VP
+    structural authority, revision-owned domain, payload integrity,
+    exact-VP alignments, articulation). Never rehashes retained VP
+    audio — authoritative GET cost boundary preserved."""
+    candidate = await revision_svc.verify_revision_authority_historical(
+        session, settings, revision)
+    classification = await verify_revision_sync_classification(
+        session, revision)
+    if classification.sync_mode == "VOCAL_V1":
+        binding = await session.get(
+            PerformanceRevisionVocalBinding, revision.id)
+        await verify_revision_vocal_binding_read_grade(
+            session, settings, revision, binding,
+            classification=classification)
+    return {"candidate": candidate, "classification": classification}
+
+
 async def read_candidate_vocal_binding(
-    session: AsyncSession, settings, *, candidate_id: str,
+        session: AsyncSession, settings, *, candidate_id: str,
 ) -> PerformanceCandidateVocalBinding:
-    """SR26-03: fail-closed authoritative candidate binding read."""
+    """SR26-03: fail-closed authoritative candidate binding read.
+
+    IR-03: historical parent authority is proven BEFORE the PF-03 mode
+    is interpreted — a corrupted adopted history refuses as 500
+    corruption, never an honest-looking NONE 404. IR-04: when the
+    candidate is ADOPTED, the complete non-media adopted-pair closure
+    is proven BEFORE the candidate binding is returned."""
     candidate = await session.get(PerformanceCandidate, candidate_id)
     if candidate is None:
         raise not_found(
             ErrorCode.PERFORMANCE_CANDIDATE_NOT_FOUND,
             f"performance candidate {candidate_id!r} not found")
+    # IR-03: mode-independent candidate historical authority FIRST
+    await revision_svc.verify_candidate_authority_historical(
+        session, settings, candidate)
     classification = await verify_candidate_sync_classification(
         session, candidate)
-    # C2-01: an ADOPTED candidate's read proves the FULL pair closure —
-    # candidate-local law, revision-local law, and equality — via the
-    # one shared revision verifier, BEFORE either mode is interpreted
-    # (both the honest-NONE 404 path and the binding-return path).
     adopted_revision = (await session.execute(
         select(PerformanceRevision).where(
             PerformanceRevision.adopted_candidate_id == candidate.id)
     )).scalar_one_or_none()
     if adopted_revision is not None:
-        await verify_revision_sync_classification(
-            session, adopted_revision)
+        # IR-04: the adopted pair must close completely (non-media)
+        # before this read represents authority
+        await verify_adopted_pair_closure(
+            session, settings, adopted_revision)
     if classification.sync_mode == "NONE":
         raise not_found(
             PERFORMANCE_VOCAL_BINDING_NOT_FOUND,
@@ -729,7 +762,7 @@ async def read_candidate_vocal_binding(
         raise corrupt(
             "persisted binding interval lies outside the candidate domain")
     # IR-03: persisted candidate authority — historical seam
-    integrity = await revision_svc.verify_candidate_integrity_historical(
+    integrity = await revision_svc.verify_candidate_authority_historical(
         session, settings, candidate)
     await _verify_alignment_exact_vp(
         session, integrity["payload_document"], vp.id)
@@ -772,7 +805,7 @@ async def verify_revision_vocal_binding_read_grade(
     # authoritative revision read too, with admission-shaped grammar
     # failures translated to the historical corruption contract
     try:
-        revision_svc.revalidate_winner(revision, candidate)
+        revision_svc.revalidate_winner_historical(revision, candidate)
     except SoloRingError as exc:
         if exc.code == ErrorCode.INTERNAL_INVARIANT_VIOLATION \
                 and exc.status_code == 500:
@@ -824,14 +857,22 @@ async def verify_revision_vocal_binding_read_grade(
 async def read_revision_vocal_binding(
         session: AsyncSession, settings, *, revision_id: str,
 ) -> PerformanceRevisionVocalBinding:
-    """SR26-03: fail-closed authoritative revision binding read. The
-    semantic laws live in the shared read-grade verifier above — the
-    GET and PF-02 reads consume the SAME verifier (SR2-05)."""
+    """SR26-03: fail-closed authoritative revision binding read.
+
+    IR-03: mode-independent revision historical authority (candidate
+    integrity + copied closure + adoption metadata) is proven BEFORE
+    the PF-03 mode is interpreted — a corrupted adopted history
+    refuses as 500 corruption, never an honest-looking NONE 404. The
+    semantic binding laws live in the shared read-grade verifier
+    (SR2-05)."""
     revision = await session.get(PerformanceRevision, revision_id)
     if revision is None:
         raise not_found(
             ErrorCode.PERFORMANCE_REVISION_NOT_FOUND,
             f"performance revision {revision_id!r} not found")
+    # IR-03: historical parent authority BEFORE the lawful NONE 404
+    await revision_svc.verify_revision_authority_historical(
+        session, settings, revision)
     classification = await verify_revision_sync_classification(
         session, revision)
     if classification.sync_mode == "NONE":

@@ -265,11 +265,20 @@ async def test_c2_03_revision_domain_tamper_refuses_revision_read_only(
 
     _corrupt(await client.get(
         f"/performance-revisions/{revision['id']}/vocal-binding"))
-    # the candidate side is untouched and remains a lawful read — the
-    # refusal is specifically the revision-owned domain law
-    ok = await client.get(
+    # IR-03/IR-04 supersession (recorded): the revision temporal
+    # domain columns are COPIED-CLOSURE fields, so under the
+    # mode-independent revision authority seam the refusal now fires
+    # on the copied-closure branch (which subsumes copied-field
+    # tampering); the revision-OWNED domain law itself remains
+    # independently proven by the SR2-05 origin-domain case (a
+    # coherent binding tamper that keeps the closure intact). The
+    # candidate GET now ALSO refuses — an adopted candidate must
+    # prove the complete adopted-pair closure before representing
+    # authority (IR-04 asymmetric matrix, revision-side case).
+    got = await client.get(
         f"/performance-candidates/{candidate['id']}/vocal-binding")
-    assert ok.status_code == 200, ok.text
+    assert got.status_code == 500, got.text
+    assert got.json()["error_code"] == "INTERNAL_INVARIANT_VIOLATION"
 
     # recovery refuses the same staged state
     import sqlite3

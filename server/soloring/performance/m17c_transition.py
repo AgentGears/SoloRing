@@ -39,10 +39,12 @@ async def adopt_performance_candidate(
     if existing is not None:
         # Preserve M17B winner-first historical semantics while adding the
         # M17C winner companion revalidation. Missing/divergent companion is
-        # corruption and is never repaired by a replay.
-        await revision_svc.verify_candidate_integrity(
+        # corruption and is never repaired by a replay. IR-03: the persisted
+        # candidate is historical authority — corruption contract, never a
+        # fresh-request 4xx.
+        await revision_svc.verify_candidate_authority_historical(
             session, settings, candidate)
-        revision_svc.revalidate_winner(existing, candidate)
+        revision_svc.revalidate_winner_historical(existing, candidate)
         await binding_svc.converge_revision_binding(
             session, settings, candidate, existing, candidate_binding,
             allow_create=False)
@@ -76,6 +78,14 @@ async def create_retarget_candidate(
     # disappeared refuses here instead of downgrading to generic M17B
     # retargeting. The XOR companion check is retained beneath it.
     await binding_svc.verify_revision_sync_classification(session, source)
+    # IR-03: mode-independent SOURCE authority BEFORE any new evidence
+    # is created — full historical candidate integrity, the source
+    # revision's copied closure, and its adoption metadata. This proof
+    # runs for NONE sources exactly as for VOCAL_V1; the underlying
+    # retarget service must never copy fields from an unverified
+    # source revision.
+    await revision_svc.verify_revision_authority_historical(
+        session, settings, source)
     candidate_binding = await session.get(
         PerformanceCandidateVocalBinding, source.adopted_candidate_id)
     source_binding = await session.get(

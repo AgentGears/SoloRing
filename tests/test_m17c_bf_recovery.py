@@ -246,7 +246,8 @@ async def test_bf07_refuses_noncanonical_rational(client, tmp_path):
         "performance_start_den = 5 WHERE shot_id = ? AND position = 0",
         (world["shot"],))
     exc = await _restore_refuses(root, tmp_path, "bf-rat")
-    assert "stores a noncanonical rational" in str(exc)
+    # IR-02: recovery runs the shared persisted mapping law
+    assert "performance_start rational is not canonical" in str(exc)
 
 
 @pytest.mark.asyncio
@@ -321,8 +322,8 @@ async def test_bf07_refuses_generic_position_shape(client, tmp_path):
         "WHERE shot_id = ? AND position = 0",
         (canonical_json_str(doc), canonical_hash(doc), world["shot"]))
     exc = await _restore_refuses(root, tmp_path, "bf-shape2")
-    assert "carries vocal_mapping_position but the PerformanceRevision " \
-        "is not VOCAL_V1" in str(exc)
+    # IR-02: recovery runs the shared persisted mapping law
+    assert "carries vocal_mapping_position on a non-VOCAL_V1" in str(exc)
 
 
 # NOTE (SR2-03 supersession): this file previously carried
