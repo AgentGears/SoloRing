@@ -70,6 +70,8 @@ ALLOWLIST = (
     # M17C-B B-F cycle batteries
     "tests/test_m17c_bf_regressions.py",
     "tests/test_m17c_bf_recovery.py",
+    # M17C-B SR2 corrective cycle battery
+    "tests/test_m17c_sr2_regressions.py",
     "server/soloring/recovery/backup.py",
     "server/soloring/recovery/successor_semantics.py",
     "server/soloring/performance/revision.py",
