@@ -226,9 +226,9 @@ async def test_hyg_base_02_migration_head_unchanged(tmp_path, monkeypatch):
                 / "alembic" / "versions")
     files = sorted(p.name for p in versions.glob("0*.py"))
     # M17C-A succession (PR #26): the single admitted successor beyond
-    # the frozen 0019 is 0020_m17c_perf_capture_r2.
-    assert files[-1] == "0020_m17c_perf_capture_r2.py"
-    assert not any(f > "0020_m17c_perf_capture_r2.py"
+    # the frozen 0019 is 0021_m17c_shot_performance_mappings.
+    assert files[-1] == "0021_m17c_shot_performance_mappings.py"
+    assert not any(f > "0021_m17c_shot_performance_mappings.py"
                    for f in files)
 
 

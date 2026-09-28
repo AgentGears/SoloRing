@@ -32,10 +32,13 @@ ALLOWLIST = (
     # reconciliation): reviewed evidence documents, no product code
     "SoloRing-PR26-First-Pass-Review-R1.md",
     "SoloRing-PR26-Reconciliation-and-Correction-Record.md",
-    # M17C-A (PR #26, second-review reconciliation): reviewed
-    # successor surface + successor-maintained files swept for
-    # the 0020 head-advance (each with in-file precedent)
+    # M17C-A (PR #26): the frozen binding/classification migration,
+    # restored to its exact c502b81 bytes by the B-F1 migration split
+    # (unchanged frozen history, still a changed path against this
+    # validator's pre-M17C base)
     "server/alembic/versions/0020_m17c_perf_capture_r2.py",
+    # M17C-B (PR #26, B-F1): the successor working-mapping migration
+    "server/alembic/versions/0021_m17c_shot_performance_mappings.py",
     # DR26-04: the superseded draft-0020 migration file (deleted by the
     # r2 identity rename; successor-maintained rename)
     "server/alembic/versions/0020_m17c_dialogue_bound_performance.py",
@@ -529,15 +532,17 @@ def main() -> int:
     admitted_0018 = "0018_m17a_dialogue_vocal_foundation.py"
     # M17B (frozen R7): the performance-revisions migration
     admitted_0019 = "0019_m17b_performance_revisions.py"
-    # M17C-A (PR #26): the dialogue-bound binding + classification
-    # migration (second-review reconciled)
+    # M17C-A (PR #26): frozen at c502b81; the B-F1 split restored its
+    # exact bytes
     admitted_0020 = "0020_m17c_perf_capture_r2.py"
+    # M17C-B (PR #26, B-F1): the successor working-mapping migration
+    admitted_0021 = "0021_m17c_shot_performance_mappings.py"
     superseded_0020_draft = "0020_m17c_dialogue_bound_performance.py"
     mig_beyond = [p.name for p in versions.glob("*.py")
                   if p.stem >= "0015" and p.name not in (
                       admitted_0015, admitted_0016, admitted_0017,
                       admitted_0018, admitted_0019, admitted_0020,
-                      superseded_0020_draft)]
+                      admitted_0021, superseded_0020_draft)]
     if mig_beyond:
         errors.append(f"migration at/beyond 0015 beyond the frozen M14/M15/"
                       f"M16-A/M17A migrations exists: {mig_beyond}")
@@ -580,13 +585,17 @@ def main() -> int:
         "performance_retarget_reviews",
     }
 
-    admitted_m17c_tables = {
+    # M17C-A (frozen at c502b81; B-F1 restored its exact bytes): the
+    # four binding/classification companion tables
+    admitted_m17c_a_tables = {
         "performance_candidate_vocal_bindings",
         "performance_revision_vocal_bindings",
         "performance_candidate_sync_classifications",
         "performance_revision_sync_classifications",
-        # M17C-B (frozen R4 §8.1): the mutable Shot working-mapping
-        # table
+    }
+    # M17C-B (frozen R4 §8.1, successor migration 0021): the mutable
+    # Shot working-mapping table
+    admitted_m17c_b_tables = {
         "shot_performance_segment_mappings",
     }
 
@@ -626,7 +635,10 @@ def main() -> int:
                     and name in admitted_m17b_tables):
                 continue
             if (f.endswith("0020_m17c_perf_capture_r2.py")
-                    and name in admitted_m17c_tables):
+                    and name in admitted_m17c_a_tables):
+                continue
+            if (f.endswith("0021_m17c_shot_performance_mappings.py")
+                    and name in admitted_m17c_b_tables):
                 continue
             errors.append(f"{f}: new table {name} in migration source")
         if f.endswith("0017_m16_intra_shot_consequences.py") and names != admitted_m16_tables:

@@ -395,11 +395,11 @@ def test_dr26_04_superseded_draft_identity_rejected(tmp_path):
             or "can't locate revision" in combined), combined[-800:]
 
     from soloring.recovery.backup import EXPECTED_ALEMBIC_HEAD
-    assert EXPECTED_ALEMBIC_HEAD == "0020_m17c_perf_capture_r2"
+    assert EXPECTED_ALEMBIC_HEAD == "0021_m17c_shot_performance_mappings"
     staged_head = "0020_m17c_performance_capture"
     assert staged_head != EXPECTED_ALEMBIC_HEAD
     assert staged_head not in {
-        "0019_m17b_performance_revisions", EXPECTED_ALEMBIC_HEAD}
+        "0019_m17b_performance_revisions", "0020_m17c_perf_capture_r2", EXPECTED_ALEMBIC_HEAD}
 
 
 def test_dr26_04_fresh_0019_to_r2_succeeds(tmp_path):
@@ -416,8 +416,15 @@ def test_dr26_04_fresh_0019_to_r2_succeeds(tmp_path):
         "SOLORING_DATA_DIR": db.parent.as_posix(),
         "PYTHONDONTWRITEBYTECODE": "1",
     }
+    # DR26-04's reachability claim is about the FROZEN r2 identity
+    # itself: a fresh database must be able to stop exactly at
+    # 0020_m17c_perf_capture_r2 (B-F1 froze it there; successor 0021 is
+    # a separate step). At 0020 the PF-02 working-mapping table is
+    # lawfully absent — the premise the B-F7 staged-upgrade battery
+    # upgrades from.
     up = subprocess.run(
-        [sys.executable, "-m", "alembic", "upgrade", "head"],
+        [sys.executable, "-m", "alembic", "upgrade",
+         "0020_m17c_perf_capture_r2"],
         cwd=str(repo / "server"), capture_output=True, text=True, env=env)
     assert up.returncode == 0, up.stderr[-800:]
     con = sqlite3.connect(db)
@@ -433,3 +440,4 @@ def test_dr26_04_fresh_0019_to_r2_succeeds(tmp_path):
         "performance_candidate_sync_classifications",
         "performance_revision_sync_classifications",
     } <= tables
+    assert "shot_performance_segment_mappings" not in tables

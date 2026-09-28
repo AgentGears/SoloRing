@@ -137,10 +137,13 @@ def check_base03() -> list[str]:
         # M17B (frozen R7): the performance-revisions migration
         "0019_m17b_performance_revisions.py",
         # M17C-A (PR #26): the dialogue-bound binding-companion
-        # migration (the CI step for this validator was retired as
+        # migration, frozen at c502b81 (B-F1 restored its exact bytes);
+        # M17C-B (PR #26, B-F1): the successor working-mapping migration
+        # (the CI step for this validator was retired as
         # successor-milestone ceremony; this admitted set keeps the
         # proof-map-owned M14-BASE:03 test meaningful).
         "0020_m17c_perf_capture_r2.py",
+        "0021_m17c_shot_performance_mappings.py",
         # DR26-04 rename: the superseded draft-0020 file (deleted by r2)
         "0020_m17c_dialogue_bound_performance.py",
     }
@@ -149,7 +152,7 @@ def check_base03() -> list[str]:
             "current migration head is not an admitted frozen head: "
             f"{migrations[-1:]}")
     beyond = [m for m in migrations
-              if m > "0020_m17c_perf_capture_r2.py"]
+              if m > "0021_m17c_shot_performance_mappings.py"]
     if beyond:
         errors.append(f"migrations beyond exact M16-A 0017 exist: {beyond}")
     m16_named = [m for m in migrations if m.startswith("0017_")]

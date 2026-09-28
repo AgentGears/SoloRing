@@ -169,7 +169,7 @@ async def adopt(client, candidate_id: str,
 
 
 async def stamp_alembic(client, head: str =
-                        "0020_m17c_perf_capture_r2") -> None:  # M17C-A advances the head
+                        "0021_m17c_shot_performance_mappings") -> None:  # M17C-A advances the head
     engine = client._transport.app.state.engine
     async with engine.begin() as conn:
         await conn.execute(text(

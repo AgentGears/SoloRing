@@ -45,9 +45,12 @@ ALLOWLIST = (
     # reconciliation): reviewed evidence documents, no product code
     "SoloRing-PR26-First-Pass-Review-R1.md",
     "SoloRing-PR26-Reconciliation-and-Correction-Record.md",
-    # M17C-A (PR #26, second-review reconciliation): reviewed successor surface + successor-maintained
-    # files swept for the 0020 head-advance
+    # M17C-A (PR #26): frozen at c502b81 (B-F1 restored its exact
+    # bytes); M17C-B (PR #26, B-F1): the successor working-mapping
+    # migration — reviewed successor surface + successor-maintained
+    # files swept for the head-advance
     "server/alembic/versions/0020_m17c_perf_capture_r2.py",
+    "server/alembic/versions/0021_m17c_shot_performance_mappings.py",
     # DR26-04 rename: the superseded draft-0020 file (deleted by r2)
     "server/alembic/versions/0020_m17c_dialogue_bound_performance.py",
     "server/soloring/api/m17c_performance.py",
@@ -576,9 +579,12 @@ def main(repo: Path = REPO) -> int:
                     "server/alembic/versions/0018_m17a_dialogue_vocal_foundation.py",
                     # M17B (frozen R7): the performance migration
                     "server/alembic/versions/0019_m17b_performance_revisions.py",
-                    # M17C-A (PR #26, second-review reconciled);
-                    # DR26-04 rename: r2 head + the superseded draft file
+                    # M17C-A (PR #26): frozen at c502b81 (B-F1 restored
+                    # its exact bytes); M17C-B (PR #26, B-F1): the
+                    # successor working-mapping migration;
+                    # DR26-04 rename: the superseded draft file
                     "server/alembic/versions/0020_m17c_perf_capture_r2.py",
+                    "server/alembic/versions/0021_m17c_shot_performance_mappings.py",
                     "server/alembic/versions/0020_m17c_dialogue_bound_"
                     "performance.py",
                 )):
@@ -596,13 +602,15 @@ def main(repo: Path = REPO) -> int:
     admitted_0018 = "0018_m17a_dialogue_vocal_foundation.py"
     # M17B (frozen R7): the performance-revisions migration
     admitted_0019 = "0019_m17b_performance_revisions.py"
-    # M17C-A (PR #26, second-review reconciled); DR26-04 r2 head
+    # M17C-A (PR #26): frozen at c502b81; B-F1 restored its exact bytes
     admitted_0020 = "0020_m17c_perf_capture_r2.py"
+    # M17C-B (PR #26, B-F1): the successor working-mapping migration
+    admitted_0021 = "0021_m17c_shot_performance_mappings.py"
     mig_beyond = [
         p.name for p in versions.glob("*.py")
         if p.stem >= "0015" and p.name not in (
             admitted_0015, admitted_0016, admitted_0017,
-            admitted_0018, admitted_0019, admitted_0020)
+            admitted_0018, admitted_0019, admitted_0020, admitted_0021)
     ]
     if mig_beyond:
         errors.append(

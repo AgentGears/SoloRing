@@ -24,7 +24,6 @@ _M17C_TABLES = (
     "performance_revision_vocal_bindings",
     "performance_candidate_sync_classifications",
     "performance_revision_sync_classifications",
-    "shot_performance_segment_mappings",
 )
 
 
@@ -112,48 +111,6 @@ def upgrade() -> None:
     _classification_table(
         "performance_revision_sync_classifications",
         "performance_revision_id", "performance_revisions", "prsc")
-    # M17C-B (frozen R4 §8.1): mutable Shot-local Performance working
-    # intent, following the ShotVocalSegmentMapping precedent. The
-    # CHECK constraints mirror the ORM exactly.
-    op.create_table(
-        "shot_performance_segment_mappings",
-        sa.Column("shot_id", sa.String(36), primary_key=True),
-        sa.Column("position", sa.Integer(), primary_key=True),
-        sa.Column("performance_revision_id", sa.String(36),
-                  nullable=False),
-        sa.Column("performance_start_num", sa.Integer(), nullable=False),
-        sa.Column("performance_start_den", sa.Integer(), nullable=False),
-        sa.Column("performance_end_num", sa.Integer(), nullable=False),
-        sa.Column("performance_end_den", sa.Integer(), nullable=False),
-        sa.Column("shot_anchor_num", sa.Integer(), nullable=False),
-        sa.Column("shot_anchor_den", sa.Integer(), nullable=False),
-        sa.Column("vocal_mapping_position", sa.Integer(), nullable=True),
-        sa.Column("mapping_schema_version", sa.Integer(),
-                  nullable=False),
-        sa.Column("mapping_json", sa.Text(), nullable=False),
-        sa.Column("mapping_hash", sa.Text(), nullable=False),
-        sa.Column("created_at", sa.Text(), nullable=False),
-        sa.Column("updated_at", sa.Text(), nullable=False),
-        sa.CheckConstraint("position >= 0", name="ck_spsm_position"),
-        sa.CheckConstraint("performance_start_den > 0",
-                           name="ck_spsm_start_den_positive"),
-        sa.CheckConstraint("performance_end_den > 0",
-                           name="ck_spsm_end_den_positive"),
-        sa.CheckConstraint("shot_anchor_den > 0",
-                           name="ck_spsm_anchor_den_positive"),
-        sa.CheckConstraint("mapping_schema_version = 1",
-                           name="ck_spsm_mapping_schema"),
-        sa.CheckConstraint("length(mapping_hash) = 64",
-                           name="ck_spsm_mapping_hash_len"),
-        sa.ForeignKeyConstraint(
-            ["shot_id"], ["shots.id"],
-            name="fk_spsm_shot", ondelete="RESTRICT"),
-        sa.ForeignKeyConstraint(
-            ["performance_revision_id"], ["performance_revisions.id"],
-            name="fk_spsm_pr", ondelete="RESTRICT"),
-    )
-    op.create_index("ix_spsm_pr", "shot_performance_segment_mappings",
-                    ["performance_revision_id"])
 
     # Backfill every existing candidate/revision. Bootstrap caveat
     # (recorded in the review register): a database whose bindings were
@@ -191,9 +148,6 @@ def downgrade() -> None:
                 f"0020 downgrade refused: {table} contains {n} row(s); "
                 "M17C dialogue-bound Performance authority is not deleted "
                 "by schema downgrade")
-    op.drop_index("ix_spsm_pr",
-                  table_name="shot_performance_segment_mappings")
-    op.drop_table("shot_performance_segment_mappings")
     op.drop_table("performance_revision_sync_classifications")
     op.drop_table("performance_candidate_sync_classifications")
     op.drop_table("performance_revision_vocal_bindings")

@@ -252,8 +252,8 @@ def test_migration_head_is_exactly_0013(tmp_path, monkeypatch):
     ver = con.execute("SELECT version_num FROM alembic_version").fetchone()[0]
     files = sorted(p.name for p in VERSIONS.glob("0*.py"))
     con.close()
-    assert ver == "0020_m17c_perf_capture_r2"  # M17C-A advances the head
-    assert files[-1] == "0020_m17c_perf_capture_r2.py"
+    assert ver == "0021_m17c_shot_performance_mappings"  # M17C-A advances the head
+    assert files[-1] == "0021_m17c_shot_performance_mappings.py"
 
 
 def test_0012_predecessor_database_upgrades_cleanly_to_0013(tmp_path, monkeypatch):

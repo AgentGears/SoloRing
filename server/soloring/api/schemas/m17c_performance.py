@@ -81,7 +81,10 @@ class PerformanceSegmentPut(_Closed):
     performance_start_ms: RationalIn
     performance_end_ms: RationalIn
     shot_anchor_ms: RationalIn
-    vocal_mapping_position: StrictInt | None = Field(default=None, ge=0)
+    # B-F cleanup: SQLite-i64 upper bound alongside the path-position
+    # bound enforced by the service
+    vocal_mapping_position: StrictInt | None = Field(
+        default=None, ge=0, le=SQLITE_INT_MAX)
 
 
 class PerformanceSegmentRead(BaseModel):
@@ -97,4 +100,3 @@ class PerformanceSegmentRead(BaseModel):
     readiness_diagnostics: dict | None = None
     created_at: str
     updated_at: str
-    created_at: str

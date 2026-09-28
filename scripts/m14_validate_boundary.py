@@ -57,13 +57,17 @@ ALLOWED_PATTERNS = [
     r"^scripts/m17b_validate_proof_map\.py$",
     r"^server/soloring/api/m17b_performance\.py$",
     r"^server/soloring/api/schemas/m17b_performance\.py$",
-    # M17C-A (PR #26, second-review reconciliation): reviewed successor
-    # surface + successor-maintained files swept for the 0020 head
+    # M17C-A (PR #26): frozen at c502b81 (B-F1 restored its exact
+    # bytes); M17C-B (PR #26, B-F1): the successor working-mapping
+    # migration — reviewed successor surface + successor-maintained
+    # files swept for the head-advance
     r"^server/soloring/performance/m17c_[a-z_]+\.py$",
     r"^server/soloring/api/m17c_performance\.py$",
     r"^server/soloring/api/schemas/m17c_performance\.py$",
     r"^server/soloring/recovery/m17c_verifier\.py$",
     r"^server/alembic/versions/0020_m17c_perf_capture_r2"
+    r"\.py$",
+    r"^server/alembic/versions/0021_m17c_shot_performance_mappings"
     r"\.py$",
     r"^tests/m17c_seed\.py$",
     r"^tests/test_m17c_[a-z0-9_]+\.py$",

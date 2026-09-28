@@ -103,7 +103,7 @@ REVIEWED_SUCCESSOR_PATHS = frozenset({
     "server/soloring/api/m17c_performance.py",
     "server/soloring/api/schemas/m17c_performance.py",
     "server/soloring/recovery/m17c_verifier.py",
-    "server/alembic/versions/0020_m17c_perf_capture_r2.py",
+    "server/alembic/versions/0021_m17c_shot_performance_mappings.py",
     # M17C-B (PR #26): the Shot performance working-mapping surface
     "server/soloring/performance/m17c_shot_mapping.py",
 })

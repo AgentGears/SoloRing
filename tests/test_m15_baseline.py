@@ -145,13 +145,15 @@ def test_migration_head_is_0015_before_m15() -> None:
     assert pre[-1] == f"{MIGRATION_PREDECESSOR}.py"
     head = _migration_names("HEAD")
     assert head, "current migration listing empty"
-    # M17C-A succession (PR #26): the single admitted successor beyond
-    # the frozen 0019 is 0020_m17c_perf_capture_r2.
-    assert head[-1] == "0020_m17c_perf_capture_r2.py", (
-        f"current migration head is not the admitted 0020: {head[-1:]}")
+    # M17C succession (PR #26): beyond the frozen 0019 the admitted
+    # successors are 0020_m17c_perf_capture_r2 (frozen at c502b81; the
+    # B-F1 split restored its exact bytes) and 0021 (the M17C-B
+    # working-mapping successor) — head is exactly 0021.
+    assert head[-1] == "0021_m17c_shot_performance_mappings.py", (
+        f"current migration head is not the admitted 0021: {head[-1:]}")
     beyond = [m for m in head
-              if m > "0020_m17c_perf_capture_r2.py"]
-    assert not beyond, f"migrations beyond 0020 exist: {beyond}"
+              if m > "0021_m17c_shot_performance_mappings.py"]
+    assert not beyond, f"migrations beyond 0021 exist: {beyond}"
 
 
 def test_predecessor_proof_validators_green() -> None:

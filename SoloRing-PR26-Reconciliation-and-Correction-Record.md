@@ -183,17 +183,21 @@ Cycle-4 delta: `40664f7..NEW_HEAD` (commit `6f9a72d` corrections+regressions+all
 
 **Final reconciliation disposition:** M17C-A technically closed at `c502b81` (final review PASS; no further corrective cycle). M17C-B began immediately after per the handoff, treating `c502b81` as the frozen baseline. **No M17C-A invariant was weakened or reinterpreted** — every M17C-A surface touched here is consumed, not modified (see predecessor-impact note below).
 
+**Primary-review supersession:** the M17C-B primary review returned **NO-GO at `f39eb9f`** (findings B-F1..B-F9). The "Delivered" description below documents the pre-correction state and is superseded where the B-F corrective cycle (appended at the end of this record) changes it — most materially the migration split (B-F1): this implementation modified `0020_m17c_perf_capture_r2` **in place**, which is not what shipped; the corrected tree restores its exact `c502b81` bytes and moves the working-mapping table to successor migration `0021_m17c_shot_performance_mappings`. The predecessor-impact note below is likewise superseded.
+
 ## Delivered (frozen R4 §8–§9, §17, §19, §21 M17C-B slice)
 
 - **Migration:** `0020_m17c_perf_capture_r2` (draft-mutable per plan) gains `shot_performance_segment_mappings` — mutable working intent, PK `(shot_id, position)`, FKs RESTRICT to `shots` + `performance_revisions`, named CHECKs matching the ORM exactly, PR index, covered by the populated-downgrade fence.
 - **Service** (`m17c_shot_mapping.py`): PUT/DELETE/list + readiness projection. Dialogue-bound detection goes through the M17C-A pair verifier (classification + both sides' cardinality + closure BEFORE mode interpretation). Dialogue-bound law set: `vocal_mapping_position` mandatory; paired `ShotVocalSegmentMapping` exists on the same Shot; its VP == the immutable revision-binding VP; rate equality; vocal source interval inside the binding interval; CURRENT-selection policy at PUT (409); and the exact induced interval/anchor with ZERO tolerance (`P0 = origin + (v0−s0)·1000/rate`). Generic law set: `vocal_mapping_position` prohibited; nonempty interval inside the immutable PR domain; picture intersection (J/L-cut lawful); project agreement.
 - **Readiness** (never persisted): `READY / STALE_VOCAL_SELECTION / BLOCKED_BINDING_INTEGRITY / BLOCKED_TIMING_MISMATCH / BLOCKED_SUBJECT_OR_PROJECT / BLOCKED_CHANNEL_CONFLICT / BLOCKED_SHOT_DEPENDENCY` + the pairwise channel-conflict law computed from immutable payload channel keys (not `performance_kind` labels). Selection change projects STALE and never mutates rows; restoring the exact VP restores readiness.
-- **API:** `PUT/DELETE/GET /shots/{shot_id}/performance-segments[/{position}]`, `GET /shots/{shot_id}/performance-readiness` — closed schemas, raw rational `{num, den}` inputs, six new centralized `ErrorCode` members.
+- **API:** `PUT/DELETE/GET /shots/{shot_id}/performance-segments[/{position}]`, `GET /shots/{shot_id}/performance-readiness` — closed schemas, raw rational `{num, den}` inputs, seven new centralized `ErrorCode` members (corrected by the B-F cycle from an earlier "six"; `errors.py:308–314`; `PERFORMANCE_CAPTURE_NOT_READY` is registered for the frozen §17 capture-refusal grammar and has no live consumer in this slice).
 - **Recovery:** the M17C verifier gains working-mapping laws per frozen §13.3 — canonical bytes/hash, rational canonicality, project/reference integrity, VOCAL_V1↔vocal_mapping_position pairing in both directions, and STALE-tolerant (a lawfully STALE mapping is a lawful stored working state; current selection is not historical truth during backup validation).
 
 ## Predecessor-impact note (per the final reconciliation requirement)
 
 No M17C-A law, migration row, or verifier branch was modified; M17C-B only **consumes** `verify_revision_sync_classification` and the binding rows. The one addition inside an existing M17C-A file is the working-mapping verification function **appended** to `m17c_verifier.py` (a new law for the new table). Fixture sweeps touched only predecessor test assertions about table sets/heads (mechanical, in-file precedent).
+
+*(Superseded by the B-F cycle — the migration claim was wrong: this implementation modified `0020` in place. The corrected tree restores it byte-identical to `c502b81`; see the corrected predecessor-impact statement in the B-F section. The "law/verifier-branch" part of the claim held.)*
 
 ## M17C-B gates (committed head `f505fd2`)
 

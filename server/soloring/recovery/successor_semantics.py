@@ -396,21 +396,28 @@ def install_successor_semantics(recovery: ModuleType) -> None:
         if head in (recovery.M15_ALEMBIC_HEAD, recovery.M16_ALEMBIC_HEAD,
                     getattr(recovery, "M17A_ALEMBIC_HEAD", None),
                     getattr(recovery, "M17B_ALEMBIC_HEAD", None),
-                    getattr(recovery, "M17C_A_ALEMBIC_HEAD", None)):
+                    getattr(recovery, "M17C_A_ALEMBIC_HEAD", None),
+                    getattr(recovery, "M17C_B_ALEMBIC_HEAD", None)):
             recovery._verify_m15_compatibility_state(staged_db)
         if head in (recovery.M16_ALEMBIC_HEAD,
                     getattr(recovery, "M17A_ALEMBIC_HEAD", None),
                     getattr(recovery, "M17B_ALEMBIC_HEAD", None),
-                    getattr(recovery, "M17C_A_ALEMBIC_HEAD", None)):
+                    getattr(recovery, "M17C_A_ALEMBIC_HEAD", None),
+                    getattr(recovery, "M17C_B_ALEMBIC_HEAD", None)):
             recovery._verify_m16_intra_shot_state(staged_db)
         if head in (getattr(recovery, "M17A_ALEMBIC_HEAD", None),
                     getattr(recovery, "M17B_ALEMBIC_HEAD", None),
-                    getattr(recovery, "M17C_A_ALEMBIC_HEAD", None)):
+                    getattr(recovery, "M17C_A_ALEMBIC_HEAD", None),
+                    getattr(recovery, "M17C_B_ALEMBIC_HEAD", None)):
             recovery._verify_m17a_dialogue_vocal_state(staged_db)
         if head in (getattr(recovery, "M17B_ALEMBIC_HEAD", None),
-                    getattr(recovery, "M17C_A_ALEMBIC_HEAD", None)):
+                    getattr(recovery, "M17C_A_ALEMBIC_HEAD", None),
+                    getattr(recovery, "M17C_B_ALEMBIC_HEAD", None)):
             recovery._verify_m17b_performance_state(staged_db, blob_root)
-        if head == getattr(recovery, "M17C_A_ALEMBIC_HEAD", None):
+        if head in (getattr(recovery, "M17C_A_ALEMBIC_HEAD", None),
+                    getattr(recovery, "M17C_B_ALEMBIC_HEAD", None)):
+            # at 0020 the M17C verifier's working-mapping pass is skipped
+            # (the table does not exist there); at 0021 it runs in full
             recovery._verify_m17c_binding_state(staged_db, blob_root)
         return original_enumerate(staged_db, expected_columns)
 

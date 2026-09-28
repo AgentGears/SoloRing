@@ -40,7 +40,7 @@ def test_fresh_upgrade_creates_exactly_seven_tables(tmp_path):
     ver = con.execute("SELECT version_num FROM alembic_version"
                       ).fetchone()[0]
     con.close()
-    assert ver == "0020_m17c_perf_capture_r2"  # M17C-A advances the head
+    assert ver == "0021_m17c_shot_performance_mappings"  # M17C-A advances the head
     assert set(_M17A_TABLES) <= tabs
     # exactly seven M17A tables: no eighth table appears
     assert len([t for t in tabs if t in _M17A_TABLES]) == 7
@@ -59,7 +59,7 @@ def test_empty_downgrade_then_reupgrade(tmp_path):
     con = sqlite3.connect(db)
     assert con.execute("SELECT version_num FROM alembic_version"
                        ).fetchone()[0] == \
-        "0020_m17c_perf_capture_r2"  # M17C-A advances the head
+        "0021_m17c_shot_performance_mappings"  # M17C-A advances the head
     con.close()
 
 

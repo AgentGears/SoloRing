@@ -45,6 +45,11 @@ _M17C_TABLES = (
     "performance_revision_sync_classifications",
 )
 
+# B-F1: created by successor migration 0021 only — a 0020 database
+# lawfully lacks it, so its absence is not corruption and the
+# working-mapping pass is conditional on its presence.
+_SHOT_MAPPING_TABLE = "shot_performance_segment_mappings"
+
 
 def _corrupt(msg: str) -> Exception:
     return SoloRingError("RECOVERY_CORRUPTION", msg, status_code=500)
@@ -66,7 +71,8 @@ def verify_m17c_binding_state(staged_db: Path,
         _verify_candidate_bindings(con, blob_root)
         _verify_revision_bindings(con)
         _verify_retarget_lineage(con)
-        _verify_shot_performance_mappings(con)
+        if _SHOT_MAPPING_TABLE in present:
+            _verify_shot_performance_mappings(con)
     finally:
         con.close()
 
@@ -478,36 +484,50 @@ def _verify_shot_performance_mappings(con) -> None:
             raise _corrupt(
                 f"performance mapping {row['shot_id']!r}@"
                 f"{row['position']} canonical bytes/hash diverge")
-        # dialogue-bound pairing: a mapping with a vocal position on a
-        # VOCAL_V1 revision must keep its paired vocal mapping
+        # B-F3/B-F4 pairing laws. Applicability comes from the
+        # immutable discriminator, never from the nullable payload
+        # shape: a shape that the supported API cannot create (VOCAL_V1
+        # without a position; a position on a non-VOCAL_V1 revision)
+        # is corruption. A MISSING paired vocal mapping, by contrast, is
+        # an API-creatable lawful BLOCKED working state (DELETE of the
+        # vocal mapping is supported and readiness reports
+        # BLOCKED_BINDING_INTEGRITY) — recovery preserves it and
+        # verifies everything else about the row.
+        cls = con.execute(
+            "SELECT sync_mode FROM "
+            "performance_revision_sync_classifications "
+            "WHERE performance_revision_id = ?",
+            (row["performance_revision_id"],)).fetchone()
+        vocal_v1 = cls is not None and cls["sync_mode"] == "VOCAL_V1"
         if row["vocal_mapping_position"] is not None:
-            cls = con.execute(
-                "SELECT sync_mode FROM "
-                "performance_revision_sync_classifications "
-                "WHERE performance_revision_id = ?",
-                (row["performance_revision_id"],)).fetchone()
-            if cls is None or cls["sync_mode"] != "VOCAL_V1":
+            if not vocal_v1:
                 raise _corrupt(
                     f"performance mapping {row['shot_id']!r}@"
                     f"{row['position']} carries vocal_mapping_position "
                     "but the PerformanceRevision is not VOCAL_V1")
+            # when the pair EXISTS, its VP identity must agree with the
+            # immutable revision binding (PUT-enforced; divergence is
+            # tampering, not a creatable blocked state)
             vocal = con.execute(
-                "SELECT 1 FROM shot_vocal_segment_mappings "
-                "WHERE shot_id = ? AND position = ?",
+                "SELECT vocal_performance_revision_id FROM "
+                "shot_vocal_segment_mappings WHERE shot_id = ? "
+                "AND position = ?",
                 (row["shot_id"], row["vocal_mapping_position"])
             ).fetchone()
-            if vocal is None:
+            binding_vp = con.execute(
+                "SELECT vocal_performance_revision_id FROM "
+                "performance_revision_vocal_bindings WHERE "
+                "performance_revision_id = ?",
+                (row["performance_revision_id"],)).fetchone()
+            if vocal is not None and binding_vp is not None and \
+                    vocal["vocal_performance_revision_id"] != \
+                    binding_vp["vocal_performance_revision_id"]:
                 raise _corrupt(
                     f"performance mapping {row['shot_id']!r}@"
-                    f"{row['position']} pairs with a missing "
-                    "ShotVocalSegmentMapping")
+                    f"{row['position']} pairs a vocal mapping whose VP "
+                    "differs from the immutable revision binding VP")
         else:
-            cls = con.execute(
-                "SELECT sync_mode FROM "
-                "performance_revision_sync_classifications "
-                "WHERE performance_revision_id = ?",
-                (row["performance_revision_id"],)).fetchone()
-            if cls is not None and cls["sync_mode"] == "VOCAL_V1":
+            if vocal_v1:
                 raise _corrupt(
                     f"performance mapping {row['shot_id']!r}@"
                     f"{row['position']} maps a VOCAL_V1 "

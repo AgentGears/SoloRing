@@ -48,7 +48,7 @@ from soloring.workflows.artifact_store import WorkflowArtifactStore
 # the expected head advances to 0020 while restores verify through the
 # exact published M17B-depth semantics; the dedicated M17C recovery
 # verifier lands with the M17C-C slice before publication.
-EXPECTED_ALEMBIC_HEAD = "0020_m17c_perf_capture_r2"
+EXPECTED_ALEMBIC_HEAD = "0021_m17c_shot_performance_mappings"
 BACKUP_MANIFEST_SCHEMA_VERSION = 1
 
 # M13 (frozen R3 §23): restore is head-dispatched across five heads. M14
@@ -64,7 +64,8 @@ M15_ALEMBIC_HEAD = "0016_m15_revision_compatibility"
 M16_ALEMBIC_HEAD = "0017_m16_intra_shot_consequences"
 M17A_ALEMBIC_HEAD = "0018_m17a_dialogue_vocal_foundation"
 M17B_ALEMBIC_HEAD = "0019_m17b_performance_revisions"
-M17C_A_ALEMBIC_HEAD = "0020_m17c_perf_capture_r2"
+M17C_A_ALEMBIC_HEAD = "0021_m17c_shot_performance_mappings"
+M17C_B_ALEMBIC_HEAD = "0021_m17c_shot_performance_mappings"
 SUPPORTED_RESTORE_ALEMBIC_HEADS = frozenset({
     PRE_M11_ALEMBIC_HEAD,
     M11_ALEMBIC_HEAD,
@@ -90,6 +91,7 @@ SUPPORTED_RESTORE_ALEMBIC_HEADS = frozenset({
     # Blob-FK path, so the physical inventory stays thirteen paths
     # until the M17C-C recovery slice.
     M17C_A_ALEMBIC_HEAD,
+    M17C_B_ALEMBIC_HEAD,
 })
 
 ARTIFACT_KINDS = (
@@ -179,9 +181,12 @@ def _blob_fk_policy_for_head(head: str) -> frozenset:
         return M14_BLOB_FK_COLUMNS
     if head == M17A_ALEMBIC_HEAD:
         return M17A_BLOB_FK_COLUMNS
-    if head in (M17B_ALEMBIC_HEAD, M17C_A_ALEMBIC_HEAD):
+    if head in (M17B_ALEMBIC_HEAD, M17C_A_ALEMBIC_HEAD,
+                M17C_B_ALEMBIC_HEAD):
         # M17C-A adds no Blob FK (binding companions reference no
-        # blobs): 0020 shares the exact thirteen-path M17B inventory.
+        # blobs) and M17C-B's working-mapping table references no
+        # blobs either: 0020/0021 share the exact thirteen-path M17B
+        # inventory.
         return M17B_BLOB_FK_COLUMNS
     raise RecoveryCorruption(f"unsupported recovery head {head!r}.")
 

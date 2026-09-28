@@ -10,7 +10,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 SERVER = REPO / "server"
 PY = sys.executable
-HEAD = "0020_m17c_perf_capture_r2"
+HEAD = "0021_m17c_shot_performance_mappings"
 TABLES = {
     "performance_candidate_vocal_bindings",
     "performance_revision_vocal_bindings",
@@ -133,5 +133,48 @@ def test_m17c_0020_populated_binding_refuses_downgrade(tmp_path):
     assert "performance_candidate_vocal_bindings" in \
         (result.stderr + result.stdout)
     con = sqlite3.connect(db)
-    assert con.execute("SELECT version_num FROM alembic_version").fetchone()[0] == HEAD
+    # B-F1: with the 0021 split, the (empty) working-mapping step
+    # succeeds first, then 0020's binding fence refuses — the database
+    # halts at 0020 with the binding rows intact.
+    assert con.execute(
+        "SELECT version_num FROM alembic_version").fetchone()[0] == \
+        "0020_m17c_perf_capture_r2"
+    assert con.execute(
+        "SELECT COUNT(*) FROM performance_candidate_vocal_bindings"
+    ).fetchone()[0] == 1
+    con.close()
+
+
+def test_m17c_0021_populated_working_mapping_refuses_downgrade(tmp_path):
+    db = tmp_path / "m17c.db"
+    _run(db, "upgrade", "head")
+    con = sqlite3.connect(db)
+    con.execute(
+        "INSERT INTO shots (id, project_id, shot_number, subject, "
+        "created_at, updated_at) VALUES "
+        "('s', 'p', 1, 's', '2026-01-01T00:00:00.000Z', "
+        "'2026-01-01T00:00:00.000Z')")
+    con.execute(
+        "INSERT INTO shot_performance_segment_mappings "
+        "(shot_id, position, performance_revision_id, "
+        "performance_start_num, performance_start_den, "
+        "performance_end_num, performance_end_den, shot_anchor_num, "
+        "shot_anchor_den, vocal_mapping_position, "
+        "mapping_schema_version, mapping_json, mapping_hash, "
+        "created_at, updated_at) VALUES "
+        "('s', 0, 'pr', 0, 1, 1000, 1, 0, 1, NULL, 1, '{}', "
+        "'" + "a" * 64 + "', '2026-01-01T00:00:00.000Z', "
+        "'2026-01-01T00:00:00.000Z')")
+    con.commit()
+    con.close()
+    result = _run(
+        db, "downgrade", "0020_m17c_perf_capture_r2", expect=1)
+    assert "shot_performance_segment_mappings" in \
+        (result.stderr + result.stdout)
+    con = sqlite3.connect(db)
+    assert con.execute(
+        "SELECT version_num FROM alembic_version").fetchone()[0] == HEAD
+    assert con.execute(
+        "SELECT COUNT(*) FROM shot_performance_segment_mappings"
+    ).fetchone()[0] == 1
     con.close()
