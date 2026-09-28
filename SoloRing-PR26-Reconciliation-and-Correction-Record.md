@@ -337,3 +337,41 @@ The 0021 docstring now states: frozen M17C-A migration `0020_m17c_perf_capture_r
 ## Frozen for the independent Codex delta review
 
 **Product delta `f0a9e32..a5f9d2d`** (`eb47648` product correction + `a5f9d2d` validator carve). CI: run `36428413488` on `eb47648` FAILURE (the allowlist fallout above, carve follows); **run `36428850548` on `a5f9d2d`: SUCCESS, attempt 1** (Backend **2816 passed / 20 skipped / 0 failed** in 27:55 — GPU gates skipped on Actions runners by design; Frontend green). Per the controlling disposition, the next protocol step after this freeze is ONE independent Codex delta-only review of exactly `f0a9e32..a5f9d2d` plus direct predecessor implications, WITHOUT this reconciliation register. No merge, no ready-mark, no M17C-C.
+
+*(Superseded: the independent Codex review of that range returned four findings — IR-01..IR-04, all accepted and corrected below. The SR2 section above remains historical evidence.)*
+
+---
+
+# M17C-B IR corrective cycle (IR-01..IR-04) — 2026-09-28
+
+The independent Codex review of `f0a9e32..a5f9d2d` returned four findings (two schema-certification exactness gaps, one error-contract seam gap, one shared position-domain gap); all four are accepted and implemented. **Product correction base: `a5f9d2d`** (the later `0d0f403` record commit is documentation-only ancestry inside the range and does not redefine the base). Corrected code head: **`e0c4e07`** (`4c80d80` product correction + `e0c4e07` validator carve). No M17C-C; PR #26 remains open, draft, unmerged.
+
+## IR-01 — exact 0021 physical-schema certification: IMPLEMENTED
+
+`_verify_spsm_schema` now proves the exact frozen migration-0021 storage contract: declared column types per `PRAGMA table_info` (`VARCHAR(36)` ids, `INTEGER` scalars/rationals/version, `TEXT` payload/timestamps — arbitrary TEXT/BLOB substitutions refused), the complete FK contract (source column, target table/column, `ON DELETE RESTRICT`, and the deterministic `ON UPDATE`/`MATCH` values), and `ix_spsm_pr` as a non-unique, non-partial, origin-`c` CREATE INDEX over exactly `performance_revision_id` (a UNIQUE or partial replacement refuses). CHECK constraints are proven as **exact stored-name + normalized semantic-expression pairs** via a balanced-paren, quote-aware DDL parser — `CONSTRAINT ck_…_ck_spsm_position CHECK(1)` keeps the name but diverges on the expression and refuses. Recorded: the stored names carry the SQLAlchemy naming-convention table prefix (`ck_<table>_ck_spsm_…`) — identical in the ORM and alembic renderings (probed against both before pinning the contract). Six surgical DDL refusals proven (position CHECK(1), denominator CHECK(1), UNIQUE index, partial index, INTEGER→TEXT, VARCHAR(36)→VARCHAR(64)); the malformed-substitute case remains in the SR2 battery.
+
+## IR-02 — exact frozen-0020 PF-03 schema certification at BOTH heads: IMPLEMENTED
+
+All four migration-0020 tables are physically certified at head 0020 AND head 0021 (the successor inherits 0020 physically and does not weaken its certification): exact columns/types/nullability, one-column parent PK, RESTRICT parent + VP FKs, and every named CHECK expression (binding tables: start-nonneg, sample order, rate positive, origin denominator, sync basis = 1, binding schema = 1, and the 64-char lowercase-hex hash grammar; classification tables: the `sync_mode IN ('NONE','VOCAL_V1')` vocabulary and schema version). The schema phase runs BEFORE semantic row traversal, and structural failures translate to the recovery-corruption contract (never a raw `sqlite3.OperationalError`). Matrix: 4 tables × 5 weakenings (CHECK(1), missing FK, wrong declared type, wrong PK, missing column) at 0020, plus representative predecessor-schema tampering at claimed 0021; the four SR2 restore behaviors (genuine 0020 restore, genuine 0021 restore, 0020 rejects the successor table, 0021 requires the exact PF-02 table) are preserved and re-anchored in the IR battery.
+
+## IR-03 — shared persisted-history candidate-integrity seam: IMPLEMENTED
+
+`revision.verify_candidate_integrity_historical` wraps the FULL existing `verify_candidate_integrity`: same underlying verifier; already-correct historical `INTERNAL_INVARIANT_VIOLATION` 500s pass through; admission-shaped `SoloRingError` failures are translated to `INTERNAL_INVARIANT_VIOLATION` 500 with the original diagnostic preserved; fresh creation still calls the plain verifier and keeps its 4xx. Wired at every persisted-authority consumer: the PF-02 seam (both media grades), the candidate and revision authoritative binding GETs, the shared read-grade verifier, and the persisted candidate-binding verification (non-ADMISSION contexts). **Battery-exposed completeness gap fixed:** the revision-side authoritative read never proved the revision↔candidate copied closure, so a candidate-side subject tamper was invisible to the revision binding GET — `revalidate_winner` (closure + adoption metadata, admission-shaped failures wrapped) now runs inside the read-grade verifier as well. Candidate tamper matrix (revision untouched: payload dual-hash disagreement, coherent real-blob payload-identity swap, provenance hash, provenance-JSON canonicality, temporal-domain law, subject disagreement): each refuses PF-02 PUT (500, zero new rows), readiness/list (500), BOTH binding GETs (500), and the backup-side recovery enumeration; fresh malformed requests keep the admission 4xx on both the closed-schema layer (`VALIDATION_ERROR`) and the semantic grammar layer (`PERFORMANCE_VOCAL_INTERVAL_INVALID`). Recorded: candidate `payload_schema_version` and `performance_profile_id` are DB-CHECK-pinned (`ck_pc_payload_schema`/`ck_pc_profile`) — column tampering is mechanically impossible, so the "payload schema/profile" category is covered by the coherent real-blob identity swap instead.
+
+## IR-04 — one shared SQLite-safe position domain: IMPLEMENTED
+
+The low-level law lives in ONE neutral primitive (`temporal.validate_mapping_position`: actual integer, bool prohibited, `[0, 2^63-1]`, `PositionError`), consumed by BOTH services' PUT **and DELETE** — M17A `ShotVocalSegmentMapping` (keeping its `INVALID_SAMPLE_INTERVAL` vocabulary; DELETE previously validated nothing) and M17C-B `ShotPerformanceSegmentMapping` (keeping `PERFORMANCE_SHOT_MAPPING_INVALID`). Validation executes before any ORM/SQLite access in all four entry points. Matrix: M17A PUT −1/2^63 → 422, 2^63−1 → lawful 200; M17A DELETE −1/2^63 → 422, 2^63−1 → idempotent 204; direct-service `True`/`False` rejected for all four entry points with `session=None` (proving no ORM access precedes the law); no raw `OverflowError`/SQLAlchemy/SQLite exception escapes anywhere. The PF-02 bound behavior re-proven unchanged.
+
+## Gates (first-run dispositions recorded exactly)
+
+- New IR battery (`test_m17c_ir_regressions.py`): **40/40**.
+- Focused M17A/M17B/M17C battery incl. SR2 + B-F + M17C-A + historical recovery families (34 files): **419/419**.
+- **Hard process gate honored**: product committed (`4c80d80`) BEFORE validator runs; the two exact-name allowlist validators then failed LOCALLY on the IR battery path — caught before any push this time — and the carve (`e0c4e07`) precedes the push. All 19 standalone validators + the 2 piped-audit validators green on the committed tree.
+- Frontend: vitest **143/143** (32 files), `tsc --noEmit` clean, `next build` succeeds.
+- Local full backend suite (GPU datapoint): **2868 passed / 8 skipped / 0 failed in 44:07** — fully-green FIRST pass on the correction tree including the three live-GPU exec gates (no rerun, no flake); CI below is the full-suite authority at the exact code head.
+- **CI run `36457412414` on `e0c4e07`: SUCCESS, attempt 1** — Backend **2856 passed / 20 skipped / 0 failed** in 30:42 (GPU gates skipped on Actions runners by design); Frontend green.
+- Residue: this cycle's only new file is the IR battery; no new repo-root generated residue.
+
+## Frozen for the independent Codex delta review
+
+**Product delta `a5f9d2d..e0c4e07`** (`4c80d80` + `e0c4e07`; the `0d0f403` record commit rides inside the range as documentation-only ancestry). Per the controlling disposition, the next protocol step is ONE independent Codex delta-only review of exactly `a5f9d2d..e0c4e07` plus direct predecessor implications, WITHOUT this reconciliation. No merge, no ready-mark, no M17C-C.
