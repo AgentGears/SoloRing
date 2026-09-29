@@ -287,6 +287,34 @@ def _verify_bytes(path: Path, expected_hash: str) -> int:
     return size
 
 
+def _verify_manifest_hashed_bytes(path: Path, expected_hash: str,
+                                  *, what: str) -> None:
+    """IND3-01: the manifest/restore-tree layer's own CONTENT read for
+    one hashed file — narrow expected-filesystem-failure normalization
+    with file identity/path context (disappearance, permission, and
+    representative storage failures become ``RecoveryCorruption``).
+    An already-raised ``RecoveryCorruption`` (hash mismatch) passes
+    through unchanged; ``RecoveryCorruption`` is not an ``OSError``.
+    Deliberately local to manifest verification — the generic
+    ``_stream_hash``/``_copy_verified`` machinery keeps its own
+    contracts."""
+    try:
+        _verify_bytes(path, expected_hash)
+    except FileNotFoundError as exc:
+        raise RecoveryCorruption(
+            f"{what} {expected_hash} at {path} is missing (disappeared "
+            "during manifest content verification)") from exc
+    except PermissionError as exc:
+        raise RecoveryCorruption(
+            f"{what} {expected_hash} at {path} is unreadable "
+            "(permission denied) during the manifest content read"
+        ) from exc
+    except OSError as exc:
+        raise RecoveryCorruption(
+            f"{what} {expected_hash} at {path} could not be read "
+            f"through a storage error: {exc}") from exc
+
+
 def _copy_verified(src: Path, dst: Path, expected_hash: str) -> int:
     """§7.4 step 9: hash source, copy exact bytes, re-hash the copy."""
     _verify_bytes(src, expected_hash)
@@ -1109,13 +1137,23 @@ def _artifact_path(root: Path, kind: str, content_hash: str) -> Path:
 def _verify_manifest_files(root: Path, manifest: dict) -> None:
     """Verify a tree's DB + Blob + artifact bytes against a manifest."""
     db_path = root / "soloring.db"
-    if not db_path.is_file():
-        raise RecoveryCorruption("backup DB is missing.")
-    db_hash, _ = _stream_hash(db_path)
-    if db_hash != manifest["database_sha256"]:
+    # IND3-01 adjacent audit: the backup DB probe and content read sit
+    # in the same public restore path with the same leak shape —
+    # normalized with the same narrow approach
+    try:
+        db_present = db_path.is_file()
+    except PermissionError as exc:
         raise RecoveryCorruption(
-            "backup DB bytes disagree with manifest database_sha256."
-        )
+            f"backup DB at {db_path} is unreadable (permission denied) "
+            "during the storage probe") from exc
+    except OSError as exc:
+        raise RecoveryCorruption(
+            f"backup DB at {db_path} could not be probed through a "
+            f"storage error: {exc}") from exc
+    if not db_present:
+        raise RecoveryCorruption("backup DB is missing.")
+    _verify_manifest_hashed_bytes(
+        db_path, manifest["database_sha256"], what="backup DB")
 
     blob_root = root / "blobs"
     for h in manifest["blob_hashes"]:
@@ -1136,7 +1174,10 @@ def _verify_manifest_files(root: Path, manifest: dict) -> None:
                 f"through a storage error: {exc}") from exc
         if not present:
             raise RecoveryCorruption(f"backup Blob {h} is missing.")
-        _verify_bytes(path, h)
+        # IND3-01: the manifest layer's own CONTENT read (a successful
+        # probe followed by an open/read failure never leaks a raw OS
+        # exception; a hash mismatch passes through unchanged)
+        _verify_manifest_hashed_bytes(path, h, what="backup Blob")
 
     artifact_root = root / "workflow-artifacts"
     for entry in manifest["workflow_artifacts"]:
@@ -1147,7 +1188,11 @@ def _verify_manifest_files(root: Path, manifest: dict) -> None:
                 f"backup workflow artifact {entry['kind']} "
                 f"{entry['sha256']} is missing."
             )
-        _verify_bytes(path, entry["sha256"])
+        # IND3-01 adjacent audit: the artifact content read shares the
+        # manifest layer's public-restore leak shape — same wrapper
+        _verify_manifest_hashed_bytes(
+            path, entry["sha256"],
+            what=f"backup workflow artifact {entry['kind']}")
 
 
 def _verify_liveness_equal(db_path: Path, manifest: dict,
