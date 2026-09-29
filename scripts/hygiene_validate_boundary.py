@@ -67,6 +67,8 @@ ALLOWLIST = (
     "tests/test_m17c_irf_regressions.py",
     # M17C-B IND corrective cycle battery
     "tests/test_m17c_ind_regressions.py",
+    # M17C-B IND2 corrective cycle battery
+    "tests/test_m17c_ind2_regressions.py",
     "server/soloring/recovery/backup.py",
     "server/soloring/recovery/successor_semantics.py",
     "server/soloring/performance/revision.py",
