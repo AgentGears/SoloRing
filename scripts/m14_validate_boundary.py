@@ -29,7 +29,7 @@ ALLOWED_PATTERNS = [
     r"^SoloRing-PR26-Reconciliation-and-Correction-Record\.md$",
     # M17C-C scope record + slice-1 surfaces
     r"^SoloRing-M17C-C-Scope-R0\.md$",
-    r"^server/alembic/versions/0022_m17c_schema8_capture$"
+    r"^server/alembic/versions/0022_m17c_schema8_capture"
     r"\.py$",
     r"^tests/test_m17cc_migration\.py$",
     # M17A implementation (frozen R5): the dialogue/vocal foundation

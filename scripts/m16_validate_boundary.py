@@ -124,7 +124,7 @@ M16_SURFACE = (
     r"^SoloRing-PR26-Reconciliation-and-Correction-Record\.md$",
     # M17C-C scope record + slice-1 surfaces
     r"^SoloRing-M17C-C-Scope-R0\.md$",
-    r"^server/alembic/versions/0022_m17c_schema8_capture$"
+    r"^server/alembic/versions/0022_m17c_schema8_capture"
     r"\.py$",
     r"^tests/test_m17cc_migration\.py$",
     r"^tests/test_post_m13_next_security\.py$",

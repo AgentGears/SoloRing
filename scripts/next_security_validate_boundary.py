@@ -588,6 +588,8 @@ def main(repo: Path = REPO) -> int:
             or f.startswith(
                 "server/alembic/versions/0021_")
             or f.startswith(
+                "server/alembic/versions/0022_")
+            or f.startswith(
                 "server/soloring/recovery/m17c_")
             or f.startswith(
                 "server/soloring/api/m17c_")
@@ -610,6 +612,7 @@ def main(repo: Path = REPO) -> int:
                     # DR26-04 rename: the superseded draft file
                     "server/alembic/versions/0020_m17c_perf_capture_r2.py",
                     "server/alembic/versions/0021_m17c_shot_performance_mappings.py",
+                    "server/alembic/versions/0022_m17c_schema8_capture.py",
                     "server/alembic/versions/0020_m17c_dialogue_bound_"
                     "performance.py",
                 )):
