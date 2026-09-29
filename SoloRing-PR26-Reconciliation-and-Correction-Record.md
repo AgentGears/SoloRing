@@ -593,3 +593,16 @@ The final independent review verified the product implementation (artifact probe
 ## Frozen for the final test-only Codex review
 
 **Test-only delta `653a325..8a92bc6`** — proof only; NOT a new product-semantic baseline. Per the controlling disposition: ONE final independent Codex delta-only review of exactly `653a325..8a92bc6`, scoped only to whether FFINAL-01 is fully closed, whether the assertions are non-vacuous, whether production code is truly untouched, and whether any test/validator weakening was introduced — WITHOUT this reconciliation or the prior final report. If clean: freeze `8a92bc6` as the complete M17C-B repository baseline, record `653a325` as the final M17C-B product-code semantic head, declare M17C-B technically CLOSED, and proceed to M17C-C on the same draft PR; no merge, no ready-mark.
+
+---
+
+# M17C-B — TECHNICALLY CLOSED — 2026-09-29
+
+**The final independent review of `653a325..8a92bc6` returned CLEAN and was accepted by the user without qualification.** The two baselines are frozen exactly:
+
+- **Final M17C-B product-code semantic head: `653a325b1f8bac75b8e9c0a105e320b3c6cf4cd4`.**
+- **Complete M17C-B repository/proof baseline: `8a92bc6d6fd3bb38a1809e6cb54d1ec33998078e`** (CI run `36575425321`, attempt 1, green — verified before this gate; the live PR head is the later record-only `67bb617`/`67bb617…` ancestry, which changes only documentation and alters neither baseline).
+
+FFINAL-01 is closed. The final delta was test-only; no product-semantic reopening occurred. **There is no remaining M17C-B/PF-02 blocker and no additional M17C-B review cycle is warranted.**
+
+Standing fence: PR #26 remains open, draft, and unmerged (no merge, no ready-mark). **M17C-C may now begin on PR #26**, using `8a92bc6` as the frozen repository predecessor baseline and `653a325` when reasoning specifically about final M17C-B product semantics; any subsequent modification to M17C-A/B authority, PF-02 storage/readiness, recovery, or their proof surfaces is explicitly predecessor impact.
