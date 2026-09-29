@@ -562,3 +562,34 @@ The complete public-restore filesystem sequence was classified once after correc
 ## Frozen for the final independent Codex delta review
 
 **Product delta `b4c31e6..653a325`** (`bdf43ad` + `653a325`). Per the controlling disposition: ONE final independent Codex delta-only review of exactly `b4c31e6..653a325` plus only direct restore-envelope implications, WITHOUT this reconciliation or the prior review; if that delta returns clean, close M17C-B technically and begin M17C-C while PR #26 remains draft.
+
+*(Outcome: the final independent review found NO runtime/product defect in F-01/F-02, NO fundamental M17C-B/PF-02 defect, and the product code technically sound at `653a325` — with ONE Low-severity proof-strength defect in `tests/test_m17c_f_regressions.py`, corrected below as a TEST-ONLY cycle.)*
+
+---
+
+# M17C-B FFINAL test-only proof hardening (FFINAL-01) — 2026-09-29
+
+The final independent review verified the product implementation (artifact probe normalization, manifest acquisition normalization, parser ownership, DB/Blob/M10F contracts, `_stream_hash`/`_copy_verified` unchanged, the eight-stage sequence deliberate) and returned one Low-severity test-strength finding; this cycle makes the regression evidence mechanically match the contract the production code already implements. **No production file touched** — the delta is exactly one test file (`tests/test_m17c_f_regressions.py`, +32/−22). **Product-code semantic head of record: `653a325`.** Test head: **`8a92bc6`**.
+
+## FFINAL-01 — the five required fixes: IMPLEMENTED
+
+1. **Real-file existence proof**: the F-01 artifact-probe test asserts `path.is_file()` after `_add_real_artifact(root)` and before any monkeypatching — the injected failure replaces a genuinely successful metadata probe, never a masked absent fixture.
+2. **Artifact kind assertion**: `kind in str(exc)` added alongside the sha assertion.
+3. **Complete artifact path assertion**: `str(path) in str(exc)` — and the selective injection itself is now EXACT-PATH based (`if self == path:`) rather than filename-only, with the viability documented in the test: `_verify_backup_tree(backup_root, False)` probes the ORIGINAL backup root before any staging, so the probe receives exactly the constructed path (the staged-copy caveat applied only to the semantic M17B layer).
+4. **Concrete manifest path assertion**: the F-02 test defines `manifest_path = root / "backup-manifest.json"`, selects the target by exact Path equality, and asserts `str(manifest_path) in str(exc)` (the concrete location production promises) instead of the bare filename.
+5. **Exact subtype for the missing-manifest regression**: `pytest.raises(Exception)` replaced by `pytest.raises(RecoveryCorruption, match="no backup-manifest.json")` with the class imported from the authoritative production module; the frozen diagnostic and the no-destination assertion are preserved.
+
+**Optional tightening applied**: the F-01 ordinary-absence and hash-mismatch tests (and both parametrized probe/acquisition tests) use direct `isinstance(exc, RecoveryCorruption)`; the now-dead `_artifact_filename` helper and one unused import were removed. Every prior branch-specific assertion is retained — the battery still covers artifact PermissionError/OSError probes, ordinary absence, hash mismatch, manifest PermissionError/OSError acquisition, missing manifest, and malformed manifest → `BackupManifestInvalid`.
+
+## Gates (first-run dispositions; no failures)
+
+- F battery: **8/8**; IND3 + IND2 + `test_m10f_backup_restore` + recovery suites: **102/102**; focused suite (40 files): **545/545**.
+- All 19 standalone validators PASS on the committed tree **with NO carve** (the cycle modifies an existing admitted filename only — consistent with the disposition's expectation; no validator content changed at all). The two piped-audit validators green.
+- Frontend: vitest **143/143**, `tsc --noEmit` clean, `next build` succeeds.
+- Local full backend suite: **2953 passed / 8 skipped / 0 failed in 48:53** — fully-green first pass including the three live-GPU exec gates.
+- **CI run `36575425321` on `8a92bc6`: SUCCESS, attempt 1** — Backend **2941 passed / 20 skipped / 0 failed** in 31:28; Frontend green.
+- Residue: no new files; production tree byte-identical to `653a325`.
+
+## Frozen for the final test-only Codex review
+
+**Test-only delta `653a325..8a92bc6`** — proof only; NOT a new product-semantic baseline. Per the controlling disposition: ONE final independent Codex delta-only review of exactly `653a325..8a92bc6`, scoped only to whether FFINAL-01 is fully closed, whether the assertions are non-vacuous, whether production code is truly untouched, and whether any test/validator weakening was introduced — WITHOUT this reconciliation or the prior final report. If clean: freeze `8a92bc6` as the complete M17C-B repository baseline, record `653a325` as the final M17C-B product-code semantic head, declare M17C-B technically CLOSED, and proceed to M17C-C on the same draft PR; no merge, no ready-mark.
