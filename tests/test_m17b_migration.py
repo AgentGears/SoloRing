@@ -77,7 +77,11 @@ def _i03_predecessor_tables_unchanged(tmp_path):
         "performance_revision_vocal_bindings",
         "performance_candidate_sync_classifications",
         "performance_revision_sync_classifications",
-        "shot_performance_segment_mappings")
+        "shot_performance_segment_mappings",
+        # M17C-C slice 1: schema-8 capture storage
+        "shot_revision_performance_specs",
+        "shot_revision_performance_segments",
+        "generation_performance_inputs")
     q = ("SELECT name, sql FROM sqlite_master WHERE type='table' "
          "AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'alembic%' "
          "AND name NOT IN {}".format(str(_excluded)))

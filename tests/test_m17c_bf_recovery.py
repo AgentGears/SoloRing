@@ -35,7 +35,7 @@ from tests.test_m17c_shot_mapping import (
     _seg_body,
 )
 
-_HEAD_0021 = "0021_m17c_shot_performance_mappings"
+_HEAD_0021 = "0022_m17c_schema8_capture"  # the current head (renamed for lineage)
 _HEAD_0020 = "0020_m17c_perf_capture_r2"
 _TABLE = "shot_performance_segment_mappings"
 
@@ -153,6 +153,11 @@ async def test_bf07_staged_0020_upgrades_to_0021_retaining_pf03(
     con.execute("UPDATE alembic_version SET version_num = ?",
                 (_HEAD_0020,))
     con.execute(f"DROP TABLE {_TABLE}")
+    # a 0020 database also predates the M17C-C capture storage
+    for _t in ("shot_revision_performance_specs",
+               "shot_revision_performance_segments",
+               "generation_performance_inputs"):
+        con.execute(f"DROP TABLE {_t}")
     con.commit()
     pf03_before = {
         "candidate_binding": con.execute(

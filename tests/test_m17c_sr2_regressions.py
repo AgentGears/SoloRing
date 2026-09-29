@@ -168,6 +168,14 @@ def _retarget_backup(root: Path, head: str, *, drop_pf02: bool) -> None:
     from soloring.domain.canonical import canonical_json_bytes
     if drop_pf02:
         _tamper(root, f"DROP TABLE {_TABLE}", ())
+    if head != "0022_m17c_schema8_capture":
+        # M17C-C slice 1: reshaping to any pre-0022 head drops the
+        # three schema-8 capture-storage tables the create_all backup
+        # tree carries (empty in every fixture that reshapes)
+        for _t in ("shot_revision_performance_specs",
+                   "shot_revision_performance_segments",
+                   "generation_performance_inputs"):
+            _tamper(root, f"DROP TABLE {_t}", ())
     _tamper(root, "UPDATE alembic_version SET version_num = ?",
             (head,))
     manifest_path = root / "backup-manifest.json"
@@ -286,14 +294,20 @@ def test_sr2_01_distinct_supported_heads():
         EXPECTED_ALEMBIC_HEAD,
         M17C_A_ALEMBIC_HEAD,
         M17C_B_ALEMBIC_HEAD,
+        M17C_C_ALEMBIC_HEAD,
         SUPPORTED_RESTORE_ALEMBIC_HEADS,
     )
     assert M17C_A_ALEMBIC_HEAD == "0020_m17c_perf_capture_r2"
     assert M17C_B_ALEMBIC_HEAD == "0021_m17c_shot_performance_mappings"
     assert M17C_A_ALEMBIC_HEAD != M17C_B_ALEMBIC_HEAD
-    assert EXPECTED_ALEMBIC_HEAD == M17C_B_ALEMBIC_HEAD
+    # M17C-C slice 1: the schema-8 capture storage successor is the
+    # expected head; all three predecessors stay distinct + supported
+    assert M17C_C_ALEMBIC_HEAD == "0022_m17c_schema8_capture"
+    assert EXPECTED_ALEMBIC_HEAD == M17C_C_ALEMBIC_HEAD
+    assert EXPECTED_ALEMBIC_HEAD == "0022_m17c_schema8_capture"
     assert M17C_A_ALEMBIC_HEAD in SUPPORTED_RESTORE_ALEMBIC_HEADS
     assert M17C_B_ALEMBIC_HEAD in SUPPORTED_RESTORE_ALEMBIC_HEADS
+    assert M17C_C_ALEMBIC_HEAD in SUPPORTED_RESTORE_ALEMBIC_HEADS
 
 
 @pytest.mark.asyncio
