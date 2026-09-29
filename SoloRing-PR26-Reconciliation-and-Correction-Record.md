@@ -527,3 +527,38 @@ The independent Codex review of `a8c822b..b2c50ff` returned one finding (the man
 ## Frozen for the independent Codex delta review
 
 **Product delta `b2c50ff..b4c31e6`** (`6fcaf0b` + `0f9c827` + `b4c31e6`). Per the controlling disposition: ONE independent Codex delta-only review of exactly `b2c50ff..b4c31e6` plus direct predecessor implications, WITHOUT this reconciliation or the IND3 report; if it is clean, close M17C-B technically at the corrected head and proceed to M17C-C while PR #26 remains draft.
+
+*(Superseded: the independent Codex review of that range returned two findings — F-01/F-02, both accepted and corrected below.)*
+
+---
+
+# M17C-B F corrective cycle (F-01/F-02) — 2026-09-29
+
+The independent Codex review of `b2c50ff..b4c31e6` returned two findings (the workflow-artifact metadata probe and the initial manifest acquisition — the last two unguarded filesystem operations in the public restore envelope); both are accepted and implemented. **Public-restore error-envelope closure only — no PF-02/M17C-B semantic modified.** **Product correction base: `b4c31e6`.** Corrected code head: **`653a325`** (`bdf43ad` product correction + `653a325` validator carve). No M17C-C; PR #26 remains open, draft, unmerged.
+
+## F-01 — workflow-artifact metadata probing normalized: IMPLEMENTED
+
+The unguarded `Path.is_file()` immediately before the (already-normalized) artifact content read now executes inside a narrow filesystem boundary: `PermissionError` is caught before generic `OSError` (both → `RecoveryCorruption` carrying the artifact kind, sha256, path, and probe/permission or storage-error family); ordinary `False` keeps the established `backup workflow artifact <kind> <hash> is missing` semantics unchanged; only then does `_verify_manifest_hashed_bytes` run. No `except Exception`. The regressions synthesize a REAL manifest-listed workflow artifact into an otherwise-lawful backup (exact artifact path layout, grammar-satisfying sorted manifest entry, canonical manifest rewrite with the recomputed database hash), patch ONLY that artifact's `is_file`, and prove the PROBE layer fires — kind/hash in the diagnostic, the content-hash wrapper's message families explicitly not matched — with the raw OS exception unable to satisfy the contract; ordinary-absence and hash-mismatch artifact behavior re-pinned unchanged.
+
+## F-02 — initial manifest acquisition normalized: IMPLEMENTED
+
+`_verify_backup_tree`'s `manifest_path.read_bytes()` extends beyond its `FileNotFoundError`-only handling: `PermissionError` and representative `OSError` translate to `RecoveryCorruption` with the manifest identity/path and unreadable/storage-error diagnostics; the frozen missing-manifest behavior is preserved verbatim; after bytes are obtained, `parse_backup_manifest_v1` keeps sole responsibility for UTF-8/JSON/canonical grammar (the `BackupManifestInvalid` contract is untouched, re-pinned by the malformed-manifest regression); no `except Exception`. The regressions patch ONLY the target `backup-manifest.json`'s `read_bytes` — the acquisition boundary fires before any parse/probe stage.
+
+## Eight-stage direct-implication sweep (recorded)
+
+The complete public-restore filesystem sequence was classified once after correction: (1) manifest acquisition — F-02 (absence/permission/storage deliberate; parse errors remain the parse contract); (2) manifest parse — `parse_backup_manifest_v1` (domain-invalid family); (3) DB probe — guarded (absence/permission/storage); (4) DB content — `_verify_manifest_hashed_bytes` with the bespoke frozen `database_sha256` mismatch; (5) Blob probe — guarded (IND2-02); (6) Blob content — `_verify_manifest_hashed_bytes` (IND3-01); (7) artifact probe — F-01; (8) artifact content — `_verify_manifest_hashed_bytes`. Every stage now exposes deliberate recovery-domain behavior; `_stream_hash`/`_copy_verified` remain globally unchanged.
+
+## Gates (first-run dispositions recorded exactly)
+
+- New F battery (`test_m17c_f_regressions.py`): **8/8**.
+- IND3 + IND2 + `test_m10f_backup_restore` + the recovery suites: **102/102** (the frozen M10F `database_sha256` contract re-proven).
+- Focused M17A/M17B/M17C suite now INCLUDING `test_m10f_backup_restore.py` (the IND3 gap closed): **545/545**.
+- **Hard process gate honored**: committed (`bdf43ad`) BEFORE validators; the two exact-name allowlist validators failed locally on the F battery path (caught pre-push, seventh consecutive cycle); carve (`653a325`) precedes the push. All 21 validators green on the committed tree.
+- Frontend: vitest **143/143** (32 files), `tsc --noEmit` clean, `next build` succeeds.
+- Local full backend suite: **2953 passed / 8 skipped / 0 failed in 44:03** — fully-green FIRST pass including the three live-GPU exec gates (no rerun, no flake).
+- **CI run `36565427012` on `653a325`: SUCCESS, attempt 1** — Backend **2941 passed / 20 skipped / 0 failed** in 32:28 (GPU gates skipped on Actions runners by design); Frontend green.
+- Residue: this cycle's only new file is the F battery; no new repo-root generated residue.
+
+## Frozen for the final independent Codex delta review
+
+**Product delta `b4c31e6..653a325`** (`bdf43ad` + `653a325`). Per the controlling disposition: ONE final independent Codex delta-only review of exactly `b4c31e6..653a325` plus only direct restore-envelope implications, WITHOUT this reconciliation or the prior review; if that delta returns clean, close M17C-B technically and begin M17C-C while PR #26 remains draft.
