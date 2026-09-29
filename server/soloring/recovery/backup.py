@@ -288,16 +288,19 @@ def _verify_bytes(path: Path, expected_hash: str) -> int:
 
 
 def _verify_manifest_hashed_bytes(path: Path, expected_hash: str,
-                                  *, what: str) -> None:
+                                  *, what: str,
+                                  mismatch: str | None = None) -> None:
     """IND3-01: the manifest/restore-tree layer's own CONTENT read for
     one hashed file — narrow expected-filesystem-failure normalization
     with file identity/path context (disappearance, permission, and
     representative storage failures become ``RecoveryCorruption``).
     An already-raised ``RecoveryCorruption`` (hash mismatch) passes
-    through unchanged; ``RecoveryCorruption`` is not an ``OSError``.
-    Deliberately local to manifest verification — the generic
-    ``_stream_hash``/``_copy_verified`` machinery keeps its own
-    contracts."""
+    through unchanged (``RecoveryCorruption`` is not an ``OSError``);
+    ``mismatch`` optionally restates the mismatch with the caller's
+    frozen diagnostic (the predecessor DB law keeps its exact
+    ``database_sha256`` message). Deliberately local to manifest
+    verification — the generic ``_stream_hash``/``_copy_verified``
+    machinery keeps its own contracts."""
     try:
         _verify_bytes(path, expected_hash)
     except FileNotFoundError as exc:
@@ -313,6 +316,10 @@ def _verify_manifest_hashed_bytes(path: Path, expected_hash: str,
         raise RecoveryCorruption(
             f"{what} {expected_hash} at {path} could not be read "
             f"through a storage error: {exc}") from exc
+    except RecoveryCorruption as exc:
+        if mismatch is not None:
+            raise RecoveryCorruption(mismatch) from exc
+        raise
 
 
 def _copy_verified(src: Path, dst: Path, expected_hash: str) -> int:
@@ -1152,8 +1159,12 @@ def _verify_manifest_files(root: Path, manifest: dict) -> None:
             f"storage error: {exc}") from exc
     if not db_present:
         raise RecoveryCorruption("backup DB is missing.")
+    # the predecessor DB mismatch diagnostic keeps its exact frozen
+    # wording (M10F cells 02/05 pin the database_sha256 token)
     _verify_manifest_hashed_bytes(
-        db_path, manifest["database_sha256"], what="backup DB")
+        db_path, manifest["database_sha256"], what="backup DB",
+        mismatch="backup DB bytes disagree with manifest "
+                 "database_sha256.")
 
     blob_root = root / "blobs"
     for h in manifest["blob_hashes"]:
