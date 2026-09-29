@@ -32,7 +32,7 @@ import sqlite3
 import pytest
 from sqlalchemy import text
 
-from soloring.errors import SoloRingError
+from soloring.recovery.backup import RecoveryCorruption
 from tests.test_m17c_shot_mapping import (
     _bound_world,
     _seg_body,
@@ -96,10 +96,6 @@ def _add_real_artifact(root) -> tuple[str, str, pathlib.Path]:
     return kind, sha, path
 
 
-def _artifact_filename(path: pathlib.Path) -> str:
-    return path.name  # "<sha256>.json"
-
-
 # ---------------------------------------------------------------------------
 # F-01 — workflow-artifact metadata probe
 # ---------------------------------------------------------------------------
@@ -114,25 +110,34 @@ def _artifact_filename(path: pathlib.Path) -> str:
 async def test_f01_artifact_probe_normalized(
         client, tmp_path, monkeypatch, error, fragment):
     """The artifact's is_file() probe fails after everything earlier in
-    the restore sequence succeeds — the PROBE layer fires (kind+hash in
-    the diagnostic), NOT the content-hash wrapper (its
-    'manifest content read' family is explicitly not matched), and the
-    raw OS exception cannot satisfy the contract."""
+    the restore sequence succeeds — the PROBE layer fires with the
+    COMPLETE identity contract (kind + sha + concrete path + probe
+    family), NOT the content-hash wrapper (its 'manifest content read'
+    family is explicitly not matched), and the raw OS exception cannot
+    satisfy the contract. Exact-PATH injection is viable because
+    ``_verify_backup_tree(backup_root, False)`` probes the ORIGINAL
+    backup root before any staging — the probe receives exactly the
+    ``path`` this test constructed."""
     _, root = await _world_with_backup(client, tmp_path)
     kind, sha, path = _add_real_artifact(root)
+    # the injected failure replaces a GENUINELY successful metadata
+    # probe, not a masked absent fixture
+    assert path.is_file()
     real_is_file = pathlib.Path.is_file
 
     def selective_is_file(self):
-        if self.name == _artifact_filename(path):
+        if self == path:
             raise error
         return real_is_file(self)
 
     monkeypatch.setattr(pathlib.Path, "is_file", selective_is_file)
     exc = await _restore_refuses(root, tmp_path, "f01")
     monkeypatch.setattr(pathlib.Path, "is_file", real_is_file)
-    assert type(exc).__name__ == "RecoveryCorruption", repr(exc)
+    assert isinstance(exc, RecoveryCorruption), repr(exc)
     assert not isinstance(exc, OSError), exc
+    assert kind in str(exc), exc
     assert sha in str(exc), exc
+    assert str(path) in str(exc), exc
     assert fragment in str(exc), (fragment, exc)
     # the content-hash wrapper is NOT the first firing layer
     assert "manifest content read" not in str(exc), exc
@@ -149,7 +154,7 @@ async def test_f01_artifact_ordinary_absence_unchanged(client, tmp_path):
     from tests.test_m17c_sr26_regressions import _rehash_manifest
     _rehash_manifest(root)
     exc = await _restore_refuses(root, tmp_path, "f01-missing")
-    assert type(exc).__name__ == "RecoveryCorruption", repr(exc)
+    assert isinstance(exc, RecoveryCorruption), repr(exc)
     assert "is missing" in str(exc), exc
     assert sha in str(exc), exc
 
@@ -166,7 +171,7 @@ async def test_f01_artifact_hash_mismatch_unchanged(client, tmp_path):
     from tests.test_m17c_sr26_regressions import _rehash_manifest
     _rehash_manifest(root)
     exc = await _restore_refuses(root, tmp_path, "f01-hash")
-    assert type(exc).__name__ == "RecoveryCorruption", repr(exc)
+    assert isinstance(exc, RecoveryCorruption), repr(exc)
     assert "frozen identity" in str(exc), exc
 
 
@@ -184,35 +189,40 @@ async def test_f01_artifact_hash_mismatch_unchanged(client, tmp_path):
 async def test_f02_manifest_acquisition_normalized(
         client, tmp_path, monkeypatch, error, fragment):
     """Only the target backup-manifest.json read_bytes fails: the
-    acquisition boundary fires with a manifest-specific diagnostic
-    before any parse/probe stage; the raw OS exception cannot satisfy
-    the contract."""
+    acquisition boundary fires with the CONCRETE manifest location in
+    the diagnostic before any parse/probe stage; the raw OS exception
+    cannot satisfy the contract. Exact-PATH selection is viable because
+    the acquisition reads the ORIGINAL backup root's manifest before
+    any staging."""
     _, root = await _world_with_backup(client, tmp_path)
+    manifest_path = root / "backup-manifest.json"
     real_read_bytes = pathlib.Path.read_bytes
 
     def selective_read_bytes(self):
-        if self.name == "backup-manifest.json":
+        if self == manifest_path:
             raise error
         return real_read_bytes(self)
 
     monkeypatch.setattr(pathlib.Path, "read_bytes", selective_read_bytes)
     exc = await _restore_refuses(root, tmp_path, "f02")
     monkeypatch.setattr(pathlib.Path, "read_bytes", real_read_bytes)
-    assert type(exc).__name__ == "RecoveryCorruption", repr(exc)
+    assert isinstance(exc, RecoveryCorruption), repr(exc)
     assert not isinstance(exc, OSError), exc
-    assert "backup-manifest.json" in str(exc), exc
+    assert str(manifest_path) in str(exc), exc
     assert fragment in str(exc), (fragment, exc)
 
 
 @pytest.mark.asyncio
 async def test_f02_missing_manifest_unchanged(client, tmp_path):
-    """The frozen missing-manifest behavior is preserved."""
+    """The frozen missing-manifest behavior is preserved under the
+    EXACT production subtype (RecoveryCorruption from the authoritative
+    module) with the frozen diagnostic and no destination created."""
     _, root = await _world_with_backup(client, tmp_path)
     (root / "backup-manifest.json").unlink()
     from soloring.recovery import restore as rb_restore
-    with pytest.raises(Exception) as excinfo:
+    with pytest.raises(RecoveryCorruption,
+                       match="no backup-manifest.json"):
         await rb_restore(root, tmp_path / "dest")
-    assert "no backup-manifest.json" in str(excinfo.value), excinfo.value
     assert not (tmp_path / "dest").exists()
 
 
