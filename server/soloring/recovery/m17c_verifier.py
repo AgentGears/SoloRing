@@ -55,6 +55,10 @@ _SHOT_MAPPING_TABLE = "shot_performance_segment_mappings"
 # backup module — the backup module installs this verifier).
 _HEAD_0020 = "0020_m17c_perf_capture_r2"
 _HEAD_0021 = "0021_m17c_shot_performance_mappings"
+# M17C-C slice 1: schema-8 capture storage (the section 13.4 verifier
+# laws land with the capture/history slices; at this head the new
+# tables are storage-only)
+_HEAD_0022 = "0022_m17c_schema8_capture"
 
 # ---------------------------------------------------------------------------
 # IR-01/IR-02: frozen PHYSICAL schema contracts for every migration-0020/0021
@@ -413,11 +417,18 @@ def verify_m17c_binding_state(staged_db: Path,
     successor migration 0021 only). At head 0021 the PF-02 table is
     REQUIRED, its physical schema is proven deterministically, and the
     working-mapping row laws run. Schema shape is NEVER inferred from
-    optional table presence."""
+    optional table presence.
+
+    At head 0022 (M17C-C slice 1, schema/storage-only) the verifier
+    runs with 0021-EQUIVALENT semantics: the PF-03 + PF-02 laws are
+    unchanged, and the new schema-8 capture storage tables
+    (§§10.4-10.6) are permitted present. Their §13.4/§13.6 verification
+    laws land with the capture/history/derived-input slices; at this
+    head the tables are storage-only and carry no rows."""
     if blob_root is None:
         from soloring.settings import get_settings
         blob_root = get_settings().blob_dir
-    if head not in (_HEAD_0020, _HEAD_0021):
+    if head not in (_HEAD_0020, _HEAD_0021, _HEAD_0022):
         raise _corrupt(
             f"M17C verifier invoked at unsupported staged head {head!r}")
     con = sqlite3.connect(staged_db)
@@ -437,7 +448,7 @@ def verify_m17c_binding_state(staged_db: Path,
         else:
             if _SHOT_MAPPING_TABLE not in present:
                 raise _corrupt(
-                    "staged head 0021 is missing the PF-02 "
+                    f"staged head {head!r} is missing the PF-02 "
                     "working-mapping table")
         # IR-01/IR-02: the COMPLETE physical-schema phase runs BEFORE
         # any semantic row traversal — head 0021 inherits the frozen
@@ -447,7 +458,7 @@ def verify_m17c_binding_state(staged_db: Path,
         try:
             for table, contract in _PF03_CONTRACTS.items():
                 _verify_table_schema(con, table, contract)
-            if head == _HEAD_0021:
+            if head != _HEAD_0020:
                 _verify_spsm_schema(con)
         except sqlite3.Error as exc:
             raise _corrupt(
@@ -457,7 +468,7 @@ def verify_m17c_binding_state(staged_db: Path,
         _verify_candidate_bindings(con, blob_root)
         _verify_revision_bindings(con)
         _verify_retarget_lineage(con)
-        if head == _HEAD_0021:
+        if head != _HEAD_0020:
             _verify_shot_performance_mappings(con)
     finally:
         con.close()

@@ -27,6 +27,11 @@ ALLOWED_PATTERNS = [
     # reconciliation): reviewed evidence documents, no product code
     r"^SoloRing-PR26-First-Pass-Review-R1\.md$",
     r"^SoloRing-PR26-Reconciliation-and-Correction-Record\.md$",
+    # M17C-C scope record + slice-1 surfaces
+    r"^SoloRing-M17C-C-Scope-R0\.md$",
+    r"^server/alembic/versions/0022_m17c_schema8_capture$"
+    r"\.py$",
+    r"^tests/test_m17cc_migration\.py$",
     # M17A implementation (frozen R5): the dialogue/vocal foundation
     # surface — performance package, migration, API, recovery
     # verifier, boundary validators, and the M17A tests.
@@ -62,6 +67,7 @@ ALLOWED_PATTERNS = [
     # migration — reviewed successor surface + successor-maintained
     # files swept for the head-advance
     r"^server/soloring/performance/m17c_[a-z_]+\.py$",
+    r"^server/soloring/performance/m17cc_models\.py$",
     r"^server/soloring/api/m17c_performance\.py$",
     r"^server/soloring/api/schemas/m17c_performance\.py$",
     r"^server/soloring/recovery/m17c_verifier\.py$",

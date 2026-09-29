@@ -73,6 +73,11 @@ ALLOWLIST = (
     "tests/test_m17c_ind3_regressions.py",
     # M17C-B F corrective cycle battery
     "tests/test_m17c_f_regressions.py",
+    # M17C-C scope record + slice-1 files (reviewed successor surfaces)
+    "SoloRing-M17C-C-Scope-R0.md",
+    "server/alembic/versions/0022_m17c_schema8_capture.py",
+    "server/soloring/performance/m17cc_models.py",
+    "tests/test_m17cc_migration.py",
     "server/soloring/recovery/backup.py",
     "server/soloring/recovery/successor_semantics.py",
     "server/soloring/performance/revision.py",
@@ -554,12 +559,15 @@ def main() -> int:
     admitted_0020 = "0020_m17c_perf_capture_r2.py"
     # M17C-B (PR #26, B-F1): the successor working-mapping migration
     admitted_0021 = "0021_m17c_shot_performance_mappings.py"
+    # M17C-C slice 1 (frozen R4 10.4-10.6): schema-8 capture storage
+    admitted_0022 = "0022_m17c_schema8_capture.py"
     superseded_0020_draft = "0020_m17c_dialogue_bound_performance.py"
     mig_beyond = [p.name for p in versions.glob("*.py")
                   if p.stem >= "0015" and p.name not in (
                       admitted_0015, admitted_0016, admitted_0017,
                       admitted_0018, admitted_0019, admitted_0020,
-                      admitted_0021, superseded_0020_draft)]
+                      admitted_0021, admitted_0022,
+                      superseded_0020_draft)]
     if mig_beyond:
         errors.append(f"migration at/beyond 0015 beyond the frozen M14/M15/"
                       f"M16-A/M17A migrations exists: {mig_beyond}")
@@ -615,6 +623,14 @@ def main() -> int:
     admitted_m17c_b_tables = {
         "shot_performance_segment_mappings",
     }
+    # M17C-C slice 1 (successor migration 0022): schema-8 capture
+    # storage — spec parent, immutable segment children, and the
+    # Generation-owned derived-input table
+    admitted_m17c_c_tables = {
+        "shot_revision_performance_specs",
+        "shot_revision_performance_segments",
+        "generation_performance_inputs",
+    }
 
     admitted_m17a_tables = {
         "dialogue_lines",
@@ -656,6 +672,9 @@ def main() -> int:
                 continue
             if (f.endswith("0021_m17c_shot_performance_mappings.py")
                     and name in admitted_m17c_b_tables):
+                continue
+            if (f.endswith("0022_m17c_schema8_capture.py")
+                    and name in admitted_m17c_c_tables):
                 continue
             errors.append(f"{f}: new table {name} in migration source")
         if f.endswith("0017_m16_intra_shot_consequences.py") and names != admitted_m16_tables:

@@ -169,6 +169,11 @@ from soloring.performance.m17c_models import (  # noqa: E402,F401
     PerformanceRevisionSyncClassification,
     ShotPerformanceSegmentMapping,
 )
+from soloring.performance.m17cc_models import (  # noqa: E402,F401
+    ShotRevisionPerformanceSpec,
+    ShotRevisionPerformanceSegment,
+    GenerationPerformanceInput,
+)
 
 __all__ = [
     "WorkerLease",

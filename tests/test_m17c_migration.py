@@ -10,13 +10,17 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 SERVER = REPO / "server"
 PY = sys.executable
-HEAD = "0021_m17c_shot_performance_mappings"
+HEAD = "0022_m17c_schema8_capture"
 TABLES = {
     "performance_candidate_vocal_bindings",
     "performance_revision_vocal_bindings",
     "performance_candidate_sync_classifications",
     "performance_revision_sync_classifications",
     "shot_performance_segment_mappings",
+    # M17C-C slice 1 (schema/storage-only successor 0022)
+    "shot_revision_performance_specs",
+    "shot_revision_performance_segments",
+    "generation_performance_inputs",
 }
 
 
@@ -172,8 +176,13 @@ def test_m17c_0021_populated_working_mapping_refuses_downgrade(tmp_path):
     assert "shot_performance_segment_mappings" in \
         (result.stderr + result.stdout)
     con = sqlite3.connect(db)
+    # the EMPTY 0022 step drops the capture tables cleanly first, then
+    # the populated 0021 step refuses: the head halts at 0021 with the
+    # working-mapping row preserved (the B-F precedent, one successor
+    # further on)
     assert con.execute(
-        "SELECT version_num FROM alembic_version").fetchone()[0] == HEAD
+        "SELECT version_num FROM alembic_version").fetchone()[0] == \
+        "0021_m17c_shot_performance_mappings"
     assert con.execute(
         "SELECT COUNT(*) FROM shot_performance_segment_mappings"
     ).fetchone()[0] == 1

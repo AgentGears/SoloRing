@@ -149,10 +149,10 @@ def test_migration_head_is_0015_before_m15() -> None:
     # successors are 0020_m17c_perf_capture_r2 (frozen at c502b81; the
     # B-F1 split restored its exact bytes) and 0021 (the M17C-B
     # working-mapping successor) — head is exactly 0021.
-    assert head[-1] == "0021_m17c_shot_performance_mappings.py", (
+    assert head[-1] == "0022_m17c_schema8_capture.py", (
         f"current migration head is not the admitted 0021: {head[-1:]}")
     beyond = [m for m in head
-              if m > "0021_m17c_shot_performance_mappings.py"]
+              if m > "0022_m17c_schema8_capture.py"]
     assert not beyond, f"migrations beyond 0021 exist: {beyond}"
 
 

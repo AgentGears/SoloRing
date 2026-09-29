@@ -43,7 +43,7 @@ async def _assess_and_apply(client, base):
     return result
 
 
-async def _stamp_alembic(client, head="0021_m17c_shot_performance_mappings"):  # M17C-A advances the head
+async def _stamp_alembic(client, head="0022_m17c_schema8_capture"):  # M17C-C advances the head
     """The conftest engine builds schema via create_all (no
     alembic_version); the backup machinery requires the table."""
     engine = client._transport.app.state.engine
@@ -125,7 +125,7 @@ async def test_0016_backup_restore_preserves_m15_rows_and_hashes(
     await backup(settings, backup_root)
     manifest = json.loads((backup_root / "backup-manifest.json")
                           .read_text(encoding="utf-8"))
-    assert manifest["alembic_version"] == "0021_m17c_shot_performance_mappings"
+    assert manifest["alembic_version"] == "0022_m17c_schema8_capture"
 
     # M16-C certified the 0017 head, so the live backup runs there; the
     # REC:01 proof stays pinned to the 0016 posture via the REC:02
@@ -161,7 +161,12 @@ async def test_0016_backup_restore_preserves_m15_rows_and_hashes(
                       "vocal_performance_revisions",
                       "vocal_candidates",
                       "dialogue_line_revisions",
-                      "dialogue_lines"):
+                      "dialogue_lines",
+                      # M17C-C slice-1 tables carry the 14th Blob-FK
+                      # path; the old-head postures drop them (empty)
+                      "shot_revision_performance_specs",
+                      "shot_revision_performance_segments",
+                      "generation_performance_inputs"):
             n = con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
             assert n == 0, (
                 f"{table} has {n} rows — not a lawful 0016 posture")
@@ -265,7 +270,12 @@ async def test_0015_backup_restores_without_inventing_m15_state(client,
                       "vocal_performance_revisions",
                       "vocal_candidates",
                       "dialogue_line_revisions",
-                      "dialogue_lines"):
+                      "dialogue_lines",
+                      # M17C-C slice-1 tables carry the 14th Blob-FK
+                      # path; the old-head postures drop them (empty)
+                      "shot_revision_performance_specs",
+                      "shot_revision_performance_segments",
+                      "generation_performance_inputs"):
             n = con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
             assert n == 0, (
                 f"{table} has {n} rows — not a lawful 0015 posture")

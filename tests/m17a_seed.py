@@ -83,7 +83,7 @@ async def make_shot(client, pid: str, duration_ms: int) -> str:
 
 
 async def stamp_alembic(client, head: str =
-                        "0021_m17c_shot_performance_mappings") -> None:  # M17C-A advances the head
+                        "0022_m17c_schema8_capture") -> None:  # M17C-C advances the head
     async with client._transport.app.state.engine.begin() as conn:
         await conn.execute(text(
             "CREATE TABLE IF NOT EXISTS alembic_version ("

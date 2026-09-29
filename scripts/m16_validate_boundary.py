@@ -110,6 +110,7 @@ M16_SURFACE = (
     # migration — reviewed successor surface + successor-maintained
     # files swept for the head-advance
     r"^server/soloring/performance/m17c_[a-z_]+\.py$",
+    r"^server/soloring/performance/m17cc_models\.py$",
     r"^server/soloring/api/m17c_performance\.py$",
     r"^server/soloring/api/schemas/m17c_performance\.py$",
     r"^server/soloring/recovery/m17c_verifier\.py$",
@@ -121,6 +122,11 @@ M16_SURFACE = (
     r"^tests/test_m17c_[a-z0-9_]+\.py$",
     r"^SoloRing-PR26-First-Pass-Review-R1\.md$",
     r"^SoloRing-PR26-Reconciliation-and-Correction-Record\.md$",
+    # M17C-C scope record + slice-1 surfaces
+    r"^SoloRing-M17C-C-Scope-R0\.md$",
+    r"^server/alembic/versions/0022_m17c_schema8_capture$"
+    r"\.py$",
+    r"^tests/test_m17cc_migration\.py$",
     r"^tests/test_post_m13_next_security\.py$",
     r"^tests/test_m14_base_corpus\.py$",
 

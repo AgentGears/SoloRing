@@ -395,7 +395,7 @@ def test_dr26_04_superseded_draft_identity_rejected(tmp_path):
             or "can't locate revision" in combined), combined[-800:]
 
     from soloring.recovery.backup import EXPECTED_ALEMBIC_HEAD
-    assert EXPECTED_ALEMBIC_HEAD == "0021_m17c_shot_performance_mappings"
+    assert EXPECTED_ALEMBIC_HEAD == "0022_m17c_schema8_capture"
     staged_head = "0020_m17c_performance_capture"
     assert staged_head != EXPECTED_ALEMBIC_HEAD
     assert staged_head not in {

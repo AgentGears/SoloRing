@@ -52,7 +52,12 @@ from soloring.workflows.artifact_store import WorkflowArtifactStore
 # Blob-FK inventory.
 M17C_A_ALEMBIC_HEAD = "0020_m17c_perf_capture_r2"
 M17C_B_ALEMBIC_HEAD = "0021_m17c_shot_performance_mappings"
-EXPECTED_ALEMBIC_HEAD = M17C_B_ALEMBIC_HEAD
+# M17C-C (frozen R4 §§10.4-10.6): schema-8 capture storage — the
+# immutable capture companions and the Generation-owned derived-input
+# table. The EXPECTED head advances to 0022; 0020/0021 remain distinct
+# supported restore heads.
+M17C_C_ALEMBIC_HEAD = "0022_m17c_schema8_capture"
+EXPECTED_ALEMBIC_HEAD = M17C_C_ALEMBIC_HEAD
 BACKUP_MANIFEST_SCHEMA_VERSION = 1
 
 # M13 (frozen R3 §23): restore is head-dispatched across five heads. M14
@@ -97,6 +102,12 @@ SUPPORTED_RESTORE_ALEMBIC_HEADS = frozenset({
     # the same M17C verifier in its 0021 form — the PF-02 table is
     # REQUIRED with a deterministic schema proof; still thirteen paths.
     M17C_B_ALEMBIC_HEAD,
+    # M17C-C head (frozen R4 §13.5): 0022 adds exactly ONE Blob-FK path
+    # (generation_performance_inputs.blob_hash) — the capture companion
+    # tables duplicate already-FK-pinned payload hashes without
+    # independent FKs — so the physical inventory becomes fourteen
+    # paths at 0022 only.
+    M17C_C_ALEMBIC_HEAD,
 })
 
 ARTIFACT_KINDS = (
@@ -193,6 +204,12 @@ def _blob_fk_policy_for_head(head: str) -> frozenset:
         # blobs either: 0020/0021 share the exact thirteen-path M17B
         # inventory.
         return M17B_BLOB_FK_COLUMNS
+    if head == M17C_C_ALEMBIC_HEAD:
+        # M17C-C §13.5: exactly ONE new path —
+        # generation_performance_inputs.blob_hash (the capture
+        # companions carry no independent Blob FK). Fourteen paths.
+        return frozenset(set(M17B_BLOB_FK_COLUMNS) | {
+            ("generation_performance_inputs", "blob_hash")})
     raise RecoveryCorruption(f"unsupported recovery head {head!r}.")
 
 _HEX = set("0123456789abcdef")
