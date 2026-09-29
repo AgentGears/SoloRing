@@ -1194,7 +1194,23 @@ def _verify_manifest_files(root: Path, manifest: dict) -> None:
     for entry in manifest["workflow_artifacts"]:
         path = _artifact_path(
             artifact_root, entry["kind"], entry["sha256"])
-        if not path.is_file():
+        # F-01: the metadata/existence probe inside a narrow filesystem
+        # boundary — permission/stat failures become recovery corruption
+        # with artifact kind/hash/path context; ordinary absence keeps
+        # the established missing-artifact semantics
+        try:
+            artifact_present = path.is_file()
+        except PermissionError as exc:
+            raise RecoveryCorruption(
+                f"backup workflow artifact {entry['kind']} "
+                f"{entry['sha256']} at {path} is unreadable (permission "
+                "denied) during the storage probe") from exc
+        except OSError as exc:
+            raise RecoveryCorruption(
+                f"backup workflow artifact {entry['kind']} "
+                f"{entry['sha256']} at {path} could not be probed "
+                f"through a storage error: {exc}") from exc
+        if not artifact_present:
             raise RecoveryCorruption(
                 f"backup workflow artifact {entry['kind']} "
                 f"{entry['sha256']} is missing."
@@ -1247,12 +1263,25 @@ def _verify_backup_tree(root: Path, full_liveness: bool) -> dict:
     parsed source manifest instead.
     """
     manifest_path = root / "backup-manifest.json"
+    # F-02: the manifest ACQUISITION boundary — missing stays the
+    # frozen behavior; permission and representative storage failures
+    # translate to recovery corruption with manifest identity/path
+    # context. Everything after the bytes (UTF-8, JSON, canonical
+    # grammar) stays parse_backup_manifest_v1's contract.
     try:
         raw = manifest_path.read_bytes()
     except FileNotFoundError as exc:
         raise RecoveryCorruption(
             f"{root} has no backup-manifest.json."
         ) from exc
+    except PermissionError as exc:
+        raise RecoveryCorruption(
+            f"backup-manifest.json at {manifest_path} is unreadable "
+            "(permission denied) during manifest acquisition") from exc
+    except OSError as exc:
+        raise RecoveryCorruption(
+            f"backup-manifest.json at {manifest_path} could not be "
+            f"read through a storage error: {exc}") from exc
     manifest = parse_backup_manifest_v1(raw)
     _verify_manifest_files(root, manifest)
     if full_liveness:
