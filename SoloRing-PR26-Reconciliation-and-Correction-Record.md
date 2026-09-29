@@ -463,3 +463,37 @@ Every `PRAGMA index_list` entry of every migration-owned table is classified by 
 ## Frozen for the independent Codex delta review
 
 **Product delta `f84e6f9..a8c822b`** (`84c074f` + `a8c822b`). Per the controlling disposition: ONE independent Codex delta-only review of exactly `f84e6f9..a8c822b` plus direct implications, WITHOUT this reconciliation; if it returns clean with no new fundamental authority/recovery defect, M17C-B may finally close technically and M17C-C may begin while PR #26 remains draft.
+
+*(Superseded: the independent Codex review of that range returned three findings — IND2-01..03, all accepted and corrected below.)*
+
+---
+
+# M17C-B IND2 corrective cycle (IND2-01..03) — 2026-09-29
+
+The independent Codex review of `f84e6f9..a8c822b` returned three findings (provenance storage-class/parser stability, the complete blob filesystem boundary, and retarget eligibility precedence); all three are accepted and implemented. **Product correction base: `a8c822b`.** Corrected code head: **`b2c50ff`** (`d21d89c` product correction + `b2c50ff` validator carve). No M17C-C; PR #26 remains open, draft, unmerged.
+
+## IND2-01 — provenance TEXT storage + stable parser corruption: IMPLEMENTED
+
+`m17b_verifier.parse_persisted_json_text(value, *, what)` is the ONE persisted-JSON parser for candidate provenance, used in BOTH `_verify_candidates` and `_verify_retargeted`: it requires an actual Python `str` (bytes/bytearray/memoryview/numeric values refuse as `RECOVERY_CORRUPTION` with a provenance-specific diagnostic — the frozen storage representation is TEXT, so a BLOB that happens to decode as UTF-8 is STILL an invalid runtime storage class), calls `json.loads`, and translates `JSONDecodeError` to recovery corruption — never a broad `except Exception`, never a raw `UnicodeDecodeError`. All subsequent provenance laws (closed grammar, canonical equality, hash, source-kind agreement, retarget chain) are retained. Regressions at BOTH supported heads: generic `X'FF'` BLOB, retargeted `X'FF'` BLOB, and a valid-UTF8 BLOB containing otherwise-valid JSON (storage class proven `blob` via `typeof()`) all refuse with the TEXT-storage diagnostic; the ordinary malformed-TEXT case remains covered.
+
+## IND2-02 — the complete blob filesystem boundary normalized: IMPLEMENTED
+
+`_blob_bytes` now treats the existence/type probe and the content read as ONE narrow filesystem boundary: the probe's `PermissionError`/representative `OSError` translate to the unreadable/storage-error corruption family with blob hash/path context; ordinary absence stays the missing-Blob family; the probe-to-read disappearance race (`FileNotFoundError` after a successful probe) lands back in the missing-Blob family; the read failures keep their IND-04 handling; the SHA-256 rehash is retained. **Adjacent-boundary normalization with recorded layering:** the restore-side manifest blob probe in `_verify_backup_tree` performs its own `is_file()` existence check BEFORE the semantic verifier runs, so it received the same narrow normalization — and in the restore flow that branch fires FIRST, which the probe-boundary regressions assert. Five monkeypatched regressions against the STAGED copy (matched by blob NAME — the staged tree's paths differ from the original): stat `PermissionError`, stat `OSError(EIO)`, read `PermissionError`, read `OSError`, and the disappearance race — each refuses through the stable recovery-corruption contract (the manifest-probe family raises the module's own `RecoveryCorruption` hierarchy; the semantic-verifier families raise `SoloRingError` with `RECOVERY_CORRUPTION`) with branch-specific diagnostics. The missing-file and wrong-hash cases are kept.
+
+## IND2-03 — retarget eligibility precedence without stored-verdict trust: IMPLEMENTED
+
+The shared verifier is split into two reusable historical phases. **Phase A** — `verify_retarget_assessment_historical(...) -> recomputed_verdict`: the complete assessment laws (exact source coordinate; from/to row existence; duplicated snapshot hashes; ProductionObject existence/project ownership; assessment project; evaluator schema/id/version; canonical scope recomputation with JSON/hash equality; evaluator verdict/reason recomputation; canonical report recomputation with JSON/hash equality; stored verdict == recomputed verdict), every persisted corruption a historical 500, and the STORED verdict is never the eligibility decision. **Eligibility precedence:** `create_retarget_candidate` maps the RECOMPUTED verdict — `COMPATIBLE_AS_IS` → `422 RETARGET_NOT_REQUIRED`, `INCOMPATIBLE` → `422 RETARGET_INCOMPATIBLE` — WITHOUT resolving or inspecting `accepted_review_id`; only recomputed `REQUIRES_REVIEW` resolves the review (a genuinely nonexistent request-supplied id keeps the established 404). **Phase B** — `verify_retarget_review_historical`: exact assessment ownership, `ACCEPT_FOR_NEW_CANDIDATE`, and the complete persisted metadata grammar. Candidate construction/flush stays strictly after both phases. The combined `verify_retarget_evidence_historical` wrapper is retained for later already-published candidate validation by composing the phases (with the published-evidence REQUIRES_REVIEW requirement), and the candidate-specific provenance↔assessment coordinate law remains at its higher layer. g08/g17 are restored to their original dummy-review-id shape (correct again under the precedence). The full precedence set is proven: lawful INCOMPATIBLE/COMPATIBLE_AS_IS + a syntactically valid nonexistent review id → the 4xx branches with zero new rows; corrupt assessment + missing review id → Phase A 500 fires FIRST; REQUIRES_REVIEW + missing id → 404; REQUIRES_REVIEW + a corrupt repointed existing review → Phase B 500; lawful chain → 201 unchanged.
+
+## Gates (first-run dispositions recorded exactly)
+
+- New IND2 battery (`test_m17c_ind2_regressions.py`): **15/15**.
+- Focused M17A/M17B/M17C battery incl. the retarget G/x matrices and the historical recovery families (37 files): **491/491** (first run after the source fixes; the g08/g17 restoration passed first-run inside it).
+- **Hard process gate honored**: committed (`d21d89c`) BEFORE validators; the two exact-name allowlist validators failed locally on the IND2 battery path (caught pre-push, fifth consecutive cycle); carve (`b2c50ff`) precedes the push. All 21 validators green on the committed tree.
+- Frontend: vitest **143/143** (32 files), `tsc --noEmit` clean, `next build` succeeds.
+- Local full backend suite: **2940 passed / 8 skipped / 0 failed in 44:56** — fully-green FIRST pass including the three live-GPU exec gates (no rerun, no flake).
+- **CI run `36536429685` on `b2c50ff`: SUCCESS, attempt 1** — Backend **2928 passed / 20 skipped / 0 failed** in 30:48 (GPU gates skipped on Actions runners by design); Frontend green.
+- Residue: this cycle's only new file is the IND2 battery; no new repo-root generated residue.
+
+## Frozen for the independent Codex delta review
+
+**Product delta `a8c822b..b2c50ff`** (`d21d89c` + `b2c50ff`). Per the controlling disposition: ONE independent Codex delta-only review of exactly `a8c822b..b2c50ff` plus direct predecessor implications, WITHOUT this reconciliation or the IND2 report; if it returns clean with no new fundamental authority/recovery defect, M17C-B may finally close technically and M17C-C may begin while PR #26 remains draft.
