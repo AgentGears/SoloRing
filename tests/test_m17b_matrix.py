@@ -1382,15 +1382,15 @@ async def test_x21_adoption_rejects_tampered_assessment_verdict(client):
               "accepted_review_id": accept["id"],
               "producer_id": "x21", "producer_version": "1",
               "source_identity": None, "parameters_sha256": None})
-    assert rc.status_code == 201, rc.text
-    r = await client.post(
-        f"/performance-candidates/{rc.json()['id']}/adopt",
-        json={"adopted_by": "d"})
-    # IR-03 (M17C): persisted-candidate corruption at adoption now carries
-    # the HISTORICAL corruption contract (500 INTERNAL_INVARIANT_VIOLATION,
-    # original diagnostic preserved) — never a fresh-request 4xx
-    assert r.status_code == 500, r.text
-    assert r.json()["error_code"] == "INTERNAL_INVARIANT_VIOLATION", r.text
+    # IND-03 (M17C): creation itself now recomputes the assessment
+    # through the shared HISTORICAL verifier BEFORE constructing a
+    # candidate, so the tampered verdict/report refuses at CREATION
+    # on the same recomputation branch with zero new candidates -
+    # the refusal moved earlier than adoption-time
+    assert rc.status_code == 500, rc.text
+    assert rc.json()["error_code"] == \
+        "INTERNAL_INVARIANT_VIOLATION", rc.text
+    assert "recomputation" in rc.json()["message"], rc.text
 
     # ---- delta-review subcases: the four tamper shapes the
     # recomputation alone (or a stale-hash check alone) cannot catch
@@ -1419,16 +1419,17 @@ async def test_x21_adoption_rejects_tampered_assessment_verdict(client):
         return pid_l, eid_l, rev_l, obj_l, p1, p2, a_l, acc
 
     async def _try_adopt_forge(rev_l, a_l, acc):
-        rc = await client.post(
+        # IND-03 (M17C): creation itself now runs the shared
+        # HISTORICAL retarget-evidence verifier BEFORE constructing
+        # a candidate, so every tamper shape refuses at CREATION
+        # with zero new candidates - return the creation response;
+        # the per-subcase diagnostics are unchanged
+        return await client.post(
             f"/performance-revisions/{rev_l['id']}/retarget-candidates",
             json={"assessment_id": a_l["id"],
                   "accepted_review_id": acc["id"],
                   "producer_id": "x21b", "producer_version": "1",
                   "source_identity": None, "parameters_sha256": None})
-        assert rc.status_code == 201, rc.text
-        return await client.post(
-            f"/performance-candidates/{rc.json()['id']}/adopt",
-            json={"adopted_by": "d"})
 
     # (a) SELF-CONSISTENT forged report+hash: keep the stored
     # verdict REQUIRES_REVIEW (creation requires it) but forge the

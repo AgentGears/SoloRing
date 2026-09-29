@@ -252,12 +252,17 @@ def verify_persisted_mapping_structural(
                 f"{what} rational invalid: {exc.message}") from exc
         if (cn, cd) != (num, den):
             raise _fail(f"{what} rational is not canonical")
-    if not performance_start_num < performance_end_num:
+    # IND-01: EXACT rational ordering — after canonicality, the
+    # interval order and the domain containment both use the exact
+    # Fraction values (never numerator-only comparison, never floats,
+    # no tolerance). 1/2 -> 2/5 is INVERTED (0.5 > 0.4) even though
+    # 1 < 2 numerically; 3/4 -> 1/1 is lawful (0.75 < 1).
+    start = Fraction(performance_start_num, performance_start_den)
+    end = Fraction(performance_end_num, performance_end_den)
+    if not start < end:
         raise _fail("interval is empty or inverted")
     domain_lo = Fraction(domain_start_num, domain_start_den)
     domain_hi = Fraction(domain_end_num, domain_end_den)
-    start = Fraction(performance_start_num, performance_start_den)
-    end = Fraction(performance_end_num, performance_end_den)
     if not (domain_lo <= start and end <= domain_hi):
         raise _fail(
             "interval lies outside the immutable PerformanceRevision "

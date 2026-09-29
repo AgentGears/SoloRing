@@ -454,6 +454,8 @@ async def _verify_retarget_evidence(session: AsyncSession, settings,
         raise _invalid(
             ErrorCode.PERFORMANCE_PROVENANCE_INVALID,
             "retarget provenance assessment does not resolve")
+    # envelope↔assessment coordinate equality (the candidate's own
+    # provenance block must name the exact assessment coordinate)
     if (a.performance_revision_id,
             a.from_production_revision_id,
             a.to_production_revision_id) != (
@@ -463,82 +465,24 @@ async def _verify_retarget_evidence(session: AsyncSession, settings,
         raise _invalid(
             ErrorCode.PERFORMANCE_PROVENANCE_INVALID,
             "retarget provenance coordinate mismatch")
-    # assessment recomputation (recovery parity): recompute scope and
-    # report through the ASSESSMENT SERVICE's own builders — a stored
-    # verdict/verdict row that does not recompute is corruption
-    from soloring.performance.retarget import (
-        EVALUATOR_ID, EVALUATOR_VERSION, _build_report, _build_scope,
-        _evaluate)
-    from soloring.production.models import ProductionRevision
-    from_pr = await session.get(ProductionRevision,
-                                a.from_production_revision_id)
-    to_pr = await session.get(ProductionRevision,
-                              a.to_production_revision_id)
-    if from_pr is None or to_pr is None:
-        raise _invalid(
-            ErrorCode.PERFORMANCE_PROVENANCE_INVALID,
-            "retarget assessment physical revision does not resolve")
-    # persisted-row laws (recovery parity, third-Codex P1-1
-    # completion): assessment project equality, duplicated snapshot
-    # hashes, and both ProductionObjects' project ownership — none of
-    # which the recomputed scope/report bytes can express
-    from soloring.performance.retarget import (
-        verify_assessment_persisted_laws)
-    await verify_assessment_persisted_laws(
-        session, source, a, from_pr, to_pr)
-    if a.evaluator_id != EVALUATOR_ID or \
-            a.evaluator_version != EVALUATOR_VERSION or \
-            a.schema_version != 1:
-        raise _invalid(
-            ErrorCode.PERFORMANCE_PROVENANCE_INVALID,
-            "retarget assessment evaluator identity drift")
-    scope = _build_scope(
-        performance=source,
-        payload_sha=source.canonical_channel_payload_sha256,
-        from_pr=from_pr, to_pr=to_pr)
-    from soloring.domain.canonical import (canonical_hash,
-                                           canonical_json_str)
-    scope_json = canonical_json_str(scope)
-    scope_hash = canonical_hash(scope)
-    if a.scope_json != scope_json or a.scope_hash != scope_hash:
-        raise _invalid(
-            ErrorCode.PERFORMANCE_PROVENANCE_INVALID,
-            "retarget assessment scope does not recompute from "
-            "immutable rows")
-    verdict, reason = _evaluate(from_pr, to_pr)
-    report = _build_report(
-        scope_hash=scope_hash, performance_id=source.id,
-        from_id=from_pr.id, to_id=to_pr.id, verdict=verdict,
-        reason=reason, from_obj=str(from_pr.production_object_id),
-        to_obj=str(to_pr.production_object_id))
-    if a.report_json != canonical_json_str(report) or \
-            a.report_hash != canonical_hash(report) or \
-            a.overall_verdict != verdict:
-        raise _invalid(
-            ErrorCode.PERFORMANCE_PROVENANCE_INVALID,
-            "retarget assessment stored report/verdict != evaluator "
-            "recomputation")
-    if a.overall_verdict != "REQUIRES_REVIEW":
-        raise _invalid(
-            ErrorCode.PERFORMANCE_PROVENANCE_INVALID,
-            "retarget seeded from a non-REQUIRES_REVIEW assessment")
     review = await session.get(PerformanceRetargetReview,
                                ret.get("accepted_review_id"))
-    if review is None or review.assessment_id != a.id or \
-            review.decision != "ACCEPT_FOR_NEW_CANDIDATE":
+    if review is None:
         raise _invalid(
             ErrorCode.PERFORMANCE_PROVENANCE_INVALID,
             "retarget accepted review does not satisfy the review "
             "law chain")
-    # accepted-review persisted grammar (recovery parity, P1-1
-    # residue): recovery validates every review row's metadata
-    # through the shared grammar — the live authority path must not
-    # promote a referenced review whose metadata recovery would
-    # refuse (e.g. whitespace-tampered reviewed_by)
-    validate_review_metadata(
-        decision=review.decision,
-        reviewed_by=review.reviewed_by,
-        rationale=review.rationale)
+    # IND-03: the complete assessment/review half runs through the ONE
+    # shared historical verifier (the same law create_retarget_
+    # candidate proves BEFORE constructing a candidate): persisted-row
+    # laws, evaluator identity, canonical scope/report recomputation,
+    # stored-verdict equality, review ownership/decision/grammar. Its
+    # historical 500 contract is exactly the persisted-corruption
+    # contract this path already runs under.
+    from soloring.performance.retarget import (
+        verify_retarget_evidence_historical)
+    await verify_retarget_evidence_historical(
+        session, source=source, assessment=a, accepted_review=review)
 
 _CLOSURE_FIELDS = (
     "project_id", "subject_id", "performance_kind",

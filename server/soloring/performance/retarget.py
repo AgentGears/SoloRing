@@ -319,6 +319,141 @@ async def get_review(session: AsyncSession, *, review_id: str
     return r
 
 
+def _historical_corrupt(message: str) -> SoloRingError:
+    return SoloRingError(ErrorCode.INTERNAL_INVARIANT_VIOLATION,
+                         message, status_code=500)
+
+
+async def verify_retarget_evidence_historical(
+        session: AsyncSession, *, source: PerformanceRevision,
+        assessment: PerformanceRetargetAssessment,
+        accepted_review: PerformanceRetargetReview) -> None:
+    """IND-03: the ONE shared HISTORICAL retarget-evidence verifier —
+    the complete assessment/review authority, factored from the laws
+    ``_verify_retarget_evidence``/``verify_assessment_persisted_laws``
+    already embody, consumed by BOTH retarget-candidate creation
+    (BEFORE any PerformanceCandidate is constructed or flushed) and
+    later candidate historical validation. Every failure involving
+    these ALREADY-PERSISTED rows is historical corruption
+    (``INTERNAL_INVARIANT_VIOLATION``, 500) with the original
+    diagnostic preserved — never a creation/admission 4xx. The only
+    4xx branches left are request-shaped eligibility refusals for
+    LAWFUL non-REQUIRES_REVIEW verdicts (a valid COMPATIBLE_AS_IS or
+    INCOMPATIBLE assessment makes retarget creation a no-op
+    rejection; the assessment itself is NOT corrupt)."""
+    from soloring.domain.canonical import (canonical_hash,
+                                           canonical_json_str)
+    from soloring.production.models import (ProductionObject,
+                                            ProductionRevision)
+
+    # assessment identity: belongs to the exact source revision
+    if assessment.performance_revision_id != source.id:
+        raise _historical_corrupt(
+            "retarget assessment belongs to a different "
+            "PerformanceRevision than the source")
+    from_pr = await session.get(ProductionRevision,
+                                assessment.from_production_revision_id)
+    to_pr = await session.get(ProductionRevision,
+                              assessment.to_production_revision_id)
+    if from_pr is None or to_pr is None:
+        raise _historical_corrupt(
+            "retarget assessment physical revision does not resolve")
+    # persisted-row laws (recovery parity): assessment project
+    # equality, duplicated from/to snapshot hashes vs the referenced
+    # immutable rows, referenced ProductionObjects exist and belong to
+    # the source project
+    if assessment.project_id != source.project_id:
+        raise _historical_corrupt(
+            "assessment project != performance revision project")
+    if assessment.from_production_revision_hash != \
+            from_pr.snapshot_hash or \
+            assessment.to_production_revision_hash != \
+            to_pr.snapshot_hash:
+        raise _historical_corrupt(
+            "assessment duplicated snapshot-hash columns disagree "
+            "with the referenced physical revisions")
+    from_obj = await session.get(ProductionObject,
+                                 from_pr.production_object_id)
+    to_obj = await session.get(ProductionObject,
+                               to_pr.production_object_id)
+    if from_obj is None or to_obj is None or \
+            from_obj.project_id != source.project_id or \
+            to_obj.project_id != source.project_id:
+        raise _historical_corrupt(
+            "assessment physical object missing or outside the "
+            "performance revision's project")
+    # evaluator identity (exact frozen evaluator)
+    if assessment.schema_version != 1:
+        raise _historical_corrupt(
+            "retarget assessment schema_version is not 1")
+    if assessment.evaluator_id != EVALUATOR_ID or \
+            assessment.evaluator_version != EVALUATOR_VERSION:
+        raise _historical_corrupt(
+            "retarget assessment evaluator identity drift")
+    # canonical evidence: recompute scope and report through the SAME
+    # builders the assessment service uses — stored bytes are never
+    # trusted
+    scope = _build_scope(
+        performance=source,
+        payload_sha=source.canonical_channel_payload_sha256,
+        from_pr=from_pr, to_pr=to_pr)
+    scope_json = canonical_json_str(scope)
+    scope_hash = canonical_hash(scope)
+    if assessment.scope_json != scope_json or \
+            assessment.scope_hash != scope_hash:
+        raise _historical_corrupt(
+            "retarget assessment scope does not recompute from "
+            "immutable rows")
+    verdict, reason = _evaluate(from_pr, to_pr)
+    report = _build_report(
+        scope_hash=scope_hash, performance_id=source.id,
+        from_id=from_pr.id, to_id=to_pr.id, verdict=verdict,
+        reason=reason, from_obj=str(from_pr.production_object_id),
+        to_obj=str(to_pr.production_object_id))
+    if assessment.report_json != canonical_json_str(report) or \
+            assessment.report_hash != canonical_hash(report):
+        raise _historical_corrupt(
+            "retarget assessment stored report != evaluator "
+            "recomputation")
+    if assessment.overall_verdict != verdict:
+        raise _historical_corrupt(
+            "retarget assessment stored verdict != evaluator "
+            "recomputation")
+    # retarget eligibility: a LAWFUL non-REQUIRES_REVIEW verdict is a
+    # request-shaped no-op refusal (the evidence itself is valid);
+    # anything else was already refused as corruption above
+    if verdict == COMPATIBLE_AS_IS:
+        raise _invalid(
+            ErrorCode.RETARGET_NOT_REQUIRED,
+            "same-revision physical coordinate requires no retarget — "
+            "assessment is valid evidence but retarget-candidate "
+            "creation is a no-op rejection")
+    if verdict == INCOMPATIBLE:
+        raise _invalid(
+            ErrorCode.RETARGET_INCOMPATIBLE,
+            "INCOMPATIBLE assessment cannot seed a retarget candidate")
+    # accepted review: exists, belongs to THIS exact assessment,
+    # ACCEPT decision, and complete persisted metadata grammar through
+    # the shared validator
+    if accepted_review.assessment_id != assessment.id:
+        raise _historical_corrupt(
+            "accepted review belongs to a different assessment — "
+            "cross-assessment review replay is corruption")
+    if accepted_review.decision != "ACCEPT_FOR_NEW_CANDIDATE":
+        raise _historical_corrupt(
+            "accepted review does not satisfy the review law chain")
+    from soloring.performance.revision import validate_review_metadata
+    try:
+        validate_review_metadata(
+            decision=accepted_review.decision,
+            reviewed_by=accepted_review.reviewed_by,
+            rationale=accepted_review.rationale)
+    except SoloRingError as exc:
+        raise _historical_corrupt(
+            f"accepted review metadata violates persisted grammar: "
+            f"{exc.message}") from exc
+
+
 async def list_reviews(session: AsyncSession, *, assessment_id: str
                        ) -> list[PerformanceRetargetReview]:
     await get_assessment(session, assessment_id=assessment_id)
@@ -347,44 +482,24 @@ async def create_retarget_candidate(
                         "not found")
     assessment = await get_assessment(session,
                                       assessment_id=assessment_id)
-
-    # coordinate equality chain (frozen §8.2 / §12.4)
-    if assessment.performance_revision_id != performance.id:
-        raise _invalid(
-            ErrorCode.RETARGET_ASSESSMENT_COORDINATE_MISMATCH,
-            "assessment belongs to a different PerformanceRevision")
-    verdict = assessment.overall_verdict
-    if verdict == COMPATIBLE_AS_IS:
-        raise _invalid(
-            ErrorCode.RETARGET_NOT_REQUIRED,
-            "same-revision physical coordinate requires no retarget — "
-            "assessment is valid evidence but retarget-candidate "
-            "creation is a no-op rejection")
-    if verdict == INCOMPATIBLE:
-        raise _invalid(
-            ErrorCode.RETARGET_INCOMPATIBLE,
-            "INCOMPATIBLE assessment cannot seed a retarget candidate")
-    if verdict != REQUIRES_REVIEW:
-        raise SoloRingError(
-            ErrorCode.INTERNAL_INVARIANT_VIOLATION,
-            "evaluator v1 verdict outside its frozen law — "
-            "corruption", status_code=500)
-
     review = await session.get(PerformanceRetargetReview,
                                accepted_review_id)
     if review is None:
         raise not_found(ErrorCode.RETARGET_REVIEW_NOT_FOUND,
                         f"retarget review {accepted_review_id!r} "
                         "not found")
-    if review.assessment_id != assessment.id:
-        raise _invalid(
-            ErrorCode.RETARGET_REVIEW_ASSESSMENT_MISMATCH,
-            "accepted review belongs to a different assessment — "
-            "cross-assessment review replay rejects")
-    if review.decision != "ACCEPT_FOR_NEW_CANDIDATE":
-        raise _invalid(ErrorCode.RETARGET_REVIEW_REJECTED,
-                       "retarget candidate requires an "
-                       "ACCEPT_FOR_NEW_CANDIDATE review")
+
+    # IND-03: the COMPLETE persisted assessment/review authority is
+    # proven through the ONE shared historical verifier BEFORE any
+    # PerformanceCandidate is constructed or flushed — corrupted
+    # stored evidence is historical 500 corruption with the targeted
+    # diagnostic preserved, and no fresh immutable evidence row is
+    # inserted on top of unverified provenance (transaction rollback
+    # is not the authority boundary). The only 4xx branches are the
+    # lawful no-op eligibility refusals inside the verifier.
+    await verify_retarget_evidence_historical(
+        session, source=performance, assessment=assessment,
+        accepted_review=review)
 
     # server constructs the exact retarget envelope — the caller
     # cannot forge source/from/to ids; the closed grammar (including

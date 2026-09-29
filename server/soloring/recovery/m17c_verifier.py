@@ -94,6 +94,9 @@ def _binding_contract(table: str, parent_col: str, parent_table: str,
             "binding_hash": ("TEXT", 1, 0),
             "created_at": ("TEXT", 1, 0),
         },
+        # IND-02: the exact PK column sequence whose SQLite autoindex
+        # (origin 'pk') is the lawful consequence of the frozen PK
+        "pk_columns": [parent_col],
         # IR-01: the COMPLETE ordered CHECK multiset — closed world
         "checks": [
             (f"{n}_start_nonneg", "source_start_sample >= 0"),
@@ -115,10 +118,12 @@ def _binding_contract(table: str, parent_col: str, parent_table: str,
              "vocal_performance_revision_id", "id") + _FK_RESTRICT,
             (0, parent_table, parent_col, "id") + _FK_RESTRICT,
         ]),
-        # IR-01: the closed explicit-index inventory (origin-'c'
-        # indexes only; SQLite autoindexes implied by PK/UNIQUE are
-        # lawful here) — the PF-03 tables carry none
+        # IR-01/IND-02: the closed explicit-index inventory (origin-'c'
+        # indexes only) — the PF-03 tables carry none
         "explicit_indexes": {},
+        # IND-02: the migrations declare NO additional UNIQUE
+        # constraints, so any origin-'u' autoindex refuses
+        "unique_indexes": {},
     }
 
 
@@ -132,6 +137,7 @@ def _classification_contract(table: str, parent_col: str,
             "classification_schema_version": ("INTEGER", 1, 0),
             "created_at": ("TEXT", 1, 0),
         },
+        "pk_columns": [parent_col],
         "checks": [
             (f"{n}_mode", "sync_mode IN ('NONE', 'VOCAL_V1')"),
             (f"{n}_schema", "classification_schema_version = 1"),
@@ -140,6 +146,7 @@ def _classification_contract(table: str, parent_col: str,
             (0, parent_table, parent_col, "id") + _FK_RESTRICT,
         ]),
         "explicit_indexes": {},
+        "unique_indexes": {},
     }
 
 
@@ -204,6 +211,8 @@ _SPSM_CONTRACT = {
         + _FK_RESTRICT,
     ]),
     "explicit_indexes": {"ix_spsm_pr": (0, "c", 0)},
+    "pk_columns": ["shot_id", "position"],
+    "unique_indexes": {},
 }
 
 
@@ -347,6 +356,34 @@ def _verify_table_schema(con: sqlite3.Connection, table: str,
         raise _corrupt(
             f"{table} explicit-index contract diverges: expected "
             f"{contract['explicit_indexes']}, got {explicit}")
+    # IND-02: classify EVERY remaining autoindex by origin. 'pk'
+    # entries are lawful ONLY as the exact consequence of the frozen
+    # PK — each must index exactly the frozen PK columns in order.
+    # 'u' entries are UNIQUE-constraint consequences; the frozen
+    # 0020/0021 migrations declare NO additional UNIQUE constraints,
+    # so ANY origin-'u' index (anonymous UNIQUE(column) or a named
+    # CONSTRAINT ... UNIQUE) refuses — arbitrary autoindexes are never
+    # treated as benign.
+    pk_autoindexes = []
+    unique_autoindexes = []
+    for r in con.execute(f"PRAGMA index_list({table})"):
+        if r[3] == "pk":
+            pk_autoindexes.append(r[1])
+        elif r[3] == "u":
+            unique_autoindexes.append(r[1])
+    for name in pk_autoindexes:
+        cols = [row[2] for row in con.execute(
+            f"PRAGMA index_info({name})")]
+        if cols != contract["pk_columns"]:
+            raise _corrupt(
+                f"{table} PK autoindex {name!r} does not index exactly "
+                f"the frozen PK columns {contract['pk_columns']!r} "
+                f"(got {cols!r})")
+    if unique_autoindexes:
+        raise _corrupt(
+            f"{table} carries unexpected UNIQUE-constraint autoindexes "
+            f"{unique_autoindexes!r} — the frozen migrations declare "
+            "no UNIQUE constraints beyond the primary key")
 
 
 def _verify_spsm_schema(con: sqlite3.Connection) -> None:

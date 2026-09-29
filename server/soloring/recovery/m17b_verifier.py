@@ -77,7 +77,20 @@ def _blob_bytes(blob_root: Path, h: str) -> bytes:
     p = blob_root / "sha256" / h[:2] / h[2:4] / h
     if not p.is_file():
         raise _corrupt(f"M17B payload blob {h} missing from Blob root")
-    data = p.read_bytes()
+    # IND-04: normalize the EXPECTED storage read failures (unreadable
+    # through permission or a representative OS error) into the
+    # recovery-corruption contract with path/hash context — narrowly,
+    # never a broad Exception catch
+    try:
+        data = p.read_bytes()
+    except PermissionError as exc:
+        raise _corrupt(
+            f"M17B payload blob {h} at {p} is unreadable "
+            f"(permission denied)") from exc
+    except OSError as exc:
+        raise _corrupt(
+            f"M17B payload blob {h} at {p} is unreadable through a "
+            f"storage error: {exc}") from exc
     if hashlib.sha256(data).hexdigest() != h:
         raise _corrupt(f"M17B payload blob {h} bytes do not rehash")
     return data
@@ -262,7 +275,14 @@ def _verify_candidates(con: sqlite3.Connection, blob_root: Path) -> None:
                 if aid is not None:
                     _verify_alignment_link(con, aid, r["subject_id"],
                                            r["project_id"])
-        prov = json.loads(r["provenance_json"])
+        # IND-04: malformed persisted provenance must surface as the
+        # structured recovery-corruption contract, never the raw
+        # parser exception
+        try:
+            prov = json.loads(r["provenance_json"])
+        except json.JSONDecodeError as exc:
+            raise _corrupt(
+                f"candidate {r['id']!r} provenance is not JSON") from exc
         from soloring.performance.revision import (
             build_provenance_envelope)
         try:
@@ -441,7 +461,13 @@ def _verify_retargeted(con: sqlite3.Connection) -> None:
     for r in con.execute(
             "SELECT * FROM performance_candidates WHERE source_kind = "
             "'retargeted'"):
-        prov = json.loads(r["provenance_json"])
+        # IND-04: same structured-parser law as the candidate pass
+        try:
+            prov = json.loads(r["provenance_json"])
+        except json.JSONDecodeError as exc:
+            raise _corrupt(
+                f"retarget candidate {r['id']!r} provenance is not "
+                "JSON") from exc
         ret = prov.get("retarget")
         if not isinstance(ret, dict) or set(ret) != {
                 "source_performance_revision_id",

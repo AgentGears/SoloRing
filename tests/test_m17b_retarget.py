@@ -151,8 +151,12 @@ async def test_g07_reject_review_does_not_permit_retarget_candidate(client):
               "accepted_review_id": review["id"],
               "producer_id": "p", "producer_version": "1",
               "source_identity": None, "parameters_sha256": None})
-    assert r.status_code == 422
-    assert r.json()["error_code"] == "RETARGET_REVIEW_REJECTED"
+    # IND-03 (M17C): the accepted-review decision law is part of
+    # the shared HISTORICAL verifier - citing a persisted
+    # non-ACCEPT review is persisted-evidence failure (500)
+    assert r.status_code == 500
+    assert r.json()["error_code"] == "INTERNAL_INVARIANT_VIOLATION"
+    assert "review law chain" in r.json()["message"]
 
 
 @pytest.mark.asyncio
@@ -162,11 +166,16 @@ async def test_g08_incompatible_assessment_blocks_retarget_candidate(client):
                        pr1["production_revision_id"],
                        prx["production_revision_id"])).json()
     assert a["overall_verdict"] == "INCOMPATIBLE"
+    # IND-03: cite a REAL review row (the route resolves the review
+    # before the verifier's lawful-verdict eligibility branch fires)
+    review = (await client.post(
+        f"/performance-retarget-assessments/{a['id']}/reviews",
+        json={"decision": "ACCEPT_FOR_NEW_CANDIDATE",
+              "reviewed_by": "rev"})).json()
     r = await client.post(
         f"/performance-revisions/{rev['id']}/retarget-candidates",
         json={"assessment_id": a["id"],
-              "accepted_review_id":
-                  "55555555-5555-4555-8555-555555555555",
+              "accepted_review_id": review["id"],
               "producer_id": "p", "producer_version": "1",
               "source_identity": None, "parameters_sha256": None})
     assert r.status_code == 422
@@ -187,10 +196,11 @@ async def test_g09_retarget_assessment_provenance_coordinate_mismatch_rejects(cl
               "accepted_review_id": review["id"],
               "producer_id": "p", "producer_version": "1",
               "source_identity": None, "parameters_sha256": None})
-    assert r.status_code == 422
-    assert r.json()["error_code"] in (
-        "RETARGET_ASSESSMENT_COORDINATE_MISMATCH",
-        "RETARGET_REVIEW_ASSESSMENT_MISMATCH")
+    # IND-03 (M17C): assessment-identity is a law of the shared
+    # HISTORICAL verifier - persisted-evidence failure (500)
+    assert r.status_code == 500
+    assert r.json()["error_code"] == "INTERNAL_INVARIANT_VIOLATION"
+    assert "different PerformanceRevision" in r.json()["message"]
 
 
 @pytest.mark.asyncio
@@ -309,9 +319,11 @@ async def test_g16_accepted_review_belonging_to_another_assessment_rejects(clien
               "accepted_review_id": review1["id"],
               "producer_id": "p", "producer_version": "1",
               "source_identity": None, "parameters_sha256": None})
-    assert r.status_code == 422
-    assert r.json()["error_code"] == \
-        "RETARGET_REVIEW_ASSESSMENT_MISMATCH"
+    # IND-03 (M17C): review ownership is a law of the shared
+    # HISTORICAL verifier - persisted-evidence failure (500)
+    assert r.status_code == 500
+    assert r.json()["error_code"] == "INTERNAL_INVARIANT_VIOLATION"
+    assert "different assessment" in r.json()["message"]
 
 
 @pytest.mark.asyncio
@@ -321,11 +333,16 @@ async def test_g17_compatible_as_is_assessment_is_valid_evidence_but_retarget_ca
                        pr1["production_revision_id"],
                        pr1["production_revision_id"])).json()
     assert a["overall_verdict"] == "COMPATIBLE_AS_IS"
+    # IND-03: cite a REAL review row (the route resolves the review
+    # before the verifier's lawful-verdict eligibility branch fires)
+    review = (await client.post(
+        f"/performance-retarget-assessments/{a['id']}/reviews",
+        json={"decision": "ACCEPT_FOR_NEW_CANDIDATE",
+              "reviewed_by": "rev"})).json()
     r = await client.post(
         f"/performance-revisions/{rev['id']}/retarget-candidates",
         json={"assessment_id": a["id"],
-              "accepted_review_id":
-                  "55555555-5555-4555-8555-555555555555",
+              "accepted_review_id": review["id"],
               "producer_id": "p", "producer_version": "1",
               "source_identity": None, "parameters_sha256": None})
     assert r.status_code == 422
