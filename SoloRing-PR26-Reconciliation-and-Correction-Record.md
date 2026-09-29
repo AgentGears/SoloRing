@@ -497,3 +497,33 @@ The shared verifier is split into two reusable historical phases. **Phase A** �
 ## Frozen for the independent Codex delta review
 
 **Product delta `a8c822b..b2c50ff`** (`d21d89c` + `b2c50ff`). Per the controlling disposition: ONE independent Codex delta-only review of exactly `a8c822b..b2c50ff` plus direct predecessor implications, WITHOUT this reconciliation or the IND2 report; if it returns clean with no new fundamental authority/recovery defect, M17C-B may finally close technically and M17C-C may begin while PR #26 remains draft.
+
+*(Superseded: the independent Codex review of that range returned one finding — IND3-01, accepted and corrected below.)*
+
+---
+
+# M17C-B IND3 corrective cycle (IND3-01) — 2026-09-29
+
+The independent Codex review of `a8c822b..b2c50ff` returned one finding (the manifest layer's own content read leaking raw OS exceptions after a successful probe); it is accepted and implemented. **Product correction base: `b2c50ff`.** Corrected code head: **`b4c31e6`** (`6fcaf0b` product correction + `0f9c827` validator carve + `b4c31e6` fix-forward). No M17C-C; PR #26 remains open, draft, unmerged.
+
+## IND3-01 — manifest Blob content reads normalized: IMPLEMENTED
+
+`_verify_manifest_hashed_bytes(path, expected_hash, *, what, mismatch=None)` is the manifest/restore-tree layer's own content-read wrapper, used by `_verify_manifest_files` for every manifest-listed Blob: it invokes `_verify_bytes`, narrowly catches `FileNotFoundError` (probe-then-open disappearance → the missing family with a "disappeared during manifest content verification" diagnostic), `PermissionError`, and representative `OSError` (unreadable/storage-error families with hash/path context), and lets an already-raised hash-mismatch `RecoveryCorruption` pass through unchanged (`RecoveryCorruption` is not an `OSError`); the optional `mismatch` restates a mismatch with a caller's frozen diagnostic. No `except Exception` anywhere — programming errors remain visible. The generic `_stream_hash`/`_copy_verified` machinery is deliberately UNCHANGED (callsite-local, per the preferred boundary — backup/copy hashing keeps its own contracts).
+
+**Adjacent audit of the same `_verify_bytes` callers in the PUBLIC RESTORE path:** the backup DB probe+content read and the workflow-artifact content read share `_verify_manifest_files`' exact leak shape and received the same narrow wrapper (the DB probe now also guards its stat boundary; the DB mismatch keeps its exact frozen `database_sha256` wording). Purely backup-side machinery (`_copy_verified` source reads) is left unchanged — not public restore.
+
+**Layer proof:** the regressions patch the ACTUAL `builtins.open` seam selectively by target filename — `_stream_hash` uses built-in `open()`, not `Path.read_bytes`, so patching `read_bytes` alone demonstrably reaches only the semantic M17B reader (the IND2 experience). Tests A/B/C (probe succeeds; open gets `FileNotFoundError` / `PermissionError` / `OSError(EIO)`) each assert the MANIFEST layer fires first: `RecoveryCorruption` hierarchy, the blob hash present, a manifest-read-specific fragment, and the semantic `M17B payload blob` family explicitly NOT matched; never a raw OS exception. One representative adjacent regression proves the backup DB content-read permission branch (sqlite3 opens through its own C layer, so the selective `builtins.open` patch hits exactly the manifest hash read). The wrong-bytes hash-mismatch case keeps the existing `RecoveryCorruption` pass-through. The IND2 semantic-layer tests are retained unchanged and complementary.
+
+## Gates (first-run dispositions recorded exactly)
+
+- New IND3 battery (`test_m17c_ind3_regressions.py`): **5/5**; IND2/IND/IR-final/IR batteries **117/117** combined.
+- Focused M17A/M17B/M17C battery (38 files): **496/496** — with the gap now disclosed: the focused set does not include `test_m10f_backup_restore.py`, which is how the fix-forward below escaped local pre-push gates.
+- **Hard process gate honored**: committed (`6fcaf0b`) BEFORE validators; the two exact-name allowlist validators failed locally on the IND3 battery path (caught pre-push, sixth consecutive cycle); carve (`0f9c827`) precedes the push. All 21 validators green on the committed tree.
+- Frontend: vitest **143/143** (32 files), `tsc --noEmit` clean, `next build` succeeds.
+- Local full backend suite, FIRST RUN on `6fcaf0b`: **2943 passed / 8 skipped / 2 failed** — the two failures are the frozen M10F cells 02/05 pinning the DB hash-mismatch `database_sha256` diagnostic, which the IND3 wrapper had restated through `_verify_bytes`' generic message; CI run `36550409879` on `0f9c827` failed on exactly the same two tests (2/2931+20), independently reproducing the root cause. **Fix-forward `b4c31e6`**: the wrapper gained the optional bespoke mismatch restatement and the DB call passes the predecessor's exact frozen wording — the M10F evidence and the Blob pass-through are untouched; `test_m10f_backup_restore` + IND3 + IND2 files **61/61** green post-fix locally.
+- **CI run `36555193243` on `b4c31e6` (the corrected code head): SUCCESS, attempt 1** — Backend **2933 passed / 20 skipped / 0 failed** in 30:47 (GPU gates skipped on Actions runners by design); Frontend green.
+- Residue: this cycle's only new file is the IND3 battery; no new repo-root generated residue.
+
+## Frozen for the independent Codex delta review
+
+**Product delta `b2c50ff..b4c31e6`** (`6fcaf0b` + `0f9c827` + `b4c31e6`). Per the controlling disposition: ONE independent Codex delta-only review of exactly `b2c50ff..b4c31e6` plus direct predecessor implications, WITHOUT this reconciliation or the IND3 report; if it is clean, close M17C-B technically at the corrected head and proceed to M17C-C while PR #26 remains draft.
