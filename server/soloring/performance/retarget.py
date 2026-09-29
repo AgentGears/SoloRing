@@ -324,23 +324,15 @@ def _historical_corrupt(message: str) -> SoloRingError:
                          message, status_code=500)
 
 
-async def verify_retarget_evidence_historical(
+async def verify_retarget_assessment_historical(
         session: AsyncSession, *, source: PerformanceRevision,
-        assessment: PerformanceRetargetAssessment,
-        accepted_review: PerformanceRetargetReview) -> None:
-    """IND-03: the ONE shared HISTORICAL retarget-evidence verifier —
-    the complete assessment/review authority, factored from the laws
-    ``_verify_retarget_evidence``/``verify_assessment_persisted_laws``
-    already embody, consumed by BOTH retarget-candidate creation
-    (BEFORE any PerformanceCandidate is constructed or flushed) and
-    later candidate historical validation. Every failure involving
-    these ALREADY-PERSISTED rows is historical corruption
-    (``INTERNAL_INVARIANT_VIOLATION``, 500) with the original
-    diagnostic preserved — never a creation/admission 4xx. The only
-    4xx branches left are request-shaped eligibility refusals for
-    LAWFUL non-REQUIRES_REVIEW verdicts (a valid COMPATIBLE_AS_IS or
-    INCOMPATIBLE assessment makes retarget creation a no-op
-    rejection; the assessment itself is NOT corrupt)."""
+        assessment: PerformanceRetargetAssessment) -> str:
+    """IND2-03 Phase A: assessment historical authority — the COMPLETE
+    persisted assessment laws, returning the RECOMPUTED verdict so the
+    caller decides eligibility WITHOUT ever trusting the stored
+    ``overall_verdict`` before recomputation. Every persisted
+    corruption is historical ``INTERNAL_INVARIANT_VIOLATION`` 500 with
+    the original diagnostic preserved."""
     from soloring.domain.canonical import (canonical_hash,
                                            canonical_json_str)
     from soloring.production.models import (ProductionObject,
@@ -419,22 +411,17 @@ async def verify_retarget_evidence_historical(
         raise _historical_corrupt(
             "retarget assessment stored verdict != evaluator "
             "recomputation")
-    # retarget eligibility: a LAWFUL non-REQUIRES_REVIEW verdict is a
-    # request-shaped no-op refusal (the evidence itself is valid);
-    # anything else was already refused as corruption above
-    if verdict == COMPATIBLE_AS_IS:
-        raise _invalid(
-            ErrorCode.RETARGET_NOT_REQUIRED,
-            "same-revision physical coordinate requires no retarget — "
-            "assessment is valid evidence but retarget-candidate "
-            "creation is a no-op rejection")
-    if verdict == INCOMPATIBLE:
-        raise _invalid(
-            ErrorCode.RETARGET_INCOMPATIBLE,
-            "INCOMPATIBLE assessment cannot seed a retarget candidate")
-    # accepted review: exists, belongs to THIS exact assessment,
-    # ACCEPT decision, and complete persisted metadata grammar through
-    # the shared validator
+    return verdict
+
+
+async def verify_retarget_review_historical(
+        session: AsyncSession, *, assessment: PerformanceRetargetAssessment,
+        accepted_review: PerformanceRetargetReview) -> None:
+    """IND2-03 Phase B: accepted-review historical authority — resolved
+    ONLY after the recomputed verdict proved REQUIRES_REVIEW. Proves
+    exact assessment ownership, the ACCEPT_FOR_NEW_CANDIDATE decision,
+    and the complete persisted metadata grammar through the shared
+    validator; every failure on the persisted row is historical 500."""
     if accepted_review.assessment_id != assessment.id:
         raise _historical_corrupt(
             "accepted review belongs to a different assessment — "
@@ -452,6 +439,27 @@ async def verify_retarget_evidence_historical(
         raise _historical_corrupt(
             f"accepted review metadata violates persisted grammar: "
             f"{exc.message}") from exc
+
+
+async def verify_retarget_evidence_historical(
+        session: AsyncSession, *, source: PerformanceRevision,
+        assessment: PerformanceRetargetAssessment,
+        accepted_review: PerformanceRetargetReview) -> None:
+    """IND2-03: the combined wrapper for LATER already-published
+    candidate historical validation, composed from the two phases —
+    assessment historical authority, the published-evidence
+    REQUIRES_REVIEW requirement, and accepted-review authority. The
+    creation path calls the phases DIRECTLY so the eligibility
+    precedence (recomputed verdict BEFORE any review resolution)
+    holds; the candidate-specific provenance↔assessment coordinate law
+    remains at its higher layer in ``_verify_retarget_evidence``."""
+    verdict = await verify_retarget_assessment_historical(
+        session, source=source, assessment=assessment)
+    if verdict != REQUIRES_REVIEW:
+        raise _historical_corrupt(
+            "retarget seeded from a non-REQUIRES_REVIEW assessment")
+    await verify_retarget_review_historical(
+        session, assessment=assessment, accepted_review=accepted_review)
 
 
 async def list_reviews(session: AsyncSession, *, assessment_id: str
@@ -482,24 +490,42 @@ async def create_retarget_candidate(
                         "not found")
     assessment = await get_assessment(session,
                                       assessment_id=assessment_id)
+
+    # IND2-03 Phase A: the COMPLETE persisted assessment authority is
+    # recomputed BEFORE the verdict is trusted — the stored
+    # overall_verdict is never the eligibility decision. Corruption is
+    # historical 500 with the targeted diagnostic; no fresh evidence
+    # is constructed on top of unverified provenance.
+    verdict = await verify_retarget_assessment_historical(
+        session, source=performance, assessment=assessment)
+
+    # IND2-03 eligibility precedence: the two lawful no-op refusals
+    # are decided from the RECOMPUTED verdict and MUST NOT resolve or
+    # inspect accepted_review_id — a syntactically valid nonexistent
+    # review id keeps these 4xx branches.
+    if verdict == COMPATIBLE_AS_IS:
+        raise _invalid(
+            ErrorCode.RETARGET_NOT_REQUIRED,
+            "same-revision physical coordinate requires no retarget — "
+            "assessment is valid evidence but retarget-candidate "
+            "creation is a no-op rejection")
+    if verdict == INCOMPATIBLE:
+        raise _invalid(
+            ErrorCode.RETARGET_INCOMPATIBLE,
+            "INCOMPATIBLE assessment cannot seed a retarget candidate")
+
+    # Phase B: only a recomputed REQUIRES_REVIEW resolves the accepted
+    # review (a genuinely nonexistent request-supplied review id keeps
+    # the established not-found contract), then proves its historical
+    # authority — ownership, ACCEPT decision, metadata grammar.
     review = await session.get(PerformanceRetargetReview,
                                accepted_review_id)
     if review is None:
         raise not_found(ErrorCode.RETARGET_REVIEW_NOT_FOUND,
                         f"retarget review {accepted_review_id!r} "
                         "not found")
-
-    # IND-03: the COMPLETE persisted assessment/review authority is
-    # proven through the ONE shared historical verifier BEFORE any
-    # PerformanceCandidate is constructed or flushed — corrupted
-    # stored evidence is historical 500 corruption with the targeted
-    # diagnostic preserved, and no fresh immutable evidence row is
-    # inserted on top of unverified provenance (transaction rollback
-    # is not the authority boundary). The only 4xx branches are the
-    # lawful no-op eligibility refusals inside the verifier.
-    await verify_retarget_evidence_historical(
-        session, source=performance, assessment=assessment,
-        accepted_review=review)
+    await verify_retarget_review_historical(
+        session, assessment=assessment, accepted_review=review)
 
     # server constructs the exact retarget envelope — the caller
     # cannot forge source/from/to ids; the closed grammar (including

@@ -72,21 +72,61 @@ def _hash(obj) -> str:
     return canonical_hash(obj)
 
 
+def parse_persisted_json_text(value, *, what: str):
+    """IND2-01: the ONE persisted-JSON text parser for candidate
+    provenance at the M17B recovery boundary. The frozen storage
+    representation is TEXT — a BLOB that happens to decode as UTF-8 is
+    STILL an invalid runtime storage class and refuses. Requires an
+    actual Python ``str`` (bytes/bytearray/memoryview/numeric values
+    are RECOVERY_CORRUPTION with a provenance-specific diagnostic);
+    ``json.JSONDecodeError`` translates to RECOVERY_CORRUPTION. Never a
+    broad ``except Exception``, never a raw ``UnicodeDecodeError``."""
+    if not isinstance(value, str):
+        raise _corrupt(
+            f"{what} is not persisted TEXT storage (got "
+            f"{type(value).__name__}) — the frozen representation is "
+            "TEXT")
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise _corrupt(f"{what} is not JSON") from exc
+
+
 def _blob_bytes(blob_root: Path, h: str) -> bytes:
+    """IND2-02: the metadata/existence probe and the content read are
+    ONE narrow filesystem boundary around the exact content-addressed
+    path. Ordinary absence is the missing-Blob corruption family; a
+    permission/stat/read failure is the unreadable/storage-error family
+    with blob hash/path context; a disappearance between a successful
+    probe and the read lands back in the missing-Blob family (never a
+    raw ``FileNotFoundError``). The physical SHA-256 rehash is
+    retained."""
     import hashlib
     p = blob_root / "sha256" / h[:2] / h[2:4] / h
-    if not p.is_file():
+    try:
+        present = p.is_file()
+    except PermissionError as exc:
+        raise _corrupt(
+            f"M17B payload blob {h} at {p} is unreadable (permission "
+            "denied) during the storage probe") from exc
+    except OSError as exc:
+        raise _corrupt(
+            f"M17B payload blob {h} at {p} could not be probed through "
+            f"a storage error: {exc}") from exc
+    if not present:
         raise _corrupt(f"M17B payload blob {h} missing from Blob root")
-    # IND-04: normalize the EXPECTED storage read failures (unreadable
-    # through permission or a representative OS error) into the
-    # recovery-corruption contract with path/hash context — narrowly,
-    # never a broad Exception catch
     try:
         data = p.read_bytes()
+    except FileNotFoundError as exc:
+        # race: disappeared between the successful probe and the read —
+        # the missing-Blob family, not a raw FileNotFoundError
+        raise _corrupt(
+            f"M17B payload blob {h} missing from Blob root "
+            "(disappeared during restore verification)") from exc
     except PermissionError as exc:
         raise _corrupt(
             f"M17B payload blob {h} at {p} is unreadable "
-            f"(permission denied)") from exc
+            "(permission denied)") from exc
     except OSError as exc:
         raise _corrupt(
             f"M17B payload blob {h} at {p} is unreadable through a "
@@ -275,14 +315,11 @@ def _verify_candidates(con: sqlite3.Connection, blob_root: Path) -> None:
                 if aid is not None:
                     _verify_alignment_link(con, aid, r["subject_id"],
                                            r["project_id"])
-        # IND-04: malformed persisted provenance must surface as the
-        # structured recovery-corruption contract, never the raw
-        # parser exception
-        try:
-            prov = json.loads(r["provenance_json"])
-        except json.JSONDecodeError as exc:
-            raise _corrupt(
-                f"candidate {r['id']!r} provenance is not JSON") from exc
+        # IND2-01: the shared persisted-TEXT parser — storage class and
+        # decode failures both surface as structured recovery corruption
+        prov = parse_persisted_json_text(
+            r["provenance_json"], what=f"candidate {r['id']!r} "
+            "provenance")
         from soloring.performance.revision import (
             build_provenance_envelope)
         try:
@@ -461,13 +498,11 @@ def _verify_retargeted(con: sqlite3.Connection) -> None:
     for r in con.execute(
             "SELECT * FROM performance_candidates WHERE source_kind = "
             "'retargeted'"):
-        # IND-04: same structured-parser law as the candidate pass
-        try:
-            prov = json.loads(r["provenance_json"])
-        except json.JSONDecodeError as exc:
-            raise _corrupt(
-                f"retarget candidate {r['id']!r} provenance is not "
-                "JSON") from exc
+        # IND2-01: the same shared persisted-TEXT parser as the
+        # candidate pass
+        prov = parse_persisted_json_text(
+            r["provenance_json"], what=f"retarget candidate {r['id']!r} "
+            "provenance")
         ret = prov.get("retarget")
         if not isinstance(ret, dict) or set(ret) != {
                 "source_performance_revision_id",

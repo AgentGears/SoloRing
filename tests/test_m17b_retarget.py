@@ -166,16 +166,14 @@ async def test_g08_incompatible_assessment_blocks_retarget_candidate(client):
                        pr1["production_revision_id"],
                        prx["production_revision_id"])).json()
     assert a["overall_verdict"] == "INCOMPATIBLE"
-    # IND-03: cite a REAL review row (the route resolves the review
-    # before the verifier's lawful-verdict eligibility branch fires)
-    review = (await client.post(
-        f"/performance-retarget-assessments/{a['id']}/reviews",
-        json={"decision": "ACCEPT_FOR_NEW_CANDIDATE",
-              "reviewed_by": "rev"})).json()
+    # IND2-03: eligibility is decided from the RECOMPUTED verdict
+    # BEFORE any review resolution — a syntactically valid
+    # nonexistent accepted_review_id keeps the 422 branch
     r = await client.post(
         f"/performance-revisions/{rev['id']}/retarget-candidates",
         json={"assessment_id": a["id"],
-              "accepted_review_id": review["id"],
+              "accepted_review_id":
+                  "55555555-5555-4555-8555-555555555555",
               "producer_id": "p", "producer_version": "1",
               "source_identity": None, "parameters_sha256": None})
     assert r.status_code == 422
@@ -333,16 +331,14 @@ async def test_g17_compatible_as_is_assessment_is_valid_evidence_but_retarget_ca
                        pr1["production_revision_id"],
                        pr1["production_revision_id"])).json()
     assert a["overall_verdict"] == "COMPATIBLE_AS_IS"
-    # IND-03: cite a REAL review row (the route resolves the review
-    # before the verifier's lawful-verdict eligibility branch fires)
-    review = (await client.post(
-        f"/performance-retarget-assessments/{a['id']}/reviews",
-        json={"decision": "ACCEPT_FOR_NEW_CANDIDATE",
-              "reviewed_by": "rev"})).json()
+    # IND2-03: eligibility is decided from the RECOMPUTED verdict
+    # BEFORE any review resolution — a syntactically valid
+    # nonexistent accepted_review_id keeps the 422 branch
     r = await client.post(
         f"/performance-revisions/{rev['id']}/retarget-candidates",
         json={"assessment_id": a["id"],
-              "accepted_review_id": review["id"],
+              "accepted_review_id":
+                  "55555555-5555-4555-8555-555555555555",
               "producer_id": "p", "producer_version": "1",
               "source_identity": None, "parameters_sha256": None})
     assert r.status_code == 422

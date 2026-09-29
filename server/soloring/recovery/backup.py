@@ -1120,7 +1120,21 @@ def _verify_manifest_files(root: Path, manifest: dict) -> None:
     blob_root = root / "blobs"
     for h in manifest["blob_hashes"]:
         path = blob_root / _blob_relative_path(h)
-        if not path.is_file():
+        # IND2-02: the manifest existence probe and hash read are one
+        # narrow filesystem boundary — permission/stat failures
+        # translate to recovery corruption with blob context, never a
+        # raw OS error
+        try:
+            present = path.is_file()
+        except PermissionError as exc:
+            raise RecoveryCorruption(
+                f"backup Blob {h} at {path} is unreadable (permission "
+                "denied) during the storage probe") from exc
+        except OSError as exc:
+            raise RecoveryCorruption(
+                f"backup Blob {h} at {path} could not be probed "
+                f"through a storage error: {exc}") from exc
+        if not present:
             raise RecoveryCorruption(f"backup Blob {h} is missing.")
         _verify_bytes(path, h)
 
