@@ -32,6 +32,10 @@ ALLOWED_PATTERNS = [
     r"^server/alembic/versions/0022_m17c_schema8_capture"
     r"\.py$",
     r"^tests/test_m17cc_migration\.py$",
+    # M17C-C slice 2 (the coherent performance-plane read)
+    r"^server/soloring/performance/m17cc_capture_read\.py$",
+    r"^tests/test_m17cc_capture\.py$",
+    r"^tests/m17cc_capture_helper\.py$",
     # M17A implementation (frozen R5): the dialogue/vocal foundation
     # surface — performance package, migration, API, recovery
     # verifier, boundary validators, and the M17A tests.

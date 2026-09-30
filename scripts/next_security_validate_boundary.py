@@ -89,6 +89,10 @@ ALLOWLIST = (
     "server/alembic/versions/0022_m17c_schema8_capture.py",
     "server/soloring/performance/m17cc_models.py",
     "tests/test_m17cc_migration.py",
+    # M17C-C slice 2
+    "server/soloring/performance/m17cc_capture_read.py",
+    "tests/test_m17cc_capture.py",
+    "tests/m17cc_capture_helper.py",
     "server/soloring/recovery/backup.py",
     "server/soloring/recovery/successor_semantics.py",
     "server/soloring/performance/revision.py",

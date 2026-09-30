@@ -127,6 +127,10 @@ M16_SURFACE = (
     r"^server/alembic/versions/0022_m17c_schema8_capture"
     r"\.py$",
     r"^tests/test_m17cc_migration\.py$",
+    # M17C-C slice 2 (the coherent performance-plane read)
+    r"^server/soloring/performance/m17cc_capture_read\.py$",
+    r"^tests/test_m17cc_capture\.py$",
+    r"^tests/m17cc_capture_helper\.py$",
     r"^tests/test_post_m13_next_security\.py$",
     r"^tests/test_m14_base_corpus\.py$",
 
