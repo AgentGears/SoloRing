@@ -964,8 +964,15 @@ _M17CC_CHILD_COLUMNS = (
 def _verify_m17cc_capture_state(con: sqlite3.Connection,
                                 blob_root: Path) -> None:
     """§13.4: total snapshot classification + the captured-schema-8
-    equivalence/closure/arithmetic/coherence/conflict laws."""
-    revisions = {}
+    equivalence/closure/arithmetic/coherence/conflict laws.
+
+    Memory law: the traversal STREAMS — phase 1 retains only each
+    revision's (shot_id, schema) after decoding (scale databases carry
+    thousands of multi-MB snapshots; holding the decoded documents
+    would exhaust memory), and phase 2 re-decodes ONLY the schema-8
+    snapshots the closure laws need."""
+    classified = {}
+    schema8_ids = []
     for row in con.execute(
             "SELECT id, shot_id, snapshot_json FROM shot_revisions"):
         try:
@@ -978,15 +985,16 @@ def _verify_m17cc_capture_state(con: sqlite3.Connection,
             raise _corrupt(
                 f"ShotRevision {row['id']} snapshot is not a JSON "
                 "object")
-        revisions[row["id"]] = (row["shot_id"], snap,
-                                snap.get("schema_version"))
+        schema = snap.get("schema_version")
+        classified[row["id"]] = (row["shot_id"], schema)
+        if schema == 8:
+            schema8_ids.append((row["id"], row["shot_id"]))
 
     # total classification: every revision is either schema <8 with
     # ZERO M17C-C companions, or schema 8 with the full closure. No
     # "companions ignored because the snapshot is old" and no "schema
     # 8 accepted without companions".
-    schema8 = []
-    for rev_id, (shot_id, snap, schema) in revisions.items():
+    for rev_id, (shot_id, schema) in classified.items():
         if not isinstance(schema, int) or isinstance(schema, bool) \
                 or not 1 <= schema <= 8:
             raise _corrupt(
@@ -1009,7 +1017,6 @@ def _verify_m17cc_capture_state(con: sqlite3.Connection,
                 raise _corrupt(
                     f"ShotRevision {rev_id} is schema 8 without its "
                     "performance companion parent")
-            schema8.append((rev_id, shot_id, snap))
 
     # orphan sweep: companions reference known revisions (FK-shielded
     # live; the law stands as the recovery parity mirror)
@@ -1017,12 +1024,15 @@ def _verify_m17cc_capture_state(con: sqlite3.Connection,
                   "shot_revision_performance_segments"):
         for (rev_id,) in con.execute(
                 f"SELECT DISTINCT shot_revision_id FROM {table}"):
-            if rev_id not in revisions:
+            if rev_id not in classified:
                 raise _corrupt(
                     f"{table} references missing ShotRevision "
                     f"{rev_id!r}")
 
-    for rev_id, shot_id, snap in schema8:
+    for rev_id, shot_id in schema8_ids:
+        snap = json.loads(con.execute(
+            "SELECT snapshot_json FROM shot_revisions WHERE id = ?",
+            (rev_id,)).fetchone()[0])
         _verify_one_schema8(con, blob_root, rev_id, shot_id, snap)
 
 
