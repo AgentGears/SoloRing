@@ -259,7 +259,42 @@ NO backup/restore/downgrade slice work (§1.7 is next); NO §14.6 sampler or der
 
 ## Next slice (unchanged)
 
-§1.7 backup/restore + downgrade closure: clean round trips preserving companions, staged real-0021→0022 upgrade retaining all M17C-C rows, populated downgrade refusals naming the tables, and the head-sweep of test constants.
+§1.7 backup/restore + downgrade closure — CORRECTED WORDING (2026-09-30, review correction accepted): two DISTINCT assertions, not one. (1) A real populated **0021** database cannot already contain the three 0022 M17C-C tables — the frozen upgrade requirement is a real-0021→0022 upgrade retaining every **M17C-B predecessor row** verbatim with the three new tables created empty. (2) Separately, M17C-C state created AT 0022 (schema-8 captures, companion rows, fixture-valid derived inputs) then proves backup/restore durability. Clean round trips preserving companions, populated downgrade refusals naming the tables, and the head-sweep of test constants.
 
 
 
+
+---
+
+# M17C-C slice 6 — §1.7 backup/restore + downgrade closure — 2026-09-30 — IMPLEMENTED
+
+Slice 6 is complete and green under the frozen rule: **valid M17C-C historical closure survives backup/restore exactly; invalid downgrade cannot erase it.** This closes the last M17C-C slice; the capture-phase record wording correction (real-0021→0022 retains M17C-B PREDECESSOR rows; M17C-C state is created AT 0022 and round-tripped separately) is applied above as two distinct assertions.
+
+## Delivered (the fourteen gate points)
+
+1. **Real 0021→0022 staged upgrade (verbatim)**: a genuine populated 0021 database (a lawful M17C-A/B world reshaped to the 0021 identity — three successor tables dropped, head stamped, manifest canonically rewritten) upgrades through the actual migration with ROW-CONTENT FINGERPRINTS over twelve predecessor surfaces (candidates, PRs, VPs, selections, alignments, both binding tables, both classification tables, both working-mapping tables, blobs) plus the table inventory (M17C-C tables excluded — they legitimately appear) provably IDENTICAL, the three new tables existing EMPTY, and recovery green at 0022.
+2. **Clean schema-8 round trip**: dialogue+generic capture → backup → restore fresh → snapshot bytes/hash, companion parent, children (count/order/bytes/hashes/projection), immutable PR/VP/binding/classification rows, and the blobs table byte-identical (BEFORE fingerprints read the live DB file AFTER the backup — the backup checkpoints WAL, so the file is exactly the staged state); the §12 historical response IDENTICAL through the ACTUAL public reader running on a second app bound to the restored tree; full recovery verifier green.
+3. **The milestone exit criterion composite**: 8-over-7 capture → every forbidden current surface mutated (newer VP re-selected, newer PR/mapping, all current mappings deleted, dependencies cleared, duration changed) → historical read A → backup → restore into a FRESH tree (the restored app is disjoint from the live tree, so read B provably reads only the restored closure) → recovery verifier green → historical read B → **A == B exactly**, both planes intact.
+4. **8-over-7 survives restore**: covered by the composite (intra_shot AND performance planes both present and equal in B).
+5. **GPI durability through a REAL backup**: fixture-valid rows inserted into the LIVE database (schema-1 WorkflowSpec carrying the translation identity, content-addressed manifest/template artifact files at the canonical hash-sharded paths, real placed Blob bytes so the 14-path liveness walk finds them) survive backup/restore with generation identity, roles, blob hashes, retained bytes, segment tiebacks, translation identity, and derived-input hashes EXACT; the §13.6 recovery laws validate them on the restored tree. No production writer.
+6. **Blob-FK inventory restoration**: the restored 0022 database's FK metadata yields EXACTLY the 14-path head policy (generation_performance_inputs.blob_hash the sole M17C-C addition; the predecessor set proven 13 without it), certified mechanically by the restore-time liveness enumeration; a genuine 0021-retargeted backup restores at 13 paths with the verifier green at 0021.
+7. **Three populated-downgrade fences** naming the blocking table — already frozen in test_m17cc_migration (specs/segments with the FK-off isolated child proving the SEGMENT fence independently/GPI), unchanged by this slice.
+8. **Empty downgrade**: 0022→0021 drops cleanly with all three tables gone and the resulting database ACCEPTED by the predecessor head (verifier green at 0021).
+9. **Non-destructive refusal**: on a VALID schema-8 staged state the downgrade refuses at the specs fence, the head stays 0022, parent/children fingerprints are byte-identical afterward, no table is partially dropped, and recovery stays green — the fence fires before any destructive DDL.
+10. **Explicit backup inclusion**: the restored file's FK metadata + the liveness enumeration certify the three tables and their Blob path mechanically — a future logical-omission cannot pass the inventory equality.
+11. **Head sweep (mechanical, this slice)**: every committed-tree occurrence of `0022_m17c_schema8_capture` / `0021_m17c_shot_performance_mappings` / the head sets classified — product side: backup.py (M17C_C head = current EXPECTED, M17C_B = predecessor restore target, SUPPORTED set, 14-path policy), successor_semantics (6 chain memberships incl. M17C_C), m17c_verifier (head-aware trio), the two migration identities; validator side: m14/m16 boundary regexes admit the 0021 migration path (predecessor-specific by design); test side: the seed/stamp/baseline constants advancing to 0022 (slice-1 sweep, annotated) and the sr2 assertion `M17C_C_ALEMBIC_HEAD == "0022..."`. **No stale 0021-as-latest anywhere.**
+12. **Predecessor behavior frozen**: the 0021-retargeted restore green at 13 paths + verifier at 0021 + slice-5's rows-refused laws re-confirmed in the inventory test.
+13. **No new capture/history/recovery semantics**: zero product-code changes in this slice — the battery proved the slices-2–5 laws compose; no defect was found requiring revision.
+14. **No M17C-D encroachment**: GPI rows are fixtures only.
+
+## Gates (first-run dispositions recorded exactly)
+
+- New §1.7 battery (`test_m17cc_roundtrip.py`): **7/7**. First-run corrections were fixture-level (the predecessor-table fingerprint legitimately excludes the three appearing tables; the 13-path constant is `M17B_BLOB_FK_COLUMNS`; a live-DB fixture generation must satisfy the backup's generation-liveness contract — schema-1 spec with an `inputs` object, plus CONTENT-ADDRESSED manifest/template artifact files at `kind/sha256/xx/yy/<hash>.json` whose real hashes feed the generation row).
+- Families: migration + recovery + history batteries re-confirmed alongside.
+- Local full backend suite: **PENDING-FILL**.
+- **CI run on the slice-6 head: PENDING-FILL**.
+- Residue: slice 6's new files = `tests/test_m17cc_roundtrip.py`; product code UNCHANGED.
+
+## Fences honored
+
+No capture/history/recovery law revisions; no §14.6 sampler or GPI writer; PR #26 remains draft, unmerged, unready — ready for the exhaustive final first-pass review against the frozen R0 scope and predecessor-impact register.
