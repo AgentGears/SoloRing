@@ -104,3 +104,37 @@ Additive only: recovery head constants/dispatch (0022 admitted; 0020/0021 laws b
 ## Next slice (unchanged from the R0 sequencing)
 
 Slice 2: the one-read tenth element + `performance_pack` schema-8 wrap + no-empty law; slice 3: fenced persistence + reuse + §11.4 blockers; then §12 history, §13.4/§13.5/§13.6 verifier laws.
+
+---
+
+# M17C-C slice 2 — the coherent performance-plane READ + the pure schema-8 wrap — 2026-09-30 — IMPLEMENTED
+
+Slice 2 is complete and green per the narrow-gate guidance. Slice-2 head: **`45d565f`** (`10b596b` slice-2 source + `91c62a2` carve + `45d565f` one-line spy fix-forward).
+
+## Delivered (exactly the six boundary points)
+
+1. **One-read coherence**: `_snapshot_one_read` returns a TENTH element — `resolve_performance_plane` (new `server/soloring/performance/m17cc_capture_read.py`) resolves the complete plane on the SAME pinned SQLite snapshot, last in the frozen precedence chain (after M16), as a plain immutable-in-practice value: mappings, PR closure fields, immutable revision vocal bindings, paired vocal mappings, and the full readiness projection. The M17C-B session-based verifiers run through an `AsyncSession` bound to the pinned connection in savepoint-join mode (verified by scratch: same-snapshot reads, no second pooled connection). No reconstruction from current state after the read; `_persist_revision_fenced` untouched (no companion writes — slice 3).
+2. **Pure builder**: `build_capturable_snapshot(..., performance_pack=None)` performs schema construction only — it queries nothing and evaluates no readiness.
+3. **No mapping ⇒ exact predecessor**: `performance_pack` absent/None leaves the output byte-identical (asserted at schema 1 and 2 builder forms AND live: the captured snapshot's canonical bytes AND hash equal the no-pack build).
+4. **No-empty schema 8**: a pack with an empty segments list is unrepresentable (internal-invariant refusal); non-empty position-ordered segments only.
+5. **Closed uniform vocal grammar**: complete 5-key vocal object or explicit `null`, enforced structurally, never omission.
+6. **Schema 8 over schema 7 proven directly**: the M16 intra_shot block and every predecessor field are byte-equal beneath the new plane (only `schema_version` and `performance` change).
+
+Plus the capture gate: `capture_revision_with_visual` refuses non-READY with typed **409 PERFORMANCE_CAPTURE_NOT_READY** (per-segment diagnostics; the error code's first live consumer) BEFORE any builder invocation, mirroring the frozen M7D→M16 blocker precedence; corruption fails closed 500 inside the read through the shared seam. Non-capture consumers of the one-read seam (observation_readiness) are unaffected for no-mapping shots (a COUNT-only fast path).
+
+## The coherency proof (the reviewer's requested shape)
+
+`test_one_read_coherence_survives_post_read_mutation`: after `_snapshot_one_read` returns, the test deletes the working mapping, repoints the paired vocal mapping through the supported M17A API, and shrinks the Shot duration — the already-resolved tenth element and the snapshot built from the READ tuple still carry the originally captured values. This directly proves the intended boundary: the schema-8 content is fixed at read time, immune to subsequent current-state mutation.
+
+## Gates (first-run dispositions recorded exactly)
+
+- New slice-2 battery (`test_m17cc_capture.py`): **11/11**; capture-family + interaction suites (m13_shot_capture, m10d races/proofs, m16 recovery, all M17C batteries): **120/120**; focused suite: **570/570**.
+- **Hard process gate honored**: committed BEFORE validators; committed-tree validation caught the five-validator carve for the three slice-2 files pre-push (`91c62a2`). All 21 validators green on the committed tree.
+- Frontend: vitest **143/143**, `tsc --noEmit` clean, `next build` succeeds.
+- Local full backend suite, FIRST RUN on `10b596b`: **2970 passed / 8 skipped / 1 failed** — the M7C structural-singularity spy's builder signature lacked the new `performance_pack` pass-through (fixture-side; the single-builder proof now also covers the schema-8 plane). Fix-forward `45d565f` (one line + comment); `test_m7c_capture` 29/29 post-fix.
+- **CI run `36679790505` on `45d565f`: SUCCESS, attempt 1 — Backend 2959 passed / 20 skipped / 0 failed**; Frontend green. (An intermediate run on `91c62a2` failed only on the same spy finding — superseded by the fix-forward head.)
+- Residue: slice 2's new files = `m17cc_capture_read.py`, `test_m17cc_capture.py`, `m17cc_capture_helper.py`.
+
+## Next slice (unchanged)
+
+Slice 3: fenced persistence of the companion parent/children, reuse-winner validation extended to the performance plane, and the §11.4 blocker surface.
