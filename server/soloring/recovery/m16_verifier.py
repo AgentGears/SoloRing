@@ -718,11 +718,15 @@ def verify_m16_intra_shot_state(staged_db: Path) -> None:
 
         # History is enumerated from the OUTER schema-7 snapshots: a
         # schema-7 revision without companions is corruption, and a
-        # companion parent without schema 7 is corruption.
+        # companion parent without schema 7 (or its M17C-C §11.5
+        # schema-8 wrap, which retains the exact predecessor base) is
+        # corruption.
         for rev_id, snapshot_json in rows(
                 "SELECT id, snapshot_json FROM shot_revisions"):
             snap = json.loads(snapshot_json)
-            if snap.get("schema_version") == 7:
+            if snap.get("schema_version") == 7 or (
+                    snap.get("schema_version") == 8
+                    and "intra_shot" in snap):
                 verify_intra_shot_history_sync(
                     con, rev_id, snapshot=snap)
         for (rev_id,) in rows(
@@ -735,10 +739,21 @@ def verify_m16_intra_shot_state(staged_db: Path) -> None:
                 _corrupt(
                     f"intra_shot companions reference missing "
                     f"ShotRevision {rev_id}")
-            if json.loads(snap[0][0]).get("schema_version") != 7:
+            outer = json.loads(snap[0][0])
+            if outer.get("schema_version") == 8:
+                # the M17C-C §11.5 wrap retains the exact predecessor
+                # base — companions under schema 8 require the retained
+                # embedded block (verified through the same history law
+                # in the first loop)
+                if "intra_shot" not in outer:
+                    _corrupt(
+                        f"ShotRevision {rev_id} carries intra_shot "
+                        "companions without the retained embedded block "
+                        "under its schema-8 wrap")
+            elif outer.get("schema_version") != 7:
                 _corrupt(
                     f"ShotRevision {rev_id} carries companions without "
-                    "outer schema 7")
+                    "outer schema 7 or its schema-8 wrap")
 
         for row in rows(
                 "SELECT id, shot_id, source_kind, "

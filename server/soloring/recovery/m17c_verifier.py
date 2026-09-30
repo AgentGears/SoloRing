@@ -419,12 +419,24 @@ def verify_m17c_binding_state(staged_db: Path,
     working-mapping row laws run. Schema shape is NEVER inferred from
     optional table presence.
 
-    At head 0022 (M17C-C slice 1, schema/storage-only) the verifier
-    runs with 0021-EQUIVALENT semantics: the PF-03 + PF-02 laws are
-    unchanged, and the new schema-8 capture storage tables
-    (§§10.4-10.6) are permitted present. Their §13.4/§13.6 verification
-    laws land with the capture/history/derived-input slices; at this
-    head the tables are storage-only and carry no rows."""
+    At head 0022 (M17C-C) the three schema-8 capture tables are
+    REQUIRED, and the §13.4/§13.6 M17C-C recovery passes run on top
+    of the unchanged PF-03/PF-02 laws: the captured-schema-8 laws
+    (total snapshot classification, snapshot↔parent↔children
+    equivalence, immutable authority closure, exact rational
+    arithmetic, historical project/subject coherence, and the captured
+    same-subject channel-conflict law) plus the structural
+    Generation-owned derived-input laws. Recovery re-derives every law
+    from the STAGED ROWS + immutable authority + retained Blob
+    closure — it never delegates to the §12 historical reader and
+    never consults current working state. At heads 0020/0021 the rows
+    those heads cannot represent are REFUSED: any companion or
+    derived-input row refuses.
+
+    §13.6 deferral (frozen scope): the control-schedule recomputation
+    and the sample-exact vocal-audio realization laws require the
+    M17C-D §14.6 sampler; this pass proves the structural/tieback/
+    rehash/identity laws constructible today."""
     if blob_root is None:
         from soloring.settings import get_settings
         blob_root = get_settings().blob_dir
@@ -450,6 +462,27 @@ def verify_m17c_binding_state(staged_db: Path,
                 raise _corrupt(
                     f"staged head {head!r} is missing the PF-02 "
                     "working-mapping table")
+        if head == _HEAD_0022:
+            # §13.4: head behavior stays explicit — the successor
+            # migration physically creates the three capture tables, so
+            # a 0022 database without them is structurally corrupt
+            missing = [t for t in _M17CC_TABLES if t not in present]
+            if missing:
+                raise _corrupt(
+                    f"staged head 0022 is missing the M17C-C capture "
+                    f"tables {missing}")
+        else:
+            # §13.4 total classification at the predecessor heads: rows
+            # those heads cannot represent are refused, not ignored
+            # (the tables themselves may lawfully be present as
+            # create_all staging artifacts)
+            for table in _M17CC_TABLES:
+                if table in present and con.execute(
+                        f"SELECT 1 FROM {table} LIMIT 1").fetchone():
+                    raise _corrupt(
+                        f"staged head {head!r} carries {table} rows — "
+                        "schema-8 capture companions are created by "
+                        "successor migration 0022 only")
         # IR-01/IR-02: the COMPLETE physical-schema phase runs BEFORE
         # any semantic row traversal — head 0021 inherits the frozen
         # 0020 PF-03 schemas physically and must not weaken their
@@ -470,6 +503,12 @@ def verify_m17c_binding_state(staged_db: Path,
         _verify_retarget_lineage(con)
         if head != _HEAD_0020:
             _verify_shot_performance_mappings(con)
+        if head == _HEAD_0022:
+            # §13.4/§13.6 (M17C-C): AFTER every predecessor pass — the
+            # captured-schema-8 laws extend the chain, they do not
+            # replace it
+            _verify_m17cc_capture_state(con, blob_root)
+            _verify_generation_performance_inputs(con, blob_root)
     finally:
         con.close()
 
@@ -890,3 +929,586 @@ def _verify_shot_performance_mappings(con) -> None:
         # rewritten by diagnosis and never refused here. Other
         # structural corruption of the vocal row stays the M17A
         # verifier's concern.
+
+
+# ---------------------------------------------------------------------------
+# M17C-C (frozen R4 §13.4/§13.6): captured schema-8 + derived-input laws.
+# Recovery re-derives every law from the staged rows + immutable
+# authority + retained Blob closure. It never calls the §12 historical
+# reader (the two surfaces agree because they implement the same frozen
+# laws, not because one delegates) and never consults current working
+# state — no VP selection, no current vocal/performance mappings, no
+# candidates as working intent, no current Shot dependency selection,
+# no current Shot duration.
+# ---------------------------------------------------------------------------
+
+_M17CC_TABLES = (
+    "shot_revision_performance_specs",
+    "shot_revision_performance_segments",
+    "generation_performance_inputs",
+)
+
+_M17CC_CHILD_COLUMNS = (
+    "position, subject_id, performance_revision_id, "
+    "performance_payload_blob_hash, performance_payload_sha256, "
+    "performance_profile_id, performance_kind, "
+    "performance_start_num, performance_start_den, "
+    "performance_end_num, performance_end_den, "
+    "shot_anchor_num, shot_anchor_den, performance_mapping_hash, "
+    "vocal_performance_revision_id, vocal_binding_hash, "
+    "vocal_mapping_hash, source_start_sample, "
+    "source_end_sample_exclusive, sample_rate_hz, "
+    "segment_json, segment_hash")
+
+
+def _verify_m17cc_capture_state(con: sqlite3.Connection,
+                                blob_root: Path) -> None:
+    """§13.4: total snapshot classification + the captured-schema-8
+    equivalence/closure/arithmetic/coherence/conflict laws."""
+    revisions = {}
+    for row in con.execute(
+            "SELECT id, shot_id, snapshot_json FROM shot_revisions"):
+        try:
+            snap = json.loads(row["snapshot_json"])
+        except (ValueError, TypeError) as exc:
+            raise _corrupt(
+                f"ShotRevision {row['id']} snapshot_json is not "
+                f"decodable: {exc}") from exc
+        if not isinstance(snap, dict):
+            raise _corrupt(
+                f"ShotRevision {row['id']} snapshot is not a JSON "
+                "object")
+        revisions[row["id"]] = (row["shot_id"], snap,
+                                snap.get("schema_version"))
+
+    # total classification: every revision is either schema <8 with
+    # ZERO M17C-C companions, or schema 8 with the full closure. No
+    # "companions ignored because the snapshot is old" and no "schema
+    # 8 accepted without companions".
+    schema8 = []
+    for rev_id, (shot_id, snap, schema) in revisions.items():
+        if not isinstance(schema, int) or isinstance(schema, bool) \
+                or not 1 <= schema <= 8:
+            raise _corrupt(
+                f"ShotRevision {rev_id} carries illegal snapshot "
+                f"schema_version {schema!r}")
+        companions = con.execute(
+            "SELECT COUNT(*) FROM shot_revision_performance_specs "
+            "WHERE shot_revision_id = ?", (rev_id,)).fetchone()[0]
+        children = con.execute(
+            "SELECT COUNT(*) FROM shot_revision_performance_segments "
+            "WHERE shot_revision_id = ?", (rev_id,)).fetchone()[0]
+        if schema < 8:
+            if companions or children:
+                raise _corrupt(
+                    f"ShotRevision {rev_id} carries schema {schema} "
+                    "with M17C-C companion rows — schema <8 captures "
+                    "write zero companions")
+        else:
+            if not companions:
+                raise _corrupt(
+                    f"ShotRevision {rev_id} is schema 8 without its "
+                    "performance companion parent")
+            schema8.append((rev_id, shot_id, snap))
+
+    # orphan sweep: companions reference known revisions (FK-shielded
+    # live; the law stands as the recovery parity mirror)
+    for table in ("shot_revision_performance_specs",
+                  "shot_revision_performance_segments"):
+        for (rev_id,) in con.execute(
+                f"SELECT DISTINCT shot_revision_id FROM {table}"):
+            if rev_id not in revisions:
+                raise _corrupt(
+                    f"{table} references missing ShotRevision "
+                    f"{rev_id!r}")
+
+    for rev_id, shot_id, snap in schema8:
+        _verify_one_schema8(con, blob_root, rev_id, shot_id, snap)
+
+
+def _m17cc_embedded_grammar(perf, rev_id: str) -> list:
+    from soloring.performance.m17cc_capture_read import (
+        EMBEDDED_SEGMENT_KEYS,
+    )
+    if not isinstance(perf, dict) or perf.get("schema_version") != 1:
+        raise _corrupt(
+            f"ShotRevision {rev_id} performance history declares "
+            f"unknown schema {perf!r}")
+    segments = perf.get("segments")
+    if not isinstance(segments, list) or not segments:
+        raise _corrupt(
+            f"ShotRevision {rev_id} performance history carries an "
+            "empty segment list — no empty schema 8 exists")
+    for index, seg in enumerate(segments):
+        if not isinstance(seg, dict) or set(seg) != set(
+                EMBEDDED_SEGMENT_KEYS):
+            raise _corrupt(
+                f"ShotRevision {rev_id} performance history segment "
+                f"{index} is not the exact frozen key projection")
+        if seg["position"] != index:
+            raise _corrupt(
+                f"ShotRevision {rev_id} performance history segment "
+                f"{index} declares position {seg['position']!r}")
+        vocal = seg["vocal"]
+        if vocal is not None and (not isinstance(vocal, dict) or
+                                  set(vocal) != {
+                                      "vocal_performance_revision_id",
+                                      "vocal_binding_hash",
+                                      "source_start_sample",
+                                      "source_end_sample_exclusive",
+                                      "sample_rate_hz"}):
+            raise _corrupt(
+                f"ShotRevision {rev_id} performance history segment "
+                f"{index} carries a vocal object outside the closed "
+                "5-key grammar")
+    return segments
+
+
+def _verify_one_schema8(con: sqlite3.Connection, blob_root: Path,
+                        rev_id: str, shot_id: str, snap: dict) -> None:
+    where = f"ShotRevision {rev_id}"
+    # §13.4 snapshot↔parent equivalence: the embedded block reproduces
+    # the canonical parent bytes EXACTLY (no semantic-equivalence
+    # shortcut) and the canonical bytes reproduce the hash
+    parent = con.execute(
+        "SELECT schema_version, spec_json, spec_hash FROM "
+        "shot_revision_performance_specs WHERE shot_revision_id = ?",
+        (rev_id,)).fetchall()
+    if len(parent) != 1:
+        raise _corrupt(
+            f"{where} requires exactly one performance companion "
+            f"parent, found {len(parent)}")
+    parent = parent[0]
+    if parent["schema_version"] != 1:
+        raise _corrupt(
+            f"{where} performance companion parent carries unknown "
+            f"schema {parent['schema_version']!r}")
+    try:
+        spec = json.loads(parent["spec_json"])
+    except (ValueError, TypeError) as exc:
+        raise _corrupt(
+            f"{where} performance companion spec_json is malformed "
+            f"JSON: {exc}") from exc
+    if _canonical(spec) != parent["spec_json"] \
+            or _hash(spec) != parent["spec_hash"]:
+        raise _corrupt(
+            f"{where} performance companion spec_json/spec_hash "
+            "disagree with canonical bytes")
+    embedded = snap.get("performance")
+    if not isinstance(embedded, dict):
+        raise _corrupt(
+            f"{where} schema-8 snapshot carries no performance block")
+    if _canonical(embedded) != parent["spec_json"]:
+        raise _corrupt(
+            f"{where} snapshot performance block bytes disagree with "
+            "its companion parent spec bytes")
+    segments = _m17cc_embedded_grammar(spec, rev_id)
+
+    # §13.4 parent↔children equivalence: count, position, canonical
+    # segment bytes/hash, every projection column, rational fields,
+    # and vocal-group nullability project exactly from the embedded
+    # grammar (the recovery form of the slice-3 persistence invariant)
+    children = con.execute(
+        "SELECT " + _M17CC_CHILD_COLUMNS +
+        " FROM shot_revision_performance_segments "
+        "WHERE shot_revision_id = ? ORDER BY position",
+        (rev_id,)).fetchall()
+    if not children:
+        raise _corrupt(
+            f"{where} is schema 8 with an empty companion child set")
+    if len(children) != len(segments):
+        raise _corrupt(
+            f"{where} performance companion row count disagrees: "
+            f"stored {len(children)}, captured {len(segments)}")
+
+    verified = []
+    for row, seg in zip(children, segments):
+        verified.append(_verify_m17cc_child(
+            con, blob_root, rev_id, shot_id, row, seg))
+    _verify_m17cc_captured_conflicts(rev_id, verified)
+
+
+def _verify_m17cc_child(con, blob_root, rev_id, shot_id, row, seg):
+    import hashlib
+    where = (f"ShotRevision {rev_id} performance companion child at "
+             f"position {row['position']}")
+    if row["position"] != seg["position"]:
+        raise _corrupt(
+            f"{where} disagrees with the embedded captured ordering")
+    if row["segment_json"] != _canonical(seg) \
+            or row["segment_hash"] != _hash(seg):
+        raise _corrupt(
+            f"{where} segment_json/segment_hash disagree with the "
+            "canonical embedded segment")
+    vocal = seg["vocal"]
+    for column, want in (
+        ("subject_id", seg["subject_id"]),
+        ("performance_revision_id", seg["performance_revision_id"]),
+        ("performance_payload_sha256",
+         seg["performance_payload_sha256"]),
+        ("performance_profile_id", seg["performance_profile_id"]),
+        ("performance_kind", seg["performance_kind"]),
+        ("performance_start_num", seg["performance_start_ms"]["num"]),
+        ("performance_start_den", seg["performance_start_ms"]["den"]),
+        ("performance_end_num", seg["performance_end_ms"]["num"]),
+        ("performance_end_den", seg["performance_end_ms"]["den"]),
+        ("shot_anchor_num", seg["shot_anchor_ms"]["num"]),
+        ("shot_anchor_den", seg["shot_anchor_ms"]["den"]),
+    ):
+        if row[column] != want:
+            raise _corrupt(
+                f"{where} column {column} disagrees with the embedded "
+                "captured segment")
+    for column, key in (
+        ("vocal_performance_revision_id",
+         "vocal_performance_revision_id"),
+        ("vocal_binding_hash", "vocal_binding_hash"),
+        ("source_start_sample", "source_start_sample"),
+        ("source_end_sample_exclusive",
+         "source_end_sample_exclusive"),
+        ("sample_rate_hz", "sample_rate_hz"),
+    ):
+        captured = vocal[key] if vocal is not None else None
+        if row[column] != captured:
+            raise _corrupt(
+                f"{where} vocal-group column {column} disagrees with "
+                "the embedded captured vocal grammar (all-or-none)")
+
+    # §13.4 exact arithmetic (recomputed, never trusted from text):
+    # canonical rationals and a non-empty interval
+    start = _m17cc_rational(row["performance_start_num"],
+                            row["performance_start_den"],
+                            f"{where} performance_start")
+    end = _m17cc_rational(row["performance_end_num"],
+                          row["performance_end_den"],
+                          f"{where} performance_end")
+    _m17cc_rational(row["shot_anchor_num"], row["shot_anchor_den"],
+                    f"{where} shot_anchor")
+    if start >= end:
+        raise _corrupt(f"{where} captured interval is empty/inverted")
+
+    pr = con.execute(
+        "SELECT subject_id, project_id, performance_kind, "
+        "performance_profile_id, temporal_start_num, "
+        "temporal_start_den, temporal_end_num, temporal_end_den, "
+        "canonical_channel_payload_sha256, "
+        "canonical_channel_payload_blob_hash "
+        "FROM performance_revisions WHERE id = ?",
+        (row["performance_revision_id"],)).fetchone()
+    if pr is None:
+        raise _corrupt(
+            f"{where} references a missing immutable "
+            f"PerformanceRevision {row['performance_revision_id']!r}")
+    if (pr["subject_id"] != row["subject_id"]
+            or pr["performance_kind"] != row["performance_kind"]
+            or pr["performance_profile_id"]
+            != row["performance_profile_id"]
+            or pr["canonical_channel_payload_sha256"]
+            != row["performance_payload_sha256"]
+            or pr["canonical_channel_payload_blob_hash"]
+            != row["performance_payload_blob_hash"]):
+        raise _corrupt(
+            f"{where} disagrees with the immutable PerformanceRevision "
+            f"{row['performance_revision_id']!r} it names")
+    domain_start = _m17cc_rational(
+        pr["temporal_start_num"], pr["temporal_start_den"],
+        f"{where} PR temporal_start")
+    domain_end = _m17cc_rational(
+        pr["temporal_end_num"], pr["temporal_end_den"],
+        f"{where} PR temporal_end")
+
+    # §13.4 historical project/subject coherence (immutable + captured
+    # identities only — never current dependency selection)
+    shot = con.execute(
+        "SELECT project_id FROM shots WHERE id = ?",
+        (shot_id,)).fetchone()
+    if shot is None:
+        raise _corrupt(
+            f"{where} belongs to a missing Shot {shot_id!r}")
+    if pr["project_id"] != shot["project_id"]:
+        raise _corrupt(
+            f"{where} crosses projects: PR project "
+            f"{pr['project_id']!r} != Shot project "
+            f"{shot['project_id']!r}")
+
+    info = {
+        "subject_id": row["subject_id"],
+        "start": start, "end": end,
+        "channels": None,
+    }
+
+    # the retained payload Blob closure rehashes and parses as the
+    # channel document the captured history is built from
+    blob_hash = row["performance_payload_blob_hash"]
+    blob_path = blob_root / "sha256" / blob_hash[:2] / \
+        blob_hash[2:4] / blob_hash
+    if not blob_path.is_file():
+        raise _corrupt(
+            f"{where} names a payload blob absent from the retained "
+            "Blob closure")
+    data = blob_path.read_bytes()
+    if hashlib.sha256(data).hexdigest() != blob_hash:
+        raise _corrupt(
+            f"{where} retained payload blob does not rehash")
+    info["channels"] = _m17cc_payload_channels(data, where)
+
+    if vocal is None:
+        # generic §8.2 law: the captured interval lies inside the
+        # immutable PR temporal domain
+        if not (domain_start <= start and end <= domain_end):
+            raise _corrupt(
+                f"{where} captured interval lies outside the immutable "
+                f"PerformanceRevision domain [{domain_start}, "
+                f"{domain_end})")
+        return info
+
+    # dialogue-bound §8.3 laws, recomputed exactly through the
+    # immutable synchronization binding: identity/hash agreement, the
+    # captured sample interval inside the binding interval and the VP
+    # trim, and the EXACT induced performance interval (origin +
+    # sample/rate arithmetic — no tolerance, no float conversion)
+    binding = con.execute(
+        "SELECT vocal_performance_revision_id, binding_hash, "
+        "source_start_sample, source_end_sample_exclusive, "
+        "sample_rate_hz, performance_origin_num, "
+        "performance_origin_den FROM "
+        "performance_revision_vocal_bindings "
+        "WHERE performance_revision_id = ?",
+        (row["performance_revision_id"],)).fetchone()
+    if binding is None:
+        raise _corrupt(
+            f"{where} is dialogue-bound but its immutable "
+            "synchronization binding is gone")
+    if (binding["binding_hash"] != row["vocal_binding_hash"]
+            or binding["vocal_performance_revision_id"]
+            != row["vocal_performance_revision_id"]
+            or binding["sample_rate_hz"] != row["sample_rate_hz"]):
+        raise _corrupt(
+            f"{where} captured vocal closure disagrees with the "
+            "immutable synchronization binding")
+    vp = con.execute(
+        "SELECT speaker_subject_id, trim_start_sample, "
+        "trim_end_sample_exclusive, dialogue_line_revision_id "
+        "FROM vocal_performance_revisions WHERE id = ?",
+        (row["vocal_performance_revision_id"],)).fetchone()
+    if vp is None:
+        raise _corrupt(
+            f"{where} names a missing immutable "
+            f"VocalPerformanceRevision "
+            f"{row['vocal_performance_revision_id']!r}")
+    if vp["speaker_subject_id"] != row["subject_id"]:
+        raise _corrupt(
+            f"{where} subject disagrees with the VP speaker "
+            f"({vp['speaker_subject_id']!r}) — subject/speaker "
+            "agreement is historical")
+    line = con.execute(
+        "SELECT project_id FROM dialogue_lines WHERE id = ("
+        "SELECT dialogue_line_id FROM dialogue_line_revisions "
+        "WHERE id = ?)",
+        (vp["dialogue_line_revision_id"],)).fetchone()
+    if line is None or line["project_id"] != shot["project_id"]:
+        raise _corrupt(
+            f"{where} VP lineage crosses projects")
+    origin = _m17cc_rational(
+        binding["performance_origin_num"],
+        binding["performance_origin_den"],
+        f"{where} binding performance_origin")
+    rate = row["sample_rate_hz"]
+    s0 = binding["source_start_sample"]
+    p0 = origin + Fraction(
+        (row["source_start_sample"] - s0) * 1000, rate)
+    p1 = origin + Fraction(
+        (row["source_end_sample_exclusive"] - s0) * 1000, rate)
+    if start != p0 or end != p1:
+        raise _corrupt(
+            f"{where} captured interval [{start}, {end}) != the exact "
+            f"binding-induced interval [{p0}, {p1})")
+    if not (binding["source_start_sample"] <= row["source_start_sample"]
+            and row["source_end_sample_exclusive"]
+            <= binding["source_end_sample_exclusive"]):
+        raise _corrupt(
+            f"{where} captured sample interval lies outside the "
+            "immutable binding source interval")
+    if not (vp["trim_start_sample"] <= row["source_start_sample"]
+            and row["source_end_sample_exclusive"]
+            <= vp["trim_end_sample_exclusive"]):
+        raise _corrupt(
+            f"{where} captured sample interval lies outside the VP "
+            "trim")
+    return info
+
+
+def _m17cc_rational(num, den, what: str) -> Fraction:
+    _check_rational(num, den, what)
+    return Fraction(num, den)
+
+
+def _verify_m17cc_captured_conflicts(rev_id: str, verified) -> None:
+    """§13.4 captured conflict law: no overlapping same-subject
+    interval pair whose retained payload CHANNEL sets intersect
+    inside ONE captured history — evaluated from the CAPTURED
+    companion rows + the immutable payloads (the D14 channel-conflict
+    law checked against captured history, never against present-day
+    performance mappings; disjoint-channel same-subject overlap is
+    the LAWFUL D14 shape and must not refuse)."""
+    import itertools
+    for a, b in itertools.combinations(verified, 2):
+        if a["subject_id"] != b["subject_id"]:
+            continue
+        if not (a["start"] < b["end"] and b["start"] < a["end"]):
+            continue
+        shared = (a["channels"] or frozenset()) & \
+            (b["channels"] or frozenset())
+        if shared:
+            raise _corrupt(
+                f"ShotRevision {rev_id} captured history carries "
+                f"overlapping same-subject segments "
+                f"[{a['start']}, {a['end']}) and [{b['start']}, "
+                f"{b['end']}) sharing channels {sorted(shared)} — "
+                "the D14 channel-conflict law is checked against "
+                "captured history")
+
+
+def _m17cc_payload_channels(data: bytes, where: str) -> frozenset:
+    """The retained payload's channel-key set (the captured conflict
+    law's disjointness domain)."""
+    try:
+        return frozenset(
+            ch["channel_key"] for ch in json.loads(data)["channels"])
+    except (ValueError, TypeError, KeyError) as exc:
+        raise _corrupt(
+            f"{where} retained payload blob is not a channel "
+            f"payload document: {exc}") from exc
+
+
+def _verify_generation_performance_inputs(
+        con: sqlite3.Connection, blob_root: Path) -> None:
+    """§13.6 structural laws constructible before the M17C-D writer:
+    parent + creation-unit coherence, role vocabulary, retained-byte
+    rehash, exact segment tieback, and translation/derived-input
+    identity validity. The control-schedule recomputation and the
+    sample-exact vocal-audio realization laws require the §14.6
+    sampler and remain M17C-D — no substitute sampler is invented
+    here. Recovery never WRITES these rows."""
+    import hashlib
+    for row in con.execute(
+            "SELECT generation_id, input_key, position, artifact_role, "
+            "shot_revision_segment_position, performance_revision_id, "
+            "vocal_performance_revision_id, blob_hash, binding_hash, "
+            "segment_hash, translation_identity, derived_input_hash, "
+            "created_at FROM generation_performance_inputs"):
+        gwhere = (f"generation performance input "
+                  f"{row['generation_id']!r}/{row['input_key']!r}"
+                  f"@{row['position']}")
+        gen = con.execute(
+            "SELECT shot_revision_id, created_at, workflow_spec_json, "
+            "workflow_spec_hash FROM generations WHERE id = ?",
+            (row["generation_id"],)).fetchone()
+        if gen is None:
+            raise _corrupt(f"{gwhere} has no parent Generation")
+        # same creation unit: the sibling binding was written in the
+        # Generation's creation transaction
+        if row["created_at"] != gen["created_at"]:
+            raise _corrupt(
+                f"{gwhere} was not written in its Generation's "
+                "creation unit")
+        if row["artifact_role"] not in (
+                "performance.controls", "performance.vocal_audio"):
+            raise _corrupt(
+                f"{gwhere} carries unknown artifact_role "
+                f"{row['artifact_role']!r}")
+        for column in ("blob_hash", "segment_hash", "derived_input_hash"):
+            value = row[column]
+            if len(value) != 64 or value.strip("0123456789abcdef"):
+                raise _corrupt(
+                    f"{gwhere} {column} is not a 64-char lowercase "
+                    "hex digest")
+        if row["binding_hash"] is not None and (
+                len(row["binding_hash"]) != 64
+                or row["binding_hash"].strip("0123456789abcdef")):
+            raise _corrupt(
+                f"{gwhere} binding_hash is not a 64-char lowercase "
+                "hex digest")
+        # retained derived bytes exist and rehash
+        blob_path = blob_root / "sha256" / row["blob_hash"][:2] / \
+            row["blob_hash"][2:4] / row["blob_hash"]
+        if not blob_path.is_file():
+            raise _corrupt(
+                f"{gwhere} retained derived-input blob "
+                f"{row['blob_hash']} is missing")
+        if hashlib.sha256(
+                blob_path.read_bytes()).hexdigest() != row["blob_hash"]:
+            raise _corrupt(
+                f"{gwhere} retained derived-input blob does not rehash")
+        # the tie-back resolves to the EXACT captured schema-8 segment
+        child = con.execute(
+            "SELECT " + _M17CC_CHILD_COLUMNS +
+            " FROM shot_revision_performance_segments "
+            "WHERE shot_revision_id = ? AND position = ?",
+            (gen["shot_revision_id"],
+             row["shot_revision_segment_position"])).fetchone()
+        if child is None:
+            raise _corrupt(
+                f"{gwhere} tie-back resolves to no captured schema-8 "
+                f"segment ({gen['shot_revision_id']!r}@"
+                f"{row['shot_revision_segment_position']})")
+        if child["segment_hash"] != row["segment_hash"]:
+            raise _corrupt(
+                f"{gwhere} segment_hash does not tie back to the exact "
+                "captured segment")
+        if child["performance_revision_id"] != \
+                row["performance_revision_id"]:
+            raise _corrupt(
+                f"{gwhere} performance_revision_id disagrees with the "
+                "tied-back captured segment")
+        if row["vocal_performance_revision_id"] is not None \
+                or row["binding_hash"] is not None:
+            if child["vocal_performance_revision_id"] is None:
+                raise _corrupt(
+                    f"{gwhere} carries vocal identity but the tied-back "
+                    "segment is generic")
+            if (row["vocal_performance_revision_id"]
+                    != child["vocal_performance_revision_id"]
+                    or row["binding_hash"]
+                    != child["vocal_binding_hash"]):
+                raise _corrupt(
+                    f"{gwhere} vocal identity disagrees with the "
+                    "tied-back captured segment")
+        elif row["artifact_role"] == "performance.vocal_audio":
+            raise _corrupt(
+                f"{gwhere} is a vocal-audio input without its vocal "
+                "identity group")
+        # the translation identity is materialized in the Generation's
+        # execution spec (grammar-agnostic presence: the exact spec
+        # field grammar is frozen with the M17C-D writer)
+        try:
+            spec = json.loads(gen["workflow_spec_json"])
+        except (ValueError, TypeError) as exc:
+            raise _corrupt(
+                f"Generation {row['generation_id']} workflow_spec_json "
+                f"is malformed JSON: {exc}") from exc
+        if _canonical(spec) != gen["workflow_spec_json"] \
+                or _hash(spec) != gen["workflow_spec_hash"]:
+            raise _corrupt(
+                f"Generation {row['generation_id']} workflow spec "
+                "bytes/hash disagree with canonical form")
+        if not _m17cc_spec_materializes(spec,
+                                        row["translation_identity"]):
+            raise _corrupt(
+                f"{gwhere} translation_identity is not materialized in "
+                "the Generation execution spec")
+
+
+def _m17cc_spec_materializes(spec, identity: str) -> bool:
+    """Whether the decoded execution-spec document carries the exact
+    translation identity as a JSON string value (recursive; the exact
+    field grammar is frozen with the M17C-D writer)."""
+    if isinstance(spec, str):
+        return spec == identity
+    if isinstance(spec, dict):
+        return any(_m17cc_spec_materializes(v, identity)
+                   for v in spec.values())
+    if isinstance(spec, list):
+        return any(_m17cc_spec_materializes(v, identity)
+                   for v in spec)
+    return False
