@@ -136,6 +136,8 @@ M16_SURFACE = (
     # M17C-C slice 4 (§12 historical inspection)
     r"^server/soloring/performance/m17cc_history\.py$",
     r"^tests/test_m17cc_history\.py$",
+    # M17C-C slice 5 (§13.4-13.6 recovery verifier)
+    r"^tests/test_m17cc_recovery\.py$",
     r"^tests/test_post_m13_next_security\.py$",
     r"^tests/test_m14_base_corpus\.py$",
 

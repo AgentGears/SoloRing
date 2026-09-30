@@ -87,6 +87,8 @@ ALLOWLIST = (
     # M17C-C slice 4 (§12 historical inspection)
     "server/soloring/performance/m17cc_history.py",
     "tests/test_m17cc_history.py",
+    # M17C-C slice 5 (§13.4-13.6 recovery verifier)
+    "tests/test_m17cc_recovery.py",
     "server/soloring/recovery/backup.py",
     "server/soloring/recovery/successor_semantics.py",
     "server/soloring/performance/revision.py",

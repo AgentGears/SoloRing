@@ -41,6 +41,8 @@ ALLOWED_PATTERNS = [
     # M17C-C slice 4 (§12 historical inspection)
     r"^server/soloring/performance/m17cc_history\.py$",
     r"^tests/test_m17cc_history\.py$",
+    # M17C-C slice 5 (§13.4-13.6 recovery verifier)
+    r"^tests/test_m17cc_recovery\.py$",
     # M17A implementation (frozen R5): the dialogue/vocal foundation
     # surface — performance package, migration, API, recovery
     # verifier, boundary validators, and the M17A tests.
