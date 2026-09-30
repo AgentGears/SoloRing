@@ -291,8 +291,8 @@ Slice 6 is complete and green under the frozen rule: **valid M17C-C historical c
 
 - New §1.7 battery (`test_m17cc_roundtrip.py`): **7/7**. First-run corrections were fixture-level (the predecessor-table fingerprint legitimately excludes the three appearing tables; the 13-path constant is `M17B_BLOB_FK_COLUMNS`; a live-DB fixture generation must satisfy the backup's generation-liveness contract — schema-1 spec with an `inputs` object, plus CONTENT-ADDRESSED manifest/template artifact files at `kind/sha256/xx/yy/<hash>.json` whose real hashes feed the generation row).
 - Families: migration + recovery + history batteries re-confirmed alongside.
-- Local full backend suite: **PENDING-FILL**.
-- **CI run on the slice-6 head: PENDING-FILL**.
+- Local full backend suite, FIRST RUN on the slice-6 tree: **3013 passed / 8 skipped / 0 failed in 47:00, exit 0** (collection 3021 = the slice-5 total 3014 + the 7-test battery — exact); no fix-forward, no stall.
+- **CI run `36783206959` on `75dc465`: SUCCESS, attempt 1 — Backend 3020 passed / 20 skipped / 0 failed** (CI total 3040 = its slice-5 total 3033 + the 7-test battery, arithmetic exact); Frontend green (143/143).
 - Residue: slice 6's new files = `tests/test_m17cc_roundtrip.py`; product code UNCHANGED.
 
 ## Fences honored
