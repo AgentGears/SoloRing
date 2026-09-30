@@ -211,7 +211,7 @@ def test_segment_grammar_divergence_refused():
     from soloring.errors import SoloRingError
     shot = _Shot()
     bad = _seg()
-    bad["unexpected"] = True
+    del bad["performance_kind"]
     with pytest.raises(SoloRingError):
         build_capturable_snapshot(shot, [], [_Dep()], performance_pack=_pack([bad]))
     badv = _seg(0, {"vocal_performance_revision_id": "v"})
@@ -343,10 +343,11 @@ async def test_capture_corruption_fails_closed_in_read(client):
 
 
 @pytest.mark.asyncio
-async def test_live_capture_schema8_shape_and_no_companions(client):
+async def test_live_capture_schema8_shape_and_companions(client):
     """A lawful performance-bearing capture produces schema 8 with the
-    complete embedded grammar — and (slice-2 boundary) writes ZERO
-    companion parent/children rows (those land with slice 3)."""
+    complete embedded grammar — and (slice 3) persists EXACTLY one
+    companion parent plus one child per captured segment, whose every
+    column is the mechanical projection of the captured value."""
     from sqlalchemy import text as _text
     world = await _bound_world(client)
     await _lawful_bound_mapping(client, world)
@@ -362,12 +363,38 @@ async def test_live_capture_schema8_shape_and_no_companions(client):
     assert len(seg["vocal"]) == 5
     engine = _engine(client)
     async with engine.connect() as conn:
-        for table in ("shot_revision_performance_specs",
-                      "shot_revision_performance_segments",
-                      "generation_performance_inputs"):
-            n = (await conn.execute(_text(
-                f"SELECT COUNT(*) FROM {table}"))).scalar_one()
-            assert n == 0, table
+        parents = (await conn.execute(_text(
+            "SELECT schema_version, spec_json, spec_hash FROM "
+            "shot_revision_performance_specs WHERE shot_revision_id "
+            "= :r"), {"r": revision_obj.id})).fetchall()
+        assert len(parents) == 1
+        assert parents[0].schema_version == 1
+        assert parents[0].spec_json == canonical_json_str(
+            {"schema_version": 1, "segments": snap["performance"]["segments"]})
+        assert parents[0].spec_hash == canonical_hash(
+            {"schema_version": 1, "segments": snap["performance"]["segments"]})
+        children = (await conn.execute(_text(
+            "SELECT position, subject_id, "
+            "performance_revision_id, vocal_performance_revision_id, "
+            "vocal_binding_hash, vocal_mapping_hash, segment_json "
+            "FROM shot_revision_performance_segments WHERE "
+            "shot_revision_id = :r ORDER BY position"),
+            {"r": revision_obj.id})).fetchall()
+        assert len(children) == 1
+        ch = children[0]
+        assert ch.position == 0
+        assert ch.performance_revision_id == world["pr"]["id"]
+        assert ch.subject_id == world["subject_id"]
+        assert ch.vocal_performance_revision_id == world["vp"]["id"]
+        assert len(ch.vocal_binding_hash) == 64
+        assert len(ch.vocal_mapping_hash) == 64
+        assert ch.segment_json == canonical_json_str(
+            snap["performance"]["segments"][0])
+        # derived-input rows remain M17C-D storage-only: zero rows
+        n_gpi = (await conn.execute(_text(
+            "SELECT COUNT(*) FROM generation_performance_inputs"))
+        ).scalar_one()
+        assert n_gpi == 0
 
 
 @pytest.mark.asyncio

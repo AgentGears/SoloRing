@@ -312,9 +312,13 @@ def build_capturable_snapshot(
 def _performance_segments_value(performance_pack) -> list[dict]:
     """The embedded performance.segments value under the frozen 11.2
     grammar: non-empty, canonically ordered by position, uniform closed
-    vocal grammar (complete vocal object or explicit null). Structural
-    internal invariants over an IN-MEMORY captured value — the caller
-    (the one capture read) is their single producer."""
+    vocal grammar (complete vocal object or explicit null). PURE
+    projection of the frozen embedded keys from each captured segment —
+    the read value may carry extra projection keys (blob/mapping
+    hashes) that only companion persistence consumes; the SNAPSHOT
+    embeds exactly the frozen 11.2 shape. Structural internal
+    invariants over an IN-MEMORY captured value — the caller (the one
+    capture read) is their single producer."""
     from soloring.errors import internal_invariant
 
     if not isinstance(performance_pack, dict):
@@ -331,17 +335,22 @@ def _performance_segments_value(performance_pack) -> list[dict]:
         raise internal_invariant(
             "performance segments must be canonically ordered by "
             "unique position")
+    embedded_keys = {
+        "position", "subject_id", "performance_revision_id",
+        "performance_payload_sha256", "performance_profile_id",
+        "performance_kind", "performance_start_ms", "performance_end_ms",
+        "shot_anchor_ms", "vocal"}
     value = []
     for s in segments:
-        if set(s) != {"position", "subject_id", "performance_revision_id",
-                      "performance_payload_sha256",
-                      "performance_profile_id", "performance_kind",
-                      "performance_start_ms", "performance_end_ms",
-                      "shot_anchor_ms", "vocal"}:
+        if not embedded_keys <= set(s):
             raise internal_invariant(
-                "performance segment key grammar diverges from the "
-                "frozen 11.2 shape")
-        vocal = s["vocal"]
+                "captured performance segment lacks a frozen 11.2 field")
+        seg = {k: s[k] for k in (
+            "position", "subject_id", "performance_revision_id",
+            "performance_payload_sha256", "performance_profile_id",
+            "performance_kind", "performance_start_ms",
+            "performance_end_ms", "shot_anchor_ms", "vocal")}
+        vocal = seg["vocal"]
         if vocal is not None and set(vocal) != {
                 "vocal_performance_revision_id", "vocal_binding_hash",
                 "source_start_sample", "source_end_sample_exclusive",
@@ -349,7 +358,7 @@ def _performance_segments_value(performance_pack) -> list[dict]:
             raise internal_invariant(
                 "performance segment vocal grammar diverges from the "
                 "frozen 11.2 shape")
-        value.append(s)
+        value.append(seg)
     return value
 
 
