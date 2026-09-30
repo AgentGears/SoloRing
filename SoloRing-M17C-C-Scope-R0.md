@@ -74,3 +74,33 @@ M17C-B is TECHNICALLY CLOSED (final review CLEAN, accepted without qualification
 > Vocal/facial segment identity survives current-state changes and restore.
 
 Concretely: after capture, mutating every current-state surface the historical read must not consult (VP selection, vocal mappings, working performance mappings, dependencies, Shot duration) leaves the historical inspection byte-identical; a backup/restore round trip preserves it; recovery refuses every §13.4/§13.6 tamper shape.
+
+---
+
+# M17C-C slice 1 — migration 0022 (schema/storage-only) — 2026-09-29/30 — IMPLEMENTED
+
+Per the sequencing discipline (0022 remains schema/storage-only; no capture, current-read, derived-input-production, or sampler semantics), slice 1 is complete and green. **Frozen repository predecessor baseline: `8a92bc6`.** Slice-1 head: **`3fe01db`** (`eee329d` migration+models+head plumbing, `742f80f` validator carve, `bcb256d` fixture companion sweep, `3fe01db` one stray literal).
+
+## Delivered
+
+- **Migration `0022_m17c_schema8_capture`** (down_revision `0021_m17c_shot_performance_mappings`): `shot_revision_performance_specs` (§10.4 parent; schema-version and 64-hex spec-hash CHECKs); `shot_revision_performance_segments` (§10.5 immutable children; PK `(shot_revision_id, position)`; the all-or-none dialogue-bound vocal-group CHECK; duplicated immutable hashes as capture closure — payload hashes deliberately carry NO independent Blob FK; FKs RESTRICT to shot_revisions + performance_revisions; `ix_srpss_pr`); `generation_performance_inputs` (§10.6; the two v1 `artifact_role` CHECK; `blob_hash` FK → blobs = the ONE new Blob-FK path; `translation_identity` + `derived_input_hash`). Populated-downgrade fences on all three tables.
+- **ORM models** `server/soloring/performance/m17cc_models.py` (registered in `db/models`); create_all-vs-alembic DDL identity verified for all three tables.
+- **Head plumbing**: `M17C_C_ALEMBIC_HEAD`/`EXPECTED_ALEMBIC_HEAD = 0022`; SUPPORTED extended; `_blob_fk_policy_for_head` gains the 14-path set at 0022 only (0020/0021 keep 13); successor dispatch extended at all six membership sites; the head-aware M17C verifier accepts 0022 with 0021-equivalent semantics (§13.4/§13.6 land with the capture/history slices; the new tables are storage-only at this head).
+- **Tests**: new `tests/test_m17cc_migration.py` (fresh upgrade, empty downgrade, three populated-fence refusals, the all-or-none CHECK, staged real-0021→0022 upgrade preserving every M17C-B row + verifier green at 0022); the head/constant companion sweep across ~30 test files and five validator scripts.
+
+## Predecessor impact (register)
+
+Additive only: recovery head constants/dispatch (0022 admitted; 0020/0021 laws byte-identical), `_retarget_backup` fixture helper drops the three tables when reshaping to pre-0022 heads, `_stamp_alembic` default advanced, i03 comparison excludes the new tables. No PF-02/PF-03 semantic, no M17C-A/B test expectation weakened.
+
+## Gates (first-run dispositions recorded exactly)
+
+- New M17C-C migration battery **8/8**; migration-family suites **212+ passed**; focused suite (43 files incl. m10f + all recovery families) **559/559**.
+- **Hard process gate honored**: committed BEFORE validators; committed-tree validation caught the m14/m16 regex-comma defect + the nsec slice/source-fit admissions (carve `742f80f`) and the companion fallout (`bcb256d`) — all fixed before push. All 19 standalone validators + 2 piped-audit validators green on the committed tree.
+- Frontend: vitest **143/143**, `tsc --noEmit` clean, `next build` succeeds.
+- Local full backend suite **on the final tree (`3fe01db`): 2960 passed / 8 skipped / 0 failed in 45:17 — fully-green FIRST pass including the three live-GPU exec gates.** (An earlier full-suite run started on the pre-carve tree reported 7 fixture-side failures — all fixed in `bcb256d`/`3fe01db`; disclosed, not erased.)
+- **CI run `36639823643` on `3fe01db`: attempts 1–2 failed ONLY on `tests/test_m7d_relations.py::test_race_r8_...` — the repo-characterized SQLite "Database is busy" flake, identical signature both times (1 failed / 2947+20 each; every other step green; Frontend green); per repo precedent rerun-failed-jobs only, no source change. Attempt 3: SUCCESS — Backend 2948 passed / 20 skipped / 0 failed; Frontend green.** The flake passed first-run locally both full runs (2953 and 2960 suites).
+- Residue: new files = migration 0022 + `m17cc_models.py` + `test_m17cc_migration.py` + this scope record; no other root residue.
+
+## Next slice (unchanged from the R0 sequencing)
+
+Slice 2: the one-read tenth element + `performance_pack` schema-8 wrap + no-empty law; slice 3: fenced persistence + reuse + §11.4 blockers; then §12 history, §13.4/§13.5/§13.6 verifier laws.
