@@ -138,3 +138,44 @@ Plus the capture gate: `capture_revision_with_visual` refuses non-READY with typ
 ## Next slice (unchanged)
 
 Slice 3: fenced persistence of the companion parent/children, reuse-winner validation extended to the performance plane, and the §11.4 blocker surface.
+
+---
+
+# M17C-C slice 3 — frozen-companion persistence + winner-reuse validation — 2026-09-30 — IMPLEMENTED
+
+Slice 3 is complete and green per the frozen one-sentence boundary: **persist and validate the same already-captured value; never resolve Performance again.** Slice-3 heads: **`4996bec`** (implementation) + **`73d9ccc`** (validator carves).
+
+## Delivered (exactly the eight gate points)
+
+1. **Fresh schema-8 persistence**: `_persist_revision_fenced` gains `performance_pack` — inside the existing BEGIN IMMEDIATE unit, `persist_performance_companions` inserts the PARENT FIRST (immediate SQLite FKs) then exactly `len(performance.segments)` children, every column the mechanical projection of the READ value (never a DB reread). ShotRevision behavior is unchanged.
+2. **Canonical parent identity**: `spec_json` is the canonical serialization of the EMBEDDED performance value (`embedded_performance_value`/`performance_spec_bytes` — the frozen §11.2 key projection of the captured pack) and `spec_hash` hashes those exact bytes; no independent row reconstruction. Child `segment_json`/`segment_hash` are the canonical embedded segment.
+3. **Exact child projection**: dialogue-bound children carry the complete vocal group; generic children the all-NULL group (matching the DB all-or-none CHECK); rationals stored as num/den pairs.
+4. **Zero-companion predecessor behavior**: schema <8 captures write ZERO companion rows (no opportunistic upgrade); a schema-<8 winner unexpectedly carrying companions is refused at convergence as an impossible state ("snapshot hash does not require" invariant — defense in depth mirroring the intra_shot fence).
+5. **Reuse winner validation**: the loser of a `(shot_id, snapshot_hash)` convergence validates the committed winner's COMPLETE companion closure (`verify_performance_companions`: exactly-one parent with canonical bytes/hash; exact child count, order, every field). Missing parent/child, reordered or incorrect position, altered field/spec_json/spec_hash all fail closed and are NEVER repaired — durable-closure corruption is an internal-invariant 500, not another readiness decision (§11.4 vocabulary unchanged).
+6. **Atomicity**: any companion insert failure rolls back the WHOLE unit (fault-injection at child k>0 proven: zero ShotRevision/parent/children survive; the surface stays live and a clean capture afterwards succeeds).
+7. **Race/reuse proof**: two concurrent captures of the same shot converge on one revision id and the loser validates the winner's companions; a tampered winner refuses the loser.
+8. **Coherence through persistence**: read → mutate current mappings/binding/duration → persist the ALREADY-READ value → companions carry the pre-mutation captured values (extends the slice-2 mutability proof through the write).
+
+Supporting read-side change (slice-3 scope, no slice-2 semantics touched): `resolve_performance_plane` now also captures the projection keys (payload blob hash, performance mapping hash, vocal mapping hash) alongside the embedded keys; the builder PROJECTS the frozen embedded keys from these richer dicts, so snapshot bytes stay byte-stable while companions carry the projection.
+
+## Tests
+
+New `tests/test_m17cc_persist.py` (12 cases over 8 functions; the corrupt-winner matrix parametrized ×5 with exact invariant-fragment assertions). The slice-2 no-companions boundary test is superseded to the slice-3 assertions (parent/child row identity against the canonical embedded value); the slice-2 grammar test now proves MISSING-key refusal (extra projection keys project away by design).
+
+## Gates (first-run dispositions recorded exactly)
+
+- Three M17C-C batteries (`test_m17cc_persist` 12 + `test_m17cc_capture` 11 + `test_m17cc_migration` 7): **30/30** (re-confirmed post-commit). Focused suite (46 files): **606/606**.
+- **Hard process gate honored**: committed BEFORE validators; committed-tree validation caught the four-boundary carve for `tests/test_m17cc_persist.py` pre-push (`73d9ccc`). All 21 validators green on the committed tree — including both npm-audit validators fed the runtime audit document the CI way (bare invocation reads empty stdin; zero runtime vulnerabilities, baseline exceptions empty).
+- Local full backend suite, FIRST RUN on `4996bec`: **2983 passed / 8 skipped / 0 failed** in 47:24 — no fix-forward needed this slice.
+- **CI run `36705552791` on `73d9ccc`: SUCCESS, attempt 1 — Backend 2971 passed / 20 skipped / 0 failed**; Frontend green.
+- Frontend: vitest **143/143**, `tsc --noEmit` clean, `next build` succeeds.
+- Residue: slice 3's new files = `tests/test_m17cc_persist.py`.
+
+## Fences honored
+
+NO §12 historical inspection and NO §13.4 general recovery pass were started (their own slices); the §11.4 error vocabulary is unchanged (409 admission gate before the builder; corruption 500 in the read; durable-closure corruption = internal-invariant 500 only). `_validate_reuse_integrity` and the intra_shot fence untouched. PR #26 remains draft, unmerged, unready.
+
+## Next slice (unchanged)
+
+§12 historical inspection, then §13.4/§13.5/§13.6 recovery-verifier laws, then backup/restore + downgrade coverage — each its own slice.
+
