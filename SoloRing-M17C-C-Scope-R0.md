@@ -219,4 +219,47 @@ NO §13.4/§13.5/§13.6 recovery-verifier expansion; NO derived-input semantics;
 
 §13.4 captured-schema-8 recovery-verifier laws (+ §13.5 Blob-FK inventory advance, §13.6 structural derived-input laws), then §1.7 backup/restore + downgrade coverage.
 
+---
+
+# M17C-C slice 5 — §13.4/§13.5/§13.6 recovery verifier — 2026-09-30 — IMPLEMENTED
+
+Slice 5 is complete and green under the frozen rule: **recovery independently proves that the durable database can reconstruct and validate every M17C-C historical claim without relying on current working state or the §12 API implementation.** Slice-5 heads: **`8468dde`** (implementation) + **`ebe7e1b`** (validator carves).
+
+## Delivered (the fifteen gate points)
+
+1. **Head behavior explicit**: at 0022 the three capture tables are REQUIRED (a 0022 database missing them is structurally corrupt) and two new passes run inside `verify_m17c_binding_state` AFTER every unchanged predecessor pass; at 0020/0021 any companion or derived-input ROW refuses ("rows those heads cannot represent") while the tables themselves may remain as create_all staging artifacts.
+2. **Total schema classification**: every ShotRevision decodes, must declare integer schema 1..8, and is either schema <8 with ZERO companions or schema 8 with its parent — no "companions ignored because the snapshot is old", no "schema 8 accepted without companions"; orphan companion rows refuse.
+3. **Predecessor verification first**: the passes extend the restore chain, never replace it — and the M16 recovery verifier now admits the §11.5 schema-8 wrap (history enumerated for schema 7 OR schema 8-with-retained-block; companions require outer 7 or the wrap WITH the block), so an 8-over-7 capture verifies BOTH planes through the unchanged intra_shot history law. This was a real gap: schema-8 wraps would previously have corrupted the M16 recovery pass.
+4. **Snapshot↔parent equivalence** at canonical-BYTE strength: the embedded `performance` block reproduces the parent `spec_json` exactly; the canonical bytes reproduce `spec_hash`; the parent's own canonical form re-verifies.
+5. **Parent↔children equivalence**: count, canonical ordering, `segment_json`/`segment_hash` canonical pair, every projection column, rational fields, and all-or-none vocal nullability project exactly from the embedded grammar (the recovery form of the slice-3 persistence invariant).
+6. **Immutable closure revalidated independently**: PR existence + subject/kind/profile/sha/blob-hash agreement; the retained payload Blob exists, rehashes, and parses as the channel document; dialogue-bound children re-resolve the exact binding (hash/VP/rate) and the exact VP. The frozen `EMBEDDED_SEGMENT_KEYS` constant is the ONE shared law source; `m17cc_history` is never imported.
+7. **Exact arithmetic recomputed** with Fractions (never float): canonical rationals (gcd law), non-empty interval, generic containment in the PR temporal domain, the §8.3 binding-induced interval `origin + (sample − s0)·1000/rate` reproduced with NO tolerance, and the captured sample interval inside both the binding interval and the VP trim.
+8. **Historical project/subject coherence**: PR↔Shot project equality, VP speaker == captured subject, VP dialogue-line project == shot project — never current dependency selection or duration.
+9. **Captured conflict law**: overlapping same-subject pairs refuse only when their retained-payload CHANNEL sets intersect — the lawful D14 disjoint-channel overlap (the fixture world itself) does not refuse. Evaluated from captured rows + immutable payloads, never current mappings.
+10. **§13.5 stays mechanical**: the backup module's head-gated 14-path Blob-FK inventory at 0022 (slice 1) is untouched.
+11. **§13.6 structural only**: parent Generation + same-creation-unit (`created_at` equality), role vocabulary (DB-CHECK-pinned — the law stands as the mirror), 64-char lowercase-hex digests, retained derived bytes rehash, exact segment tieback (`segment_hash` + position + PR + vocal group; `performance.vocal_audio` requires the vocal identity), translation identity materialized in the Generation execution spec (canonical spec pair + grammar-agnostic presence — the exact spec-field grammar freezes with the M17C-D writer, disclosed), and the control-schedule/vocal-audio §14.6 sampler laws remain the EXPLICIT deferral — no substitute sampler invented.
+12. **No writer semantics**: recovery never creates or derives GPI rows; test fixtures construct them on staged copies.
+13. **Tamper coverage mirrors the laws**: a 17-case matrix — schema8/no parent, empty children, count mismatch, moved position, altered field/segment_json/spec_json, snapshot-block disagreement (coherent outer hash), PR mismatch, gone binding, nulled vocal group, payload blob missing/corrupt, **three coherent-everywhere rewrites** (timing, subject+PR, PR-swap-to-shared-channels) that pass every internal-consistency law and are caught ONLY by the recomputed immutable-authority arithmetic/speaker/conflict laws, and cross-project.
+14. **Independence from §12 proven**: with `verify_performance_history` monkeypatched to explode, recovery still passes clean state and still refuses tampered state.
+15. **No backup/restore work started** beyond what the positive proof needs (the clean 8-over-7 full-restore round-trip is the §1.7 prerequisite evidence, not the slice).
+
+## Gates (first-run dispositions recorded exactly)
+
+- New §13.5 battery (`test_m17cc_recovery.py`): **23/23**. First-run corrections were fixture-level (restore entry lives in `recovery.backup`, not a `restore` module; the role vocabulary values are the full `performance.*` strings; a staged GPI blob must be placed at the canonical path on the staged copy — liveness at backup time knows nothing of fixture rows; the generation fixture inserts directly on the staged copy, the m13-history pattern, to avoid dragging workflow-artifact liveness in; raw-sqlite3 tampering raises the driver's IntegrityError). Two fragments deliberately name the PREDECESSOR pass that fires first (deleted binding → the PF-03 "total companion loss" refusal; PR subject → the chain's "subject != bound VP speaker") — the predecessor-first ordering is itself the proven law.
+- Families: recovery/capture/history batteries incl. m16 recovery + m17a/m17b recovery: **103/103**; backup/restore + history: **76/76**.
+- **Hard process gate honored**: committed BEFORE validators; committed-tree validation caught the four-boundary carve pre-push (`ebe7e1b` — 10th consecutive cycle). All 21 validators green on the committed tree.
+- Frontend: vitest **143/143**, `tsc --noEmit` clean, `next build` succeeds.
+- Local full backend suite, FIRST RUN on the slice-5 tree: **stalled** — killed and characterized in two stages. Stage 1 (memory): the §13.4 traversal held every decoded snapshot simultaneously and the process reached 9.3 GB into the scale tests (restore runs the pass over the whole staged DB); fixed the same slice by `2aba5e8` — the traversal STREAMS (phase 1 retains only `(shot_id, schema)` per revision; phase 2 re-decodes only the schema-8 snapshots; the memory law is documented in the pass). `test_m10f_scale` — the family that exposed the blowup — 7/7 in 26 s post-fix; battery 23/23 re-confirmed. Stage 2 (environment): the second run stalled at `test_m14_exec_100` with the ComfyUI worker's CPU frozen at 17.5 GB — leftover processes from the killed first run held the lane; after teardown the exec battery passes **9/9 in 28:05 in isolation**, and the clean third run is the recorded result: **3006 passed / 8 skipped / 0 failed in 50:13, exit 0** (collection 3014 = the slice-4 total 2991 + the 23-test battery — the arithmetic closes exactly). No product fix-forward beyond the streaming correction.
+- **CI run `36764570572` on `2aba5e8`: attempt 1 failed ONLY on the characterized M7D race_r8 SQLite flake (`test_race_r8_concurrent_identical_relation_captures_converge` — "Database is busy"; 3012 passed / 20 skipped / 0 other failures); rerun-failed-jobs per the standing precedent → attempt 2 SUCCESS — Backend 3013 passed / 20 skipped / 0 failed** (CI total 3033 = its slice-4 total 3010 + the 23-test battery, arithmetic exact); Frontend green attempt 1.
+- Residue: slice 5's new files = `tests/test_m17cc_recovery.py`; touched predecessor files = `recovery/m17c_verifier.py` (the two passes + head wiring), `recovery/m16_verifier.py` (the §11.5 wrap admission, two laws).
+
+## Fences honored
+
+NO backup/restore/downgrade slice work (§1.7 is next); NO §14.6 sampler or derived-input writer semantics (M17C-D); §13.5 inventory untouched; the §12 reader untouched. PR #26 remains draft, unmerged, unready.
+
+## Next slice (unchanged)
+
+§1.7 backup/restore + downgrade closure: clean round trips preserving companions, staged real-0021→0022 upgrade retaining all M17C-C rows, populated downgrade refusals naming the tables, and the head-sweep of test constants.
+
+
 
