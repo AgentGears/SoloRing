@@ -179,3 +179,44 @@ NO §12 historical inspection and NO §13.4 general recovery pass were started (
 
 §12 historical inspection, then §13.4/§13.5/§13.6 recovery-verifier laws, then backup/restore + downgrade coverage — each its own slice.
 
+---
+
+# M17C-C slice 4 — §12 historical inspection — 2026-09-30 — IMPLEMENTED
+
+Slice 4 is complete and green under the frozen rule: **historical inspection reconstructs what was captured, never what is true now.** Slice-4 heads: **`a0dd9b9`** (implementation) + **`0181aba`** (validator carves).
+
+## Delivered (the ten gate points)
+
+1. **Captured-graph-only read path**: new `server/soloring/performance/m17cc_history.py` — ONE async entry `verify_performance_history` (the `intra_shot_history` pattern) — consumed by the PUBLIC historical reader (`_revision_continuity`, `GET /shot-revisions/{id}/continuity`; the Generation continuity path inherits). It resolves only immutable references named by the captured graph: snapshot bytes + companion parent/children + `performance_revisions` / `performance_revision_vocal_bindings` / `vocal_performance_revisions` + the retained Blob row. No readiness calculation, no current resolution, no latest substitution.
+2. **Exact per-segment answer**: subject; exact PR + immutable identity (kind, profile, payload schema version, source kind, temporal domain, adopted_at); exact payload bytes/hash + retained Blob size; exact VP + identity (line revision, revision number, speaker, native rate, retained audio hash) when dialogue-bound; exact vocal sample interval; Performance interval and Shot-relative anchor as canonical rationals; the immutable synchronization binding (binding hash + VP + sample interval + performance origin + synchronization basis version); captured mapping hashes exposed as closure.
+3. **Schema branching stays historical**: the endpoint's legal outer-schema tuple admits 8 (previously schema-8 revisions failed as illegal); schema 8 requires and fully validates the performance plane (exactly-one parent, canonical spec bytes/hash, snapshot-block byte identity with the companion parent, frozen §11.2 grammar, non-empty, position-canonical; exact child count/order/column projection incl. the all-or-none vocal group against the embedded grammar); schema <8 keeps the exact predecessor behavior and never consults the performance companions at all (spy-proven, not merely implied by output); Performance is never inferred because current mappings exist.
+4. **Current-state mutation immunity** (the direct product proof for the milestone exit criterion): capture → record the full historical response → **temptation fixture** (a newer internally-valid VP on the same line re-selected as current + a newer valid PR/mapping on a lawful disjoint interval) → delete every current vocal and performance mapping → clear the current Shot dependency selection → change Shot duration → read again on a **reopened session** (each HTTP request binds a fresh session; no identity-map cover) → **exact equality**, captured identities and captured ordering intact.
+5. **Absence, not just correct output**: a `before_cursor_execute` spy on the engine (async engines take synchronous listeners on `sync_engine`) asserts ZERO statements touch `vocal_performance_selections`, `shot_vocal_segment_mappings`, `shot_performance_segment_mappings`, `performance_candidate*`, or `shot_entity_dependencies` while the schema-8 historical read runs; a second spy proves the companion tables are not consulted for schema <8.
+6. **Immutable-closure corruption fails closed**: 13-case tamper matrix (missing parent, missing child, moved position, altered field, altered segment_json/spec_json/spec_hash, snapshot-block disagreement with consistent outer hash, PR disagreement, gone binding, binding disagreement, vocal-group nulled, vocal-group grafted) — each a typed internal-invariant 500 with the exact fragment, never a present-day fallback. The FK-shielded shapes (missing retained Blob behind `fk_pr_payload_blob` RESTRICT; missing VP behind binding + selection) are proven UNCONSTRUCTIBLE by IntegrityError, with the reader's existence laws standing as the §13.4 recovery-parity mirror.
+7. **Dialogue and non-dialogue both proved**: the dialogue segment reconstructs the complete vocal object (VP identity + binding + sample interval + captured mapping hash); the generic segment reconstructs `vocal: null` in the same answer shape — the two forms stay distinct (the nulled/grafted group flips refuse).
+8. **Ordering is captured ordering**: children are read `ORDER BY position` with positions verified `0..n-1`; the order survives deletion of every current mapping (proving it is not derived from current mappings, UUIDs, row order, or a temporal sort).
+9. **No recovery-verifier expansion**: `m17c_verifier.py` untouched (0022 stays 0021-equivalent); the reader's laws are the local defensive validation a trustworthy answer needs. The exhaustive §13.4 sweep is the next slice.
+10. **No derived-input semantics**: `generation_performance_inputs` is untouched and irrelevant to the §12 answer; no Generation-history endpoint was added (M17C-D territory).
+
+**§11.5 closed on the read path** (disclosed scope note, not a new plane): a schema-8 wrap of a schema-7 predecessor reconstructs BOTH planes — the intra_shot outer-schema law admits the wrap (`7` → `(7, 8)`), a present embedded intra_shot block with gone companions is corruption (never silent absence, proven by tamper), and intra_shot provenance follows the reconstructed block. Schema-7-only behavior is byte-identical.
+
+## Gates (first-run dispositions recorded exactly)
+
+- New §12 battery (`test_m17cc_history.py`): **19/19** first run after three fixture-level corrections (async-engine listener must attach to `sync_engine`; the error body carries `message` not `detail`; the spec-hash tamper must respect the length-64 CHECK — the first attempt tripped `ck_srpfs_hash_len`, exactly the DB-CHECK-pinned pattern). The 8-over-7 test then surfaced two REAL laws to update, not fixture defects: the intra_shot verifier's outer-schema-7 pin and the events-table FK shielding the intra_shot spec parent (tamper deletes children first).
+- Families: M17C-C four batteries + the endpoint-history families (m16 history + history_c, m6c continuity, m13 history/corrections): **109/109**; focused battery: **146/146**.
+- **Hard process gate honored**: committed BEFORE validators; committed-tree validation caught the six-validator carve for the two new files pre-push (`0181aba` — 9th consecutive cycle). All 21 validators green on the committed tree (npm-audit pair fed the runtime audit document the CI way).
+- Frontend: vitest **143/143**, `tsc --noEmit` clean, `next build` succeeds.
+- Local full backend suite, FIRST RUN on the slice-4 tree: **2983 passed / 8 skipped / 0 failed in 46:09, exit 0** — collection verified independently (`--collect-only` = 2991 = 2983+8, the run is complete and self-consistent); no fix-forward needed.
+- **Counting note (disclosed, slice-3-era)**: the slice-3 head `73d9ccc` collects **2972** in a clean worktree, 19 below the 2991 total both its local run (2983/8) and CI (2971/20) executed — that anomaly predates this slice and does not touch the slice-4 tree, whose collection equals its local execution exactly; the slice-4 CI total (3010 = 2990/20) moved +19 from slice 3's exactly as the added battery predicts. Slice 3's green stands on its CI corroboration.
+- **CI run `36718111656` on `0181aba`: SUCCESS, attempt 1 — Backend 2990 passed / 20 skipped / 0 failed**; Frontend green (143/143).
+- Residue: slice 4's new files = `m17cc_history.py`, `test_m17cc_history.py`; touched predecessor files = `api/continuity.py` (schema-8 branch + response key), `continuity/intra_shot_history.py` (one law admits the wrap).
+
+## Fences honored
+
+NO §13.4/§13.5/§13.6 recovery-verifier expansion; NO derived-input semantics; §11.4 vocabulary unchanged; capture paths untouched (slice-3 persistence unmodified). PR #26 remains draft, unmerged, unready.
+
+## Next slice (unchanged)
+
+§13.4 captured-schema-8 recovery-verifier laws (+ §13.5 Blob-FK inventory advance, §13.6 structural derived-input laws), then §1.7 backup/restore + downgrade coverage.
+
+
