@@ -89,6 +89,8 @@ ALLOWLIST = (
     "tests/test_m17cc_history.py",
     # M17C-C slice 5 (§13.4-13.6 recovery verifier)
     "tests/test_m17cc_recovery.py",
+    # M17C-C slice 6 (§1.7 backup/restore + downgrade closure)
+    "tests/test_m17cc_roundtrip.py",
     "server/soloring/recovery/backup.py",
     "server/soloring/recovery/successor_semantics.py",
     "server/soloring/performance/revision.py",

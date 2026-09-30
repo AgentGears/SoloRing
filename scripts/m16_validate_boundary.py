@@ -138,6 +138,8 @@ M16_SURFACE = (
     r"^tests/test_m17cc_history\.py$",
     # M17C-C slice 5 (§13.4-13.6 recovery verifier)
     r"^tests/test_m17cc_recovery\.py$",
+    # M17C-C slice 6 (§1.7 backup/restore + downgrade closure)
+    r"^tests/test_m17cc_roundtrip\.py$",
     r"^tests/test_post_m13_next_security\.py$",
     r"^tests/test_m14_base_corpus\.py$",
 

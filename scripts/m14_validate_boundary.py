@@ -43,6 +43,8 @@ ALLOWED_PATTERNS = [
     r"^tests/test_m17cc_history\.py$",
     # M17C-C slice 5 (§13.4-13.6 recovery verifier)
     r"^tests/test_m17cc_recovery\.py$",
+    # M17C-C slice 6 (§1.7 backup/restore + downgrade closure)
+    r"^tests/test_m17cc_roundtrip\.py$",
     # M17A implementation (frozen R5): the dialogue/vocal foundation
     # surface — performance package, migration, API, recovery
     # verifier, boundary validators, and the M17A tests.
