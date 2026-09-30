@@ -133,6 +133,9 @@ M16_SURFACE = (
     r"^tests/m17cc_capture_helper\.py$",
     # M17C-C slice 3 (frozen-companion persistence + winner reuse)
     r"^tests/test_m17cc_persist\.py$",
+    # M17C-C slice 4 (§12 historical inspection)
+    r"^server/soloring/performance/m17cc_history\.py$",
+    r"^tests/test_m17cc_history\.py$",
     r"^tests/test_post_m13_next_security\.py$",
     r"^tests/test_m14_base_corpus\.py$",
 

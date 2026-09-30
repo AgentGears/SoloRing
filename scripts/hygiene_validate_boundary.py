@@ -84,6 +84,9 @@ ALLOWLIST = (
     "tests/m17cc_capture_helper.py",
     # M17C-C slice 3 (frozen-companion persistence + winner reuse)
     "tests/test_m17cc_persist.py",
+    # M17C-C slice 4 (§12 historical inspection)
+    "server/soloring/performance/m17cc_history.py",
+    "tests/test_m17cc_history.py",
     "server/soloring/recovery/backup.py",
     "server/soloring/recovery/successor_semantics.py",
     "server/soloring/performance/revision.py",

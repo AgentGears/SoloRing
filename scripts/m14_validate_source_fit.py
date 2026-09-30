@@ -108,6 +108,7 @@ REVIEWED_SUCCESSOR_PATHS = frozenset({
     "server/soloring/performance/m17c_shot_mapping.py",
     "server/soloring/performance/m17cc_models.py",
     "server/soloring/performance/m17cc_capture_read.py",
+    "server/soloring/performance/m17cc_history.py",
 })
 
 FORBIDDEN_PATTERNS: list[tuple[str, str]] = [
