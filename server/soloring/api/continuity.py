@@ -459,19 +459,47 @@ async def _revision_continuity(
         intra_block = None
         if not isinstance(schema_version, int) or isinstance(
                 schema_version, bool) or schema_version not in (
-                1, 2, 3, 4, 5, 6, 7):
+                1, 2, 3, 4, 5, 6, 7, 8):
             raise internal_invariant(
                 f"ShotRevision {revision_id} carries illegal snapshot "
                 f"schema_version {schema_version!r}.")
-        if schema_version == 7:
+        if schema_version == 7 or (
+                schema_version == 8 and "intra_shot" in snapshot):
             # M16-C (frozen R6 §8.4/§15.4): rebuild + verify the intra_shot
             # history from immutable companion rows only — never current
             # M16 state, current target definitions, or current selections.
+            # M17C-C §11.5: a schema-8 capture may wrap a schema-7
+            # predecessor; the wrapped intra_shot authority remains
+            # valid history and reconstructs through the same law (a
+            # present embedded block with gone companions is
+            # corruption, never silent absence).
             from soloring.continuity.intra_shot_history import (
                 verify_intra_shot_history,
             )
 
             intra_block = await verify_intra_shot_history(
+                session, revision_id, snapshot=snapshot)
+            if intra_block is None and schema_version == 8:
+                raise internal_invariant(
+                    f"ShotRevision {revision_id} schema-8 snapshot "
+                    "carries an intra_shot block without its "
+                    "companion closure.")
+        performance_block = None
+        if schema_version == 8:
+            # M17C-C §12: historical performance reconstruction is
+            # captured-graph-only — snapshot bytes + companion rows +
+            # immutable referenced authority + retained Blob closure.
+            # Current vocal/performance mappings, current selections,
+            # candidate working intent, and current Shot dependency
+            # selection NEVER participate; disagreement is typed
+            # corruption, never a present-day fallback. Schema < 8
+            # keeps the exact predecessor historical behavior and does
+            # not consult the performance companions at all.
+            from soloring.performance.m17cc_history import (
+                verify_performance_history,
+            )
+
+            performance_block = await verify_performance_history(
                 session, revision_id, snapshot=snapshot)
         snap_hash_row = (await session.execute(text(
             "SELECT snapshot_hash FROM shot_revisions WHERE id = :rid"),
@@ -705,7 +733,8 @@ async def _revision_continuity(
         "intra_shot": intra_block,
         "intra_shot_provenance": (
             await _intra_shot_provenance(session, rev["id"])
-            if schema_version == 7 else None),
+            if intra_block is not None else None),
+        "performance": performance_block,
     }
 
 

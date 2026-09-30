@@ -560,10 +560,14 @@ def _verify_core(parent, children, starts, world, revision_id: str,
             raise internal_invariant(
                 f"ShotRevision {revision_id} intra_shot duration "
                 "disagrees with the captured intent duration")
-        if snapshot.get("schema_version") != 7:
+        if snapshot.get("schema_version") not in (7, 8):
+            # M17C-C §11.5: a schema-8 capture wraps the EXACT
+            # predecessor base — an intra_shot block under outer
+            # schema 8 is the wrapped schema-7 authority, valid
+            # history reconstructing through the same law
             raise internal_invariant(
                 f"ShotRevision {revision_id} carries intra_shot history "
-                "without outer snapshot schema 7")
+                "without outer snapshot schema 7 or its schema-8 wrap")
     return block
 
 
