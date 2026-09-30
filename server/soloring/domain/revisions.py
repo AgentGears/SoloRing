@@ -176,12 +176,28 @@ async def _snapshot_one_read(
                 raise SoloRingError(
                     first["code"], first["message"],
                     status_code=409, details=first["details"])
+            # M17C-C slice 2 (frozen R4 11.1): the performance plane
+            # resolves on THIS SAME pinned snapshot, last in the frozen
+            # precedence chain (after M16), as a complete immutable-
+            # in-practice value — mappings, PR closure fields, bindings,
+            # paired vocal mappings, and the readiness projection all
+            # fixed in memory before the fenced persistence unit. None
+            # when the Shot carries no working mappings. Impossible
+            # persisted history fails closed here exactly as every other
+            # M17C-B authority read; non-READY working states are DATA
+            # (the capture path gates on them), so non-capture
+            # consumers of this seam stay unaffected.
+            from soloring.performance.m17cc_capture_read import (
+                resolve_performance_plane,
+            )
+            performance = await resolve_performance_plane(
+                conn, settings, shot_id)
             await conn.commit()
             return (
                 shot, refs, resolved, outcome.states,
                 relation_outcome.relation_states,
                 visual_result, spatial_result, production_world_result,
-                intra,
+                intra, performance,
             )
         except Exception:
             with contextlib.suppress(Exception):
@@ -731,6 +747,7 @@ async def capture_revision_with_visual(
     spatial_result = read[6]
     production_world_result = read[7]
     intra = read[8]
+    performance = read[9]
     visual_pack = (
         visual_result.pack if visual_result is not None else None
     )
@@ -766,10 +783,24 @@ async def capture_revision_with_visual(
                     (packed["target"]["kind"], packed["target"]["id"])))
             for i, (public, packed) in enumerate(
                 zip(intra["events"], intra_shot_pack["events"]))]
+    # M17C-C slice 2 (frozen R4 11.2/11.4): the readiness gate runs on
+    # the CAPTURE path only, from the pinned read value — a non-READY
+    # working state refuses capture with the frozen typed refusal
+    # (corruption already failed closed inside the read). The gate sits
+    # BEFORE any builder invocation, mirroring the M7D/M8/M10/M13/M16
+    # blocker precedence.
+    if performance is not None and not performance["ready"]:
+        from soloring.errors import ErrorCode
+        raise SoloRingError(
+            ErrorCode.PERFORMANCE_CAPTURE_NOT_READY,
+            "the Shot's performance plane is not READY — capture "
+            "requires every mapping ready", status_code=409,
+            details={"segments": performance["segment_readiness"]})
     snapshot, continuity_spec = build_capturable_snapshot(
         shot, refs, resolved, feature_states, relation_states, visual_pack,
         spatial_pack, production_world_pack,
         intra_shot_pack=intra_shot_pack,
+        performance_pack=performance,
     )
     snapshot_hash = canonical_hash(snapshot)
     snapshot_json = canonical_json_str(snapshot)

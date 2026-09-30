@@ -199,6 +199,7 @@ def build_capturable_snapshot(
     shot, refs, resolved: list[ResolvedDependency], feature_states=(),
     relation_states=(), visual_pack=None, spatial_pack=None,
     production_world_pack=None, intra_shot_pack=None,
+    performance_pack=None,
 ) -> tuple[dict, dict | None]:
     """(snapshot value, continuity spec or None) from ONE captured value.
 
@@ -293,7 +294,63 @@ def build_capturable_snapshot(
                 **{k: v for k, v in base.items()
                    if k != "schema_version"},
                 "intra_shot": intra_shot_pack}
+    if performance_pack is not None:
+        # M17C-C slice 2 (frozen R4 11.2): schema 8 wraps the EXACT
+        # predecessor base (any of schemas 1-7) with the canonical
+        # non-empty performance block. PURE schema construction — the
+        # builder consumes only the in-memory capture value; it never
+        # queries persistence, readiness, mappings, or bindings.
+        segments = _performance_segments_value(performance_pack)
+        base = {"schema_version": 8,
+                **{k: v for k, v in base.items()
+                   if k != "schema_version"},
+                "performance": {"schema_version": 1,
+                                "segments": segments}}
     return base, spec
+
+
+def _performance_segments_value(performance_pack) -> list[dict]:
+    """The embedded performance.segments value under the frozen 11.2
+    grammar: non-empty, canonically ordered by position, uniform closed
+    vocal grammar (complete vocal object or explicit null). Structural
+    internal invariants over an IN-MEMORY captured value — the caller
+    (the one capture read) is their single producer."""
+    from soloring.errors import internal_invariant
+
+    if not isinstance(performance_pack, dict):
+        raise internal_invariant(
+            "performance_pack must be the capture-read value dict")
+    segments = performance_pack.get("segments")
+    if not segments:
+        raise internal_invariant(
+            "schema-8 wrap requires a non-empty performance block — "
+            "no mapping means the exact predecessor snapshot")
+    positions = [s["position"] for s in segments]
+    if positions != sorted(positions) or len(set(positions)) != len(
+            positions):
+        raise internal_invariant(
+            "performance segments must be canonically ordered by "
+            "unique position")
+    value = []
+    for s in segments:
+        if set(s) != {"position", "subject_id", "performance_revision_id",
+                      "performance_payload_sha256",
+                      "performance_profile_id", "performance_kind",
+                      "performance_start_ms", "performance_end_ms",
+                      "shot_anchor_ms", "vocal"}:
+            raise internal_invariant(
+                "performance segment key grammar diverges from the "
+                "frozen 11.2 shape")
+        vocal = s["vocal"]
+        if vocal is not None and set(vocal) != {
+                "vocal_performance_revision_id", "vocal_binding_hash",
+                "source_start_sample", "source_end_sample_exclusive",
+                "sample_rate_hz"}:
+            raise internal_invariant(
+                "performance segment vocal grammar diverges from the "
+                "frozen 11.2 shape")
+        value.append(s)
+    return value
 
 
 def effective_working_snapshot_hash(
