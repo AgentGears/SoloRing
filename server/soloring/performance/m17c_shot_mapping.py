@@ -631,6 +631,37 @@ async def _project_one(session, settings, shot, row, seam_by_pr,
             # DELETE) — readiness reports blocked; recovery preserves.
             return (BLOCKED_BINDING_INTEGRITY,
                     {"reason": "the paired vocal mapping is missing"})
+        # RR2-M17CC-01 (third first-pass review): a PRESENT paired
+        # vocal mapping must satisfy its complete persisted canonical
+        # law BEFORE any of its bytes enter capture identity — the
+        # shared transport-neutral verifier (the same document law the
+        # M17A recovery verifier enforces). ABSENCE stays lawful
+        # blocked data above; a PRESENT-but-noncanonical row is
+        # corruption and fails closed — capture must never mint
+        # schema-8 history its own §12 contract would reject.
+        from soloring.performance.mapping import (
+            verify_stored_vocal_mapping,
+        )
+        try:
+            verify_stored_vocal_mapping(
+                mapping_schema_version=vocal.mapping_schema_version,
+                mapping_json=vocal.mapping_json,
+                mapping_hash=vocal.mapping_hash,
+                vocal_performance_revision_id=(
+                    vocal.vocal_performance_revision_id),
+                source_start_sample=vocal.source_start_sample,
+                source_end_sample_exclusive=(
+                    vocal.source_end_sample_exclusive),
+                sample_rate_hz=vocal.sample_rate_hz,
+                performance_origin_num=vocal.performance_origin_num,
+                performance_origin_den=vocal.performance_origin_den,
+                shot_anchor_num=vocal.shot_anchor_num,
+                shot_anchor_den=vocal.shot_anchor_den)
+        except ValueError as exc:
+            raise _corrupt(
+                f"paired vocal mapping {row.shot_id!r}@"
+                f"{row.vocal_mapping_position} fails its persisted "
+                f"canonical structural law: {exc}") from exc
         if vocal.vocal_performance_revision_id != \
                 binding.vocal_performance_revision_id:
             # SR2-03: the supported M17A vocal PUT can repoint the

@@ -222,3 +222,77 @@ async def list_shot_vocal_segment_mappings(
             "current_readiness": readiness,
             "created_at": r.created_at, "updated_at": r.updated_at})
     return out
+
+
+# ---------------------------------------------------------------------------
+# RR2-M17CC-01 (third first-pass review): the ONE shared, transport-
+# neutral persisted structural law for a PRESENT ShotVocalSegmentMapping.
+# The live capture/readiness path and the M17A recovery verifier consume
+# the SAME document reconstruction so the two definitions cannot drift;
+# each caller keeps its own transport and error vocabulary.
+# ---------------------------------------------------------------------------
+
+def vocal_mapping_canonical_document(
+        *, vocal_performance_revision_id: str,
+        source_start_sample: int,
+        source_end_sample_exclusive: int,
+        sample_rate_hz: int,
+        performance_origin_num: int, performance_origin_den: int,
+        shot_anchor_num: int, shot_anchor_den: int) -> dict:
+    """The exact canonical vocal mapping document reconstructed from a
+    stored row's OWN fields (the grammar the M17A PUT writes)."""
+    return {
+        "mapping_schema_version": 1,
+        "vocal_performance_revision_id": vocal_performance_revision_id,
+        "source_start_sample": source_start_sample,
+        "source_end_sample_exclusive": source_end_sample_exclusive,
+        "sample_rate_hz": sample_rate_hz,
+        "performance_origin_ms": {
+            "num": performance_origin_num,
+            "den": performance_origin_den},
+        "shot_anchor_ms": {"num": shot_anchor_num,
+                           "den": shot_anchor_den},
+    }
+
+
+def verify_stored_vocal_mapping(
+        *, mapping_schema_version, mapping_json: str, mapping_hash: str,
+        vocal_performance_revision_id: str,
+        source_start_sample: int,
+        source_end_sample_exclusive: int,
+        sample_rate_hz: int,
+        performance_origin_num: int, performance_origin_den: int,
+        shot_anchor_num: int, shot_anchor_den: int) -> None:
+    """Fail closed (raising ValueError with a precise reason) unless a
+    PRESENT vocal mapping row satisfies its complete persisted canonical
+    law: mapping_schema_version == 1, the stored mapping_json IS the
+    canonical document over the row's own fields, and mapping_hash IS
+    that document's canonical digest. Never repairs, normalizes, or
+    substitutes the row."""
+    import json as _json
+
+    canonical = vocal_mapping_canonical_document(
+        vocal_performance_revision_id=vocal_performance_revision_id,
+        source_start_sample=source_start_sample,
+        source_end_sample_exclusive=source_end_sample_exclusive,
+        sample_rate_hz=sample_rate_hz,
+        performance_origin_num=performance_origin_num,
+        performance_origin_den=performance_origin_den,
+        shot_anchor_num=shot_anchor_num,
+        shot_anchor_den=shot_anchor_den)
+    if mapping_schema_version != 1:
+        raise ValueError(
+            "mapping_schema_version is not the frozen 1")
+    try:
+        doc = _json.loads(mapping_json)
+    except (ValueError, TypeError) as exc:
+        raise ValueError(
+            f"mapping_json is not decodable JSON: {exc}") from exc
+    if doc != canonical:
+        raise ValueError(
+            "mapping_json is not the canonical document over the "
+            "row's own fields")
+    if canonical_hash(canonical) != mapping_hash:
+        raise ValueError(
+            "mapping_hash is not the canonical digest of the row's "
+            "own mapping document")

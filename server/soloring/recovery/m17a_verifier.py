@@ -232,24 +232,32 @@ def _verify_selections(con: sqlite3.Connection) -> None:
 
 
 def _verify_mappings(con: sqlite3.Connection) -> None:
+    # RR2-M17CC-01: the canonical document is reconstructed by the ONE
+    # shared transport-neutral law (the same function the live capture
+    # path enforces) so the two definitions cannot drift; this verifier
+    # keeps its own transport and corruption vocabulary.
+    from soloring.performance.mapping import (
+        verify_stored_vocal_mapping,
+    )
     for r in con.execute("SELECT * FROM shot_vocal_segment_mappings"):
-        doc = json.loads(r["mapping_json"])
-        canonical = {"mapping_schema_version": 1,
-                     "vocal_performance_revision_id":
-                     r["vocal_performance_revision_id"],
-                     "source_start_sample": r["source_start_sample"],
-                     "source_end_sample_exclusive":
-                     r["source_end_sample_exclusive"],
-                     "sample_rate_hz": r["sample_rate_hz"],
-                     "performance_origin_ms": {
-                         "num": r["performance_origin_num"],
-                         "den": r["performance_origin_den"]},
-                     "shot_anchor_ms": {"num": r["shot_anchor_num"],
-                                        "den": r["shot_anchor_den"]}}
-        if doc != canonical or \
-                canonical_hash(canonical) != r["mapping_hash"]:
+        try:
+            verify_stored_vocal_mapping(
+                mapping_schema_version=r["mapping_schema_version"],
+                mapping_json=r["mapping_json"],
+                mapping_hash=r["mapping_hash"],
+                vocal_performance_revision_id=(
+                    r["vocal_performance_revision_id"]),
+                source_start_sample=r["source_start_sample"],
+                source_end_sample_exclusive=(
+                    r["source_end_sample_exclusive"]),
+                sample_rate_hz=r["sample_rate_hz"],
+                performance_origin_num=r["performance_origin_num"],
+                performance_origin_den=r["performance_origin_den"],
+                shot_anchor_num=r["shot_anchor_num"],
+                shot_anchor_den=r["shot_anchor_den"])
+        except ValueError as exc:
             raise _corrupt(f"mapping {r['shot_id']}@{r['position']} "
-                           "canonical rehash fail")
+                           f"canonical rehash fail: {exc}") from exc
         for n, d in ((r["performance_origin_num"],
                       r["performance_origin_den"]),
                      (r["shot_anchor_num"], r["shot_anchor_den"])):
