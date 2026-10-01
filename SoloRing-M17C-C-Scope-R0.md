@@ -521,3 +521,26 @@ The commissioned minimal correction is complete: the shared vocal-mapping verifi
 ## Fences honored
 
 Minimal delta; PR #26 remains draft, unmerged, unready. After CI corroboration the next gate is another fresh independent exhaustive first-pass review of the corrected HEAD before any second-review phase.
+
+---
+
+# M17C-C fifth first-pass review — 2026-10-02 — NOT CLEAN (register RR4-M17CC-01 FROZEN)
+
+The independent review of implementation HEAD `a029900` (the RR3 correction against actual code, the shared M17A recovery path, its adversarial tests, and the surrounding PF-02 → capture → §12 → §13.4 chain; no Codex/second reviewer) is complete. **Verdict: NOT CLEAN — 1 new Medium, 0 High, 0 Low.** PR #26 remains draft, open, unmerged (tip `42871ba`, one documentation-only commit above the reviewed head). The register is frozen; the next lawful step is a narrowly scoped correction cycle for RR4-M17CC-01.
+
+## Register status
+
+- **RR3-M17CC-01: CLOSED** — `verify_stored_vocal_mapping` uses the exact certifying law `mapping_json == canonical_json_str(canonical)` + the independent hash; parsing only differentiates diagnostics after byte inequality; the battery genuinely exercises the value-vs-serialization boundary; CI 36924263930 genuinely green on `a029900`.
+- **RR2-M17CC-01:** its mapping-JSON/hash defect closed; **RR4-M17CC-01 is the newly identified broader predecessor-integrity seam**.
+- **All earlier FPR/RR findings remain CLOSED** (no basis to reopen FPR-01..08, RR-01..04, or the grammar-v2 snapshot anchor; the correction delta is narrow — the only product file changed vs `28a7dbe` is `performance/mapping.py`).
+
+## Frozen finding
+
+- **RR4-M17CC-01 — MEDIUM — NEW — paired vocal-mapping predecessor-integrity closure before fresh capture.** The shared helper certifies the mapping document's SELF-consistency, but not all persisted M17A laws that make the paired row valid authority. Two independently provable gaps:
+  1. **Sample-rate authority is not checked.** The M17A write path requires `sample_rate_hz == VP native rate` (and recovery enforces it independently), but the shared helper only reconstructs the document from the row's own fields — so corrupting the rate to another positive value + recomputing the exact canonical JSON/hash passes. PF-02's induced-interval uses `binding.sample_rate_hz`, never comparing the paired row's rate; `_project_one` checks VP identity/selection/induced timing but not the rate → READY → `resolve_performance_plane` copies the corrupted rate into the captured vocal closure → persistence writes it mechanically → the first §12 read compares against the immutable binding and refuses: capture mints a schema-8 revision its own first historical inspection rejects (exactly the RR2-class outcome).
+  2. **Canonical rational representation is missing from the shared helper.** The table requires positive denominators but not reduced fractions; M17A recovery explicitly enforces gcd-canonical form after the shared helper — so the supposedly shared "complete persisted canonical law" is incomplete. A coherent vocal anchor rewrite `1/1 → 2/2` with exact recomputed canonical JSON/hash passes the helper; PF-02 compares anchors as `Fraction` values (equal); but the captured vocal hash was computed over `2/2` while the historical preimage reconstruction uses the Performance mapping's canonical `1/1` → §12/recovery reject the freshly captured mapping-hash closure.
+- **Required correction:** do NOT weaken the RR3 byte law. Make fresh capture consume the FULL predecessor vocal-mapping integrity contract before closure extraction: enforce canonical `performance_origin`/`shot_anchor` rationals on a present row; require paired-vocal `sample_rate_hz` agreement with the immutable binding/VP rate; preserve VP identity/selection/induced-timing; share or prove-implied any other M17A interval/trim laws; keep ABSENCE lawful `BLOCKED_BINDING_INTEGRITY` exactly. Preferred shape: factor the row-local M17A structural law so live capture and recovery share the SAME rules, with cross-row binding/VP authority checks in the caller. Frozen battery: (1) rate-only corruption + exact JSON/hash recompute → readiness/capture 500 before persistence; (2) canonical-rational corruption (anchor ×k/k + exact recompute) → same refusal; (3) counts unchanged for both; (4) M17A recovery refuses both staged states on the same law; (5) clean control + the RR3 forgery/noncanonical cases + supported DELETE remain green.
+
+## Frozen disposition
+
+**FIRST-PASS REVIEW COMPLETE. New register RR4-M17CC-01 frozen (0H/1M/0L). RR3-M17CC-01 CLOSED. All earlier FPR/RR findings remain CLOSED. PR #26 remains draft, unmerged, unready. Merge/ready NOT authorized. Codex/second reviewer NOT run.** The next lawful step is a narrowly scoped correction cycle for RR4-M17CC-01, then another independent first-pass review of the corrected HEAD. No correction work has started; the cycle awaits its gate.
