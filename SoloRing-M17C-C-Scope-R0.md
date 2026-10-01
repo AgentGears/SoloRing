@@ -298,3 +298,34 @@ Slice 6 is complete and green under the frozen rule: **valid M17C-C historical c
 ## Fences honored
 
 No capture/history/recovery law revisions; no §14.6 sampler or GPI writer; PR #26 remains draft, unmerged, unready — ready for the exhaustive final first-pass review against the frozen R0 scope and predecessor-impact register.
+
+---
+
+# M17C-C exhaustive first-pass review — 2026-10-01 — NOT CLEAN (findings register FROZEN)
+
+The independent exhaustive first-pass review of final HEAD `1680e8c1078800fba9d1083b2c8763dc7620be57` is complete. PR #26 remained draft, open, unmerged, and unchanged during the review. **Verdict: NOT CLEAN — eight findings: 2 High, 4 Medium, 2 Low.** The register below is frozen; any second-review/Codex pass starts from it independently.
+
+## Frozen findings register (summary; the review document is the authority)
+
+1. **FPR-M17CC-01 — HIGH — Generation / successor-schema execution semantics.** The Generation service is not schema-8-aware: M16's event-capability refusal fires only at outer schema 7, spatial authority loads only at outer (5, 6), M14 observation integration only at outer 6 — so a legal schema-8 wrap can bypass `INTRA_SHOT_REALIZATION_UNSUPPORTED`, silently drop captured spatial/observation predecessor authority, and persist a Generation below the authority the revision actually carries. Safe pre-M17C-D posture = successor-aware preservation of predecessor execution laws OR a typed fail-closed schema-8 realization refusal — never lowering.
+2. **FPR-M17CC-02 — HIGH — effective working snapshot / canon currency.** `effective_working_snapshot_hash()` has no `performance_pack` path and `read_shot_detail()` never resolves the Performance plane before exposing the working hash — while `differs_from_approved()` assumes the same canonical builder capture uses. An unchanged Performance state can report divergence; a Performance-only change does not participate. The currentness/canon invariant stops meaning what the API says.
+3. **FPR-M17CC-03 — MEDIUM — observation readiness.** `observation_readiness()` consumes the 10-element one-read only through index 7, and declares any captured outer schema other than exactly 6 not-applicable ("carries no production world") — factually wrong for a schema-8-over-6 capture that retains the exact `production_world` block; `capture.is_current` also derives from the Performance-blind hash.
+4. **FPR-M17CC-04 — MEDIUM — captured mapping-hash anchoring.** `performance_mapping_hash` and `vocal_mapping_hash` are companion-only closure fields — excluded from the embedded segment and from `segment_json`/`segment_hash`, unanchored in §12 reconstruction and §13.4 recovery, and unexercised by the tamper matrix. Post-capture mutation of either column alters the historical answer while every hash and recovery stays green. The fix needs an immutable anchor (captured preimage or a full-child closure hash), never a current-working-mapping read.
+5. **FPR-M17CC-05 — MEDIUM — §12 retained payload bytes.** The historical reader verifies only the `blobs` DB row and returns hash/sha/size metadata; it neither opens nor rehashes nor can supply the retained payload bytes R0 requires. Physical deletion/corruption of the payload file with the DB row intact currently returns 200.
+6. **FPR-M17CC-06 — MEDIUM — §13.6 translation identity.** Recovery accepts `translation_identity` occurring anywhere as any JSON string value in the WorkflowSpec — presence, not identity equality. A wrong identity passes when the same string appears in an unrelated field. The exact identity coordinate must be frozen before M17C-D writes rows.
+7. **FPR-M17CC-07 — LOW — pure builder schema-8-over-schema-1.** `build_capturable_snapshot()` returns the zero-dependency schema-1 base before reaching the Performance wrapper, contradicting the frozen any-schema-1–7 wrap law. Unreachable through current PF-02 admission (READY Performance requires a dependency-bearing world) — a false pure-builder law, not a production data-loss path today.
+8. **FPR-M17CC-08 — LOW — recovery fixture portability.** `_coherent_child_rewrite` mixes named SQLite placeholders with a positional parameter sequence passed to `sqlite3.execute` — 39 deprecation warnings in CI; becomes `ProgrammingError` under Python 3.14. Fixture-only.
+
+## Review scope assessment (as recorded by the reviewer)
+
+The six-slice record is materially accurate; the §1.7 proof, the one-read/persist core, the head-gated inventories, and the boundary-carve narrowness held up. The earlier concern about undisclosed M17C-A/B recovery-chain changes is CLOSED (the successor chain pre-existed frozen baseline 8a92bc6; M17C-C only adds 0022 membership; the M16 8-over-7 recovery admission is disclosed, required predecessor impact). The defects concentrate where the new outer schema crosses existing consumers, and where companion-only closure is weaker than the frozen historical/recovery claim.
+
+## Open design decisions the corrections must resolve
+
+- The pre-M17C-D Generation posture: preserve all predecessor execution semantics while deferring only Performance, or refuse schema-8 realization until the M17C-D adapter exists.
+- A durable, §12-lawful anchor for the two captured mapping hashes (capture-schema/closure design, not another verifier `if`).
+- The transport shape of §12 exact retained payload bytes (encoded, subresource, or other — R0 requires the bytes but not the encoding).
+
+## Frozen disposition
+
+**FIRST-PASS REVIEW COMPLETE. Known findings FPR-M17CC-01..08. Primary blockers 01 and 02. PR #26 remains draft, unmerged, unready. Merge/ready-mark NOT authorized by this review. Second reviewer/Codex NOT run.** No correction work has started; the correction cycle awaits its gate.
