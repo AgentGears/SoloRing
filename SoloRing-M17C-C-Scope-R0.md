@@ -369,3 +369,30 @@ The correction gate was authorized against the frozen register; the three archit
 ## Fences honored
 
 No Codex/second pass run; no merge/ready; PR #26 remains draft/unmerged/unready. The corrected HEAD now awaits the re-run of the exhaustive first-pass review and the freezing of the NEW register, per the mandated sequence.
+
+---
+
+# M17C-C corrected-head exhaustive first-pass RE-REVIEW — 2026-10-01 — NOT CLEAN (register RR-M17CC-01..04 FROZEN)
+
+The fresh independent re-review of corrected HEAD `7a06474` (against the frozen R0 scope, the predecessor-impact register, the original register FPR-M17CC-01..08, and the correction claims; no Codex/second reviewer) is complete. **Verdict: NOT CLEAN — 4 findings: 0 High, 3 Medium, 1 Low.** PR #26 remains draft, open, unmerged (tip `aa08e932`). The new register is frozen; the next lawful step is a correction cycle against RR-M17CC-01..04.
+
+## Original-register closure status (as certified by the re-review)
+
+- **CLOSED:** FPR-M17CC-01 (typed terminal schema-8 generation refusal), FPR-02 (READY Performance in the pinned working hash + canon equality/sensitivity), FPR-05 (physical §12 payload bytes, base64, fail-closed), FPR-06 (identity equality at the dedicated coordinate), FPR-07 (schema-8-over-schema-1 wrapping), FPR-08 (fully named SQLite parameters).
+- **STILL OPEN:** FPR-M17CC-03 (the 8-over-6 unwrap is incomplete), FPR-M17CC-04 (preimage gives recomputability, not immutable anchoring).
+- The 0023 recovery/head plumbing held up (expected head, 0022 as the preimage-less historical posture, 14-path inventory, predecessor chain), and CI 36842093290's green was independently corroborated — green gates do not invalidate the uncovered branches.
+
+## Frozen findings register (summary; the review document is the authority)
+
+1. **RR-M17CC-01 — MEDIUM — FPR-03 remains open.** The 8-over-6 observation unwrap strips only `performance` and leaves `schema_version: 8` on the "predecessor" handed to the frozen M14 compiler, which strictly refuses any schema ≠ 6 — the supported observation-capable case still fails. The correction test reached only the profile-less refusal branch. Required: reconstruct the actual wrapped schema-6 predecessor INCLUDING `schema_version: 6`; add an observation-capable test that reaches `compile_world_observation_spec`.
+2. **RR-M17CC-02 — MEDIUM — NEW.** A supported DELETE of the paired vocal mapping is a lawful `BLOCKED_BINDING_INTEGRITY` working state (M17C-B), but `resolve_performance_plane()` raises corruption when the paired mapping is missing — BEFORE the capture gate can issue its frozen 409, and (via the FPR-02 route) making `GET /shots/{id}` 500 on a merely-blocked plane. Required: separate "project readiness" from "extract complete capturable closure" — non-READY must survive as data for the typed refusal and non-capture readers. The reviewer's open question to freeze during this correction: whether `working_snapshot_hash` for lawfully non-READY Performance is null (the predecessor unready-layer pattern) or hashes the current-but-uncapturable state — must be an explicit decision, not implicit.
+3. **RR-M17CC-03 — MEDIUM — FPR-04 remains open.** The 0023 preimage makes both mapping hashes recomputable but not immutably anchored: a COHERENT rewrite of `vocal_mapping_position` (or the vocal origin pair) plus the recomputed mapping hash passes §12 and recovery — no snapshot field, segment hash, or immutable authority row carries the historical working-mapping value. The reviewer's correction-design note (accepted): preimage provides recomputability, not anchoring, unless a digest of the preimage is itself covered by the ShotRevision's immutable snapshot identity or an equivalently independent immutable authority; another companion-only self-hash is not enough. Required adversarial test: a coherent preimage+hash rewrite, not merely hash-only mutation.
+4. **RR-M17CC-04 — LOW — NEW proof-gate defect.** The corrected M16 boundary validator defines `GENERATION_FENCE_OK_8` but never requires it; `main()` still verifies only the schema-7 fence while the broadened per-line vocabulary admits generic terms — the validator stays green even if the schema-8 refusal is removed. Not a product failure at `7a06474` (the FPR battery protects the implementation); a misleading proof claim. Required: positively require the schema-8 fence and its ordering, structurally/AST-anchored rather than a broad keyword allowlist.
+
+## Missing evidence the correction battery must add
+
+An observation-capable 8-over-6 readiness call reaching the M14 compiler; a supported paired-vocal DELETE followed by Shot detail AND capture proving no 500 and the correct non-READY posture; a coherent preimage+mapping-hash rewrite refused by §12 and recovery.
+
+## Frozen disposition
+
+**FIRST-PASS RE-REVIEW COMPLETE. New register RR-M17CC-01..04 frozen. Original findings: 01/02/05/06/07/08 closed; 03/04 open. PR #26 remains draft, unmerged, unready. Merge/ready NOT authorized. Codex/second reviewer NOT run.** The next lawful step is a correction cycle against RR-M17CC-01..04; only after another corrected HEAD passes an independent first-pass review does the second-review/Codex phase begin. No correction work has started; the cycle awaits its gate.
