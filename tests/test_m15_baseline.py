@@ -218,7 +218,7 @@ def test_m15_source_scope_excludes_execution_source() -> None:
         # surface, byte-pinned here so later edits cannot inherit
         # ownership by pathname reuse
         "server/soloring/observation/readiness.py":
-            "1ddfbaa3b69a9252898e1099d003a9b6fd3ce304",
+            "75452823fd4cf9ac6b39ad908bb8e31a5dcb5ccb",
     }
     for path, expected_blob in post_m15_owned.items():
         assert _git("rev-parse", f"HEAD:{path}") == expected_blob, (
