@@ -444,3 +444,31 @@ The fresh independent review of implementation HEAD `82f51a6` (against frozen R0
 ## Frozen disposition
 
 **FIRST-PASS REVIEW COMPLETE. New register RR2-M17CC-01 frozen (0H/1M/0L). RR-M17CC-01..04 all CLOSED; FPR-M17CC-01..08 all remain CLOSED. PR #26 remains draft, unmerged, unready. Merge/ready NOT authorized. Codex/second reviewer NOT run.** The next lawful step is a narrowly scoped correction cycle for RR2-M17CC-01 followed by another independent first-pass review of the corrected HEAD. No correction work has started; the cycle awaits its gate.
+
+---
+
+# M17C-C RR2-M17CC-01 CORRECTION — the fresh-capture admission seam — 2026-10-01 — IMPLEMENTED
+
+The commissioned correction is complete: a PRESENT paired `ShotVocalSegmentMapping` must satisfy its complete persisted canonical structure before any of its bytes can enter grammar-v2 capture identity. Correction heads: **`e8e1b6b`** (implementation) + the validator-carve commit (`28a7dbe` pushed head at the time of the record).
+
+## Delivered (the frozen gate exactly)
+
+1. **ONE shared, transport-neutral structural law** — `performance/mapping.py` gains `vocal_mapping_canonical_document` + `verify_stored_vocal_mapping`: `mapping_schema_version == 1`; the exact canonical document reconstructed from the row's OWN fields; the stored `mapping_json` IS that document; `mapping_hash` IS its canonical digest. Never repairs, normalizes, or substitutes. **The M17A recovery verifier's `_verify_mappings` now consumes the SAME law** (its hand-inlined document reconstruction removed; its own transport and corruption vocabulary preserved — the two definitions cannot drift).
+2. **Invoked before capturable closure extraction** — `m17c_shot_mapping._project_one` runs the verifier on the PRESENT paired vocal mapping immediately after the absence check, BEFORE the VP-identity/selection/induced-interval laws — hence before `resolve_performance_plane` can copy `mapping_hash` + the origin preimage into the capture value, and hence before the builder/persistence. ABSENCE stays the lawful `BLOCKED_BINDING_INTEGRITY` data (RR-02 preserved exactly, no readiness-vocabulary redesign); PRESENT-but-noncanonical raises the typed corruption so readiness AND capture fail closed — capture can no longer mint schema-8 history its own §12 contract would reject at first read.
+3. **The frozen battery** (`tests/test_m17cc_rr2_corrections.py`, 4 tests): mapping_hash-only corruption (another storage-valid 64-hex; semantic fields + mapping_json untouched) and mapping_json-only corruption (semantic columns + hash untouched) — each proving the identical lawful world captured cleanly FIRST, then the precise corruption reason from both the readiness projection (500) and capture (500 before the builder), with revision/parent/children counts unchanged after each refusal; the clean control captures schema 8 and is immediately valid under §12 AND recovery; the RR-02 supported-delete re-proof (absence still blocked data, Shot detail 200 with nulls).
+
+## Predecessor-impact disclosure
+
+The only predecessor surface touched is the shared document law itself: recovery's `_verify_mappings` message now carries the precise reason suffix (same code path, same vocabulary family — disclosed). Grammar-v2, snapshot anchoring, §12 semantics, recovery semantics, PF-03 authority, Generation behavior, and M17C-D boundaries are untouched.
+
+## Gates (first-run dispositions recorded exactly)
+
+- RR2 battery **4/4** first run (fixture-level corrections only: a paren typo in the count helper; the corruption-reason assertion now names the precise member). The correction-affected batteries **130/130** (all nine m17cc files + m17a recovery + m17c shot-mapping) and the migration/recovery families **55/55**.
+- Committed-tree validators: all green after the four-boundary carve for the RR2 battery.
+- Frontend: vitest **143/143**, tsc clean, build succeeds.
+- Local full backend suite, FIRST RUN: **3034 passed / 8 skipped / 0 failed in 50:22, exit 0** (collection 3042 = the prior 3038 + the 4-test battery — exact).
+- **CI run `36910082107` on `28a7dbe`: SUCCESS, attempt 1 — Backend 3041 passed / 20 skipped / 0 failed** (CI total 3061 = its prior 3057 + the 4-test battery, exact); Frontend green attempt 1 (143/143).
+
+## Fences honored
+
+No grammar-v2/snapshot/§12/recovery-semantics changes; PR #26 remains draft, unmerged, unready. After CI corroboration the next gate is another fresh independent exhaustive first-pass review of the corrected HEAD, findings frozen before any Codex/second-review step.
