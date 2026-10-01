@@ -472,3 +472,22 @@ The only predecessor surface touched is the shared document law itself: recovery
 ## Fences honored
 
 No grammar-v2/snapshot/§12/recovery-semantics changes; PR #26 remains draft, unmerged, unready. After CI corroboration the next gate is another fresh independent exhaustive first-pass review of the corrected HEAD, findings frozen before any Codex/second-review step.
+
+---
+
+# M17C-C fourth first-pass review — 2026-10-01 — NOT CLEAN (register RR3-M17CC-01 FROZEN)
+
+The independent review of implementation HEAD `28a7dbe` (the RR2 correction, its shared M17A recovery seam, the new adversarial battery, the readiness/capture path, predecessor impact, and the surrounding closed findings; no Codex/second reviewer) is complete. **Verdict: NOT CLEAN — 1 Medium, 0 High, 0 Low.** PR #26 remains draft, open, unmerged (tip `505a8d5`, one documentation-only commit above the reviewed head). The register is frozen; the next lawful step is a minimal correction of the shared serialized-byte law plus the semantically-identical/noncanonical JSON adversarial proof.
+
+## Register status
+
+- **RR2-M17CC-01: REMAINS OPEN** — the core architecture was assessed CORRECT (the shared verifier placement after the lawful-absence branch and before VP/selection/timing/closure extraction; the genuine shared recovery seam; the battery; CI 36910082107 independently confirmed at 3041/20), but the correction does not implement the complete canonical-BYTE law it claims.
+- **All earlier FPR/RR findings remain CLOSED** (no basis found to reopen FPR-01..08, RR-01..04, grammar-v2 anchoring, the non-READY/null-hash posture, the Generation fence, §12 physical-payload closure, or the schema-6 observation projection). An unrelated event-loop warning in the green CI run does not meet the finding threshold.
+
+## Frozen finding
+
+- **RR3-M17CC-01 — MEDIUM — persisted mapping_json canonical-BYTE integrity.** `verify_stored_vocal_mapping` decodes `mapping_json` and compares the decoded OBJECT to the canonical dict — it never checks `mapping_json == canonical_json_str(canonical)`. A row whose bytes are changed to a semantically identical but NONCANONICAL serialization (pretty-printed, reordered, or a duplicate-key form whose decoded last-value object equals the canonical document — a serialization the canonical writer can never emit) passes the verifier with every semantic field and `mapping_hash` untouched: PF-02 stays READY, capture proceeds, and M17A recovery — now sharing the same under-checking helper — also certifies the noncanonical predecessor row. This violates the frozen §11.4 requirement that capture refuse noncanonical stored mapping BYTES/hash. The existing forged-document test changes the decoded semantics, so it cannot catch the value-vs-serialization boundary. Required correction: the shared helper performs the exact serialized-form comparison (`mapping_json == canonical_json_str(canonical)`, retaining `mapping_hash == canonical_hash(canonical)`; parsing unnecessary for certification once byte equality holds, retained only for a differentiated diagnostic). Mandatory proof: a mapping-json-only mutation that is SEMANTICALLY IDENTICAL to the lawful document (pretty-print/reorder) with all semantic columns + the canonical hash untouched → readiness 500, capture fails before builder/persistence, revision/parent/child counts unchanged, M17A recovery independently refuses the same row, and the existing clean control + supported-delete case stay green. The forged-document case is RETAINED as a separate test (a different failure mode).
+
+## Frozen disposition
+
+**FIRST-PASS REVIEW COMPLETE. New register RR3-M17CC-01 frozen (0H/1M/0L). RR2-M17CC-01 remains OPEN. All earlier FPR/RR findings remain CLOSED. PR #26 remains draft, unmerged, unready. Merge/ready NOT authorized. Codex/second reviewer NOT run.** The next lawful step is the minimal serialized-byte correction + the semantically-identical adversarial proof, then another independent first-pass review of the corrected HEAD. No correction work has started; the cycle awaits its gate.
