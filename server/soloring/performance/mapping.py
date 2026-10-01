@@ -265,10 +265,16 @@ def verify_stored_vocal_mapping(
         shot_anchor_num: int, shot_anchor_den: int) -> None:
     """Fail closed (raising ValueError with a precise reason) unless a
     PRESENT vocal mapping row satisfies its complete persisted canonical
-    law: mapping_schema_version == 1, the stored mapping_json IS the
-    canonical document over the row's own fields, and mapping_hash IS
-    that document's canonical digest. Never repairs, normalizes, or
-    substitutes the row."""
+    law: mapping_schema_version == 1, the stored mapping_json IS EXACTLY
+    the canonical serialized form (byte identity, per the frozen 11.4
+    noncanonical-BYTES refusal — RR3-M17CC-01: decoding alone proves
+    semantic equality, not canonical serialization; a pretty-printed,
+    reordered, or duplicate-key form that decodes to the canonical
+    document is NOT a serialization the canonical writer could emit),
+    and mapping_hash IS that document's canonical digest. Never
+    repairs, normalizes, reserializes-and-accepts, or substitutes the
+    row. Parsing is used ONLY to differentiate diagnostics, never as
+    the certification."""
     import json as _json
 
     canonical = vocal_mapping_canonical_document(
@@ -283,15 +289,24 @@ def verify_stored_vocal_mapping(
     if mapping_schema_version != 1:
         raise ValueError(
             "mapping_schema_version is not the frozen 1")
-    try:
-        doc = _json.loads(mapping_json)
-    except (ValueError, TypeError) as exc:
+    # the CERTIFYING law: exact canonical serialized identity
+    canonical_bytes = canonical_json_str(canonical)
+    if mapping_json != canonical_bytes:
+        # diagnostic-only parse: distinguish a semantic forgery from a
+        # semantically identical but NONCANONICAL serialization
+        try:
+            doc = _json.loads(mapping_json)
+        except (ValueError, TypeError) as exc:
+            raise ValueError(
+                f"mapping_json is not the canonical serialized form "
+                f"and is not decodable JSON: {exc}") from exc
+        if doc != canonical:
+            raise ValueError(
+                "mapping_json is not the canonical document over the "
+                "row's own fields")
         raise ValueError(
-            f"mapping_json is not decodable JSON: {exc}") from exc
-    if doc != canonical:
-        raise ValueError(
-            "mapping_json is not the canonical document over the "
-            "row's own fields")
+            "mapping_json decodes to the canonical document but is "
+            "not its canonical serialized form")
     if canonical_hash(canonical) != mapping_hash:
         raise ValueError(
             "mapping_hash is not the canonical digest of the row's "
