@@ -491,3 +491,33 @@ The independent review of implementation HEAD `28a7dbe` (the RR2 correction, its
 ## Frozen disposition
 
 **FIRST-PASS REVIEW COMPLETE. New register RR3-M17CC-01 frozen (0H/1M/0L). RR2-M17CC-01 remains OPEN. All earlier FPR/RR findings remain CLOSED. PR #26 remains draft, unmerged, unready. Merge/ready NOT authorized. Codex/second reviewer NOT run.** The next lawful step is the minimal serialized-byte correction + the semantically-identical adversarial proof, then another independent first-pass review of the corrected HEAD. No correction work has started; the cycle awaits its gate.
+
+---
+
+# M17C-C RR3-M17CC-01 CORRECTION — the exact canonical serialized form — 2026-10-01 — IMPLEMENTED
+
+The commissioned minimal correction is complete: the shared vocal-mapping verifier now certifies the exact canonical BYTE identity of the stored `mapping_json`. Correction heads: **`3bee776`** (implementation) + the validator-carve commit (pushed head `a029900` at record time).
+
+## Delivered (the frozen boundary exactly)
+
+1. **Exact serialized identity** — `verify_stored_vocal_mapping` now certifies `mapping_json == canonical_json_str(canonical)`; the independent digest law `mapping_hash == canonical_hash(canonical)` is retained. No normalize/reserialize-and-accept/repair/replace. **Parsing is DIAGNOSTIC-ONLY** — when the byte comparison fails, a single decode differentiates a semantic forgery ("not the canonical document") from a semantically identical but NONCANONICAL serialization ("decodes to the canonical document but is not its canonical serialized form" — pretty-print/reorder/duplicate-key forms the canonical writer can never emit); it never substitutes for byte equality.
+2. **Still ONE shared law** — both the live PF-02/capture path (`_project_one`, after the lawful-absence branch) and the M17A recovery verifier certify the identical canonical-byte law. Disclosed predecessor impact: the recovery proof surface gains the differentiated reason (its own transport + vocabulary unchanged).
+3. **RR-02 preserved exactly** — an ABSENT paired mapping stays lawful `BLOCKED_BINDING_INTEGRITY` data; the correction applies only to a PRESENT stored row. Frozen §11.4 enforcement of an EXISTING rule; grammar-v2/snapshot anchoring/§12/Generation/PF-03/non-READY posture/migration heads/M17C-D boundaries untouched.
+
+## The frozen battery (`tests/test_m17cc_rr3_corrections.py`, 3 tests)
+
+- **The decisive byte-canonicality proof**: start from the lawful `mapping_json`, deserialize it, write a semantically identical but NONCANONICAL serialization (reversed key order + `indent=2`), leaving every semantic column and `mapping_hash` untouched (both re-verified on the tampered row) → readiness 500 with the noncanonical-form reason; capture fails with the SAME corruption before builder/persistence; revision/parent/child counts unchanged; **M17A recovery independently refuses the same stored row** (hand-staged DB copy — the backup API itself runs the same verification chain and refuses during staging, which is the same law).
+- **The semantic-forgery case retained** as a distinct failure mode (the RR2 proof, now with its precise differentiated reason).
+- **The clean canonical control** (READY, schema-8 capture, §12 valid, M17A + M17C recovery valid) **+ the supported paired-vocal DELETE** (still blocked data, never corruption; Shot detail 200 with nulls).
+
+## Gates (first-run dispositions recorded exactly)
+
+- RR3 battery **3/3** first run after one staging correction (the backup API refuses during staging on the corrupted row — the recovery proof hand-stages the DB copy instead, disclosed in-test). The correction-affected batteries **133/133** (all ten m17cc files + m17a recovery + shot mapping + bf recovery), the RR2 battery unchanged and green under the byte law.
+- Committed-tree validators: all green after the four-boundary carve for the RR3 battery.
+- Frontend: vitest **143/143**, tsc clean, build succeeds.
+- Local full backend suite, FIRST RUN: **3037 passed / 8 skipped / 0 failed in 49:42, exit 0** (collection 3045 = the prior 3042 + the 3-test battery — exact).
+- **CI run `36924263930` on `a029900`: SUCCESS, attempt 1 — Backend 3044 passed / 20 skipped / 0 failed** (CI total 3064 = its prior 3061 + the 3-test battery, exact); Frontend green attempt 1 (143/143).
+
+## Fences honored
+
+Minimal delta; PR #26 remains draft, unmerged, unready. After CI corroboration the next gate is another fresh independent exhaustive first-pass review of the corrected HEAD before any second-review phase.
