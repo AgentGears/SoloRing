@@ -289,6 +289,22 @@ def verify_stored_vocal_mapping(
     if mapping_schema_version != 1:
         raise ValueError(
             "mapping_schema_version is not the frozen 1")
+    # RR4-M17CC-01: the complete PERSISTED STRUCTURAL law — canonical
+    # rational representation on BOTH persisted pairs (positive
+    # denominator, gcd-reduced, and zero only as 0/1). The M17A write
+    # path canonicalizes before persistence and M17A recovery enforces
+    # the same form; a present row carrying 1/1-as-2/2 is NOT the
+    # stored law even when its document bytes/hash are self-consistent.
+    import math as _math
+
+    for what, n, d in (
+            ("performance_origin_ms", performance_origin_num,
+             performance_origin_den),
+            ("shot_anchor_ms", shot_anchor_num, shot_anchor_den)):
+        if d <= 0 or _math.gcd(abs(n), d) != 1 or (n == 0 and d != 1):
+            raise ValueError(
+                f"{what} rational {n}/{d} is not in canonical "
+                "reduced form")
     # the CERTIFYING law: exact canonical serialized identity
     canonical_bytes = canonical_json_str(canonical)
     if mapping_json != canonical_bytes:

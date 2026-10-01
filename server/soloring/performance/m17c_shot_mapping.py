@@ -680,6 +680,32 @@ async def _project_one(session, settings, shot, row, seam_by_pr,
                          vocal.vocal_performance_revision_id,
                      "bound_vocal_performance_revision_id":
                          binding.vocal_performance_revision_id})
+        # RR4-M17CC-01: CROSS-ROW authority checks on the PRESENT
+        # paired vocal mapping — the immutable synchronization binding
+        # is the external authority (its own rate == VP native rate and
+        # its source interval within the VP trim are binding-table
+        # laws verified at both binding grades). The paired row's rate
+        # must AGREE with the binding, and its sample interval must
+        # lie INSIDE the binding's authoritative source interval (the
+        # §8.3 creation law, now proven at admission time too — a
+        # coherent post-creation rewrite would otherwise flow READY
+        # into capture and mint history §12/§13.4 immediately reject).
+        if vocal.sample_rate_hz != binding.sample_rate_hz:
+            raise _corrupt(
+                f"paired vocal mapping {row.shot_id!r}@"
+                f"{row.vocal_mapping_position} sample_rate_hz "
+                f"{vocal.sample_rate_hz!r} disagrees with the immutable "
+                f"synchronization binding rate "
+                f"{binding.sample_rate_hz!r}")
+        if not (binding.source_start_sample
+                <= vocal.source_start_sample
+                and vocal.source_end_sample_exclusive
+                <= binding.source_end_sample_exclusive):
+            raise _corrupt(
+                f"paired vocal mapping {row.shot_id!r}@"
+                f"{row.vocal_mapping_position} source interval lies "
+                "outside the immutable synchronization binding source "
+                "interval")
         # B-F8: missing selection row is corruption inside
         # _selection_posture; lawful UNSET/different selection is STALE
         state, selected = await _selection_posture(session, binding)

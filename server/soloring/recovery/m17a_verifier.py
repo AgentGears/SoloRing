@@ -258,11 +258,10 @@ def _verify_mappings(con: sqlite3.Connection) -> None:
         except ValueError as exc:
             raise _corrupt(f"mapping {r['shot_id']}@{r['position']} "
                            f"canonical rehash fail: {exc}") from exc
-        for n, d in ((r["performance_origin_num"],
-                      r["performance_origin_den"]),
-                     (r["shot_anchor_num"], r["shot_anchor_den"])):
-            if d <= 0 or math.gcd(abs(n), d) != 1 or (n == 0 and d != 1):
-                raise _corrupt("noncanonical rational in mapping")
+        # RR4-M17CC-01: the canonical-rational law now lives INSIDE
+        # the shared row-local verifier above (live capture enforces
+        # the identical rule); the laws below are the CROSS-ROW
+        # authority checks recovery performs over its own transport
         vp = con.execute(
             "SELECT * FROM vocal_performance_revisions WHERE id = ?",
             (r["vocal_performance_revision_id"],)).fetchone()
