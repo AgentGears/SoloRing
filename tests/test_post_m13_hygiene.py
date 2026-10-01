@@ -228,8 +228,8 @@ async def test_hyg_base_02_migration_head_unchanged(tmp_path, monkeypatch):
     # M17C succession (PR #26): the admitted successors beyond the
     # frozen 0019 are 0020/0021 (M17C-A/B) and 0022 (M17C-C capture
     # storage); head is exactly 0022.
-    assert files[-1] == "0022_m17c_schema8_capture.py"
-    assert not any(f > "0022_m17c_schema8_capture.py"
+    assert files[-1] == "0023_m17cc_capture_closure_preimage.py"
+    assert not any(f > "0023_m17cc_capture_closure_preimage.py"
                    for f in files)
 
 

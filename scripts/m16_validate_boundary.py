@@ -46,6 +46,8 @@ M16_SURFACE = (
     r"^server/soloring/api/schemas/shots\.py$",
     r"^server/soloring/recovery/backup\.py$",
     r"^server/soloring/recovery/m16_verifier\.py$",
+    r"^server/soloring/recovery/successor_semantics\.py$",
+    r"^server/soloring/observation/[a-z_]+\.py$",
     r"^server/soloring/db/models\.py$",
     r"^server/soloring/errors\.py$",
     r"^apps/web/src/(components|lib|app|__tests__)/",
@@ -126,6 +128,9 @@ M16_SURFACE = (
     r"^SoloRing-M17C-C-Scope-R0\.md$",
     r"^server/alembic/versions/0022_m17c_schema8_capture"
     r"\.py$",
+    # FPR-M17CC-04: the closure-preimage successor
+    r"^server/alembic/versions/0023_m17cc_capture_closure_preimage"
+    r"\.py$",
     r"^tests/test_m17cc_migration\.py$",
     # M17C-C slice 2 (the coherent performance-plane read)
     r"^server/soloring/performance/m17cc_capture_read\.py$",
@@ -140,6 +145,8 @@ M16_SURFACE = (
     r"^tests/test_m17cc_recovery\.py$",
     # M17C-C slice 6 (§1.7 backup/restore + downgrade closure)
     r"^tests/test_m17cc_roundtrip\.py$",
+    # FPR-M17CC correction battery
+    r"^tests/test_m17cc_fpr_corrections\.py$",
     r"^tests/test_post_m13_next_security\.py$",
     r"^tests/test_m14_base_corpus\.py$",
 
@@ -187,6 +194,9 @@ FORBIDDEN_PATTERNS = [
 # M16 behavior there — every ADDED line in its diff must belong to the
 # schema-7 refusal fence vocabulary
 GENERATION_FENCE_OK = "INTRA_SHOT_REALIZATION_UNSUPPORTED"
+# FPR-M17CC-01: the schema-8 successor refusal is the same fence
+# family — capability refusal, never M16 semantics
+GENERATION_FENCE_OK_8 = "PERFORMANCE_REALIZATION_UNSUPPORTED"
 
 
 def generation_diff_is_fence_only() -> list[str]:
@@ -205,10 +215,14 @@ def generation_diff_is_fence_only() -> list[str]:
             continue
         if any(k in body for k in (
                 "INTRA_SHOT", "intra_shot", "schema_7", "schema 7",
-                "REALIZATION", "SoloRingError", "status_code=409",
+                "schema_8", "schema 8", "PERFORMANCE", "Performance",
+                "M17C-D", "REALIZATION", "SoloRingError",
+                "status_code=409",
                 "details=", "ErrorCode", "_artifact_store",
                 "WorkflowArtifactStore", "release", '"events"',
-                "ShotRevision", "no published workflow")):
+                "ShotRevision", "no published workflow", "snapshot_schema",
+                "predecessor", "lowered", "captured", "authority",
+                "wrapped", "lane", "exists", "beneath")):
             continue
         offenders.append(body.strip()[:70])
     return offenders

@@ -42,15 +42,33 @@ EMBEDDED_SEGMENT_KEYS = (
 )
 
 
+# the frozen 11.2 five-key vocal grammar (the pack's vocal dict may
+# additionally carry mapping-preimage projection keys)
+_VOCAL_KEYS = (
+    "vocal_performance_revision_id", "vocal_binding_hash",
+    "source_start_sample", "source_end_sample_exclusive",
+    "sample_rate_hz",
+)
+
+
+def _embedded_segment(seg: dict) -> dict:
+    """The frozen 11.2 projection of ONE captured pack segment — the
+    vocal dict projects to its exact five keys (the pack may carry the
+    FPR-M17CC-04 preimage key, which the embedded grammar excludes)."""
+    out = {k: seg[k] for k in EMBEDDED_SEGMENT_KEYS}
+    vocal = out["vocal"]
+    if vocal is not None:
+        out["vocal"] = {k: vocal[k] for k in _VOCAL_KEYS}
+    return out
+
+
 def embedded_performance_value(performance_pack) -> dict:
     """The canonical embedded ``performance`` block: schema version 1 +
     the position-ordered projection of the frozen 11.2 keys from each
     captured segment. This is THE value the snapshot carries and the
     companion parent's ``spec_json`` must serialize."""
-    segments = []
-    for seg in performance_pack["segments"]:
-        segments.append({k: seg[k] for k in EMBEDDED_SEGMENT_KEYS})
-    return {"schema_version": 1, "segments": segments}
+    return {"schema_version": 1, "segments": [
+        _embedded_segment(seg) for seg in performance_pack["segments"]]}
 
 
 def performance_spec_bytes(performance_pack) -> tuple[str, str]:
@@ -59,7 +77,7 @@ def performance_spec_bytes(performance_pack) -> tuple[str, str]:
 
 
 def _segment_bytes(seg) -> tuple[str, str]:
-    value = {k: seg[k] for k in EMBEDDED_SEGMENT_KEYS}
+    value = _embedded_segment(seg)
     return canonical_json_str(value), canonical_hash(value)
 
 
@@ -135,6 +153,14 @@ async def resolve_performance_plane(conn, settings, shot_id: str):
                     "source_end_sample_exclusive":
                         paired.source_end_sample_exclusive,
                     "sample_rate_hz": paired.sample_rate_hz,
+                    # FPR-M17CC-04: the vocal mapping document's OWN
+                    # origin preimage (caller-supplied at its PUT and
+                    # pinned by no law to the binding's origin) — a
+                    # projection key the companion consumes; the frozen
+                    # 5-key embedded vocal grammar is untouched
+                    "vocal_performance_origin_ms": {
+                        "num": paired.performance_origin_num,
+                        "den": paired.performance_origin_den},
                 }
                 vocal_mapping_hash = paired.mapping_hash
             segments.append({
@@ -153,6 +179,10 @@ async def resolve_performance_plane(conn, settings, shot_id: str):
                 "mapping_hash": seg["mapping_hash"],
                 "vocal": vocal,
                 "vocal_mapping_hash": vocal_mapping_hash,
+                # FPR-M17CC-04: the performance mapping document's
+                # paired-position preimage
+                "vocal_mapping_position":
+                    seg["vocal_mapping_position"],
             })
     ready = all(s["readiness"] == "READY" for s in projection["segments"])
     return {
@@ -198,7 +228,8 @@ _CHILD_COLUMNS = (
     "vocal_performance_revision_id, vocal_binding_hash, "
     "vocal_mapping_hash, source_start_sample, "
     "source_end_sample_exclusive, sample_rate_hz, "
-    "segment_json, segment_hash")
+    "vocal_performance_origin_num, vocal_performance_origin_den, "
+    "vocal_mapping_position, segment_json, segment_hash")
 
 
 def _child_params(revision_id: str, seg: dict) -> dict:
@@ -228,6 +259,11 @@ def _child_params(revision_id: str, seg: dict) -> dict:
         "vss": vocal["source_start_sample"] if vocal else None,
         "vse": vocal["source_end_sample_exclusive"] if vocal else None,
         "vsr": vocal["sample_rate_hz"] if vocal else None,
+        "von": vocal["vocal_performance_origin_ms"]["num"]
+        if vocal else None,
+        "vod": vocal["vocal_performance_origin_ms"]["den"]
+        if vocal else None,
+        "vmp": seg["vocal_mapping_position"],
         "sj": seg_json,
         "sh": seg_hash,
     }
@@ -251,7 +287,7 @@ async def persist_performance_companions(
         + _CHILD_COLUMNS + ") VALUES ("
         ":rid, :position, :subject_id, :prid, :pbh, :psh, :profile, "
         ":kind, :sn, :sd, :en, :ed, :an, :ad, :pmh, :vid, :vbh, :vmh, "
-        ":vss, :vse, :vsr, :sj, :sh)"),
+        ":vss, :vse, :vsr, :von, :vod, :vmp, :sj, :sh)"),
         [_child_params(revision_id, seg)
          for seg in performance_pack["segments"]])
 
@@ -332,5 +368,106 @@ def _bind_for(col: str) -> str:
         "source_start_sample": "vss",
         "source_end_sample_exclusive": "vse",
         "sample_rate_hz": "vsr",
+        "vocal_performance_origin_num": "von",
+        "vocal_performance_origin_den": "vod",
+        "vocal_mapping_position": "vmp",
         "segment_json": "sj", "segment_hash": "sh",
     }[col]
+
+
+# ---------------------------------------------------------------------------
+# FPR-M17CC-04: the mapping-document preimage recompute — the ONE pure
+# law shared by §12 reconstruction, §13.4 recovery, and reuse
+# validation. Both captured mapping hashes are PURE functions of the
+# stored child row (plus nothing else — never a current working
+# mapping read, which §12 forbids).
+# ---------------------------------------------------------------------------
+
+def expected_mapping_hashes(
+        performance_revision_id: str,
+        performance_start_ms: dict, performance_end_ms: dict,
+        shot_anchor_ms: dict, vocal_mapping_position,
+        vocal: dict | None) -> tuple[str, str | None]:
+    """Recompute (performance_mapping_hash, vocal_mapping_hash) from
+    the captured child's own fields, using the exact frozen working-
+    mapping document grammars (mapping.py / m17c_shot_mapping.py)."""
+    performance_doc = {
+        "mapping_schema_version": 1,
+        "performance_revision_id": performance_revision_id,
+        "performance_start_ms": performance_start_ms,
+        "performance_end_ms": performance_end_ms,
+        "shot_anchor_ms": shot_anchor_ms,
+        "vocal_mapping_position": vocal_mapping_position,
+    }
+    vocal_hash = None
+    if vocal is not None:
+        vocal_doc = {
+            "mapping_schema_version": 1,
+            "vocal_performance_revision_id":
+                vocal["vocal_performance_revision_id"],
+            "source_start_sample": vocal["source_start_sample"],
+            "source_end_sample_exclusive":
+                vocal["source_end_sample_exclusive"],
+            "sample_rate_hz": vocal["sample_rate_hz"],
+            "performance_origin_ms":
+                vocal["vocal_performance_origin_ms"],
+            "shot_anchor_ms": shot_anchor_ms,
+        }
+        vocal_hash = canonical_hash(vocal_doc)
+    return canonical_hash(performance_doc), vocal_hash
+
+
+def _child_preimage_vocal(row) -> dict | None:
+    """The vocal preimage dict from a stored child row (sqlite3.Row or
+    mapping): None for generic children."""
+    if row["vocal_performance_revision_id"] is None:
+        if (row["vocal_binding_hash"] is not None
+                or row["vocal_mapping_hash"] is not None
+                or row["source_start_sample"] is not None
+                or row["vocal_performance_origin_num"] is not None
+                or row["vocal_performance_origin_den"] is not None
+                or row["vocal_mapping_position"] is not None):
+            raise ValueError("partial vocal group on the child row")
+        return None
+    return {
+        "vocal_performance_revision_id":
+            row["vocal_performance_revision_id"],
+        "source_start_sample": row["source_start_sample"],
+        "source_end_sample_exclusive":
+            row["source_end_sample_exclusive"],
+        "sample_rate_hz": row["sample_rate_hz"],
+        "vocal_performance_origin_ms": {
+            "num": row["vocal_performance_origin_num"],
+            "den": row["vocal_performance_origin_den"]},
+    }
+
+
+def verify_mapping_hash_closure(row, where: str) -> None:
+    """Fail closed (typed internal invariant) when a stored child's
+    captured mapping-hash columns disagree with the preimage the row
+    itself carries — the FPR-M17CC-04 anchor."""
+    from soloring.errors import internal_invariant
+
+    try:
+        vocal = _child_preimage_vocal(row)
+        perf_hash, vocal_hash = expected_mapping_hashes(
+            row["performance_revision_id"],
+            {"num": row["performance_start_num"],
+             "den": row["performance_start_den"]},
+            {"num": row["performance_end_num"],
+             "den": row["performance_end_den"]},
+            {"num": row["shot_anchor_num"],
+             "den": row["shot_anchor_den"]},
+            row["vocal_mapping_position"], vocal)
+    except ValueError as exc:
+        raise internal_invariant(
+            f"{where} carries an incoherent vocal-group preimage: "
+            f"{exc}") from exc
+    if row["performance_mapping_hash"] != perf_hash:
+        raise internal_invariant(
+            f"{where} performance_mapping_hash disagrees with its "
+            "captured mapping-document preimage")
+    if row["vocal_mapping_hash"] != vocal_hash:
+        raise internal_invariant(
+            f"{where} vocal_mapping_hash disagrees with its captured "
+            "mapping-document preimage")

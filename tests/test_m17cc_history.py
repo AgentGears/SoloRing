@@ -160,10 +160,19 @@ async def test_history_answers_the_frozen_segment_contract(client):
     blob = await _row(client, (
         "SELECT size_bytes FROM blobs WHERE hash = :h"),
         {"h": pr["canonical_channel_payload_blob_hash"]})
+    payload_path = (
+        client._transport.app.state.settings.blob_dir / "sha256"
+        / pr["canonical_channel_payload_blob_hash"][:2]
+        / pr["canonical_channel_payload_blob_hash"][2:4]
+        / pr["canonical_channel_payload_blob_hash"])
+    import base64 as _b64
     assert d0["performance_payload"] == {
         "blob_hash": pr["canonical_channel_payload_blob_hash"],
         "sha256": pr["canonical_channel_payload_sha256"],
         "size_bytes": blob["size_bytes"],
+        # FPR-M17CC-05: the EXACT retained bytes (verified + base64)
+        "payload_bytes_base64": _b64.b64encode(
+            payload_path.read_bytes()).decode("ascii"),
     }
     assert d0["performance_start_ms"] == {"num": 0, "den": 1}
     assert d0["performance_end_ms"] == {"num": 1000, "den": 1}
@@ -441,14 +450,19 @@ async def test_immutable_closure_corruption_fails_closed(
                            "vocal_mapping_hash = NULL, "
                            "source_start_sample = NULL, "
                            "source_end_sample_exclusive = NULL, "
-                           "sample_rate_hz = NULL "
+                           "sample_rate_hz = NULL, "
+                           "vocal_performance_origin_num = NULL, "
+                           "vocal_performance_origin_den = NULL, "
+                           "vocal_mapping_position = NULL "
                            "WHERE shot_revision_id = :r "
                            "AND position = 0", {"r": revision.id})
     elif tamper == "vocal_group_grafted":
         donor = await _row(client, (
             f"SELECT vocal_performance_revision_id, vocal_binding_hash,"
             f" vocal_mapping_hash, source_start_sample, "
-            f"source_end_sample_exclusive, sample_rate_hz "
+            f"source_end_sample_exclusive, sample_rate_hz, "
+            f"vocal_performance_origin_num, "
+            f"vocal_performance_origin_den, vocal_mapping_position "
             f"FROM {_CHILDREN} WHERE shot_revision_id = :r "
             "AND position = 0"), {"r": revision.id})
         await _sql(client, f"UPDATE {_CHILDREN} SET "
@@ -459,7 +473,13 @@ async def test_immutable_closure_corruption_fails_closed(
                            "source_start_sample = :source_start_sample, "
                            "source_end_sample_exclusive = "
                            ":source_end_sample_exclusive, "
-                           "sample_rate_hz = :sample_rate_hz "
+                           "sample_rate_hz = :sample_rate_hz, "
+                           "vocal_performance_origin_num = "
+                           ":vocal_performance_origin_num, "
+                           "vocal_performance_origin_den = "
+                           ":vocal_performance_origin_den, "
+                           "vocal_mapping_position = "
+                           ":vocal_mapping_position "
                            "WHERE shot_revision_id = :r "
                            "AND position = 1",
                    {"r": revision.id, **donor})

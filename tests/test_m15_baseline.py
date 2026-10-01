@@ -147,12 +147,13 @@ def test_migration_head_is_0015_before_m15() -> None:
     assert head, "current migration listing empty"
     # M17C succession (PR #26): beyond the frozen 0019 the admitted
     # successors are 0020_m17c_perf_capture_r2 (frozen at c502b81; the
-    # B-F1 split restored its exact bytes) and 0021 (the M17C-B
-    # working-mapping successor) — head is exactly 0021.
-    assert head[-1] == "0022_m17c_schema8_capture.py", (
-        f"current migration head is not the admitted 0021: {head[-1:]}")
+    # B-F1 split restored its exact bytes), 0021 (the M17C-B
+    # working-mapping successor), 0022 (M17C-C schema-8 capture
+    # storage) and 0023 (the FPR-M17CC-04 closure-preimage successor).
+    assert head[-1] == "0023_m17cc_capture_closure_preimage.py", (
+        f"current migration head is not the admitted 0023: {head[-1:]}")
     beyond = [m for m in head
-              if m > "0022_m17c_schema8_capture.py"]
+              if m > "0023_m17cc_capture_closure_preimage.py"]
     assert not beyond, f"migrations beyond 0021 exist: {beyond}"
 
 
@@ -211,6 +212,13 @@ def test_m15_source_scope_excludes_execution_source() -> None:
     post_m15_owned = {
         "server/soloring/executors/comfy/translate.py":
             "9d0af0782a372c57cfbb389d8accd6f8c3675ac8",
+        # FPR-M17CC-03 (first-pass review): the successor-aware
+        # observation-readiness unwrap of the schema-8 wrap — a
+        # reviewed successor correction to the M14 observation
+        # surface, byte-pinned here so later edits cannot inherit
+        # ownership by pathname reuse
+        "server/soloring/observation/readiness.py":
+            "1ddfbaa3b69a9252898e1099d003a9b6fd3ce304",
     }
     for path, expected_blob in post_m15_owned.items():
         assert _git("rev-parse", f"HEAD:{path}") == expected_blob, (

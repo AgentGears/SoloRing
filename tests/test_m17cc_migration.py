@@ -11,7 +11,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 SERVER = REPO / "server"
 PY = sys.executable
-HEAD = "0022_m17c_schema8_capture"
+HEAD = "0023_m17cc_capture_closure_preimage"
 TABLES = {
     "shot_revision_performance_specs",
     "shot_revision_performance_segments",

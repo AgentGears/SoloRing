@@ -51,7 +51,7 @@ from tests.m17cc_capture_helper import capture as _capture
 from tests.test_m17cc_persist import _lawful
 from tests.test_m17c_shot_mapping import _bound_world, _seg_body
 
-_HEAD = "0022_m17c_schema8_capture"
+_HEAD = "0023_m17cc_capture_closure_preimage"
 _HEAD_0021 = "0021_m17c_shot_performance_mappings"
 _PARENTS = "shot_revision_performance_specs"
 _CHILDREN = "shot_revision_performance_segments"
@@ -663,7 +663,7 @@ async def test_populated_downgrade_refusal_is_non_destructive(
     result = _run(root / "soloring.db", "downgrade", _HEAD_0021,
                   expect=1)
     combined = result.stdout + result.stderr
-    assert "0022 downgrade refused" in combined
+    assert "0023 downgrade refused" in combined
     assert _PARENTS in combined
 
     con = _con(root / "soloring.db")

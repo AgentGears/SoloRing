@@ -500,7 +500,8 @@ async def _revision_continuity(
             )
 
             performance_block = await verify_performance_history(
-                session, revision_id, snapshot=snapshot)
+                session, revision_id, snapshot=snapshot,
+                settings=settings)
         snap_hash_row = (await session.execute(text(
             "SELECT snapshot_hash FROM shot_revisions WHERE id = :rid"),
             {"rid": revision_id})).scalar_one()

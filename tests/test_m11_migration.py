@@ -266,5 +266,5 @@ def test_migration_head_is_0012(tmp_path, monkeypatch):
     ver = con.execute("SELECT version_num FROM alembic_version").fetchone()[0]
     files = sorted(p.name for p in VERSIONS.glob("0*.py"))
     con.close()
-    assert ver == "0022_m17c_schema8_capture"  # M17C-C advances the head
-    assert files[-1] == "0022_m17c_schema8_capture.py"
+    assert ver == "0023_m17cc_capture_closure_preimage"  # M17C-C advances the head
+    assert files[-1] == "0023_m17cc_capture_closure_preimage.py"

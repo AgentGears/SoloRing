@@ -144,8 +144,10 @@ def check_base03() -> list[str]:
         # proof-map-owned M14-BASE:03 test meaningful).
         "0020_m17c_perf_capture_r2.py",
         "0021_m17c_shot_performance_mappings.py",
-        # M17C-C slice 1: the schema-8 capture storage successor
+        # M17C-C slice 1: the schema-8 capture storage successor;
+        # FPR-M17CC-04: the closure-preimage successor
         "0022_m17c_schema8_capture.py",
+        "0023_m17cc_capture_closure_preimage.py",
         # DR26-04 rename: the superseded draft-0020 file (deleted by r2)
         "0020_m17c_dialogue_bound_performance.py",
     }
@@ -154,7 +156,7 @@ def check_base03() -> list[str]:
             "current migration head is not an admitted frozen head: "
             f"{migrations[-1:]}")
     beyond = [m for m in migrations
-              if m > "0022_m17c_schema8_capture.py"]
+              if m > "0023_m17cc_capture_closure_preimage.py"]
     if beyond:
         errors.append(f"migrations beyond exact M16-A 0017 exist: {beyond}")
     m16_named = [m for m in migrations if m.startswith("0017_")]

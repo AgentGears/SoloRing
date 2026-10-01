@@ -35,7 +35,7 @@ from tests.test_m17c_shot_mapping import (
     _seg_body,
 )
 
-_HEAD_0021 = "0022_m17c_schema8_capture"  # the current head (renamed for lineage)
+_HEAD_0021 = "0023_m17cc_capture_closure_preimage"  # the current head (renamed for lineage)
 _HEAD_0020 = "0020_m17c_perf_capture_r2"
 _TABLE = "shot_performance_segment_mappings"
 

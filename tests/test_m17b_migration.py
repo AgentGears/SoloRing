@@ -39,7 +39,7 @@ def _fresh_upgrade_reaches_0019(tmp_path):
     tabs = {r[0] for r in con.execute(
         "SELECT name FROM sqlite_master WHERE type='table'")}
     con.close()
-    assert ver == "0022_m17c_schema8_capture"  # M17C-C advances the head
+    assert ver == "0023_m17cc_capture_closure_preimage"  # M17C-C advances the head
     assert set(_M17B_TABLES) <= tabs
     assert len([t for t in tabs if t in _M17B_TABLES]) == 4
 

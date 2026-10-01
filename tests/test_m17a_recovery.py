@@ -134,6 +134,6 @@ async def test_backup_restore_round_trip(client, tmp_path):
     n_map = con.execute(
         "SELECT COUNT(*) FROM shot_vocal_segment_mappings").fetchone()[0]
     con.close()
-    assert ver == "0022_m17c_schema8_capture"
+    assert ver == "0023_m17cc_capture_closure_preimage"
     assert (n_dlr, n_vp, n_da, n_map) == (2, 2, 4, 2)
     assert sel == [(v1["id"],), (None,)]

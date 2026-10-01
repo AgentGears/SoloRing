@@ -59,6 +59,9 @@ _HEAD_0021 = "0021_m17c_shot_performance_mappings"
 # laws land with the capture/history slices; at this head the new
 # tables are storage-only)
 _HEAD_0022 = "0022_m17c_schema8_capture"
+# FPR-M17CC-04: the closure-preimage successor — schema-8 companion
+# rows captured at 0022 lack the preimage columns and cannot certify
+_HEAD_0023 = "0023_m17cc_capture_closure_preimage"
 
 # ---------------------------------------------------------------------------
 # IR-01/IR-02: frozen PHYSICAL schema contracts for every migration-0020/0021
@@ -440,7 +443,7 @@ def verify_m17c_binding_state(staged_db: Path,
     if blob_root is None:
         from soloring.settings import get_settings
         blob_root = get_settings().blob_dir
-    if head not in (_HEAD_0020, _HEAD_0021, _HEAD_0022):
+    if head not in (_HEAD_0020, _HEAD_0021, _HEAD_0022, _HEAD_0023):
         raise _corrupt(
             f"M17C verifier invoked at unsupported staged head {head!r}")
     con = sqlite3.connect(staged_db)
@@ -462,15 +465,26 @@ def verify_m17c_binding_state(staged_db: Path,
                 raise _corrupt(
                     f"staged head {head!r} is missing the PF-02 "
                     "working-mapping table")
-        if head == _HEAD_0022:
+        if head in (_HEAD_0022, _HEAD_0023):
             # §13.4: head behavior stays explicit — the successor
             # migration physically creates the three capture tables, so
-            # a 0022 database without them is structurally corrupt
+            # a 0022+ database without them is structurally corrupt
             missing = [t for t in _M17CC_TABLES if t not in present]
             if missing:
                 raise _corrupt(
                     f"staged head 0022 is missing the M17C-C capture "
                     f"tables {missing}")
+            if head == _HEAD_0022 and con.execute(
+                    "SELECT 1 FROM "
+                    "shot_revision_performance_segments LIMIT 1"
+                    ).fetchone():
+                # FPR-M17CC-04: preimage-less captured rows cannot
+                # certify their mapping-hash closure — refuse rather
+                # than silently skipping the anchor law
+                raise _corrupt(
+                    "staged head 0022 carries schema-8 companion "
+                    "children captured without the closure preimage — "
+                    "upgrade to 0023 to certify the captured closure")
         else:
             # §13.4 total classification at the predecessor heads: rows
             # those heads cannot represent are refused, not ignored
@@ -503,7 +517,7 @@ def verify_m17c_binding_state(staged_db: Path,
         _verify_retarget_lineage(con)
         if head != _HEAD_0020:
             _verify_shot_performance_mappings(con)
-        if head == _HEAD_0022:
+        if head in (_HEAD_0022, _HEAD_0023):
             # §13.4/§13.6 (M17C-C): AFTER every predecessor pass — the
             # captured-schema-8 laws extend the chain, they do not
             # replace it
@@ -958,7 +972,8 @@ _M17CC_CHILD_COLUMNS = (
     "vocal_performance_revision_id, vocal_binding_hash, "
     "vocal_mapping_hash, source_start_sample, "
     "source_end_sample_exclusive, sample_rate_hz, "
-    "segment_json, segment_hash")
+    "vocal_performance_origin_num, vocal_performance_origin_den, "
+    "vocal_mapping_position, segment_json, segment_hash")
 
 
 def _verify_m17cc_capture_state(con: sqlite3.Connection,
@@ -1183,6 +1198,41 @@ def _verify_m17cc_child(con, blob_root, rev_id, shot_id, row, seg):
             raise _corrupt(
                 f"{where} vocal-group column {column} disagrees with "
                 "the embedded captured vocal grammar (all-or-none)")
+
+    # FPR-M17CC-04: the captured mapping-document preimage ANCHOR —
+    # both stored mapping hashes recompute as pure functions of the
+    # child row itself (never a current working-mapping read)
+    from soloring.performance.m17cc_capture_read import (
+        _child_preimage_vocal, expected_mapping_hashes,
+    )
+    try:
+        preimage_vocal = _child_preimage_vocal(row)
+    except ValueError as exc:
+        raise _corrupt(
+            f"{where} carries an incoherent vocal-group preimage: "
+            f"{exc}") from exc
+    if (row["vocal_mapping_position"] is None) != (preimage_vocal
+                                                   is None):
+        raise _corrupt(
+            f"{where} vocal_mapping_position preimage disagrees with "
+            "the all-or-none vocal group")
+    expected_perf_hash, expected_vocal_hash = expected_mapping_hashes(
+        row["performance_revision_id"],
+        {"num": row["performance_start_num"],
+         "den": row["performance_start_den"]},
+        {"num": row["performance_end_num"],
+         "den": row["performance_end_den"]},
+        {"num": row["shot_anchor_num"],
+         "den": row["shot_anchor_den"]},
+        row["vocal_mapping_position"], preimage_vocal)
+    if row["performance_mapping_hash"] != expected_perf_hash:
+        raise _corrupt(
+            f"{where} performance_mapping_hash disagrees with its "
+            "captured mapping-document preimage")
+    if row["vocal_mapping_hash"] != expected_vocal_hash:
+        raise _corrupt(
+            f"{where} vocal_mapping_hash disagrees with its captured "
+            "mapping-document preimage")
 
     # §13.4 exact arithmetic (recomputed, never trusted from text):
     # canonical rationals and a non-empty interval
@@ -1502,23 +1552,15 @@ def _verify_generation_performance_inputs(
             raise _corrupt(
                 f"Generation {row['generation_id']} workflow spec "
                 "bytes/hash disagree with canonical form")
-        if not _m17cc_spec_materializes(spec,
-                                        row["translation_identity"]):
+        # FPR-M17CC-06: IDENTITY EQUALITY at the frozen coordinate —
+        # the WorkflowSpec's dedicated performance-translation field
+        # must EQUAL the row's translation identity (presence anywhere
+        # else in the document is not identity). The coordinate is
+        # frozen here ahead of the M17C-D writer.
+        if spec.get("performance_translation") != \
+                row["translation_identity"]:
             raise _corrupt(
-                f"{gwhere} translation_identity is not materialized in "
-                "the Generation execution spec")
-
-
-def _m17cc_spec_materializes(spec, identity: str) -> bool:
-    """Whether the decoded execution-spec document carries the exact
-    translation identity as a JSON string value (recursive; the exact
-    field grammar is frozen with the M17C-D writer)."""
-    if isinstance(spec, str):
-        return spec == identity
-    if isinstance(spec, dict):
-        return any(_m17cc_spec_materializes(v, identity)
-                   for v in spec.values())
-    if isinstance(spec, list):
-        return any(_m17cc_spec_materializes(v, identity)
-                   for v in spec)
-    return False
+                f"{gwhere} translation_identity disagrees with the "
+                "WorkflowSpec performance_translation coordinate "
+                f"({spec.get('performance_translation')!r} != "
+                f"{row['translation_identity']!r})")

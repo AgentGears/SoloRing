@@ -161,7 +161,7 @@ def test_0007_rebuild_preserves_populated_rows_exactly(
         assert raised, "active-only uniqueness not enforced"
 
         assert con.execute("SELECT version_num FROM alembic_version"
-                           ).fetchone()[0] == "0022_m17c_schema8_capture"
+                           ).fetchone()[0] == "0023_m17cc_capture_closure_preimage"
     finally:
         con.close()
 

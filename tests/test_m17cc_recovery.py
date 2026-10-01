@@ -48,7 +48,7 @@ from tests.m17cc_capture_helper import capture as _capture
 from tests.test_m17cc_persist import _lawful
 from tests.test_m17c_shot_mapping import _bound_world, _seg_body
 
-_HEAD = "0022_m17c_schema8_capture"
+_HEAD = "0023_m17cc_capture_closure_preimage"
 _PARENTS = "shot_revision_performance_specs"
 _CHILDREN = "shot_revision_performance_segments"
 _GPI = "generation_performance_inputs"
@@ -190,10 +190,38 @@ def _coherent_child_rewrite(root, revision_id, position, seg_updates,
         "segment_json": seg_json,
         "segment_hash": seg_hash,
     }
+    # FPR-M17CC-08: fully NAMED parameters — the former named+positional
+    # mix is a deprecation today and ProgrammingError under Python 3.14.
+    # FPR-M17CC-04: the stored mapping hashes RECOMPUTE over the forged
+    # preimage so the tamper is fully self-consistent and only the
+    # immutable-authority laws can refuse.
+    from soloring.performance.m17cc_capture_read import (
+        _child_preimage_vocal, expected_mapping_hashes,
+    )
+    forged = _one(root, (
+        f"SELECT * FROM {_CHILDREN} WHERE shot_revision_id = ? "
+        "AND position = ?"), (revision_id, position))
+    for column, value in columns.items():
+        forged[column] = value
+    perf_hash, vocal_hash = expected_mapping_hashes(
+        forged["performance_revision_id"],
+        {"num": forged["performance_start_num"],
+         "den": forged["performance_start_den"]},
+        {"num": forged["performance_end_num"],
+         "den": forged["performance_end_den"]},
+        {"num": forged["shot_anchor_num"],
+         "den": forged["shot_anchor_den"]},
+        forged["vocal_mapping_position"],
+        _child_preimage_vocal(forged))
+    columns["performance_mapping_hash"] = perf_hash
+    columns["vocal_mapping_hash"] = vocal_hash
     sets = ", ".join(f"{c} = :{c}" for c in columns)
+    params = dict(columns)
+    params["__rid"] = revision_id
+    params["__pos"] = position
     _sql(root, (
-        f"UPDATE {_CHILDREN} SET {sets} WHERE shot_revision_id = ? "
-        "AND position = ?"), (*columns.values(), revision_id, position))
+        f"UPDATE {_CHILDREN} SET {sets} WHERE shot_revision_id = "
+        ":__rid AND position = :__pos"), params)
     for column, value in pr_updates:
         _sql(root, (
             f"UPDATE performance_revisions SET {column} = ? "
@@ -322,7 +350,11 @@ async def test_captured_schema8_tamper_matrix(
              "vocal_binding_hash = NULL, vocal_mapping_hash = NULL, "
              "source_start_sample = NULL, "
              "source_end_sample_exclusive = NULL, "
-             "sample_rate_hz = NULL WHERE shot_revision_id = ? "
+             "sample_rate_hz = NULL, "
+             "vocal_performance_origin_num = NULL, "
+             "vocal_performance_origin_den = NULL, "
+             "vocal_mapping_position = NULL "
+             "WHERE shot_revision_id = ? "
              "AND position = 0", (revision_id,))
     elif tamper == "payload_blob_missing":
         h = _one(root, (
@@ -636,7 +668,7 @@ async def test_gpi_structural_laws_pass_and_refuse(client, tmp_path):
          "without its vocal identity group", {"vid": None,
                                               "binding": None}),
         ("translation_identity", ("performance:0", 0),
-         "not materialized",
+         "disagrees with the WorkflowSpec performance_translation",
          {"translation": "soloring-executor-translation-alp/9"}),
         ("derived_hash_hex", ("performance:0", 0),
          "lowercase hex digest", {"derived": "A" * 64}),

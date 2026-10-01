@@ -61,14 +61,28 @@ class ShotRevisionPerformanceSegment(Base):
             "AND vocal_mapping_hash IS NULL "
             "AND source_start_sample IS NULL "
             "AND source_end_sample_exclusive IS NULL "
-            "AND sample_rate_hz IS NULL) OR "
+            "AND sample_rate_hz IS NULL "
+            "AND vocal_performance_origin_num IS NULL "
+            "AND vocal_performance_origin_den IS NULL "
+            "AND vocal_mapping_position IS NULL) OR "
             "(vocal_performance_revision_id IS NOT NULL "
             "AND vocal_binding_hash IS NOT NULL "
             "AND vocal_mapping_hash IS NOT NULL "
             "AND source_start_sample IS NOT NULL "
             "AND source_end_sample_exclusive IS NOT NULL "
-            "AND sample_rate_hz IS NOT NULL)",
+            "AND sample_rate_hz IS NOT NULL "
+            "AND vocal_performance_origin_num IS NOT NULL "
+            "AND vocal_performance_origin_den IS NOT NULL "
+            "AND vocal_mapping_position IS NOT NULL)",
             name="ck_srpss_vocal_group_all_or_none"),
+        # FPR-M17CC-04: the captured mapping-document preimage
+        CheckConstraint(
+            "vocal_mapping_position >= 0 OR vocal_mapping_position "
+            "IS NULL", name="ck_srpss_vocal_position"),
+        CheckConstraint(
+            "vocal_performance_origin_den > 0 OR "
+            "vocal_performance_origin_den IS NULL",
+            name="ck_srpss_vocal_origin_den"),
         CheckConstraint(
             "length(performance_payload_blob_hash) = 64",
             name="ck_srpss_payload_hash_len"),
@@ -126,6 +140,12 @@ class ShotRevisionPerformanceSegment(Base):
     source_end_sample_exclusive: Mapped[int | None] = mapped_column(
         Integer, nullable=True)
     sample_rate_hz: Mapped[int | None] = mapped_column(
+        Integer, nullable=True)
+    vocal_performance_origin_num: Mapped[int | None] = mapped_column(
+        Integer, nullable=True)
+    vocal_performance_origin_den: Mapped[int | None] = mapped_column(
+        Integer, nullable=True)
+    vocal_mapping_position: Mapped[int | None] = mapped_column(
         Integer, nullable=True)
     segment_json: Mapped[str] = mapped_column(Text, nullable=False)
     segment_hash: Mapped[str] = mapped_column(Text, nullable=False)

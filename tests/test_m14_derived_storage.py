@@ -128,7 +128,7 @@ async def test_migration_upgrade_creates_exact_schema(tmp_path, monkeypatch):
     conn = _connect(db)
     head = conn.execute(
         "SELECT version_num FROM alembic_version").fetchone()[0]
-    assert head == "0022_m17c_schema8_capture"
+    assert head == "0023_m17cc_capture_closure_preimage"
 
     tables = {r[0] for r in conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table'")}
@@ -396,6 +396,7 @@ async def test_recovery_blob_fk_inventory_eight_paths(
         "0020_m17c_perf_capture_r2",
         "0021_m17c_shot_performance_mappings",
         "0022_m17c_schema8_capture",
+        "0023_m17cc_capture_closure_preimage",
     }), SUPPORTED_RESTORE_ALEMBIC_HEADS
     assert _blob_fk_policy_for_head(
         "0016_m15_revision_compatibility") == M14_BLOB_FK_COLUMNS

@@ -537,12 +537,14 @@ async def test_structural_singularity_both_paths_invoke_builder(
         snaps, "effective_working_snapshot_hash",
         lambda shot, refs, resolved, feature_states=(),
         relation_states=(), visual_pack=None, spatial_pack=None,
-        production_world_pack=None, intra_shot_pack=None: (
+        production_world_pack=None, intra_shot_pack=None,
+        performance_pack=None: (
             __import__("soloring.domain.canonical",
                        fromlist=["canonical_hash"]).canonical_hash(
                 spy(shot, refs, resolved, feature_states,
                     relation_states, visual_pack, spatial_pack,
-                    production_world_pack, intra_shot_pack)[0])
+                    production_world_pack, intra_shot_pack,
+                    performance_pack)[0])
         ),
     )
 
@@ -607,8 +609,8 @@ def test_migration_files_and_head_is_0009():
     to 0009 only with M8A's visual-identity migration."""
     versions = BASE_DIR / "server" / "alembic" / "versions"
     files = sorted(p.name for p in versions.glob("*.py"))
-    assert files[-1] == "0022_m17c_schema8_capture.py"
-    assert len(files) == 22  # M17C-C added 0022 (M17C-B 0021, M17C-A 0020)
+    assert files[-1] == "0023_m17cc_capture_closure_preimage.py"
+    assert len(files) == 23  # FPR-M17CC-04 added 0023 (M17C-C 0022, M17C-B 0021, M17C-A 0020)
 
 
 # --- Reuse integrity fail-closed ----------------------------------------------------------------

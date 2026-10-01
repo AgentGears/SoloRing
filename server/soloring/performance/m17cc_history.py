@@ -24,6 +24,8 @@ scope R0 1.5).
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
 
 from sqlalchemy import text
@@ -34,7 +36,8 @@ from soloring.performance.m17cc_capture_read import EMBEDDED_SEGMENT_KEYS
 
 # the slice-3 §10.5 column order (identity column first); history
 # compares every column against the EMBEDDED segment projection and
-# the immutable referenced rows
+# the immutable referenced rows. FPR-M17CC-04: the captured mapping-
+# document preimage columns are included.
 _CHILD_COLUMNS = (
     "shot_revision_id, position, subject_id, performance_revision_id, "
     "performance_payload_blob_hash, performance_payload_sha256, "
@@ -45,7 +48,8 @@ _CHILD_COLUMNS = (
     "vocal_performance_revision_id, vocal_binding_hash, "
     "vocal_mapping_hash, source_start_sample, "
     "source_end_sample_exclusive, sample_rate_hz, "
-    "segment_json, segment_hash")
+    "vocal_performance_origin_num, vocal_performance_origin_den, "
+    "vocal_mapping_position, segment_json, segment_hash")
 
 _VOCAL_KEYS = (
     "vocal_performance_revision_id", "vocal_binding_hash",
@@ -100,7 +104,8 @@ def _verify_embedded_grammar(perf: dict, revision_id: str) -> list[dict]:
 
 
 async def verify_performance_history(session, revision_id: str,
-                                      snapshot: dict) -> dict:
+                                      snapshot: dict,
+                                      settings=None) -> dict:
     """Reconstruct + verify the schema-8 performance history. Pure
     read of the captured graph; raises the typed internal invariant on
     ANY disagreement — never repairs, never substitutes current state.
@@ -158,7 +163,7 @@ async def verify_performance_history(session, revision_id: str,
     answer_segments = []
     for row, seg in zip(children, segments):
         answer_segments.append(await _verify_one_child(
-            session, revision_id, row, seg))
+            session, settings, revision_id, row, seg))
     return {
         "schema_version": 1,
         "spec_hash": parent.spec_hash,
@@ -166,8 +171,8 @@ async def verify_performance_history(session, revision_id: str,
     }
 
 
-async def _verify_one_child(session, revision_id: str, row,
-                            seg: dict) -> dict:
+async def _verify_one_child(session, settings, revision_id: str,
+                            row, seg: dict) -> dict:
     """Verify ONE captured child against its embedded segment and the
     immutable closure it names, then answer the §12 questions for it."""
     position = row["position"]
@@ -216,6 +221,33 @@ async def _verify_one_child(session, revision_id: str, row,
                 f"{where} vocal-group column {column} disagrees with "
                 "the embedded captured vocal grammar (all-or-none).")
 
+    # FPR-M17CC-04: the captured mapping-document preimage columns —
+    # all-or-none with the vocal group (the origin pair and position
+    # live ONLY on the child row; the frozen embedded vocal grammar
+    # excludes them by design) — and ANCHORING both stored mapping
+    # hashes (they must recompute exactly from the child's own
+    # preimage, never a current read)
+    if vocal is None:
+        for column in ("vocal_performance_origin_num",
+                       "vocal_performance_origin_den",
+                       "vocal_mapping_position"):
+            if row[column] is not None:
+                raise internal_invariant(
+                    f"{where} preimage column {column} is set on a "
+                    "generic child (all-or-none)")
+    else:
+        for column in ("vocal_performance_origin_num",
+                       "vocal_performance_origin_den",
+                       "vocal_mapping_position"):
+            if row[column] is None:
+                raise internal_invariant(
+                    f"{where} dialogue-bound child lacks its "
+                    f"{column} preimage (all-or-none)")
+    from soloring.performance.m17cc_capture_read import (
+        verify_mapping_hash_closure,
+    )
+    verify_mapping_hash_closure(row, where)
+
     pr = (await session.execute(text(
         "SELECT subject_id, performance_kind, performance_profile_id, "
         "payload_schema_version, source_kind, temporal_start_num, "
@@ -246,6 +278,12 @@ async def _verify_one_child(session, revision_id: str, row,
         raise internal_invariant(
             f"{where} names a payload blob absent from the retained "
             "Blob closure.")
+    # FPR-M17CC-05: the EXACT retained bytes are physically read,
+    # rehash-verified, and carried in the frozen answer — a missing or
+    # corrupt physical file (DB row intact) fails closed; size
+    # metadata may never substitute for the bytes
+    payload_bytes = _verified_payload_bytes(
+        settings, where, row.performance_payload_blob_hash)
 
     answer = {
         "position": position,
@@ -269,6 +307,8 @@ async def _verify_one_child(session, revision_id: str, row,
             "blob_hash": row.performance_payload_blob_hash,
             "sha256": row.performance_payload_sha256,
             "size_bytes": blob.size_bytes,
+            "payload_bytes_base64": base64.b64encode(
+                payload_bytes).decode("ascii"),
         },
         "performance_start_ms": _rat(
             row.performance_start_num, row.performance_start_den,
@@ -357,3 +397,32 @@ async def _verify_one_child(session, revision_id: str, row,
             "vocal_mapping_hash": row.vocal_mapping_hash,
         }
     return answer
+
+
+def _verified_payload_bytes(settings, where: str, blob_hash: str) -> bytes:
+    """FPR-M17CC-05: open the retained payload file, rehash it against
+    its content address, and return the exact bytes. A missing or
+    corrupt physical file (with the DB row intact) fails closed — the
+    historical answer may never substitute metadata for the frozen
+    bytes."""
+    if settings is None:
+        from soloring.settings import get_settings
+        settings = get_settings()
+    from soloring.assets.blob_store import BlobStore
+
+    path = BlobStore(settings).path_for_hash(blob_hash)
+    try:
+        data = path.read_bytes()
+    except FileNotFoundError as exc:
+        raise internal_invariant(
+            f"{where} retained payload blob {blob_hash} is physically "
+            "missing from storage") from exc
+    except OSError as exc:
+        raise internal_invariant(
+            f"{where} retained payload blob {blob_hash} is unreadable: "
+            f"{exc}") from exc
+    if hashlib.sha256(data).hexdigest() != blob_hash:
+        raise internal_invariant(
+            f"{where} retained payload blob {blob_hash} does not "
+            "rehash to its content address")
+    return data

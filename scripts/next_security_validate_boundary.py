@@ -87,6 +87,7 @@ ALLOWLIST = (
     # M17C-C scope record + slice-1 files
     "SoloRing-M17C-C-Scope-R0.md",
     "server/alembic/versions/0022_m17c_schema8_capture.py",
+    "server/alembic/versions/0023_m17cc_capture_closure_preimage.py",
     "server/soloring/performance/m17cc_models.py",
     "tests/test_m17cc_migration.py",
     # M17C-C slice 2
@@ -102,6 +103,8 @@ ALLOWLIST = (
     "tests/test_m17cc_recovery.py",
     # M17C-C slice 6 (§1.7 backup/restore + downgrade closure)
     "tests/test_m17cc_roundtrip.py",
+    # FPR-M17CC correction battery
+    "tests/test_m17cc_fpr_corrections.py",
     "server/soloring/recovery/backup.py",
     "server/soloring/recovery/successor_semantics.py",
     "server/soloring/performance/revision.py",
@@ -603,6 +606,8 @@ def main(repo: Path = REPO) -> int:
             or f.startswith(
                 "server/alembic/versions/0022_")
             or f.startswith(
+                "server/alembic/versions/0023_")
+            or f.startswith(
                 "server/soloring/recovery/m17c_")
             or f.startswith(
                 "server/soloring/api/m17c_")
@@ -626,6 +631,7 @@ def main(repo: Path = REPO) -> int:
                     "server/alembic/versions/0020_m17c_perf_capture_r2.py",
                     "server/alembic/versions/0021_m17c_shot_performance_mappings.py",
                     "server/alembic/versions/0022_m17c_schema8_capture.py",
+    "server/alembic/versions/0023_m17cc_capture_closure_preimage.py",
                     "server/alembic/versions/0020_m17c_dialogue_bound_"
                     "performance.py",
                 )):
@@ -649,12 +655,14 @@ def main(repo: Path = REPO) -> int:
     admitted_0021 = "0021_m17c_shot_performance_mappings.py"
     # M17C-C slice 1: schema-8 capture storage
     admitted_0022 = "0022_m17c_schema8_capture.py"
+    # FPR-M17CC-04: the closure-preimage successor
+    admitted_0023 = "0023_m17cc_capture_closure_preimage.py"
     mig_beyond = [
         p.name for p in versions.glob("*.py")
         if p.stem >= "0015" and p.name not in (
             admitted_0015, admitted_0016, admitted_0017,
             admitted_0018, admitted_0019, admitted_0020, admitted_0021,
-            admitted_0022)
+            admitted_0022, admitted_0023)
     ]
     if mig_beyond:
         errors.append(

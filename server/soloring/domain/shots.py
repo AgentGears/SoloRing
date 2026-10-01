@@ -387,6 +387,19 @@ async def read_shot_detail(engine: AsyncEngine, shot_id: str, *, settings=None):
                     relation_outcome=relation_outcome,
                     production_world_outcome=m13_outcome)
                 if m13_ready:
+                    # FPR-M17CC-02 (first-pass review): the Performance
+                    # plane resolves on THIS SAME pinned snapshot — the
+                    # effective working hash must be built by the same
+                    # canonical construction capture uses, so a schema-8
+                    # canon compares equal against unchanged Performance
+                    # state and a Performance-only change moves the hash.
+                    # None when the Shot carries no working mappings
+                    # keeps the exact predecessor bytes.
+                    from soloring.performance.m17cc_capture_read import (
+                        resolve_performance_plane,
+                    )
+                    performance = await resolve_performance_plane(
+                        conn, settings, shot_id)
                     effective_hash = effective_working_snapshot_hash(
                         shot, refs, resolved, outcome.states,
                         relation_outcome.relation_states,
@@ -397,6 +410,7 @@ async def read_shot_detail(engine: AsyncEngine, shot_id: str, *, settings=None):
                         intra_shot_pack=(
                             _working_intra_pack(shot_id, intra)
                             if intra["events"] else None),
+                        performance_pack=performance,
                     )
                     differs = await canon.differs_from_approved(
                         conn, shot, refs, effective_hash

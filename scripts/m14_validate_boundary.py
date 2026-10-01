@@ -31,6 +31,9 @@ ALLOWED_PATTERNS = [
     r"^SoloRing-M17C-C-Scope-R0\.md$",
     r"^server/alembic/versions/0022_m17c_schema8_capture"
     r"\.py$",
+    # FPR-M17CC-04: the closure-preimage successor
+    r"^server/alembic/versions/0023_m17cc_capture_closure_preimage"
+    r"\.py$",
     r"^tests/test_m17cc_migration\.py$",
     # M17C-C slice 2 (the coherent performance-plane read)
     r"^server/soloring/performance/m17cc_capture_read\.py$",
@@ -45,6 +48,8 @@ ALLOWED_PATTERNS = [
     r"^tests/test_m17cc_recovery\.py$",
     # M17C-C slice 6 (§1.7 backup/restore + downgrade closure)
     r"^tests/test_m17cc_roundtrip\.py$",
+    # FPR-M17CC correction battery
+    r"^tests/test_m17cc_fpr_corrections\.py$",
     # M17A implementation (frozen R5): the dialogue/vocal foundation
     # surface — performance package, migration, API, recovery
     # verifier, boundary validators, and the M17A tests.

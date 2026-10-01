@@ -109,6 +109,9 @@ REVIEWED_SUCCESSOR_PATHS = frozenset({
     "server/soloring/performance/m17cc_models.py",
     "server/soloring/performance/m17cc_capture_read.py",
     "server/soloring/performance/m17cc_history.py",
+    # FPR-M17CC-03: the successor-aware observation-readiness
+    # unwrap legitimately names the intra-shot block
+    "server/soloring/observation/readiness.py",
 })
 
 FORBIDDEN_PATTERNS: list[tuple[str, str]] = [

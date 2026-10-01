@@ -57,7 +57,14 @@ M17C_B_ALEMBIC_HEAD = "0021_m17c_shot_performance_mappings"
 # table. The EXPECTED head advances to 0022; 0020/0021 remain distinct
 # supported restore heads.
 M17C_C_ALEMBIC_HEAD = "0022_m17c_schema8_capture"
-EXPECTED_ALEMBIC_HEAD = M17C_C_ALEMBIC_HEAD
+# FPR-M17CC-04 (first-pass review): the closure-preimage successor —
+# adds the captured mapping-document preimage columns and NO Blob-FK
+# path, so the physical inventory stays the fourteen paths of 0022.
+# 0022 remains a supported restore head (with its schema-8 companion
+# rows refused by the verifier: they cannot certify the mapping-hash
+# closure).
+M17C_C2_ALEMBIC_HEAD = "0023_m17cc_capture_closure_preimage"
+EXPECTED_ALEMBIC_HEAD = M17C_C2_ALEMBIC_HEAD
 BACKUP_MANIFEST_SCHEMA_VERSION = 1
 
 # M13 (frozen R3 §23): restore is head-dispatched across five heads. M14
@@ -106,8 +113,10 @@ SUPPORTED_RESTORE_ALEMBIC_HEADS = frozenset({
     # (generation_performance_inputs.blob_hash) — the capture companion
     # tables duplicate already-FK-pinned payload hashes without
     # independent FKs — so the physical inventory becomes fourteen
-    # paths at 0022 only.
+    # paths at 0022 only. FPR-M17CC-04: the 0023 closure-preimage
+    # successor adds NO Blob-FK path — the same fourteen paths.
     M17C_C_ALEMBIC_HEAD,
+    M17C_C2_ALEMBIC_HEAD,
 })
 
 ARTIFACT_KINDS = (
@@ -204,10 +213,11 @@ def _blob_fk_policy_for_head(head: str) -> frozenset:
         # blobs either: 0020/0021 share the exact thirteen-path M17B
         # inventory.
         return M17B_BLOB_FK_COLUMNS
-    if head == M17C_C_ALEMBIC_HEAD:
+    if head in (M17C_C_ALEMBIC_HEAD, M17C_C2_ALEMBIC_HEAD):
         # M17C-C §13.5: exactly ONE new path —
         # generation_performance_inputs.blob_hash (the capture
-        # companions carry no independent Blob FK). Fourteen paths.
+        # companions carry no independent Blob FK). Fourteen paths
+        # (0023 adds no path).
         return frozenset(set(M17B_BLOB_FK_COLUMNS) | {
             ("generation_performance_inputs", "blob_hash")})
     raise RecoveryCorruption(f"unsupported recovery head {head!r}.")

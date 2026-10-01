@@ -242,20 +242,14 @@ async def test_atomicity_fault_at_child_rolls_back_whole_unit(
             {"r": revision_id, "j": spec_json, "h": spec_hash})
         first = m17cc_capture_read._child_params(revision_id,
                                                  pack["segments"][0])
+        # reuse the production column list so the fake tracks the
+        # schema (FPR-M17CC-04 added the preimage columns)
         await conn.execute(text(
-            f"INSERT INTO {_CHILDREN} (shot_revision_id, position, "
-            "subject_id, performance_revision_id, "
-            "performance_payload_blob_hash, performance_payload_sha256, "
-            "performance_profile_id, performance_kind, "
-            "performance_start_num, performance_start_den, "
-            "performance_end_num, performance_end_den, shot_anchor_num, "
-            "shot_anchor_den, performance_mapping_hash, "
-            "vocal_performance_revision_id, vocal_binding_hash, "
-            "vocal_mapping_hash, source_start_sample, "
-            "source_end_sample_exclusive, sample_rate_hz, segment_json, "
-            "segment_hash) VALUES (:rid, :position, :subject_id, :prid,"
-            " :pbh, :psh, :profile, :kind, :sn, :sd, :en, :ed, :an, "
-            ":ad, :pmh, :vid, :vbh, :vmh, :vss, :vse, :vsr, :sj, :sh)"),
+            f"INSERT INTO {_CHILDREN} ("
+            + m17cc_capture_read._CHILD_COLUMNS + ") VALUES ("
+            ":rid, :position, :subject_id, :prid, :pbh, :psh, :profile, "
+            ":kind, :sn, :sd, :en, :ed, :an, :ad, :pmh, :vid, :vbh, "
+            ":vmh, :vss, :vse, :vsr, :von, :vod, :vmp, :sj, :sh)"),
             first)
         raise RuntimeError("injected fault at child 1")
 
