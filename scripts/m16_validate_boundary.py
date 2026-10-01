@@ -149,6 +149,8 @@ M16_SURFACE = (
     r"^tests/test_m17cc_fpr_corrections\.py$",
     # RR-M17CC correction battery
     r"^tests/test_m17cc_rr_corrections\.py$",
+    # RR2-M17CC correction battery
+    r"^tests/test_m17cc_rr2_corrections\.py$",
     r"^tests/test_post_m13_next_security\.py$",
     r"^tests/test_m14_base_corpus\.py$",
 
