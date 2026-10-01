@@ -221,8 +221,12 @@ async def test_fpr02_working_hash_equals_captured_and_tracks_performance(
     assert r.status_code == 200, r.text
 
     moved = (await client.get(f"/shots/{world['shot']}")).json()
-    assert moved["working_snapshot_hash"] != working
-    assert moved["working_state_differs_from_approved"] is False
+    # RR-M17CC-02 (posture FROZEN): this mutation leaves the plane
+    # lawfully non-READY (BLOCKED_CHANNEL_CONFLICT with the existing
+    # BODY segment) — the authoritative working hash becomes
+    # UNAVAILABLE, never a second uncapturable canon
+    assert moved["working_snapshot_hash"] is None
+    assert moved["working_state_differs_from_approved"] is None
 
     # removing the change returns the captured hash exactly
     await _sql(client, "DELETE FROM shot_performance_segment_mappings "
@@ -230,6 +234,7 @@ async def test_fpr02_working_hash_equals_captured_and_tracks_performance(
                {"s": world["shot"]})
     restored = (await client.get(f"/shots/{world['shot']}")).json()
     assert restored["working_snapshot_hash"] == revision.snapshot_hash
+    assert restored["working_state_differs_from_approved"] is False
 
 
 # ---------------------------------------------------------------------------
@@ -353,8 +358,7 @@ async def test_fpr04_mapping_hash_only_tamper_refuses(client, tmp_path,
                   / "soloring.db")
     r = await client.get(f"/shot-revisions/{revision.id}/continuity")
     assert r.status_code == 500, r.text
-    assert "mapping_hash disagrees with its captured mapping-document" \
-        in r.json()["message"], r.text
+    assert "mapping_hash disagrees" in r.json()["message"], r.text
 
     # recovery refuses on the staged copy
     await _tamper(root / "soloring.db")
@@ -362,8 +366,7 @@ async def test_fpr04_mapping_hash_only_tamper_refuses(client, tmp_path,
         verify_m17c_binding_state(root / "soloring.db", root / "blobs",
                                   head=_HEAD)
     assert excinfo.value.code == "RECOVERY_CORRUPTION"
-    assert "mapping_hash disagrees with its captured mapping-document" \
-        in excinfo.value.message
+    assert "mapping_hash disagrees" in excinfo.value.message
 
 
 # ---------------------------------------------------------------------------
@@ -546,7 +549,7 @@ async def test_fpr07_builder_wraps_zero_dependency_schema1(client):
     assert base["schema_version"] == 1
 
     from tests.m17cc_capture_helper import _factory
-    pack = {"schema_version": 1, "segments": [{
+    pack = {"schema_version": 2, "segments": [{
         "position": 0,
         "subject_id": "00000000-0000-4000-8000-000000000002",
         "performance_revision_id":
@@ -559,9 +562,11 @@ async def test_fpr07_builder_wraps_zero_dependency_schema1(client):
         "performance_end_ms": {"num": 1000, "den": 1},
         "shot_anchor_ms": {"num": 0, "den": 1},
         "mapping_hash": "c" * 64,
+        "performance_mapping_hash": "c" * 64,
         "vocal": None,
         "vocal_mapping_hash": None,
         "vocal_mapping_position": None,
+        "vocal_performance_origin_ms": None,
     }]}
     wrapped, _ = build_capturable_snapshot(
         _Shot(), [], [], performance_pack=pack)

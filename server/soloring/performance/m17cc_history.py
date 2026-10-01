@@ -69,11 +69,19 @@ def _rat(num, den, what: str, revision_id: str) -> dict:
 
 
 def _verify_embedded_grammar(perf: dict, revision_id: str) -> list[dict]:
-    """The frozen §11.2 grammar of the embedded/snapshot block: schema
-    1, a NON-EMPTY position-ordered segment list, the exact frozen key
-    set per segment, and the uniform vocal grammar (the complete
-    5-key object or explicit null — never omission, never partial)."""
-    if perf.get("schema_version") != 1:
+    """The grammar of the embedded/snapshot block: v2 (RR-M17CC-03:
+    the mapping hashes and their preimage are snapshot-anchored), a
+    NON-EMPTY position-ordered segment list, the exact frozen key set
+    per segment, and the uniform vocal grammar (the complete 5-key
+    object or explicit null). Grammar v1 (0023-era companion-only
+    preimage) is REFUSED — pre-anchor captures are never silently
+    certified."""
+    if perf.get("schema_version") != 2:
+        if perf.get("schema_version") == 1:
+            raise internal_invariant(
+                f"ShotRevision {revision_id} carries a grammar-v1 "
+                "performance block captured before the mapping-hash "
+                "anchor existed — re-capture at the corrected head")
         raise internal_invariant(
             f"ShotRevision {revision_id} performance history declares "
             f"unknown schema {perf.get('schema_version')!r}.")
@@ -201,6 +209,10 @@ async def _verify_one_child(session, settings, revision_id: str,
         ("performance_end_den", seg["performance_end_ms"]["den"]),
         ("shot_anchor_num", seg["shot_anchor_ms"]["num"]),
         ("shot_anchor_den", seg["shot_anchor_ms"]["den"]),
+        ("performance_mapping_hash",
+         seg["performance_mapping_hash"]),
+        ("vocal_mapping_hash", seg["vocal_mapping_hash"]),
+        ("vocal_mapping_position", seg["vocal_mapping_position"]),
     ):
         if row[column] != embedded_value:
             raise internal_invariant(
@@ -246,7 +258,7 @@ async def _verify_one_child(session, settings, revision_id: str,
     from soloring.performance.m17cc_capture_read import (
         verify_mapping_hash_closure,
     )
-    verify_mapping_hash_closure(row, where)
+    verify_mapping_hash_closure(row, where, seg=seg)
 
     pr = (await session.execute(text(
         "SELECT subject_id, performance_kind, performance_profile_id, "

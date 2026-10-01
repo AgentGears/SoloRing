@@ -312,7 +312,9 @@ def build_capturable_snapshot(
         base = {"schema_version": 8,
                 **{k: v for k, v in base.items()
                    if k != "schema_version"},
-                "performance": {"schema_version": 1,
+                # RR-M17CC-03: grammar v2 — the block carries the
+                # mapping hashes + preimage, snapshot-anchored
+                "performance": {"schema_version": 2,
                                 "segments": segments}}
     return base, spec
 
@@ -343,44 +345,29 @@ def _performance_segments_value(performance_pack) -> list[dict]:
         raise internal_invariant(
             "performance segments must be canonically ordered by "
             "unique position")
-    embedded_keys = {
-        "position", "subject_id", "performance_revision_id",
-        "performance_payload_sha256", "performance_profile_id",
-        "performance_kind", "performance_start_ms", "performance_end_ms",
-        "shot_anchor_ms", "vocal"}
+    # RR-M17CC-03 (grammar v2): the builder delegates to the ONE
+    # shared embedded projection in m17cc_capture_read — fourteen
+    # frozen keys including the two mapping hashes and their preimage,
+    # so the snapshot itself anchors the mapping identity
+    from soloring.performance.m17cc_capture_read import (
+        EMBEDDED_SEGMENT_KEYS, _embedded_segment,
+    )
     value = []
     for s in segments:
-        if not embedded_keys <= set(s):
+        core_keys = {k for k in EMBEDDED_SEGMENT_KEYS
+                     if k != "vocal_performance_origin_ms"}
+        if not core_keys <= set(s):
             raise internal_invariant(
-                "captured performance segment lacks a frozen 11.2 field")
-        seg = {k: s[k] for k in (
-            "position", "subject_id", "performance_revision_id",
-            "performance_payload_sha256", "performance_profile_id",
-            "performance_kind", "performance_start_ms",
-            "performance_end_ms", "shot_anchor_ms", "vocal")}
-        vocal = seg["vocal"]
-        if vocal is not None:
-            # FPR-M17CC-04: the pack's vocal dict may carry the
-            # mapping-preimage projection key — the frozen 11.2 grammar
-            # governs the PROJECTED value, exactly like the
-            # segment-level projection keys
-            if not {"vocal_performance_revision_id",
-                    "vocal_binding_hash", "source_start_sample",
-                    "source_end_sample_exclusive",
-                    "sample_rate_hz"} <= set(vocal):
-                raise internal_invariant(
-                    "performance segment vocal grammar diverges from "
-                    "the frozen 11.2 shape")
-            seg["vocal"] = {
-                "vocal_performance_revision_id":
-                    vocal["vocal_performance_revision_id"],
-                "vocal_binding_hash": vocal["vocal_binding_hash"],
-                "source_start_sample": vocal["source_start_sample"],
-                "source_end_sample_exclusive":
-                    vocal["source_end_sample_exclusive"],
-                "sample_rate_hz": vocal["sample_rate_hz"],
-            }
-        value.append(seg)
+                "captured performance segment lacks a frozen "
+                "grammar-v2 field")
+        if s["vocal"] is not None and not (
+                {"vocal_performance_revision_id", "vocal_binding_hash",
+                 "source_start_sample", "source_end_sample_exclusive",
+                 "sample_rate_hz"} <= set(s["vocal"])):
+            raise internal_invariant(
+                "performance segment vocal grammar diverges from "
+                "the frozen 11.2 shape")
+        value.append(_embedded_segment(s))
     return value
 
 

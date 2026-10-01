@@ -1055,7 +1055,15 @@ def _m17cc_embedded_grammar(perf, rev_id: str) -> list:
     from soloring.performance.m17cc_capture_read import (
         EMBEDDED_SEGMENT_KEYS,
     )
-    if not isinstance(perf, dict) or perf.get("schema_version") != 1:
+    # RR-M17CC-03: grammar v2 — the mapping hashes + preimage are
+    # snapshot-anchored. Grammar v1 (0023-era companion-only preimage)
+    # is REFUSED, never silently certified.
+    if isinstance(perf, dict) and perf.get("schema_version") == 1:
+        raise _corrupt(
+            f"ShotRevision {rev_id} carries a grammar-v1 performance "
+            "block captured before the mapping-hash anchor existed — "
+            "re-capture at the corrected head")
+    if not isinstance(perf, dict) or perf.get("schema_version") != 2:
         raise _corrupt(
             f"ShotRevision {rev_id} performance history declares "
             f"unknown schema {perf!r}")
@@ -1179,6 +1187,10 @@ def _verify_m17cc_child(con, blob_root, rev_id, shot_id, row, seg):
         ("performance_end_den", seg["performance_end_ms"]["den"]),
         ("shot_anchor_num", seg["shot_anchor_ms"]["num"]),
         ("shot_anchor_den", seg["shot_anchor_ms"]["den"]),
+        ("performance_mapping_hash",
+         seg["performance_mapping_hash"]),
+        ("vocal_mapping_hash", seg["vocal_mapping_hash"]),
+        ("vocal_mapping_position", seg["vocal_mapping_position"]),
     ):
         if row[column] != want:
             raise _corrupt(
@@ -1233,6 +1245,37 @@ def _verify_m17cc_child(con, blob_root, rev_id, shot_id, row, seg):
         raise _corrupt(
             f"{where} vocal_mapping_hash disagrees with its captured "
             "mapping-document preimage")
+    # RR-M17CC-03: the SNAPSHOT-ANCHORED comparison — the embedded
+    # segment (covered by segment_hash -> parent spec_hash ->
+    # snapshot identity) is the independent authority a coherent
+    # child-side preimage+hash rewrite cannot satisfy
+    if row["performance_mapping_hash"] != seg[
+            "performance_mapping_hash"]:
+        raise _corrupt(
+            f"{where} performance_mapping_hash disagrees with the "
+            "snapshot-anchored embedded segment")
+    if row["vocal_mapping_hash"] != seg["vocal_mapping_hash"]:
+        raise _corrupt(
+            f"{where} vocal_mapping_hash disagrees with the "
+            "snapshot-anchored embedded segment")
+    if row["vocal_mapping_position"] != seg[
+            "vocal_mapping_position"]:
+        raise _corrupt(
+            f"{where} vocal_mapping_position preimage disagrees with "
+            "the snapshot-anchored embedded segment")
+    embedded_origin = seg["vocal_performance_origin_ms"]
+    if embedded_origin is None:
+        if (row["vocal_performance_origin_num"] is not None
+                or row["vocal_performance_origin_den"] is not None):
+            raise _corrupt(
+                f"{where} vocal performance-origin preimage disagrees "
+                "with the snapshot-anchored embedded segment")
+    elif (row["vocal_performance_origin_num"] != embedded_origin["num"]
+            or row["vocal_performance_origin_den"]
+            != embedded_origin["den"]):
+        raise _corrupt(
+            f"{where} vocal performance-origin preimage disagrees with "
+            "the snapshot-anchored embedded segment")
 
     # §13.4 exact arithmetic (recomputed, never trusted from text):
     # canonical rationals and a non-empty interval

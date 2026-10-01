@@ -30,15 +30,22 @@ from soloring.performance.m17c_models import (
 )
 from soloring.performance.models import ShotVocalSegmentMapping
 
-# the frozen R4 11.2 embedded segment key set — the builder projects
-# EXACTLY these keys into the snapshot's performance block; the read
-# value may carry additional projection keys (blob hash, mapping
-# hashes) that only the companion projection consumes
+# the frozen R4 11.2 embedded segment key set, EXTENDED by the
+# RR-M17CC-03 correction (capture-grammar v2): the two captured
+# mapping hashes AND their preimage are now part of the schema-8
+# snapshot/segment identity, so the chain is
+#   captured preimage -> recomputed mapping hash -> SNAPSHOT-ANCHORED
+#       hash (segment_hash -> parent spec_hash -> snapshot identity)
+# and a coherent child-side preimage+hash rewrite disagrees with the
+# independent snapshot. Grammar v1 (0023-era, preimage companion-only)
+# is REFUSED, never silently reinterpreted.
 EMBEDDED_SEGMENT_KEYS = (
     "position", "subject_id", "performance_revision_id",
     "performance_payload_sha256", "performance_profile_id",
     "performance_kind", "performance_start_ms", "performance_end_ms",
-    "shot_anchor_ms", "vocal",
+    "shot_anchor_ms", "performance_mapping_hash",
+    "vocal_mapping_hash", "vocal_mapping_position",
+    "vocal_performance_origin_ms", "vocal",
 )
 
 
@@ -52,22 +59,43 @@ _VOCAL_KEYS = (
 
 
 def _embedded_segment(seg: dict) -> dict:
-    """The frozen 11.2 projection of ONE captured pack segment — the
-    vocal dict projects to its exact five keys (the pack may carry the
-    FPR-M17CC-04 preimage key, which the embedded grammar excludes)."""
-    out = {k: seg[k] for k in EMBEDDED_SEGMENT_KEYS}
+    """The grammar-v2 projection of ONE captured pack segment: the
+    fourteen frozen keys — including the two mapping hashes and their
+    preimage (RR-M17CC-03: the mapping identity is snapshot-anchored).
+    The vocal dict projects to its exact five keys (the pack may carry
+    the origin preimage at the top level, which stays top-level)."""
+    out = {}
+    for k in EMBEDDED_SEGMENT_KEYS:
+        if k == "vocal_performance_origin_ms" and k not in seg:
+            # generic segments carry no origin (None); the pack may
+            # place the preimage at top level or inside the vocal dict
+            out[k] = vocal_origin_of(seg)
+        else:
+            out[k] = seg[k]
     vocal = out["vocal"]
     if vocal is not None:
         out["vocal"] = {k: vocal[k] for k in _VOCAL_KEYS}
     return out
 
 
+def vocal_origin_of(seg: dict):
+    origin = seg.get("vocal_performance_origin_ms")
+    if isinstance(origin, dict):
+        return origin
+    vocal = seg.get("vocal")
+    if isinstance(vocal, dict):
+        origin = vocal.get("vocal_performance_origin_ms")
+        if isinstance(origin, dict):
+            return origin
+    return None
+
+
 def embedded_performance_value(performance_pack) -> dict:
-    """The canonical embedded ``performance`` block: schema version 1 +
-    the position-ordered projection of the frozen 11.2 keys from each
+    """The canonical embedded ``performance`` block: grammar v2 +
+    the position-ordered projection of the frozen keys from each
     captured segment. This is THE value the snapshot carries and the
     companion parent's ``spec_json`` must serialize."""
-    return {"schema_version": 1, "segments": [
+    return {"schema_version": 2, "segments": [
         _embedded_segment(seg) for seg in performance_pack["segments"]]}
 
 
@@ -115,6 +143,27 @@ async def resolve_performance_plane(conn, settings, shot_id: str):
             join_transaction_mode="create_savepoint") as pinned:
         projection = await project_shot_performance_readiness(
             pinned, settings, shot_id=shot_id)
+        # RR-M17CC-02 (re-review): readiness CLASSIFICATION is separate
+        # from capturable-closure EXTRACTION. A lawfully non-READY
+        # working state (e.g. the supported DELETE of a paired vocal
+        # mapping = BLOCKED_BINDING_INTEGRITY) is DATA — the capture
+        # path issues its typed 409 from this projection, and
+        # non-capture readers stay usable. No closure material is
+        # extracted (and nothing is classified as corruption) unless
+        # EVERY segment projects READY.
+        ready = all(s["readiness"] == "READY"
+                    for s in projection["segments"])
+        if not ready:
+            return {
+                "ready": False,
+                "segments": None,
+                "segment_readiness": [
+                    {"position": s["position"],
+                     "readiness": s["readiness"],
+                     "readiness_diagnostics":
+                         s.get("readiness_diagnostics")}
+                    for s in projection["segments"]],
+            }
         segments = []
         for seg in projection["segments"]:
             pr_id = seg["performance_revision_id"]
@@ -125,9 +174,9 @@ async def resolve_performance_plane(conn, settings, shot_id: str):
                 binding = await pinned.get(
                     PerformanceRevisionVocalBinding, pr_id)
                 if binding is None:
-                    # the seam verified classification/cardinality; a
-                    # missing binding here is impossible persisted
-                    # history, fail closed
+                    # under an all-READY projection the seam has
+                    # verified classification/cardinality; a missing
+                    # binding here is impossible persisted history
                     from soloring.performance.m17c_shot_mapping import (
                         _corrupt,
                     )
@@ -138,6 +187,11 @@ async def resolve_performance_plane(conn, settings, shot_id: str):
                                           (shot_id,
                                            seg["vocal_mapping_position"]))
                 if paired is None:
+                    # under an all-READY projection the paired vocal
+                    # mapping exists (its absence is the lawful
+                    # BLOCKED_BINDING_INTEGRITY state returned above as
+                    # data); losing it here mid-read never legitimately
+                    # happens inside one pinned snapshot
                     from soloring.performance.m17c_shot_mapping import (
                         _corrupt,
                     )
@@ -177,6 +231,7 @@ async def resolve_performance_plane(conn, settings, shot_id: str):
                 "performance_end_ms": seg["performance_end_ms"],
                 "shot_anchor_ms": seg["shot_anchor_ms"],
                 "mapping_hash": seg["mapping_hash"],
+                "performance_mapping_hash": seg["mapping_hash"],
                 "vocal": vocal,
                 "vocal_mapping_hash": vocal_mapping_hash,
                 # FPR-M17CC-04: the performance mapping document's
@@ -184,9 +239,8 @@ async def resolve_performance_plane(conn, settings, shot_id: str):
                 "vocal_mapping_position":
                     seg["vocal_mapping_position"],
             })
-    ready = all(s["readiness"] == "READY" for s in projection["segments"])
     return {
-        "ready": ready,
+        "ready": True,
         "segments": segments,
         "segment_readiness": [
             {"position": s["position"], "readiness": s["readiness"],
@@ -442,10 +496,14 @@ def _child_preimage_vocal(row) -> dict | None:
     }
 
 
-def verify_mapping_hash_closure(row, where: str) -> None:
+def verify_mapping_hash_closure(row, where: str, seg=None) -> None:
     """Fail closed (typed internal invariant) when a stored child's
     captured mapping-hash columns disagree with the preimage the row
-    itself carries — the FPR-M17CC-04 anchor."""
+    itself carries (FPR-M17CC-04), AND — RR-M17CC-03 — when either the
+    preimage or the hashes disagree with the SNAPSHOT-ANCHORED
+    embedded segment (segment_hash -> parent spec_hash -> snapshot
+    identity): a coherent child-side preimage+hash rewrite is refused
+    by the independent snapshot, not merely by row-local recomputation."""
     from soloring.errors import internal_invariant
 
     try:
@@ -471,3 +529,34 @@ def verify_mapping_hash_closure(row, where: str) -> None:
         raise internal_invariant(
             f"{where} vocal_mapping_hash disagrees with its captured "
             "mapping-document preimage")
+    if seg is not None:
+        if (row["performance_mapping_hash"]
+                != seg["performance_mapping_hash"]):
+            raise internal_invariant(
+                f"{where} performance_mapping_hash disagrees with the "
+                "snapshot-anchored embedded segment")
+        if (row["vocal_mapping_hash"]
+                != seg["vocal_mapping_hash"]):
+            raise internal_invariant(
+                f"{where} vocal_mapping_hash disagrees with the "
+                "snapshot-anchored embedded segment")
+        if (row["vocal_mapping_position"]
+                != seg["vocal_mapping_position"]):
+            raise internal_invariant(
+                f"{where} vocal_mapping_position preimage disagrees "
+                "with the snapshot-anchored embedded segment")
+        embedded_origin = seg["vocal_performance_origin_ms"]
+        if embedded_origin is None:
+            if (row["vocal_performance_origin_num"] is not None
+                    or row["vocal_performance_origin_den"] is not None):
+                raise internal_invariant(
+                    f"{where} vocal performance-origin preimage "
+                    "disagrees with the snapshot-anchored embedded "
+                    "segment")
+        elif (row["vocal_performance_origin_num"]
+                != embedded_origin["num"]
+                or row["vocal_performance_origin_den"]
+                != embedded_origin["den"]):
+            raise internal_invariant(
+                f"{where} vocal performance-origin preimage disagrees "
+                "with the snapshot-anchored embedded segment")

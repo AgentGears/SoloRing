@@ -236,6 +236,41 @@ def git_changed_files() -> list[str]:
     return [f for f in out.stdout.splitlines() if f.strip()]
 
 
+def schema8_fence_check(src: str) -> list[str]:
+    """RR-M17CC-04 (re-review): POSITIVELY certify the schema-8
+    Generation refusal — a narrowly anchored structural check, not a
+    keyword allowlist. The gate fails when the fence is absent, or
+    when it sits below the first Generation-owned durable side effect
+    (the release placement) on the source line order.
+    """
+    problems: list[str] = []
+    token = "PERFORMANCE_REALIZATION_UNSUPPORTED"
+    fence = src.find(token)
+    if fence < 0:
+        problems.append(
+            "the schema-8 fail-closed realization refusal "
+            f"({token}) is absent from the generation service")
+        return problems
+    gate = src.rfind("if snapshot_schema == 8:", 0, fence)
+    if gate < 0 or fence - gate > 2000:
+        problems.append(
+            "the schema-8 refusal is not anchored to its "
+            "'if snapshot_schema == 8:' gate")
+    durable = src.find(
+        "        await _artifact_store.place_release(release)")
+    if durable >= 0 and fence > durable:
+        problems.append(
+            "the schema-8 refusal sits below the first "
+            "Generation-owned durable side effect (release "
+            "placement)")
+    raise_kw = src.rfind("raise SoloRingError(", 0, fence)
+    if raise_kw < 0 or fence - raise_kw > 400:
+        problems.append(
+            "the schema-8 fence marker is not part of a raise "
+            "statement")
+    return problems
+
+
 def main() -> int:
     errors: list[str] = []
     p0a: list[str] = []
@@ -257,6 +292,9 @@ def main() -> int:
                     errors.append(
                         "generation/service.py: fail-closed schema-7 "
                         "fence absent")
+                for off in schema8_fence_check(text):
+                    errors.append(
+                        "generation/service.py: " + off)
                 for off in generation_diff_is_fence_only():
                     errors.append(
                         "generation/service.py: added line outside the "

@@ -373,8 +373,10 @@ async def test_forbidden_current_tables_never_queried(client):
     ("missing_binding", "synchronization binding is gone"),
     ("binding_disagreement",
      "captured vocal closure disagrees"),
-    ("vocal_group_nulled", "vocal-group column"),
-    ("vocal_group_grafted", "vocal-group column"),
+    ("vocal_group_nulled",
+     "vocal_mapping_hash disagrees with the embedded"),
+    ("vocal_group_grafted",
+     "vocal_mapping_hash disagrees with the embedded"),
 ])
 async def test_immutable_closure_corruption_fails_closed(
         client, tamper, fragment):

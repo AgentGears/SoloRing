@@ -55,14 +55,21 @@ async def observation_readiness(session, settings, shot_id: str) -> dict:
     # consume the SAME full one-read capture consumes (intra-shot AND
     # Performance planes included) — is_current must incorporate the
     # Performance plane, exactly like the Shot-detail canon.
+    # RR-M17CC-02 (re-review): a lawfully non-READY Performance plane
+    # (frozen posture) makes the working hash UNAVAILABLE — a blocked
+    # state is never hashed, and no state can be "current" against a
+    # hash that cannot exist.
+    perf_unready = performance is not None and not performance["ready"]
+    hash_pack = None if perf_unready else performance
     working_snapshot, _spec = build_capturable_snapshot(
         shot, refs, resolved, feature_states, relation_states,
         visual_pack, spatial_pack, production_world_pack,
-        intra_shot_pack=intra_shot_pack, performance_pack=performance)
-    working_hash = effective_working_snapshot_hash(
-        shot, refs, resolved, feature_states, relation_states,
-        visual_pack, spatial_pack, production_world_pack,
-        intra_shot_pack=intra_shot_pack, performance_pack=performance)
+        intra_shot_pack=intra_shot_pack, performance_pack=hash_pack)
+    working_hash = None if perf_unready else (
+        effective_working_snapshot_hash(
+            shot, refs, resolved, feature_states, relation_states,
+            visual_pack, spatial_pack, production_world_pack,
+            intra_shot_pack=intra_shot_pack, performance_pack=hash_pack))
 
     async with session.bind.connect() as conn:
         captured = (await conn.execute(text(
@@ -105,17 +112,22 @@ async def observation_readiness(session, settings, shot_id: str) -> dict:
     # predecessor base, and every predecessor block survives beneath
     # the wrap. The observation plane's applicability therefore
     # evaluates the WRAPPED predecessor: the schema-6 wrap is defined
-    # by its mandatory production_world block (a schema-7 predecessor
-    # carries no world of its own under the M16-era semantics, which
-    # the unwrap preserves exactly).
+    # by its mandatory production_world block.
+    # RR-M17CC-01 (re-review): the observation compiler consumes the
+    # LITERAL schema-6 view — schema_version: 6, the M17C-C
+    # performance layer removed, and (for an 8-over-7-over-6 chain)
+    # the M16 successor layer removed as well. This is a PROJECTION
+    # for M14 consumption only; the captured ShotRevision is never
+    # rewritten or lowered.
     if captured_schema == 8:
-        predecessor = {
-            k: v for k, v in captured_snapshot.items()
-            if k != "performance"}
-        applicable = (
-            "production_world" in predecessor
-            and "intra_shot" not in predecessor)
-        observed = predecessor if applicable else captured_snapshot
+        applicable = "production_world" in captured_snapshot
+        if applicable:
+            observed = {
+                k: v for k, v in captured_snapshot.items()
+                if k not in ("performance", "intra_shot")}
+            observed["schema_version"] = 6
+        else:
+            observed = captured_snapshot
     else:
         applicable = captured_schema == 6
         observed = captured_snapshot
@@ -124,9 +136,9 @@ async def observation_readiness(session, settings, shot_id: str) -> dict:
         if captured_schema == 8 and "intra_shot" in captured_snapshot:
             explanation = (
                 "the last captured revision is a schema-8 wrap of a "
-                "schema-7 predecessor that carries intra-Shot authority "
-                "and no production world of its own; the observation "
-                "plane applies only to captured schema-6 authority")
+                "schema-7 predecessor that carries no production "
+                "world of its own; the observation plane applies only "
+                "to captured schema-6 authority")
         elif captured_schema == 8:
             explanation = (
                 "the last captured revision is a schema-8 wrap whose "

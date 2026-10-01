@@ -72,6 +72,11 @@ def _seg(position=0, vocal=None):
         "performance_start_ms": {"num": 0, "den": 1},
         "performance_end_ms": {"num": 1000, "den": 1},
         "shot_anchor_ms": {"num": 0, "den": 1},
+        "performance_mapping_hash": "c" * 64,
+        "vocal_mapping_hash": "d" * 64 if vocal else None,
+        "vocal_mapping_position": 0 if vocal else None,
+        "vocal_performance_origin_ms":
+            {"num": 0, "den": 1} if vocal else None,
         "vocal": vocal,
     }
 
@@ -152,7 +157,7 @@ def test_schema8_wrap_laws():
         shot, [], [_Dep()], performance_pack=_pack(segs))
     assert s8["schema_version"] == 8
     perf = s8["performance"]
-    assert perf["schema_version"] == 1
+    assert perf["schema_version"] == 2
     assert [s["position"] for s in perf["segments"]] == [0, 1]
     # uniform closed vocal grammar
     assert perf["segments"][0]["vocal"] == _vocal()
@@ -370,9 +375,9 @@ async def test_live_capture_schema8_shape_and_companions(client):
         assert len(parents) == 1
         assert parents[0].schema_version == 1
         assert parents[0].spec_json == canonical_json_str(
-            {"schema_version": 1, "segments": snap["performance"]["segments"]})
+            {"schema_version": 2, "segments": snap["performance"]["segments"]})
         assert parents[0].spec_hash == canonical_hash(
-            {"schema_version": 1, "segments": snap["performance"]["segments"]})
+            {"schema_version": 2, "segments": snap["performance"]["segments"]})
         children = (await conn.execute(_text(
             "SELECT position, subject_id, "
             "performance_revision_id, vocal_performance_revision_id, "

@@ -138,6 +138,34 @@ async def _stage_schema2(client, tmp_path, tag):
     return root, world, revision.id
 
 
+_COLUMN_OF_EMBEDDED = {
+    "performance_start_ms": "performance_start_num",
+    "performance_end_ms": "performance_end_num",
+    "shot_anchor_ms": "shot_anchor_num",
+    "subject_id": "subject_id",
+    "performance_revision_id": "performance_revision_id",
+    "performance_payload_sha256": "performance_payload_sha256",
+    "performance_profile_id": "performance_profile_id",
+    "performance_kind": "performance_kind",
+}
+
+
+def _preimage_vocal_of(forged, seg):
+    if seg["vocal"] is None:
+        return None
+    return {
+        "vocal_performance_revision_id":
+            forged["vocal_performance_revision_id"],
+        "source_start_sample": forged["source_start_sample"],
+        "source_end_sample_exclusive":
+            forged["source_end_sample_exclusive"],
+        "sample_rate_hz": forged["sample_rate_hz"],
+        "vocal_performance_origin_ms": {
+            "num": forged["vocal_performance_origin_num"],
+            "den": forged["vocal_performance_origin_den"]},
+    }
+
+
 def _coherent_child_rewrite(root, revision_id, position, seg_updates,
                              pr_updates=()):
     """THE strong tamper shape: rewrite one captured segment
@@ -161,6 +189,27 @@ def _coherent_child_rewrite(root, revision_id, position, seg_updates,
     seg = spec["segments"][position]
     seg.update(seg_updates)
     snap["performance"]["segments"][position].update(seg_updates)
+
+    # RR-M17CC-03: the mapping hashes are snapshot-anchored — a fully
+    # coherent rewrite must ALSO rewrite the embedded segment's
+    # mapping-hash/preimage fields (and every derived byte) so ONLY
+    # the independent immutable-authority laws can refuse
+    from soloring.performance.m17cc_capture_read import (
+        expected_mapping_hashes,
+    )
+    forged = dict(row)
+    for k, v in seg_updates.items():
+        forged[_COLUMN_OF_EMBEDDED.get(k, k)] = v
+    perf_hash, vocal_hash = expected_mapping_hashes(
+        forged["performance_revision_id"],
+        seg["performance_start_ms"], seg["performance_end_ms"],
+        seg["shot_anchor_ms"], seg["vocal_mapping_position"],
+        _preimage_vocal_of(forged, seg))
+    seg["performance_mapping_hash"] = perf_hash
+    seg["vocal_mapping_hash"] = vocal_hash
+    snap_seg = snap["performance"]["segments"][position]
+    snap_seg["performance_mapping_hash"] = perf_hash
+    snap_seg["vocal_mapping_hash"] = vocal_hash
 
     parent_json, parent_hash = _cj(spec), _ch(spec)
     snap_json, snap_hash = _cj(snap), _ch(snap)
@@ -195,24 +244,6 @@ def _coherent_child_rewrite(root, revision_id, position, seg_updates,
     # FPR-M17CC-04: the stored mapping hashes RECOMPUTE over the forged
     # preimage so the tamper is fully self-consistent and only the
     # immutable-authority laws can refuse.
-    from soloring.performance.m17cc_capture_read import (
-        _child_preimage_vocal, expected_mapping_hashes,
-    )
-    forged = _one(root, (
-        f"SELECT * FROM {_CHILDREN} WHERE shot_revision_id = ? "
-        "AND position = ?"), (revision_id, position))
-    for column, value in columns.items():
-        forged[column] = value
-    perf_hash, vocal_hash = expected_mapping_hashes(
-        forged["performance_revision_id"],
-        {"num": forged["performance_start_num"],
-         "den": forged["performance_start_den"]},
-        {"num": forged["performance_end_num"],
-         "den": forged["performance_end_den"]},
-        {"num": forged["shot_anchor_num"],
-         "den": forged["shot_anchor_den"]},
-        forged["vocal_mapping_position"],
-        _child_preimage_vocal(forged))
     columns["performance_mapping_hash"] = perf_hash
     columns["vocal_mapping_hash"] = vocal_hash
     sets = ", ".join(f"{c} = :{c}" for c in columns)
@@ -282,7 +313,8 @@ async def test_recovery_is_independent_of_the_section12_reader(
     ("pr_mismatch",
      "disagrees with the immutable PerformanceRevision"),
     ("missing_binding", "binding companion is missing"),
-    ("vocal_group_nulled", "vocal-group column"),
+    ("vocal_group_nulled",
+     "vocal_mapping_hash disagrees with the embedded"),
     ("payload_blob_missing", "payload blob"),
     ("payload_blob_corrupt", "does not rehash"),
     ("timing_mismatch", "exact binding-induced interval"),
