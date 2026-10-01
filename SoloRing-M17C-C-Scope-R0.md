@@ -329,3 +329,43 @@ The six-slice record is materially accurate; the §1.7 proof, the one-read/persi
 ## Frozen disposition
 
 **FIRST-PASS REVIEW COMPLETE. Known findings FPR-M17CC-01..08. Primary blockers 01 and 02. PR #26 remains draft, unmerged, unready. Merge/ready-mark NOT authorized by this review. Second reviewer/Codex NOT run.** No correction work has started; the correction cycle awaits its gate.
+
+---
+
+# M17C-C first-pass-review CORRECTION CYCLE — FPR-M17CC-01..08 — 2026-10-01 — IMPLEMENTED
+
+The correction gate was authorized against the frozen register; the three architectural decisions were resolved FIRST per the mandated sequence, then all eight findings corrected, beginning with the blockers. Correction head: **`7a06474`** (amended; the first commit `05fc5b4` → `438ca1f` → `bc238f2` → `7a06474` chain reflects fixture/gate convergence inside one logical delta — a mid-cycle `git stash --keep-index` mishap cost the working tree and was fully recovered from the dangling stash commit `7a29c47f`, byte-verified by content greps before the commit; lesson recorded).
+
+## The three architectural decisions (resolved first)
+
+- **A — pre-M17C-D Generation posture = typed fail-closed refusal.** M17C-D owns Performance translation; running predecessor-only execution of a performance-bearing revision is not a lawful posture, and silent lowering is what FPR-01 condemned. New `ErrorCode.PERFORMANCE_REALIZATION_UNSUPPORTED`; the generation seam refuses ANY schema-8 ShotRevision terminally (409, before any Generation row/Input/artifact/queueing), mirroring the M16 schema-7 refusal contract. An 8-over-7 wrap can no longer bypass `INTRA_SHOT_REALIZATION_UNSUPPORTED`, and 8-over-5/6 can no longer silently drop captured spatial/observation authority.
+- **B — mapping-hash anchor = captured preimage.** Successor migration **`0023_m17cc_capture_closure_preimage`** adds `vocal_mapping_position` + `vocal_performance_origin_num/den` to the companion children (verified: the vocal mapping's origin is caller-supplied at its PUT and pinned by NO law to the binding's origin) so BOTH mapping hashes recompute as pure functions of the stored child row. The frozen §11.2 embedded grammar and every snapshot byte law are untouched. The 0023 upgrade refuses populated 0022 segments (preimage is CAPTURE data, never backfilled); the downgrade fences ALL THREE M17C-C tables (alembic commits per migration step — a segments-only fence would let the destructive recreate run for a specs/GPI-only populate before the 0022 fence fires).
+- **C — §12 byte transport = inline base64.** The historical answer carries `payload_bytes_base64` of the physically-read, sha256-verified retained bytes; a missing or corrupt physical file (DB row intact) fails closed with typed invariants.
+
+## The eight corrections
+
+1. **FPR-01 (HIGH)** — the refusal above; verified by plain-8 and 8-over-7 generation tests (typed code, no persistence).
+2. **FPR-02 (HIGH)** — `effective_working_snapshot_hash` gains `performance_pack` (still delegating to THE builder) and `read_shot_detail` resolves the plane on its pinned snapshot: unchanged Performance equals the captured hash (canon equality), a Performance-only change moves it, reverting restores it exactly.
+3. **FPR-03 (MEDIUM)** — `observation_readiness` consumes the full 10-element one-read and unwraps schema 8 to the WRAPPED predecessor for applicability: an 8-over-6 capture runs the schema-6 posture on the retained production_world (never "not-applicable"); `is_current` is Performance-aware; a profile-less release now declares no observation capability (refused branch) instead of crashing.
+4. **FPR-04 (MEDIUM)** — `expected_mapping_hashes` / `_child_preimage_vocal` / `verify_mapping_hash_closure` (ONE pure law in m17cc_capture_read) consumed by §12, §13.4, and capture; tamper of EITHER mapping-hash column alone refuses at both surfaces (tested).
+5. **FPR-05 (MEDIUM)** — `_verified_payload_bytes` in the §12 reader; bytes round-trip test + missing/corrupt fail-closed.
+6. **FPR-06 (MEDIUM)** — identity equality at the frozen coordinate `spec["performance_translation"]` (recursive presence-anywhere removed); the coordinate is frozen ahead of M17C-D; an identity appearing only in an unrelated field refuses, and an unrelated duplicate does not refuse a correct identity.
+7. **FPR-07 (LOW)** — the pure builder's zero-dependency schema-1 base falls through to the Performance wrap (any-schema-1-7 law now true, directly tested).
+8. **FPR-08 (LOW)** — the recovery fixture is fully named-parameter.
+
+## Head advance 0022→0023 (plumbing)
+
+`EXPECTED/SUPPORTED` heads + the 14-path policy (0023 adds NO Blob path), successor chains (6 memberships), verifier heads (0022 remains supported; its schema-8 companion rows REFUSE — preimage-less closure cannot certify), seeds/stamps/test constants swept (SUPPORTED sets keep 0022 alongside 0023), migration-count/head asserts, and validator admissions (hygiene+nsec admit the 0023 file and its recreated table names; the m16 surface admits successor_semantics + observation; the m16 generation-fence vocabulary covers the schema-8 refusal; m14 source-fit admits readiness.py whose unwrap legitimately names the intra-shot block; the m14 baseline admits 0023 as the head; the m15 baseline byte-pins the readiness correction; the m17b h06 source gate modernizes to "every performance occurrence inside the refusal block"; sr2_01 asserts the C2 head). The roundtrip battery's non-destructive test now names the 0023 fence.
+
+## Gates (first-run dispositions recorded exactly)
+
+- FPR battery **10/10**; the combined affected battery converged to **230/230** after gate amendments (m15 baseline byte-pin + admitted sets; m16 recovery/m12/m14-derived SUPPORTED sets regain 0022; m17b h06 gate modernized; sr2_01 C2 head).
+- Local full suite on the final amended tree: **3023 passed / 8 skipped / 0 failed in 45:37** (collection 3031 = the slice-6 total 3021 + the 10-test battery — exact). One earlier run (pre-final-fixes) was killed as tree-mixed; its 2 failures were the two gate tests fixed above.
+- Committed-tree validators: all green after the four-boundary carve for `tests/test_m17cc_fpr_corrections.py` and the 0023 admissions.
+- Frontend: vitest **143/143**, tsc clean, build succeeds.
+- **CI run `36842093290` on `7a06474`: SUCCESS, attempt 1 — Backend 3030 passed / 20 skipped / 0 failed** (CI total 3050 = its slice-6 total 3040 + the 10-test battery, arithmetic exact); Frontend green attempt 1 (143/143).
+- Residue: new files = migration 0023 + `tests/test_m17cc_fpr_corrections.py`; the §1.7 exit-criterion composite and every prior slice battery remain green under the corrected head.
+
+## Fences honored
+
+No Codex/second pass run; no merge/ready; PR #26 remains draft/unmerged/unready. The corrected HEAD now awaits the re-run of the exhaustive first-pass review and the freezing of the NEW register, per the mandated sequence.
