@@ -422,3 +422,25 @@ The correction commission against the frozen re-review register is complete, wit
 ## Fences honored
 
 The six certified-closed original findings were not reopened (RR-02's seam is the disclosed integration point); no Codex/second review run; no merge/ready; PR #26 remains draft/unmerged/unready. The corrected implementation head now awaits the NEXT fresh independent exhaustive first-pass review per the mandated sequence.
+
+---
+
+# M17C-C corrected-head exhaustive first-pass review (third pass) — 2026-10-01 — NOT CLEAN (register RR2-M17CC-01 FROZEN)
+
+The fresh independent review of implementation HEAD `82f51a6` (against frozen R0, the predecessor-impact register, RR-M17CC-01..04, and the six certified-closed original findings; no Codex/second reviewer) is complete. **Verdict: NOT CLEAN — 1 new Medium finding, 0 High, 0 Low.** PR #26 remains draft, open, unmerged (tip = the record commit `47e68f0` above the reviewed head). The new register is frozen; the next lawful step is a narrowly scoped correction cycle for RR2-M17CC-01.
+
+## Register closure (as certified by this pass)
+
+- **RR-M17CC-01 / FPR-03: CLOSED** — the literal schema-6 projection (performance removed, intra_shot removed when present, schema_version restored to 6) reaches the unchanged compiler on both observation-capable wrap shapes while the stored ShotRevision remains unchanged.
+- **RR-M17CC-02: CLOSED** — readiness/closure separation with the commissioned null posture; the supported DELETE proves blocked data through detail 200/nulls and the typed 409 with zero writes.
+- **RR-M17CC-03 / FPR-04: CLOSED** — grammar-v2 snapshot anchoring; the coherent preimage+hash rewrite is refused via the snapshot identity at both surfaces.
+- **RR-M17CC-04: CLOSED** — the positive structural fence check with deletion/relocation negatives.
+- The six original certified-closed findings did not regress; CI 36877119569 was independently corroborated (3037/20 — green does not cover the new pre-capture shape); the grammar-v1 refusal was expressly authorized and is not reopened; a candidate predecessor-order concern in Shot detail was examined and NOT retained (below the evidence threshold).
+
+## Frozen finding
+
+- **RR2-M17CC-01 — MEDIUM — NEW — coherent capture / paired vocal mapping integrity at the fresh-capture admission seam.** The schema-v2 correction anchors the vocal mapping hash in immutable identity, but the fresh capture read does not first prove the CURRENT paired vocal mapping's own stored canonical bytes/hash are valid: the M17A table mechanically requires only schema 1 + a 64-char mapping_hash (no mapping_json↔fields↔hash law); M17C-B verifies the Performance mapping's full persisted canonical structure (`_verify_stored_mapping`) but `_project_one()` checks the paired vocal row's existence/VP identity/selection/induced interval WITHOUT verifying its mapping_schema_version/mapping_json/mapping_hash; `resolve_performance_plane()` then copies `paired.mapping_hash` and the origin preimage into the capture value, and fresh persistence writes it as-is. Concrete path: corrupt only `shot_vocal_segment_mappings.mapping_hash` to another 64-char value → PF-02 still READY → capture embeds the bad hash into grammar-v2 snapshot identity and persists the revision → the first §12 read recomputes from the captured preimage and rejects it — capture manufactures durable history its own historical/recovery contract regards as corrupt immediately (violating frozen §11.4; the M17A recovery verifier already knows the missing law — it reconstructs the vocal mapping document and requires the canonical hash to equal the stored one). Required correction: validate a PRESENT paired vocal mapping's complete persisted canonical law before extracting closure — a shared transport-neutral ShotVocalSegmentMapping structural verifier analogous to the PF-02 verifier; RR-02 preserved exactly (ABSENT pairing stays lawful BLOCKED; PRESENT-but-noncanonical is corruption and fails closed). Mandatory proofs: pre-capture corruption of mapping_hash ALONE (another 64-char value) and of mapping_json ALONE (semantic columns intact) — both refuse with the corruption posture BEFORE builder/persistence, revision/parent/children counts unchanged; a clean control still captures.
+
+## Frozen disposition
+
+**FIRST-PASS REVIEW COMPLETE. New register RR2-M17CC-01 frozen (0H/1M/0L). RR-M17CC-01..04 all CLOSED; FPR-M17CC-01..08 all remain CLOSED. PR #26 remains draft, unmerged, unready. Merge/ready NOT authorized. Codex/second reviewer NOT run.** The next lawful step is a narrowly scoped correction cycle for RR2-M17CC-01 followed by another independent first-pass review of the corrected HEAD. No correction work has started; the cycle awaits its gate.
