@@ -372,8 +372,7 @@ async def test_forbidden_current_tables_never_queried(client):
      "disagrees with the immutable PerformanceRevision"),
     ("missing_binding", "synchronization binding is gone"),
     ("binding_disagreement",
-     "is not contained within the immutable synchronization "
-     "binding"),
+     "fails its own canonical structural law"),
     ("vocal_group_nulled",
      "vocal_mapping_hash disagrees with the embedded"),
     ("vocal_group_grafted",

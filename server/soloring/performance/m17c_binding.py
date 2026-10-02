@@ -143,26 +143,101 @@ def _row_document(row) -> dict:
     }
 
 
-def _verify_binding_bytes(row) -> dict:
-    if row.binding_schema_version != 1 or row.synchronization_basis_version != 1:
-        raise corrupt("M17C vocal binding schema/basis version is not 1")
+def verify_stored_vocal_binding(
+        *, binding_schema_version, synchronization_basis_version,
+        vocal_performance_revision_id, source_start_sample,
+        source_end_sample_exclusive, sample_rate_hz,
+        performance_origin_num, performance_origin_den,
+        binding_json, binding_hash) -> dict:
+    """RR7-M17CC-01: the ONE shared, transport-neutral structural
+    law for a persisted PerformanceRevisionVocalBinding — the
+    immutable row must self-authenticate BEFORE any consumer uses its
+    scalars or exposes them as historical authority: schema/basis
+    versions frozen at 1; the persisted origin an ALREADY-canonical
+    rational; the exact canonical document reconstructed from the
+    row's own fields; exact binding_json bytes; recomputed canonical
+    hash == stored binding_hash. Never normalizes, repairs,
+    substitutes, or reconstructs a "correct" binding. Raises
+    ValueError with a precise reason; each caller keeps its own
+    vocabulary (PF-03 and recovery their corrupt contract, §12 its
+    internal_invariant)."""
+    from soloring.performance.temporal import (
+        RationalError, canonical_rational,
+    )
+
+    if binding_schema_version != 1 or synchronization_basis_version != 1:
+        raise ValueError(
+            "binding schema/basis version is not the frozen 1")
+    if (isinstance(performance_origin_num, bool)
+            or not isinstance(performance_origin_num, int)
+            or isinstance(performance_origin_den, bool)
+            or not isinstance(performance_origin_den, int)):
+        raise ValueError(
+            "the persisted origin is not an integer pair")
     try:
-        cn, cd = canonical_rational(
-            row.performance_origin_num, row.performance_origin_den)
-    except SoloRingError as exc:
-        # SR26-05: a malformed persisted rational is corruption of
-        # immutable history, never a client request problem.
-        raise corrupt(
-            f"M17C vocal binding stores an invalid persisted rational: "
-            f"{exc.message}") from exc
-    if (cn, cd) != (row.performance_origin_num, row.performance_origin_den):
-        raise corrupt("M17C vocal binding stores a noncanonical rational")
-    doc = _row_document(row)
+        reduced = canonical_rational(
+            performance_origin_num, performance_origin_den)
+    except RationalError as exc:
+        raise ValueError(
+            f"the persisted origin fails the canonical rational "
+            f"law: {exc}") from exc
+    if reduced != (performance_origin_num, performance_origin_den):
+        raise ValueError(
+            "the persisted origin is not in canonical reduced form")
+    doc = {
+        "binding_schema_version": binding_schema_version,
+        "synchronization_basis_version": synchronization_basis_version,
+        "vocal_performance_revision_id": vocal_performance_revision_id,
+        "source_start_sample": source_start_sample,
+        "source_end_sample_exclusive": source_end_sample_exclusive,
+        "sample_rate_hz": sample_rate_hz,
+        "performance_origin_ms": {
+            "num": performance_origin_num,
+            "den": performance_origin_den},
+    }
     expected_json = canonical_json_str(doc)
     expected_hash = canonical_hash(doc)
-    if row.binding_json != expected_json or row.binding_hash != expected_hash:
-        raise corrupt("M17C vocal binding canonical bytes/hash diverge")
+    if binding_json != expected_json:
+        raise ValueError(
+            "binding_json is not the canonical document over the "
+            "row's own fields")
+    if binding_hash != expected_hash:
+        raise ValueError(
+            "binding_hash is not the canonical digest of the row's "
+            "own binding document")
     return doc
+
+
+def _verify_binding_bytes(row) -> dict:
+    try:
+        return verify_stored_vocal_binding(
+            binding_schema_version=row.binding_schema_version,
+            synchronization_basis_version=(
+                row.synchronization_basis_version),
+            vocal_performance_revision_id=(
+                row.vocal_performance_revision_id),
+            source_start_sample=row.source_start_sample,
+            source_end_sample_exclusive=(
+                row.source_end_sample_exclusive),
+            sample_rate_hz=row.sample_rate_hz,
+            performance_origin_num=row.performance_origin_num,
+            performance_origin_den=row.performance_origin_den,
+            binding_json=row.binding_json,
+            binding_hash=row.binding_hash)
+    except ValueError as exc:
+        # PF-03 keeps its own corruption vocabulary; the shared law
+        # supplies the precise reason
+        if "schema/basis version" in str(exc):
+            raise corrupt(
+                "M17C vocal binding schema/basis version is not 1"
+            ) from exc
+        if "rational" in str(exc):
+            raise corrupt(
+                f"M17C vocal binding stores an invalid persisted "
+                f"rational: {exc}") from exc
+        raise corrupt(
+            "M17C vocal binding canonical bytes/hash diverge "
+            f"({exc})") from exc
 
 
 async def _verify_vp_structural_authority(

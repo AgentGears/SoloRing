@@ -340,9 +340,11 @@ async def _verify_one_child(session, settings, revision_id: str,
     if vocal is not None:
         binding = (await session.execute(text(
             "SELECT vocal_performance_revision_id, binding_hash, "
-            "source_start_sample, source_end_sample_exclusive, "
+            "binding_schema_version, synchronization_basis_version, "
+            "binding_json, source_start_sample, "
+            "source_end_sample_exclusive, "
             "sample_rate_hz, performance_origin_num, "
-            "performance_origin_den, synchronization_basis_version "
+            "performance_origin_den "
             "FROM performance_revision_vocal_bindings "
             "WHERE performance_revision_id = :pr"),
             {"pr": row["performance_revision_id"]}
@@ -351,6 +353,39 @@ async def _verify_one_child(session, settings, revision_id: str,
             raise internal_invariant(
                 f"{where} is dialogue-bound but its immutable "
                 "synchronization binding is gone.")
+        # RR7-M17CC-01: the immutable binding row must
+        # SELF-AUTHENTICATE before ANY of its scalars are used or
+        # exposed — a hash token cannot authenticate a binding whose
+        # document/scalars were never rehashed. The ONE shared
+        # transport-neutral PF-03 structural law (the same law the
+        # binding service and recovery enforce); §12 keeps its own
+        # internal_invariant vocabulary.
+        from soloring.performance.m17c_binding import (
+            verify_stored_vocal_binding,
+        )
+        try:
+            verify_stored_vocal_binding(
+                binding_schema_version=(
+                    binding.binding_schema_version),
+                synchronization_basis_version=(
+                    binding.synchronization_basis_version),
+                vocal_performance_revision_id=(
+                    binding.vocal_performance_revision_id),
+                source_start_sample=binding.source_start_sample,
+                source_end_sample_exclusive=(
+                    binding.source_end_sample_exclusive),
+                sample_rate_hz=binding.sample_rate_hz,
+                performance_origin_num=(
+                    binding.performance_origin_num),
+                performance_origin_den=(
+                    binding.performance_origin_den),
+                binding_json=binding.binding_json,
+                binding_hash=binding.binding_hash)
+        except ValueError as exc:
+            raise internal_invariant(
+                f"{where} names an immutable synchronization binding "
+                f"that fails its own canonical structural law: "
+                f"{exc}") from exc
         # RR6-M17CC-01: the frozen §8.3 relationship is binding
         # CONTAINMENT — binding.start <= captured.start <
         # captured.end <= binding.end — plus the EXACT binding-induced
