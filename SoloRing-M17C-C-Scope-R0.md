@@ -752,3 +752,31 @@ The independent fresh review of implementation HEAD `e9fc4d5` (no Codex/second r
 ## Frozen disposition
 
 **FIRST-PASS REVIEW COMPLETE. Known findings RR8-M17CC-01..02 (1M/1L). The core RR7 defect is corrected; the round is NOT clean. PR #26 remains draft, unmerged, unready. Merge/ready NOT authorized. Codex/second reviewer NOT run.** The next lawful step is a correction cycle for RR8-01..02, then another fresh independent first-pass review. No correction work has started; the cycle awaits its gate.
+
+---
+
+# M17C-C RR8-M17CC-01..02 CORRECTION — the typed structural result + the retained captured-hash proof — 2026-10-02 — IMPLEMENTED
+
+The commissioned correction is complete. Correction heads: **`5e36ed9`** (implementation) + the validator-carve commit (pushed head `39675bb` at record time).
+
+## Delivered (the commission exactly)
+
+1. **RR8-01 — the typed structural result** — the shared law now raises `BindingStructuralError`, a `ValueError` subclass carrying a **stable category token** (`schema_basis` / `rational_malformed` / `rational_noncanonical` / `binding_json` / `binding_hash`) — the routing contract callers map on, never human-readable text — plus `reason` (§12's richer diagnostic) and, for the malformed-rational category, a `source` field with the temporal-primitive error text. PF-03's `_verify_binding_bytes` maps the categories to the **exact predecessor messages verified verbatim against `132d2b3`**: `M17C vocal binding schema/basis version is not 1`; `M17C vocal binding stores an invalid persisted rational: INVALID_RATIONAL: <reason>`; `M17C vocal binding stores a noncanonical rational`; `M17C vocal binding canonical bytes/hash diverge` (the predecessor merged json+hash divergence into one message — both categories map to that exact form). No prefix, suffix, or parenthetical; the substring router is deleted. §12's `except ValueError` accepts the typed subclass and embeds its reason unchanged. The structural law stays singular — same checks, no duplicate grammar, no weakening.
+2. **RR8-02 — the retained captured-hash law proven after self-authentication** — the decisive layer-separation proof: after a lawful capture, the binding scalar is coherently mutated AND its canonical `binding_json`/`binding_hash` **recomputed** (self-authentication passes; the captured child/snapshot `vocal_binding_hash` untouched) → §12 reaches and fails specifically at the **captured-binding-hash disagreement** (asserted to be that message and NOT the self-authentication message). The RR7 positive battery's precedence-tautology hash assertion is **replaced with a real identity**: the exposed `synchronization_binding.binding_hash` == the canonical hash of the lawful immutable binding document == the captured child's `vocal_binding_hash`.
+3. Every closed seam preserved: the RR7 adversaries still die at self-authentication, the RR6 subsegment path stays green end-to-end, and no RR6-containment/§13.4/PF-02-readiness/grammar-v2/snapshot/Generation/migration-head/non-READY/M17C-D/forbidden-surface change was made.
+
+## The frozen battery (`tests/test_m17cc_rr8_corrections.py`, 8 tests, first run 8/8)
+
+The five predecessor-message pins (schema/basis; malformed rational with the INVALID_RATIONAL source text; noncanonical 2/2; `binding_json` divergence; `binding_hash` divergence — **exact-message equality**, not fragments, making future message-routing drift impossible); the typed-reason-reaches-§12 proof (the category + the richer reason); the coherent re-sign captured-hash proof (both layers independently demonstrated); and the repaired positive assertion on the RR6 subsegment path.
+
+## Gates (first-run dispositions recorded exactly)
+
+- RR8 battery **8/8 first run**; the correction-affected batteries **191/191** (all fifteen m17cc files + m17a/m17b recovery + shot mapping + bf recovery + sr2).
+- Committed-tree validators green after the four-boundary carve; frontend green (143/143 + tsc + build).
+- Local full backend suite, FIRST RUN: **3062 passed / 8 skipped / 0 failed in 48:05, exit 0** (collection 3070 = the prior 3062 + the 8-test battery — exact).
+- **CI run `37037965848` on `39675bb`: SUCCESS, attempt 1 — Backend 3069 passed / 20 skipped / 0 failed** (CI total 3089 = its prior 3081 + the 8-test battery, exact); Frontend green attempt 1 (143/143).
+- Predecessor-impact disclosure: `m17c_binding.py`'s message-emitting block is the only PF-03 byte change (the adapter rewrite); the RR7 round's now-false "verbatim preserved" claim is corrected in fact — the messages now ARE verbatim.
+
+## Fences honored
+
+No Codex/second review; no merge/ready; PR #26 remains draft, unmerged, unready. The next gate is another fresh independent exhaustive first-pass review of the corrected HEAD; RR8-01/02 are not closed merely because the new battery turns green.
