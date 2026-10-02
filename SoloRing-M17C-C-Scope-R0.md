@@ -851,3 +851,36 @@ The independent fresh review of implementation HEAD `d0fb98b` (no Codex/second r
 ## Frozen disposition
 
 **FIRST-PASS REVIEW COMPLETE. New register RR10-M17CC-01 frozen (0H/1M/0L). RR9-M17CC-01 CLOSED; RR8-M17CC-01..02 remain CLOSED; RR7-M17CC-01 remains CLOSED; all earlier FPR/RR findings remain CLOSED. PR #26 remains draft, unmerged, unready. Merge/ready authorization remains withheld. Codex/second reviewer NOT run.** The next lawful step is a narrowly scoped RR10 correction cycle followed by another fresh independent first-pass review. No correction work has started; the cycle awaits its gate.
+
+---
+
+# M17C-C RR10-M17CC-01 CORRECTION — VP-identity storage certification — 2026-10-03 — IMPLEMENTED
+
+The commissioned correction is complete. Correction heads: **`2aae452`** (implementation + battery) then **`8debfb4`** (the four validator carves — implementation preceded the carve adjustments per the commission; all validators ran against the committed carve-inclusive tree).
+
+## Delivered (the commission exactly)
+
+1. **The remaining binding-document storage-class escape is closed** — `verify_stored_vocal_binding` certifies `vocal_performance_revision_id` BEFORE constructing or canonicalizing the binding document: an actual Python `str` and nonempty. A persisted BLOB/`bytes` value terminates as `BindingStructuralError`, never reaching `canonical_json_str()` and never producing a raw `TypeError`.
+2. **A dedicated stable typed category** — `vp_identity_storage` (routing on category only, never human-readable diagnostics). PF-03, §12, and recovery continue consuming the single shared structural primitive; recovery's routing is unchanged (it already catches `BindingStructuralError`).
+3. **Existing contracts preserved exactly** — the RR9 `sample_storage`/`sample_domain` checks unchanged; the five RR8 predecessor category→message mappings byte-for-byte unchanged (re-proven by the RR8 pins, green); no RR8 category repurposed — the new category carries its own new PF-03 corruption message (`M17C vocal binding stores a malformed persisted VP revision id: <reason>`).
+4. **The identity rule kept appropriately narrow** — actual persisted `str` storage + nonempty is the WHOLE new law (mirroring the admission path's `isinstance(vp_id, str) and vp_id`); no UUID-format normalization, case rewriting, ID substitution, or other identity grammar introduced; existing cross-row VP existence/identity laws remain responsible for semantic referential validation after structural certification (on the read-grade live seam the VP fetch precedes the scalar laws, so a BLOB id surfaces that seam's own typed missing-VP corruption — typed either way, never raw).
+5. **No parallel grammar for the other serialized inputs, disclosed** — `binding_json` and `binding_hash` are only ever `!=`-compared in the shared law (never serialized), and `bytes != str` evaluates as a plain `False`, so malformed storage there already terminates through the existing typed divergence categories (`binding_json`/`binding_hash`); no hardening was needed and none was added.
+6. **Recovery wording disclosure** — NONE introduced: the new category flows through the existing RR9 recovery translation (`… binding fails its own canonical structural law: <reason>` → typed `RECOVERY_CORRUPTION`) unchanged.
+7. **The decisive proof stages the real SQLite shape** — the SAME genuine BLOB `vocal_performance_revision_id` written to BOTH the candidate and revision binding rows through a raw sqlite3 connection (bytes bind as BLOB; raw connections enforce no FK), with `typeof(...) == 'blob'` proven on both tables (and `'text'` proven before), candidate↔revision pair equality preserved over all `BINDING_FIELDS` so no pair-divergence law masks the target failure, and deliberately NO canonical re-sign — certification refuses before serialization becomes possible. Refusals proven on every surface: live PF-03 PUT authority (media-grade seam; the exact new typed message), live readiness (typed 500), live §12 (the typed structural-binding invariant carrying the VP-identity reason, NOT the captured-hash branch), and staged `verify_m17c_binding_state` (`RECOVERY_CORRUPTION`, same reason) — none emits raw `TypeError`, and binding/mapping counts are unchanged. The prior proofs re-run green in the affected suites: the RR9 REAL-coordinate/origin adversaries, all five RR8 exact-message pins, the RR8 captured-hash separation and positive hash identity, the RR7 self-auth adversaries, and the RR6 supported subsegment path.
+8. **Scope frozen** — no PF-02 redesign, grammar-v2/snapshot change, Generation change, migration-head change, non-READY-posture change, M17C-D work, or unrelated recovery redesign. (The uncalled legacy helper `_row_document` in `m17c_binding.py` was noticed and deliberately left untouched — narrow scope.)
+
+## The frozen battery (`tests/test_m17cc_rr10_corrections.py`, 7 tests, first run 7/7)
+
+Four parametrized unit pins (the genuine 36-byte BLOB `b'00000000-…-bb'`, an int, `None`, and the empty string — each the exact `vp_identity_storage` category, the exact reason, and the exact new PF-03 message by equality); the lawful-str pass proof (two boundary shapes verify green, returning the canonical document); the decisive BLOB-on-both-rows end-to-end adversary (typeof text→blob proven on both tables, pair equality asserted, live PUT/readiness/§12/staged-recovery all typed with counts unchanged); the clean control (readiness READY → §12 green with the exposed `binding_hash` == the canonical hash of the lawful document → backup + M17A + M17C recovery green).
+
+## Gates (first-run dispositions recorded exactly)
+
+- RR10 battery **7/7 first run**; affected suites **223/223** (the ten prior correction batteries 64 — including the mandated RR9 REAL adversaries, the RR8 five pins + captured-hash + positive identity, the RR7 self-auth adversaries, the RR6 subsegment — plus the recovery/roundtrip/persist/capture/history/migration/bf-recovery/bf-regressions/binding-transitions/sr26/shot-mapping/rr10 set 159).
+- Committed-tree validators **21/21 green** after the four-boundary carve (implementation commit `2aae452` preceded the carve commit `8debfb4`; the two npm-audit validators consume the live `apps/web` audit on stdin).
+- Frontend green (vitest 143/143 + tsc + build).
+- Local full backend suite, FIRST RUN: **3084 passed / 8 skipped / 0 failed in 47:32, exit 0** (collection 3092 = the prior 3085 + the 7-test battery — exact).
+- **CI run `37069665202` on `8debfb4`: SUCCESS, attempt 1 — Backend 3091 passed / 20 skipped / 0 failed** (plus the focused 107; CI total 3111 = its prior 3104 + the 7-test battery, exact); Frontend green attempt 1.
+
+## Fences honored
+
+No Codex/second review; no merge/ready; PR #26 remains draft, unmerged, unready. RR10 is not closed by this implementation or the green CI — the corrected implementation HEAD gets a twelfth fresh independent exhaustive first-pass review.
