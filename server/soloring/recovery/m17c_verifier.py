@@ -538,6 +538,17 @@ def _hash(obj) -> str:
 
 
 def _check_rational(num, den, what: str) -> None:
+    # RR9-M17CC-01: total over SQLite storage classes — a non-integral
+    # REAL numerator or denominator (INTEGER affinity admits REALs)
+    # fails HERE as typed corruption, never as a raw TypeError from
+    # math.gcd. Binding rows reach this only after the shared
+    # structural law already certified their origin; the captured-child
+    # rationals are certified on their own before their arithmetic.
+    if isinstance(num, bool) or not isinstance(num, int) \
+            or isinstance(den, bool) or not isinstance(den, int):
+        raise _corrupt(f"{what} rational {num!r}/{den!r} is not a "
+                       "persisted integer pair (non-integral SQLite "
+                       "storage class)")
     if den <= 0 or math.gcd(abs(num), den) != 1 or (num == 0
                                                     and den != 1):
         raise _corrupt(f"{what} rational {num}/{den} is not canonical")
@@ -598,32 +609,40 @@ def _binding_cardinality(con, *, parent_col, parent_table, binding_table,
 
 
 def _verify_binding_row(con, row, parent, what: str) -> None:
-    if row["binding_schema_version"] != 1 or \
-            row["synchronization_basis_version"] != 1:
+    # RR9-M17CC-01: the structural binding law is the ONE shared
+    # transport-neutral verifier — the same function the live PF-03
+    # seam and §12 enforce (schema/basis versions, the TOTAL
+    # storage-class certification of the sample scalars, the
+    # canonical-reduced origin, the exact canonical bytes/hash). It
+    # REPLACES this verifier's local grammar (its schema check, its
+    # _check_rational/math.gcd origin pass, and its doc
+    # reconstruction) so the two definitions cannot drift and no
+    # unchecked arithmetic below can ever receive a malformed storage
+    # class: a storage-valid non-integral REAL coordinate or REAL
+    # origin fails HERE as typed corruption, never as a raw
+    # TypeError from math.gcd/Fraction.
+    from soloring.performance.m17c_binding import (
+        BindingStructuralError, verify_stored_vocal_binding,
+    )
+    try:
+        verify_stored_vocal_binding(
+            binding_schema_version=row["binding_schema_version"],
+            synchronization_basis_version=(
+                row["synchronization_basis_version"]),
+            vocal_performance_revision_id=(
+                row["vocal_performance_revision_id"]),
+            source_start_sample=row["source_start_sample"],
+            source_end_sample_exclusive=(
+                row["source_end_sample_exclusive"]),
+            sample_rate_hz=row["sample_rate_hz"],
+            performance_origin_num=row["performance_origin_num"],
+            performance_origin_den=row["performance_origin_den"],
+            binding_json=row["binding_json"],
+            binding_hash=row["binding_hash"])
+    except BindingStructuralError as exc:
         raise _corrupt(
-            f"{what} {parent['id']!r} binding schema/basis version is not 1")
-    _check_rational(row["performance_origin_num"],
-                    row["performance_origin_den"],
-                    f"{what} {parent['id']!r} origin")
-    doc = {
-        "binding_schema_version": row["binding_schema_version"],
-        "synchronization_basis_version":
-            row["synchronization_basis_version"],
-        "vocal_performance_revision_id":
-            row["vocal_performance_revision_id"],
-        "source_start_sample": row["source_start_sample"],
-        "source_end_sample_exclusive":
-            row["source_end_sample_exclusive"],
-        "sample_rate_hz": row["sample_rate_hz"],
-        "performance_origin_ms": {
-            "num": row["performance_origin_num"],
-            "den": row["performance_origin_den"],
-        },
-    }
-    if row["binding_json"] != _canonical(doc) or \
-            row["binding_hash"] != _hash(doc):
-        raise _corrupt(
-            f"{what} {parent['id']!r} binding canonical bytes/hash diverge")
+            f"{what} {parent['id']!r} binding fails its own canonical "
+            f"structural law: {exc.reason}") from exc
 
     vp = con.execute(
         "SELECT * FROM vocal_performance_revisions WHERE id = ?",

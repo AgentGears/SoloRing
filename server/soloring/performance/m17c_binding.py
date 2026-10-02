@@ -150,9 +150,17 @@ class BindingStructuralError(ValueError):
     structural diagnostic §12 embeds in its internal_invariant) and,
     for the malformed-rational category, ``source`` carrying the
     underlying temporal-primitive error text so PF-03 can reproduce
-    its exact predecessor message."""
+    its exact predecessor message.
+
+    RR9-M17CC-01 adds the sample-storage categories so the law is
+    TOTAL over SQLite storage classes: a storage-valid non-integral
+    REAL coordinate or rate (INTEGER affinity admits REALs) fails as
+    a typed category, never as a raw TypeError escaping through later
+    Fraction/subtraction arithmetic."""
 
     CATEGORY_SCHEMA_BASIS = "schema_basis"
+    CATEGORY_SAMPLE_STORAGE = "sample_storage"
+    CATEGORY_SAMPLE_DOMAIN = "sample_domain"
     CATEGORY_RATIONAL_MALFORMED = "rational_malformed"
     CATEGORY_RATIONAL_NONCANONICAL = "rational_noncanonical"
     CATEGORY_BINDING_JSON = "binding_json"
@@ -183,7 +191,14 @@ def verify_stored_vocal_binding(
     substitutes, or reconstructs a "correct" binding. Raises the
     TYPED BindingStructuralError whose stable category callers route
     on (RR8-01: no substring matching of human text) and whose
-    reason is §12's richer diagnostic."""
+    reason is §12's richer diagnostic.
+
+    RR9-M17CC-01: the law is TOTAL over SQLite storage classes — the
+    sample scalars are certified as actual non-bool Python integers
+    in their lawful domain (0 <= start < end, rate > 0) BEFORE any
+    canonical serialization, hashing, comparison, or arithmetic; the
+    origin keeps its actual-integer canonical-reduced signed-64-bit
+    law through the ONE shared temporal primitive."""
     from soloring.performance.temporal import (
         RationalError, canonical_rational,
     )
@@ -192,6 +207,31 @@ def verify_stored_vocal_binding(
         raise BindingStructuralError(
             BindingStructuralError.CATEGORY_SCHEMA_BASIS,
             "binding schema/basis version is not the frozen 1")
+    # RR9-M17CC-01: a non-integral REAL coordinate or rate is
+    # storage-valid for SQLite (INTEGER affinity persists REALs) but
+    # is NOT a lawful persisted integer — it must fail HERE, before
+    # any consumer's arithmetic can raise a raw TypeError on a float.
+    for what, value in (
+            ("source_start_sample", source_start_sample),
+            ("source_end_sample_exclusive",
+             source_end_sample_exclusive),
+            ("sample_rate_hz", sample_rate_hz),
+    ):
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise BindingStructuralError(
+                BindingStructuralError.CATEGORY_SAMPLE_STORAGE,
+                f"{what} {value!r} is not a persisted integer "
+                "(non-integral SQLite storage class)")
+    if not (0 <= source_start_sample < source_end_sample_exclusive):
+        raise BindingStructuralError(
+            BindingStructuralError.CATEGORY_SAMPLE_DOMAIN,
+            f"sample interval [{source_start_sample!r}, "
+            f"{source_end_sample_exclusive!r}) does not satisfy "
+            "0 <= start < end")
+    if sample_rate_hz <= 0:
+        raise BindingStructuralError(
+            BindingStructuralError.CATEGORY_SAMPLE_DOMAIN,
+            f"sample_rate_hz {sample_rate_hz!r} is not positive")
     if (isinstance(performance_origin_num, bool)
             or not isinstance(performance_origin_num, int)
             or isinstance(performance_origin_den, bool)
@@ -265,6 +305,21 @@ def _verify_binding_bytes(row) -> dict:
             raise corrupt(
                 "M17C vocal binding schema/basis version is not 1"
             ) from exc
+        if exc.category == \
+                BindingStructuralError.CATEGORY_SAMPLE_STORAGE:
+            # RR9-M17CC-01: a storage-valid non-integral REAL scalar
+            # is corruption of immutable history, refused typed BEFORE
+            # any arithmetic — never a raw TypeError through Fraction.
+            raise corrupt(
+                "M17C vocal binding stores a non-integer sample "
+                f"scalar: {exc.reason}") from exc
+        if exc.category == \
+                BindingStructuralError.CATEGORY_SAMPLE_DOMAIN:
+            # RR9-M17CC-01: integral scalars outside 0 <= start < end
+            # / rate > 0 are the same immutable-history corruption.
+            raise corrupt(
+                "M17C vocal binding stores an illegal sample interval/"
+                f"rate: {exc.reason}") from exc
         if exc.category == \
                 BindingStructuralError.CATEGORY_RATIONAL_MALFORMED:
             # SR26-05: a malformed persisted rational is corruption
