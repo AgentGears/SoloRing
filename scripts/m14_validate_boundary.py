@@ -64,6 +64,8 @@ ALLOWED_PATTERNS = [
     r"^tests/test_m17cc_rr6_corrections\.py$",
     # RR7-M17CC correction battery
     r"^tests/test_m17cc_rr7_corrections\.py$",
+    # RR8-M17CC correction battery
+    r"^tests/test_m17cc_rr8_corrections\.py$",
     # M17A implementation (frozen R5): the dialogue/vocal foundation
     # surface — performance package, migration, API, recovery
     # verifier, boundary validators, and the M17A tests.
