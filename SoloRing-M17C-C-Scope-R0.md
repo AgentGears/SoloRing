@@ -627,3 +627,27 @@ The decisive public-PUT re-segmentation (the same VP moved from the binding `[48
 ## Fences honored
 
 No Codex/second review; no merge/ready; PR #26 remains draft, unmerged, unready. After CI corroborates, the next gate is another fresh independent exhaustive first-pass review of the corrected HEAD — neither RR5 finding is considered closed merely because the correction tests pass.
+
+---
+
+# M17C-C seventh first-pass review — 2026-10-02 — NOT CLEAN (register RR6-M17CC-01..02 FROZEN)
+
+The independent review of implementation HEAD `cb8b449` (the RR5 product delta, the shared scalar verifier, both live/recovery call sites, supported M17A mutation paths, PF-02 readiness/capture, §12, §13.4, and the correction battery; no Codex/second reviewer) is complete. **Verdict: NOT CLEAN — 1 Medium semantic + 1 Low proof-only.** PR #26 remains draft, open, unmerged (tip `ece1dc5`, one documentation-only commit above the reviewed head). The register is frozen; the next lawful step is a correction cycle for the binding-subinterval contract plus the missing position proof.
+
+## Register status
+
+- **RR5-M17CC-01: CLOSED for its frozen defect** (public same-VP re-segmentation outside the binding but inside the VP trim → `BLOCKED_TIMING_MISMATCH`; detail nulls; typed 409).
+- **RR5-M17CC-02: product implementation CLOSED** (position through `validate_mapping_position`; coordinates/rate before arithmetic; rational pairs through `canonical_rational`; recovery supplies the persisted position; the shadowing correction present; REAL rejection before Fraction/gcd; RR3 bytes + RR4 rate intact; absence still lawful blocked) — **mandatory persisted-position evidence incomplete** (the Low proof finding below).
+- **RR3, RR4, and all earlier FPR/RR findings remain CLOSED.** CI 36977392187 independently corroborated (3053/20 — the green run contains neither new shape).
+
+## Frozen findings
+
+1. **RR6-M17CC-01 — MEDIUM — binding-subinterval semantics disagree across live admission and §12.** One semantic law expressed incorrectly at two seams:
+   - **A supported API path can mint §12-rejected history**: the same VP's current mapping lawfully moved to a SUB-interval inside the binding (e.g. `[60000,84000)`) is legitimately READY (the Performance PUT lawfully accepts the exact induced `[250,750)`; capture persists it) — but the §12 reader requires the captured vocal interval to EQUAL the entire binding (`binding.start == captured.start && binding.end == captured.end`) instead of the frozen §8.3 CONTAINMENT, so the first historical inspection rejects a lawful capture. Recovery implements the correct law (containment + exact induced arithmetic); §12 and §13.4 disagree about a lawful captured state.
+   - **A complementary live-admission hole**: with only VP-trim containment before the induced comparison, a coherent DUAL rewrite (vocal `[36000,84000)` + exact vocal JSON/hash; Performance `[-250,750)` + exact recompute — both inside their trims/domains, induced arithmetic exact) reaches READY although the vocal interval is outside the immutable binding and NO supported Performance PUT could create the pair — capture mints history §12/§13.4 reject.
+   - **The lawful contract (both seams)**: `binding.start <= captured-vocal.start < captured-vocal.end <= binding.end` PLUS exact binding-induced Performance timing. Live: RR5-01 preserved (inside-VP-trim outside-binding = mutable working drift → `BLOCKED_TIMING_MISMATCH`, never 500) but never READY on a coherent dual rewrite. §12: whole-binding equality replaced by binding CONTAINMENT + the exact induced interval from the immutable binding origin/rate/samples (matching §13.4). Decisive battery: a public inside-binding SUBSEGMENT that captures and reads §12-green; an outside-binding coherent dual rewrite that stays non-READY and cannot capture.
+2. **RR6-M17CC-02 — LOW — proof-only: the persisted-position storage-class evidence is missing.** The RR5-02 product implementation survives review; the commissioned proof set included persisted POSITION coverage, which the battery never staged (REAL coordinate + REAL denominator only; IR-04 covers API bounds, not the malformed persisted storage class through the newly shared verifier). A narrow recovery test suffices: stage `shot_vocal_segment_mappings.position = 0.5` in a copied DB → the M17A verifier returns typed `RECOVERY_CORRUPTION` through the shared position law (never a raw exception, never green).
+
+## Frozen disposition
+
+**FIRST-PASS REVIEW COMPLETE. New register RR6-M17CC-01..02 frozen (0H/1M/1L). RR5-01 CLOSED; RR5-02 product CLOSED with the position proof owed; all earlier findings remain CLOSED. PR #26 remains draft, unmerged, unready. Merge/ready NOT authorized. Codex/second reviewer NOT run.** The next lawful step is the binding-subinterval correction cycle + the missing position proof, then another fresh independent first-pass review of the corrected HEAD. No correction work has started; the cycle awaits its gate.
