@@ -780,3 +780,23 @@ The five predecessor-message pins (schema/basis; malformed rational with the INV
 ## Fences honored
 
 No Codex/second review; no merge/ready; PR #26 remains draft, unmerged, unready. The next gate is another fresh independent exhaustive first-pass review of the corrected HEAD; RR8-01/02 are not closed merely because the new battery turns green.
+
+---
+
+# M17C-C tenth first-pass review — 2026-10-02 — NOT CLEAN (register RR9-M17CC-01 FROZEN)
+
+The independent fresh review of implementation HEAD `39675bb` (no Codex/second reviewer) is complete. **Verdict: NOT CLEAN — 1 new Medium, 0 High, 0 Low.** PR #26 remains draft, open, unmerged (tip `1c50051`, record-only above the reviewed head). The register is frozen.
+
+## Register status
+
+- **RR8-M17CC-01: CLOSED** (the typed-category routing is real; PF-03's predecessor messages match `132d2b3`; the substring router gone).
+- **RR8-M17CC-02: CLOSED** (the re-sign adversary genuinely passes self-authentication and reaches the captured-hash disagreement; the repaired positive assertion is a real canonical-hash identity).
+- **RR7-M17CC-01 remains CLOSED**; all earlier FPR/RR findings remain CLOSED (the RR7 ordering, RR6 containment, the forbidden-surface boundary, grammar-v2, the blocked-state posture, the Generation fence, and migration heads showed no regression). CI `37037965848` independently corroborated (synthetic merge `841bbc9` of `39675bb` into unchanged `d893d65`; Backend 3069/20/0, Frontend 143/143 + tsc + build; the four validator changes are exactly the RR8 test-path admissions — the green run does not exercise the malformed REAL shapes).
+
+## Frozen finding
+
+- **RR9-M17CC-01 — MEDIUM — the shared PF-03 binding structural law, and independently the M17C recovery binding verifier, are not total over SQLite storage classes: storage-valid non-integral REAL binding scalars escape the typed corruption contract as raw Python TypeError.** The physical tables declare the coordinates/rate/origin as INTEGER with numeric CHECKs but no `typeof = 'integer'` law — the reviewer independently reproduced that `48000.5` persists with storage class `real` and a canonical document over it serializes/hashes normally. `verify_stored_vocal_binding` at `39675bb` proves actual-integer storage ONLY for the origin pair; `source_start_sample`/`source_end_sample_exclusive`/`sample_rate_hz` are uncertified, so a coherent `48000.5` row with recomputed canonical bytes/hash PASSES self-authentication — then `_vocal_performance_interval`'s `Fraction((end - start) * 1000, sample_rate_hz)` receives a float numerator and raises raw `TypeError: both arguments should be Rational instances`, outside the PF-03 SoloRingError contract. Recovery independently: `_verify_binding_row` does no coordinate storage certification before the same arithmetic, and `_check_rational` runs `math.gcd(abs(num), den)` without establishing integer storage — a coherent `0.5/1` origin can raise raw TypeError before `_corrupt()` runs; `verify_m17c_binding_state`'s narrow normalization covers only `sqlite3.Error` in the physical-schema phase. The same persistence-totality class RR5 corrected for `ShotVocalSegmentMapping`; the PF-03 binding authority lacks it. NOT a reopening of the `_verify_binding_row`-duplication disposition — the finding is the concrete untyped-exception divergence. **Required:** the transport-neutral verifier certifies ALL persisted binding scalars BEFORE canonical-byte certification or arithmetic (actual non-bool integer coordinates + rate; `0 <= start < end`; positive rate; the existing canonical/i64 rational law; a SQLite-returned actual int already carries i64); recovery consumes the same total primitive (or an exactly shared lower-level one) so `_check_rational` and the sample arithmetic are unreachable with unchecked storage classes — not a third grammar. **Decisive battery:** a coherent re-signed `source_start_sample = 48000.5` (preferably on both candidate/revision bindings so adopted-pair equality also passes) → typed PF-03 corruption AND typed `RECOVERY_CORRUPTION`, never TypeError; a coherent non-integral origin (`0.5/1`) → recovery terminates through the typed structural law; the RR8 five exact-message pins byte-for-byte green, the coherent captured-hash proof and the RR6 subsegment path green.
+
+## Frozen disposition
+
+**FIRST-PASS REVIEW COMPLETE. New register RR9-M17CC-01 frozen (0H/1M/0L). RR8-01 and RR8-02 CLOSED; RR7-01 remains CLOSED; all earlier findings remain CLOSED. PR #26 remains draft, unmerged, unready. Merge/ready NOT authorized. Codex/second reviewer NOT run.** The next lawful step is a narrowly scoped RR9 correction cycle, then another fresh independent first-pass review. No correction work has started; the cycle awaits its gate.
