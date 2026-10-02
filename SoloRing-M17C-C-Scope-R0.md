@@ -884,3 +884,23 @@ Four parametrized unit pins (the genuine 36-byte BLOB `b'00000000-…-bb'`, an i
 ## Fences honored
 
 No Codex/second review; no merge/ready; PR #26 remains draft, unmerged, unready. RR10 is not closed by this implementation or the green CI — the corrected implementation HEAD gets a twelfth fresh independent exhaustive first-pass review.
+
+---
+
+# M17C-C twelfth first-pass review — 2026-10-03 — NOT CLEAN (register RR11-M17CC-01 FROZEN)
+
+The independent fresh review of carve HEAD `8debfb4` (implementation `2aae452`; no Codex/second reviewer) is complete. **Verdict: NOT CLEAN — 0 High / 0 Medium / 1 Low.** PR #26 remains draft, open, unmerged (tip `a94f4ee`, record-only above the reviewed carve head). The register is frozen.
+
+## Register status
+
+- **RR10-M17CC-01: CLOSED** — the commissioned product correction is real: `vocal_performance_revision_id` is certified as a nonempty `str` before canonical document construction; the dedicated typed category is wired into PF-03; §12 and recovery remain on the shared primitive; RR9 numerical totality and all five RR8 predecessor-message mappings remain intact; the correction record accurately describes the substantive implementation and gate results. The commit discipline independently confirmed (`a057b3e → 2aae452` changes only `m17c_binding.py` plus the RR10 battery; `2aae452 → 8debfb4` changes only the four validator admissions).
+- **RR9, RR8, RR7, and all earlier findings remain CLOSED.**
+- The decisive RR10 BLOB adversary verified substantive (the same BLOB on both candidate and revision binding rows; `typeof(...) == 'blob'` proved on both; `BINDING_FIELDS` equality prevents pair divergence from masking the target; §12 and recovery terminate typed; the live PUT fails before its upsert, so the count-only no-mutation assertion is backed by actual control-flow ordering rather than being the sole evidence). The legacy `_row_document` helper verified definition-only at the reviewed head — no active alternative binding grammar. CI `37069665202` independently corroborated on synthetic merge `07562f6` of exact carve head `8debfb4` into unchanged base `d893d65` (focused M17C 107 passed; full backend 3091 passed / 20 skipped; frontend 143/143; typecheck clean; production build successful).
+
+## Frozen finding
+
+- **RR11-M17CC-01 — LOW — proof-record factual inversion.** The RR10 implementation is correct, but its proof narrative contains a false Python-semantics statement in two committed artifacts: both `tests/test_m17cc_rr10_corrections.py` and the pushed scope record say, in substance, that `bytes != str` evaluates to `False`, therefore malformed `binding_json`/`binding_hash` storage falls into the existing typed divergence laws. That boolean statement is backwards: `b"x" != "x"` → **`True`** — and that is precisely why the implementation is safe: `if binding_json != expected_json:` makes the condition TRUE for a BLOB/`bytes` `binding_json` compared with canonical `str` and takes the typed divergence branch; `binding_hash` behaves analogously. The pushed correction record contains the inverted claim explicitly. The product law does not share the defect; this is a proof/documentation accuracy failure. The reviewer also examined the related ordering statement: the read-grade revision seam can resolve the malformed BLOB VP identity as a typed missing-VP corruption before `_read_binding_scalar_laws` reaches the new category — that does NOT reopen RR10 (it remains fail-closed and cannot reach serialization/arithmetic); media-grade PF-03, §12, and standalone M17C recovery directly exercise the new structural category; no separate finding warranted. **Required narrow correction — proof-only; no product source change indicated:** correct the RR10 battery narrative and scope record from `bytes != str is False` to the actual law (`bytes != str` is `True`, which causes the existing `!=` guards to enter their typed `binding_json`/`binding_hash` divergence branches); a very small direct regression for BLOB `binding_json` and BLOB `binding_hash` would be useful to turn that reasoning into executable evidence, but it must not introduce another grammar or modify `m17c_binding.py` unless the test exposes an actual product defect; preserve the first-run disposition if such a proof test is added.
+
+## Frozen disposition
+
+**FIRST-PASS REVIEW COMPLETE. New register RR11-M17CC-01 frozen (0H/0M/1L). RR10-M17CC-01 CLOSED; RR9, RR8, RR7, and all earlier findings remain CLOSED. PR #26 remains draft, unmerged, unready. No Codex/second reviewer, merge, or ready-mark yet.** The next lawful step is the narrowly scoped RR11 proof-record correction, followed by another fresh first-pass review. No correction work has started; the cycle awaits its gate.
