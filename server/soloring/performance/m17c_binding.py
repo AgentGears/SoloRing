@@ -156,9 +156,18 @@ class BindingStructuralError(ValueError):
     TOTAL over SQLite storage classes: a storage-valid non-integral
     REAL coordinate or rate (INTEGER affinity admits REALs) fails as
     a typed category, never as a raw TypeError escaping through later
-    Fraction/subtraction arithmetic."""
+    Fraction/subtraction arithmetic.
+
+    RR10-M17CC-01 adds the VP-identity storage category: the
+    document-bearing ``vocal_performance_revision_id`` is certified
+    as an actual nonempty Python ``str`` BEFORE the canonical document
+    is constructed — a persisted BLOB (SQLite permits one in the
+    TEXT-affinity column via raw writes with FKs off, returned as
+    Python ``bytes``) must fail as a typed category, never reach
+    ``canonical_json_str`` and raise a raw TypeError."""
 
     CATEGORY_SCHEMA_BASIS = "schema_basis"
+    CATEGORY_VP_IDENTITY_STORAGE = "vp_identity_storage"
     CATEGORY_SAMPLE_STORAGE = "sample_storage"
     CATEGORY_SAMPLE_DOMAIN = "sample_domain"
     CATEGORY_RATIONAL_MALFORMED = "rational_malformed"
@@ -198,7 +207,17 @@ def verify_stored_vocal_binding(
     in their lawful domain (0 <= start < end, rate > 0) BEFORE any
     canonical serialization, hashing, comparison, or arithmetic; the
     origin keeps its actual-integer canonical-reduced signed-64-bit
-    law through the ONE shared temporal primitive."""
+    law through the ONE shared temporal primitive.
+
+    RR10-M17CC-01: the document-bearing VP identity is certified as
+    an actual nonempty Python str BEFORE the canonical document is
+    constructed — a persisted BLOB/bytes id must fail as the typed
+    vp_identity_storage category, never reach canonical_json_str()
+    (whose json encoder raises a raw TypeError on bytes). Deliberately
+    narrow: actual str storage + nonempty is the WHOLE law here — no
+    UUID normalization, case rewriting, or identity grammar; semantic
+    referential validation (existence, cross-row identity) stays with
+    the existing VP laws AFTER structural certification."""
     from soloring.performance.temporal import (
         RationalError, canonical_rational,
     )
@@ -207,6 +226,21 @@ def verify_stored_vocal_binding(
         raise BindingStructuralError(
             BindingStructuralError.CATEGORY_SCHEMA_BASIS,
             "binding schema/basis version is not the frozen 1")
+    # RR10-M17CC-01: the ONE remaining document field whose raw value
+    # feeds canonical serialization — a BLOB staged into the
+    # TEXT-affinity column (raw writes, FKs off) returns as Python
+    # bytes and json.dumps would raise a raw TypeError; it must fail
+    # HERE, before any document construction.
+    if not isinstance(vocal_performance_revision_id, str):
+        raise BindingStructuralError(
+            BindingStructuralError.CATEGORY_VP_IDENTITY_STORAGE,
+            "vocal_performance_revision_id "
+            f"{vocal_performance_revision_id!r} is not a persisted "
+            "text value (BLOB/non-text SQLite storage class)")
+    if not vocal_performance_revision_id:
+        raise BindingStructuralError(
+            BindingStructuralError.CATEGORY_VP_IDENTITY_STORAGE,
+            "vocal_performance_revision_id is empty")
     # RR9-M17CC-01: a non-integral REAL coordinate or rate is
     # storage-valid for SQLite (INTEGER affinity persists REALs) but
     # is NOT a lawful persisted integer — it must fail HERE, before
@@ -305,6 +339,15 @@ def _verify_binding_bytes(row) -> dict:
             raise corrupt(
                 "M17C vocal binding schema/basis version is not 1"
             ) from exc
+        if exc.category == \
+                BindingStructuralError.CATEGORY_VP_IDENTITY_STORAGE:
+            # RR10-M17CC-01: a BLOB/non-text persisted VP identity is
+            # corruption of immutable history, refused typed BEFORE
+            # any document construction — never a raw TypeError from
+            # the canonical JSON encoder.
+            raise corrupt(
+                "M17C vocal binding stores a malformed persisted VP "
+                f"revision id: {exc.reason}") from exc
         if exc.category == \
                 BindingStructuralError.CATEGORY_SAMPLE_STORAGE:
             # RR9-M17CC-01: a storage-valid non-integral REAL scalar
