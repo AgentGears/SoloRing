@@ -726,6 +726,24 @@ async def _project_one(session, settings, shot, row, seam_by_pr,
                 f"paired vocal mapping {row.shot_id!r}@"
                 f"{row.vocal_mapping_position} source interval lies "
                 "outside the VP authoritative trim")
+        # RR6-M17CC-01: binding containment is a READINESS gate, not
+        # a corruption gate. The frozen §8.3 law is
+        #   binding.start <= vocal.start < vocal.end <= binding.end
+        # — an inside-VP-trim interval OUTSIDE the immutable binding is
+        # mutable working drift (BLOCKED_TIMING_MISMATCH), INCLUDING a
+        # coherently rewritten Performance mapping whose induced
+        # arithmetic would otherwise match: the check runs BEFORE the
+        # induced-timing equality so no dual rewrite can reach READY.
+        if not (binding.source_start_sample
+                <= vocal.source_start_sample
+                and vocal.source_end_sample_exclusive
+                <= binding.source_end_sample_exclusive):
+            return (BLOCKED_TIMING_MISMATCH,
+                    {"reason": "the paired vocal mapping's source "
+                               "interval lies outside the immutable "
+                               "synchronization binding (lawful "
+                               "working drift outside the bound "
+                               "subsegment)"})
         # B-F8: missing selection row is corruption inside
         # _selection_posture; lawful UNSET/different selection is STALE
         state, selected = await _selection_posture(session, binding)

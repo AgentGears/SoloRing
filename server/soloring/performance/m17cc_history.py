@@ -27,6 +27,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+from fractions import Fraction
 
 from sqlalchemy import text
 
@@ -350,16 +351,44 @@ async def _verify_one_child(session, settings, revision_id: str,
             raise internal_invariant(
                 f"{where} is dialogue-bound but its immutable "
                 "synchronization binding is gone.")
+        # RR6-M17CC-01: the frozen §8.3 relationship is binding
+        # CONTAINMENT — binding.start <= captured.start <
+        # captured.end <= binding.end — plus the EXACT binding-induced
+        # Performance interval recomputed from the immutable binding
+        # origin, binding source start, captured sample interval, and
+        # rate (matching §13.4's law). The captured Shot-local vocal
+        # segment may be a lawful SUB-interval of the binding; it is
+        # never required to equal the entire binding.
         if (binding.binding_hash != row.vocal_binding_hash
                 or binding.vocal_performance_revision_id
                 != row.vocal_performance_revision_id
-                or binding.source_start_sample != row.source_start_sample
-                or binding.source_end_sample_exclusive
-                != row.source_end_sample_exclusive
                 or binding.sample_rate_hz != row.sample_rate_hz):
             raise internal_invariant(
                 f"{where} captured vocal closure disagrees with the "
                 "immutable synchronization binding that proved it.")
+        if not (binding.source_start_sample
+                <= row.source_start_sample
+                and row.source_end_sample_exclusive
+                <= binding.source_end_sample_exclusive):
+            raise internal_invariant(
+                f"{where} captured vocal interval is not contained "
+                "within the immutable synchronization binding "
+                "(the frozen §8.3 subset relationship).")
+        origin = Fraction(binding.performance_origin_num,
+                         binding.performance_origin_den)
+        rate = row.sample_rate_hz
+        b0 = binding.source_start_sample
+        p0 = origin + Fraction(
+            (row.source_start_sample - b0) * 1000, rate)
+        p1 = origin + Fraction(
+            (row.source_end_sample_exclusive - b0) * 1000, rate)
+        if (Fraction(row.performance_start_num,
+                     row.performance_start_den) != p0
+                or Fraction(row.performance_end_num,
+                            row.performance_end_den) != p1):
+            raise internal_invariant(
+                f"{where} captured interval [{p0}, {p1}) != the exact "
+                "binding-induced interval (containment law).")
         vp = (await session.execute(text(
             "SELECT dialogue_line_revision_id, revision_number, "
             "speaker_subject_id, native_sample_rate_hz, "
