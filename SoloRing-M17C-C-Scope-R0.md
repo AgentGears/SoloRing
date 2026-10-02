@@ -651,3 +651,34 @@ The independent review of implementation HEAD `cb8b449` (the RR5 product delta, 
 ## Frozen disposition
 
 **FIRST-PASS REVIEW COMPLETE. New register RR6-M17CC-01..02 frozen (0H/1M/1L). RR5-01 CLOSED; RR5-02 product CLOSED with the position proof owed; all earlier findings remain CLOSED. PR #26 remains draft, unmerged, unready. Merge/ready NOT authorized. Codex/second reviewer NOT run.** The next lawful step is the binding-subinterval correction cycle + the missing position proof, then another fresh independent first-pass review of the corrected HEAD. No correction work has started; the cycle awaits its gate.
+
+---
+
+# M17C-C RR6-M17CC-01..02 CORRECTION — the binding-subinterval contract — 2026-10-02 — IMPLEMENTED
+
+The commissioned correction is complete: one law at both seams. Correction heads: **`a402226`** (implementation) + the validator-carve commit (pushed head `132d2b3` at record time).
+
+## Delivered (the frozen boundary exactly)
+
+1. **RR6-01 live** — binding containment is now a READINESS gate in `_project_one`: after the present-row structural/rate/VP-trim checks and BEFORE the induced-timing equality, `binding.start <= vocal.start < vocal.end <= binding.end` is required; failure returns `BLOCKED_TIMING_MISMATCH` (data — RR5-01 preserved: outside-VP-trim stays typed 500 corruption). Because the gate runs before the equality a coherent dual rewrite would game, no coherently rewritten Performance row can reach READY or capture.
+2. **RR6-01 §12** — whole-binding equality is replaced by the frozen §8.3 CONTAINMENT plus the exact binding-induced Performance interval recomputed from the immutable binding origin, binding source start, captured sample interval, and rate (Fraction arithmetic; matching §13.4's already-correct law). The immutable binding_hash/VP-identity/rate agreement is retained. A lawful inside-binding SUBSEGMENT capture now passes its first historical inspection.
+3. **RR6-02 (proof-only)** — the persisted-position adversary: a staged `position = 0.5` row terminates as typed `RECOVERY_CORRUPTION` through the shared `validate_mapping_position` law ("persisted integer domain") — never a raw exception, never green. NO product change (the finding was explicitly proof-only and the law already correct).
+4. **Predecessor impact disclosed**: the PF-02 readiness seam gains ONE classification gate restoring the already-established mutable-drift semantics (vocabulary untouched); §13.4 recovery semantics NOT modified (§12 was aligned TO it); M17A recovery untouched beyond the shared law's existing wiring; grammar-v2/snapshot anchoring/non-READY posture/Generation/PF-03/migration heads/M17C-D untouched.
+
+## The frozen battery (`tests/test_m17cc_rr6_corrections.py`, 4 tests)
+
+- **The positive public path**: binding `[48000,96000)`; the same VP publicly moved to the inside-binding subsegment `[60000,84000)` (vocal PUT 200, anchor 250); the Performance mapping publicly moved to the exact induced `[250,750)` (PUT 200) → READY, schema-8 capture, the FIRST §12 inspection GREEN (the captured sample interval and induced interval asserted in the answer), M17A + M17C recovery green.
+- **The negative coherent dual rewrite**: vocal `[36000,84000)` + exact vocal JSON/hash AND Performance `[-250,750)` + exact Performance JSON/hash (both recomputed from the rows' own fields; inside the VP trim, outside the binding) → readiness `BLOCKED_TIMING_MISMATCH` data (never 500, never READY), Shot detail 200 with the commissioned nulls, capture the typed 409, counts unchanged; recovery deliberately NOT asserted against the live drift (the predecessor contract separates immutable structural validity from mutable readiness).
+- **The persisted-position proof** and the clean control.
+
+## Gates (first-run dispositions recorded exactly)
+
+- Battery first run 3/4 → 4/4 after fixture-level fixes (a missing-argument typo in the test's recompute call; a stale fragment in the history matrix — the `binding_disagreement` tamper now surfaces the containment message, the same tamper under the new law's wording; the `Fraction` import + the dict-vs-Fraction `_rat` mismatch caught by the batteries).
+- Affected batteries **166/166** (all thirteen m17cc files + m17a recovery + shot mapping + bf recovery + sr2); migration/recovery families **25/25**.
+- Committed-tree validators green after the four-boundary carve; frontend green (143/143 + tsc + build).
+- Local full backend suite, FIRST RUN: **3050 passed / 8 skipped / 0 failed in 48:54, exit 0** (collection 3058 = the prior 3054 + the 4-test battery — exact).
+- **CI run `36992205203` on `132d2b3`: SUCCESS, attempt 1 — Backend 3057 passed / 20 skipped / 0 failed** (CI total 3077 = its prior 3073 + the 4-test battery, exact); Frontend green attempt 1 (143/143).
+
+## Fences honored
+
+No Codex/second review; no merge/ready; PR #26 remains draft, unmerged, unready. The next gate is a fresh independent exhaustive first-pass review of the corrected HEAD; neither RR6 finding is considered closed merely because the correction tests pass.
