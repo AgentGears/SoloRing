@@ -143,6 +143,29 @@ def _row_document(row) -> dict:
     }
 
 
+class BindingStructuralError(ValueError):
+    """RR8-M17CC-01: the shared binding structural law's TYPED
+    failure — a stable ``category`` (the routing contract callers map
+    on, never human-readable text) plus ``reason`` (the precise
+    structural diagnostic §12 embeds in its internal_invariant) and,
+    for the malformed-rational category, ``source`` carrying the
+    underlying temporal-primitive error text so PF-03 can reproduce
+    its exact predecessor message."""
+
+    CATEGORY_SCHEMA_BASIS = "schema_basis"
+    CATEGORY_RATIONAL_MALFORMED = "rational_malformed"
+    CATEGORY_RATIONAL_NONCANONICAL = "rational_noncanonical"
+    CATEGORY_BINDING_JSON = "binding_json"
+    CATEGORY_BINDING_HASH = "binding_hash"
+
+    def __init__(self, category: str, reason: str,
+                 source: str | None = None):
+        super().__init__(reason)
+        self.category = category
+        self.reason = reason
+        self.source = source
+
+
 def verify_stored_vocal_binding(
         *, binding_schema_version, synchronization_basis_version,
         vocal_performance_revision_id, source_start_sample,
@@ -157,32 +180,38 @@ def verify_stored_vocal_binding(
     rational; the exact canonical document reconstructed from the
     row's own fields; exact binding_json bytes; recomputed canonical
     hash == stored binding_hash. Never normalizes, repairs,
-    substitutes, or reconstructs a "correct" binding. Raises
-    ValueError with a precise reason; each caller keeps its own
-    vocabulary (PF-03 and recovery their corrupt contract, §12 its
-    internal_invariant)."""
+    substitutes, or reconstructs a "correct" binding. Raises the
+    TYPED BindingStructuralError whose stable category callers route
+    on (RR8-01: no substring matching of human text) and whose
+    reason is §12's richer diagnostic."""
     from soloring.performance.temporal import (
         RationalError, canonical_rational,
     )
 
     if binding_schema_version != 1 or synchronization_basis_version != 1:
-        raise ValueError(
+        raise BindingStructuralError(
+            BindingStructuralError.CATEGORY_SCHEMA_BASIS,
             "binding schema/basis version is not the frozen 1")
     if (isinstance(performance_origin_num, bool)
             or not isinstance(performance_origin_num, int)
             or isinstance(performance_origin_den, bool)
             or not isinstance(performance_origin_den, int)):
-        raise ValueError(
-            "the persisted origin is not an integer pair")
+        raise BindingStructuralError(
+            BindingStructuralError.CATEGORY_RATIONAL_MALFORMED,
+            "the persisted origin is not an integer pair",
+            source="INVALID_RATIONAL: numerator and denominator "
+                   "must be integers")
     try:
         reduced = canonical_rational(
             performance_origin_num, performance_origin_den)
     except RationalError as exc:
-        raise ValueError(
+        raise BindingStructuralError(
+            BindingStructuralError.CATEGORY_RATIONAL_MALFORMED,
             f"the persisted origin fails the canonical rational "
-            f"law: {exc}") from exc
+            f"law: {exc}", source=str(exc)) from exc
     if reduced != (performance_origin_num, performance_origin_den):
-        raise ValueError(
+        raise BindingStructuralError(
+            BindingStructuralError.CATEGORY_RATIONAL_NONCANONICAL,
             "the persisted origin is not in canonical reduced form")
     doc = {
         "binding_schema_version": binding_schema_version,
@@ -198,17 +227,23 @@ def verify_stored_vocal_binding(
     expected_json = canonical_json_str(doc)
     expected_hash = canonical_hash(doc)
     if binding_json != expected_json:
-        raise ValueError(
+        raise BindingStructuralError(
+            BindingStructuralError.CATEGORY_BINDING_JSON,
             "binding_json is not the canonical document over the "
             "row's own fields")
     if binding_hash != expected_hash:
-        raise ValueError(
+        raise BindingStructuralError(
+            BindingStructuralError.CATEGORY_BINDING_HASH,
             "binding_hash is not the canonical digest of the row's "
             "own binding document")
     return doc
 
 
 def _verify_binding_bytes(row) -> dict:
+    """PF-03's own seam: the shared typed law mapped back to the
+    EXACT predecessor messages (verified verbatim against 132d2b3) —
+    no prefixes, suffixes, or parentheticals. The typed category is
+    the only routing input (RR8-01: never human-readable text)."""
     try:
         return verify_stored_vocal_binding(
             binding_schema_version=row.binding_schema_version,
@@ -224,20 +259,29 @@ def _verify_binding_bytes(row) -> dict:
             performance_origin_den=row.performance_origin_den,
             binding_json=row.binding_json,
             binding_hash=row.binding_hash)
-    except ValueError as exc:
-        # PF-03 keeps its own corruption vocabulary; the shared law
-        # supplies the precise reason
-        if "schema/basis version" in str(exc):
+    except BindingStructuralError as exc:
+        if exc.category == \
+                BindingStructuralError.CATEGORY_SCHEMA_BASIS:
             raise corrupt(
                 "M17C vocal binding schema/basis version is not 1"
             ) from exc
-        if "rational" in str(exc):
+        if exc.category == \
+                BindingStructuralError.CATEGORY_RATIONAL_MALFORMED:
+            # SR26-05: a malformed persisted rational is corruption
+            # of immutable history, never a client request problem.
             raise corrupt(
-                f"M17C vocal binding stores an invalid persisted "
-                f"rational: {exc}") from exc
+                "M17C vocal binding stores an invalid persisted "
+                f"rational: {exc.source}") from exc
+        if exc.category == \
+                BindingStructuralError.CATEGORY_RATIONAL_NONCANONICAL:
+            raise corrupt(
+                "M17C vocal binding stores a noncanonical rational"
+            ) from exc
+        # the predecessor merged binding_json and binding_hash
+        # divergence into ONE message; both typed categories map to
+        # that exact form
         raise corrupt(
-            "M17C vocal binding canonical bytes/hash diverge "
-            f"({exc})") from exc
+            "M17C vocal binding canonical bytes/hash diverge") from exc
 
 
 async def _verify_vp_structural_authority(
