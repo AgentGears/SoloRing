@@ -257,12 +257,13 @@ def vocal_mapping_canonical_document(
 
 def verify_stored_vocal_mapping(
         *, mapping_schema_version, mapping_json: str, mapping_hash: str,
+        position,
         vocal_performance_revision_id: str,
-        source_start_sample: int,
-        source_end_sample_exclusive: int,
-        sample_rate_hz: int,
-        performance_origin_num: int, performance_origin_den: int,
-        shot_anchor_num: int, shot_anchor_den: int) -> None:
+        source_start_sample,
+        source_end_sample_exclusive,
+        sample_rate_hz,
+        performance_origin_num, performance_origin_den,
+        shot_anchor_num, shot_anchor_den) -> None:
     """Fail closed (raising ValueError with a precise reason) unless a
     PRESENT vocal mapping row satisfies its complete persisted canonical
     law: mapping_schema_version == 1, the stored mapping_json IS EXACTLY
@@ -289,19 +290,62 @@ def verify_stored_vocal_mapping(
     if mapping_schema_version != 1:
         raise ValueError(
             "mapping_schema_version is not the frozen 1")
-    # RR4-M17CC-01: the complete PERSISTED STRUCTURAL law — canonical
-    # rational representation on BOTH persisted pairs (positive
-    # denominator, gcd-reduced, and zero only as 0/1). The M17A write
-    # path canonicalizes before persistence and M17A recovery enforces
-    # the same form; a present row carrying 1/1-as-2/2 is NOT the
-    # stored law even when its document bytes/hash are self-consistent.
-    import math as _math
+    # RR5-M17CC-02: the law is TOTAL over SQLite storage classes —
+    # every persisted scalar is certified to be an actual non-bool
+    # integer in its lawful domain BEFORE any arithmetic, hashing
+    # assumption, or Fraction use (INTEGER affinity + numeric CHECKs
+    # admit non-integral REALs; a 48000.5 coordinate or a REAL
+    # denominator must fail as the typed structural law, never escape
+    # through math.gcd/Fraction as a raw TypeError/OverflowError, and
+    # never certify). Position uses the ONE shared domain primitive;
+    # the rational pairs use the ONE shared canonical-rational
+    # primitive (actual integer pair, positive denominator, gcd
+    # reduction, canonical zero, signed-64-bit bounds) — the persisted
+    # row must ALREADY be that canonical form.
+    from soloring.performance.temporal import (
+        RationalError, canonical_rational, validate_mapping_position,
+    )
 
+    try:
+        validate_mapping_position(position)
+    except ValueError as exc:
+        raise ValueError(f"position {position!r} is outside the "
+                         f"persisted integer domain: {exc}") from exc
+    for what, value, lawful in (
+            ("source_start_sample", source_start_sample,
+             lambda v: v >= 0),
+            ("source_end_sample_exclusive",
+             source_end_sample_exclusive, lambda v: v >= 0),
+            ("sample_rate_hz", sample_rate_hz, lambda v: v > 0),
+    ):
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError(
+                f"{what} {value!r} is not a persisted integer "
+                "(non-integral SQLite storage class)")
+        if not lawful(value):
+            raise ValueError(
+                f"{what} {value!r} is outside its persisted domain")
+    if not (source_start_sample < source_end_sample_exclusive):
+        raise ValueError(
+            f"sample interval [{source_start_sample!r}, "
+            f"{source_end_sample_exclusive!r}) is not ordered")
     for what, n, d in (
             ("performance_origin_ms", performance_origin_num,
              performance_origin_den),
-            ("shot_anchor_ms", shot_anchor_num, shot_anchor_den)):
-        if d <= 0 or _math.gcd(abs(n), d) != 1 or (n == 0 and d != 1):
+            ("shot_anchor_ms", shot_anchor_num, shot_anchor_den),
+    ):
+        if (isinstance(n, bool) or not isinstance(n, int)
+                or isinstance(d, bool) or not isinstance(d, int)):
+            raise ValueError(
+                f"{what} rational {n!r}/{d!r} is not a persisted "
+                "integer pair (non-integral SQLite storage class)")
+        try:
+            reduced = canonical_rational(n, d)
+        except RationalError as exc:
+            raise ValueError(
+                f"{what} rational {n!r}/{d!r} fails the canonical "
+                f"rational law: {exc}") from exc
+        if reduced != (n, d):
             raise ValueError(
                 f"{what} rational {n}/{d} is not in canonical "
                 "reduced form")

@@ -245,6 +245,7 @@ def _verify_mappings(con: sqlite3.Connection) -> None:
                 mapping_schema_version=r["mapping_schema_version"],
                 mapping_json=r["mapping_json"],
                 mapping_hash=r["mapping_hash"],
+                position=r["position"],
                 vocal_performance_revision_id=(
                     r["vocal_performance_revision_id"]),
                 source_start_sample=r["source_start_sample"],

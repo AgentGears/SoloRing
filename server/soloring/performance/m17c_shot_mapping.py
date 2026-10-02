@@ -647,6 +647,7 @@ async def _project_one(session, settings, shot, row, seam_by_pr,
                 mapping_schema_version=vocal.mapping_schema_version,
                 mapping_json=vocal.mapping_json,
                 mapping_hash=vocal.mapping_hash,
+                position=vocal.position,
                 vocal_performance_revision_id=(
                     vocal.vocal_performance_revision_id),
                 source_start_sample=vocal.source_start_sample,
@@ -697,15 +698,34 @@ async def _project_one(session, settings, shot, row, seam_by_pr,
                 f"{vocal.sample_rate_hz!r} disagrees with the immutable "
                 f"synchronization binding rate "
                 f"{binding.sample_rate_hz!r}")
-        if not (binding.source_start_sample
+        # RR5-M17CC-01: the immutable corruption law is the VP's
+        # AUTHORITATIVE TRIM, not the mutable binding window — the
+        # supported M17A public PUT owns Shot-local re-segmentation
+        # (same VP, native rate, inside the trim) without Performance
+        # binding containment. A lawful re-segmentation inside the
+        # trim but outside the old binding interval is MUTABLE WORKING
+        # DRIFT: it flows to the exact induced-timing comparison below
+        # and classifies as BLOCKED_TIMING_MISMATCH (data), never as
+        # corruption. Only an interval actually OUTSIDE the VP trim is
+        # a corrupted present row.
+        from soloring.performance.models import (
+            VocalPerformanceRevision as _VP,
+        )
+        vp_row = await session.get(
+            _VP, binding.vocal_performance_revision_id)
+        if vp_row is None:
+            raise _corrupt(
+                f"paired vocal mapping {row.shot_id!r}@"
+                f"{row.vocal_mapping_position} names an immutable "
+                "binding whose VocalPerformanceRevision is gone")
+        if not (vp_row.trim_start_sample
                 <= vocal.source_start_sample
                 and vocal.source_end_sample_exclusive
-                <= binding.source_end_sample_exclusive):
+                <= vp_row.trim_end_sample_exclusive):
             raise _corrupt(
                 f"paired vocal mapping {row.shot_id!r}@"
                 f"{row.vocal_mapping_position} source interval lies "
-                "outside the immutable synchronization binding source "
-                "interval")
+                "outside the VP authoritative trim")
         # B-F8: missing selection row is corruption inside
         # _selection_posture; lawful UNSET/different selection is STALE
         state, selected = await _selection_posture(session, binding)
