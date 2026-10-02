@@ -598,3 +598,32 @@ The independent review of implementation HEAD `c44591f` (the RR4 product delta, 
 ## Frozen disposition
 
 **FIRST-PASS REVIEW COMPLETE. New register RR5-M17CC-01..02 frozen (0H/2M/0L). RR4-M17CC-01 CLOSED for its frozen shapes; RR3 and all earlier FPR/RR findings remain CLOSED. PR #26 remains draft, unmerged, unready. Merge/ready NOT authorized. Codex/second reviewer NOT run.** The next lawful step is a correction cycle against RR5-01..02, then another fresh independent first-pass review of the corrected HEAD. No correction work has started; the cycle awaits its gate.
+
+---
+
+# M17C-C RR5-M17CC-01..02 CORRECTION — 2026-10-02 — IMPLEMENTED
+
+The commissioned correction is complete: the mutable-vs-immutable distinction is restored and the shared predecessor verifier is total over persisted storage classes. Correction heads: **`6f4e98e`** (implementation) + the validator-carve commit (pushed head `cb8b449` at record time).
+
+## Delivered (the frozen boundary exactly)
+
+1. **RR5-01** — `_project_one`'s interval gate now proves the immutable corruption law: the seam-verified **VP authoritative trim** (the VP row fetched via the binding's pinned id; a gone VP is corruption), NOT the mutable Performance binding window. The RR4 rate-agreement law is retained. A lawful same-VP public re-segmentation inside the trim but outside the old binding is mutable working drift that flows to the existing exact induced-timing comparison → `BLOCKED_TIMING_MISMATCH`; only an interval actually outside the VP trim is corruption (typed 500; recovery's own outside-trim law corroborates).
+2. **RR5-02** — `verify_stored_vocal_mapping` certifies every persisted scalar BEFORE any arithmetic, hashing assumption, or Fraction use: `position` via the ONE shared `validate_mapping_position` (actual non-bool int in `[0, 2^63-1]`); the sample coordinates and rate actual non-bool integers in their persisted domains (start ≥ 0, rate > 0, start < end); both rational pairs actual non-bool integer pairs verified against the ONE shared `canonical_rational` (integer pair, positive denominator, gcd reduction, canonical zero, i64 bounds — the persisted row must already BE the canonical form; the hand-reproduced gcd subset removed). A storage-valid non-integral REAL refuses as the TYPED structural law — never a raw TypeError/OverflowError through `math.gcd` or `Fraction`, never successful certification. Recovery passes `position` into the shared helper (the mapping-position domain is the same law on both transports).
+3. **Invariants preserved exactly:** the RR3 byte identity, the RR4 rate law, lawful absence → `BLOCKED_BINDING_INTEGRITY`, grammar-v2/snapshot anchoring, §12 semantics, Generation's fence, the schema-6 projection, the commissioned non-READY null posture, migration heads, and M17C-D boundaries. Predecessor surfaces touched (disclosed): the shared mapping law itself + the live seam's interval gate (binding-window → VP-trim).
+
+## First-run dispositions recorded exactly
+
+- **A shadowing bug in my own first draft was caught by the m17a recovery battery BEFORE commit**: the new rational loop's local `canonical = canonical_rational(...)` shadowed the canonical DOCUMENT dict, making every lawful row fail the byte law — renamed to `reduced` after diagnosing via a scratch reproduction (the rebuilt bytes equalled the stored bytes; the failure had to be in-processor).
+- Battery: first run 4/5 — the `real_rational_den` case initially staged `2.0`, which SQLite's INTEGER affinity stores as an INTEGER, so the row landed in the canonical-reduction law instead of the storage-class law (still a typed refusal, but not the targeted one); the case now stages the non-integral `2.5` (genuinely REAL storage). Corrected run **5/5**.
+- Affected batteries **142/142** (all twelve m17cc files + m17a recovery + shot mapping + bf recovery); migration/recovery families **45/45**.
+- Committed-tree validators green after the four-boundary carve; frontend green (143/143 + tsc + build).
+- Local full backend suite, FIRST RUN: **3046 passed / 8 skipped / 0 failed in 51:37, exit 0** (collection 3054 = the prior 3049 + the 5-test battery — exact).
+- **CI run `36977392187` on `cb8b449`: SUCCESS, attempt 1 — Backend 3053 passed / 20 skipped / 0 failed** (CI total 3073 = its prior 3068 + the 5-test battery, exact); Frontend green attempt 1 (143/143).
+
+## The frozen battery (`tests/test_m17cc_rr5_corrections.py`, 5 tests)
+
+The decisive public-PUT re-segmentation (the same VP moved from the binding `[48000,96000)` to `[0,48000)` inside the 144000-sample trim — PUT succeeds, readiness reports `BLOCKED_TIMING_MISMATCH` data never 500, Shot detail 200 with the commissioned nulls, capture the typed 409, counts unchanged); the outside-trim COHERENT tamper (`[144000,150000)` + exact recompute — 500 both surfaces, counts unchanged, M17A recovery refuses "outside VP authoritative trim"); the REAL storage-class pair (`48000.5` coordinate + `2.5` denominator, each with the byte law passing by construction — typed corruption from readiness AND capture AND recovery, counts unchanged); the clean control + the RR3 noncanonical-byte and RR4 canonical-rational proofs still green + the supported DELETE.
+
+## Fences honored
+
+No Codex/second review; no merge/ready; PR #26 remains draft, unmerged, unready. After CI corroborates, the next gate is another fresh independent exhaustive first-pass review of the corrected HEAD — neither RR5 finding is considered closed merely because the correction tests pass.
