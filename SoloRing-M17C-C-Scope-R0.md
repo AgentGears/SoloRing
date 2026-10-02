@@ -544,3 +544,37 @@ The independent review of implementation HEAD `a029900` (the RR3 correction agai
 ## Frozen disposition
 
 **FIRST-PASS REVIEW COMPLETE. New register RR4-M17CC-01 frozen (0H/1M/0L). RR3-M17CC-01 CLOSED. All earlier FPR/RR findings remain CLOSED. PR #26 remains draft, unmerged, unready. Merge/ready NOT authorized. Codex/second reviewer NOT run.** The next lawful step is a narrowly scoped correction cycle for RR4-M17CC-01, then another independent first-pass review of the corrected HEAD. No correction work has started; the cycle awaits its gate.
+
+---
+
+# M17C-C RR4-M17CC-01 CORRECTION — the complete predecessor vocal-mapping integrity contract — 2026-10-02 — IMPLEMENTED
+
+The commissioned correction is complete: fresh capture now consumes the FULL predecessor vocal-mapping integrity contract before closure extraction. Correction heads: **`c9ceb74`** (implementation) + the validator-carve commit (pushed head `c44591f` at record time).
+
+## Delivered (the six boundary points exactly)
+
+1. **RR3 untouched** — the exact certifying byte law (`mapping_json == canonical_json_str(canonical)`) and the independent digest law are unchanged and remain the certification.
+2. **The shared row-local verifier is now COMPLETE for persisted structural law** — `verify_stored_vocal_mapping` additionally enforces canonical rational representation on BOTH persisted pairs (positive denominator, gcd-reduced, zero only as 0/1) — the exact rule M17A recovery enforced separately; **recovery's duplicated rational loop is REMOVED** (one law in one place; live capture and recovery enforce the identical rules).
+3. **Cross-row authority at the live caller seam** — `_project_one` (after the shared verifier + the VP-identity check, before selection/induced timing) now requires a PRESENT paired mapping to prove: `sample_rate_hz` AGREES with the immutable synchronization binding (binding rate == VP native rate is a binding-table law verified at both grades — agreement is transitive to the VP), and its source interval lies INSIDE the binding's authoritative source interval (the §8.3 creation law now proven at admission; binding interval within VP trim is a binding law, so trim containment is transitive). Typed corruption; VP identity, selection, and induced-timing checks preserved.
+4. **The explicit M17A-law audit** — VP existence: IMPLIED (the seam-verified binding pins the VP + the identity check). VP-trim containment: IMPLIED transitively through the now-explicit binding-interval check. Shot/VP project coherence: IMPLIED (the PR subject/project seam checks + `BLOCKED_SUBJECT_OR_PROJECT` + the §12/§13.4 VP-lineage project law). Shot duration/picture: the SR2-06 recovery correction's own classification (mutable readiness, never restore corruption). **No recovery-only validity rule remains outside fresh-capture admission.**
+5. **RR-02 exact** — absence stays lawful `BLOCKED_BINDING_INTEGRITY` data; every new law applies only to a PRESENT row.
+6. **No collateral redesign** — grammar-v2, snapshot anchoring, §12, Generation, PF-03, migration heads, the non-READY posture, and M17C-D boundaries untouched. Predecessor impact disclosed: the shared law itself (recovery's duplicated loop removed) and the live seam's new present-row checks.
+
+## The frozen battery (`tests/test_m17cc_rr4_corrections.py`, 4 tests)
+
+- **Rate-only coherent corruption**: `sample_rate_hz` → another positive value, exact canonical JSON/hash recomputed from the row's own post-tamper fields (the RR3 byte law passes BY CONSTRUCTION — proven on the tampered row) → readiness 500 + capture failing with the same corruption before the builder + counts unchanged + M17A recovery independently refusing the hand-staged state ("mapping rate != VP native rate").
+- **Canonical-rational coherent corruption**: the anchor rewritten ×2/×2 (not gcd-reduced), exact recompute (the byte law passes; the shared rational law refuses) → the same refusal chain, recovery refusing through the shared law's reason.
+- **Clean control** (READY, schema-8 capture, §12 + M17A + M17C recovery valid) **+ the RR3 semantic-forgery and noncanonical-byte proofs still green under the completed law**.
+- **Supported DELETE**: still blocked data, never corruption.
+
+## Gates (first-run dispositions recorded exactly)
+
+- RR4 battery **4/4** first run. Correction-affected batteries **137/137** (all eleven m17cc files + m17a recovery + shot mapping + bf recovery); migration/recovery families **47/47**.
+- Committed-tree validators: all green after the four-boundary carve for the RR4 battery.
+- Frontend: vitest **143/143**, tsc clean, build succeeds.
+- Local full backend suite, FIRST RUN: **3041 passed / 8 skipped / 0 failed in 48:24, exit 0** (collection 3049 = the prior 3045 + the 4-test battery — exact).
+- **CI run `36943996459` on `c44591f`: SUCCESS, attempt 1 — Backend 3048 passed / 20 skipped / 0 failed** (CI total 3068 = its prior 3064 + the 4-test battery, exact); Frontend green attempt 1 (143/143).
+
+## Fences honored
+
+No Codex/second review; no merge/ready; PR #26 remains draft, unmerged, unready. Once CI corroborates, the next gate is another fresh independent exhaustive first-pass review of the corrected HEAD — not an assumption that RR4 is closed.
