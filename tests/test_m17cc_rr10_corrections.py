@@ -20,8 +20,11 @@ rewriting/identity grammar — semantic referential validation stays
 with the existing VP laws AFTER structural certification). The RR9
 sample checks and the five RR8 predecessor category->message
 mappings are unchanged; `binding_json`/`binding_hash` need NO new
-grammar (they are only ever `!=`-compared, and `bytes != str` is a
-plain False → the existing typed divergence laws terminate them).
+grammar — they are only ever `!=`-compared, and `bytes != str`
+evaluates to TRUE (RR11-M17CC-01 correcting this narrative: the
+original said False), so the existing guards' conditions are TRUE
+for BLOB/bytes storage and ENTER the typed binding_json/
+binding_hash divergence branches (proven executable below).
 
 The frozen battery:
 1. unit: every non-str id shape (bytes BLOB, int, None) and the
@@ -36,7 +39,11 @@ The frozen battery:
    structural-binding invariant, never an unhandled exception), and
    staged M17C recovery (typed RECOVERY_CORRUPTION) — never a raw
    TypeError, and no persistence side effect;
-3. the clean control: the lawful str path stays fully green.
+3. the clean control: the lawful str path stays fully green;
+4. the RR11 executable-semantics proof: a BLOB/bytes binding_json
+   and a BLOB/bytes binding_hash each terminate through their
+   EXISTING typed categories (binding_json / binding_hash) and
+   PF-03's RR8 predecessor mapping — no new category or grammar.
 """
 
 from __future__ import annotations
@@ -377,3 +384,80 @@ async def test_rr10_clean_control_lawful_path_green(client):
         root / "soloring.db", blob_root=root / "blobs")
     verify_m17c_binding_state(
         root / "soloring.db", root / "blobs", head=_HEAD)
+
+
+# ---------------------------------------------------------------------------
+# 4 — the RR11 executable-semantics proof (proof-only; no product change)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("field,category", [
+    ("binding_json", "binding_json"),
+    ("binding_hash", "binding_hash"),
+])
+def test_rr11_blob_serialized_inputs_diverge_typed(field, category):
+    """RR11-M17CC-01 — the corrected law stated executably: a BLOB/
+    bytes `binding_json` and a BLOB/bytes `binding_hash` each make the
+    shared verifier's `!=` condition TRUE (bytes != str is True), so
+    each ENTERS its EXISTING typed divergence branch —
+    CATEGORY_BINDING_JSON / CATEGORY_BINDING_HASH — and PF-03 maps
+    both to the exact RR8 predecessor message (the predecessor merged
+    json+hash divergence into one form). No new category, no new
+    grammar, no product change."""
+    from soloring.errors import SoloRingError
+    from soloring.performance.m17c_binding import (
+        BindingStructuralError, _verify_binding_bytes,
+        verify_stored_vocal_binding,
+    )
+
+    doc = _lawful_doc()
+    binding_json = _cj(doc)
+    binding_hash = _ch(doc)
+
+    class _Row:
+        pass
+
+    row = _Row()
+    row.binding_schema_version = 1
+    row.synchronization_basis_version = 1
+    row.vocal_performance_revision_id = doc[
+        "vocal_performance_revision_id"]
+    row.source_start_sample = doc["source_start_sample"]
+    row.source_end_sample_exclusive = doc["source_end_sample_exclusive"]
+    row.sample_rate_hz = doc["sample_rate_hz"]
+    row.performance_origin_num = 0
+    row.performance_origin_den = 1
+    row.binding_json = binding_json
+    row.binding_hash = binding_hash
+
+    # the BLOB/bytes storage class for exactly ONE serialized input,
+    # the other kept lawful — the exact Python-semantics premise
+    if field == "binding_json":
+        row.binding_json = binding_json.encode("ascii")
+    else:
+        row.binding_hash = binding_hash.encode("ascii")
+    # bytes != str is True — the premise, verified in-band
+    assert (row.binding_json if field == "binding_json"
+            else row.binding_hash) != (
+        binding_json if field == "binding_json" else binding_hash)
+
+    with pytest.raises(BindingStructuralError) as excinfo:
+        verify_stored_vocal_binding(
+            binding_schema_version=1, synchronization_basis_version=1,
+            vocal_performance_revision_id=doc[
+                "vocal_performance_revision_id"],
+            source_start_sample=row.source_start_sample,
+            source_end_sample_exclusive=(
+                row.source_end_sample_exclusive),
+            sample_rate_hz=row.sample_rate_hz,
+            performance_origin_num=0, performance_origin_den=1,
+            binding_json=row.binding_json,
+            binding_hash=row.binding_hash)
+    # the EXISTING typed category — no new category introduced
+    assert excinfo.value.category == category
+
+    with pytest.raises(SoloRingError) as pf03:
+        _verify_binding_bytes(row)
+    assert pf03.value.status_code == 500
+    # the EXACT RR8 predecessor message (json+hash merged), unchanged
+    assert pf03.value.message == \
+        "M17C vocal binding canonical bytes/hash diverge"
