@@ -702,3 +702,33 @@ The independent review of implementation HEAD `132d2b3` (the RR6 delta against t
 ## Frozen disposition
 
 **FIRST-PASS REVIEW COMPLETE. New register RR7-M17CC-01 frozen (0H/1M/0L). RR6-01 and RR6-02 CLOSED; all earlier findings remain CLOSED. PR #26 remains draft, unmerged, unready. Merge/ready NOT authorized. Codex/second reviewer NOT run.** The next lawful step is the narrowly scoped §12 immutable-binding-authentication correction, then another fresh independent first-pass review of the corrected HEAD. No correction work has started; the cycle awaits its gate.
+
+---
+
+# M17C-C RR7-M17CC-01 CORRECTION — §12 authenticates the immutable PF-03 binding document — 2026-10-02 — IMPLEMENTED
+
+The commissioned correction is complete: §12 self-authenticates the immutable binding before using it. Correction heads: **`e5ab1b6`** (implementation) + the validator-carve commit (pushed head `e9fc4d5` at record time).
+
+## Delivered (the frozen boundary exactly)
+
+1. **ONE shared transport-neutral structural law** — `m17c_binding` gains `verify_stored_vocal_binding`: binding and sync-basis versions frozen at 1; the persisted origin an actual integer pair in ALREADY-canonical reduced form (the shared `canonical_rational` primitive); the exact canonical binding document reconstructed from the row's own fields; exact `binding_json == canonical_json_str(document)`; recomputed canonical hash == stored `binding_hash`. Never normalizes, repairs, substitutes, or reconstructs. **PF-03's `_verify_binding_bytes` becomes a thin adapter** over the shared law, its corrupt vocabulary preserved verbatim (the three legacy messages reproduced from the shared law's precise reasons) — the disclosed predecessor impact.
+2. **§12 (`_verify_one_child`)** — the binding row self-authenticates through the shared law BEFORE any scalar is used or exposed (the query now also selects `binding_json` and the version columns; §12 keeps its own `internal_invariant` vocabulary). Only then: the captured-hash comparison, VP identity, rate agreement, the RR6 containment, and the exact induced-arithmetic laws — containment NOT collapsed back into equality.
+3. No PF-02/§13.4/grammar-v2/snapshot/Generation/PF-03-authority/migration-head/non-READY/M17C-D changes.
+
+## The frozen battery (`tests/test_m17cc_rr7_corrections.py`, 4 tests)
+
+- **The scalar/stale-hash tamper**: extend only `binding.source_end_sample_exclusive` (`[48000,96000)` → `[48000,120000)`; the captured `[48000,96000)` stays contained; `binding_json`/`binding_hash` untouched so the hash TOKEN still matches) → §12 typed 500 through the shared law AND the M17C recovery chain (`_verify_revision_bindings` — where the binding-document law lives) independently refusing the same staged state.
+- **The `binding_json`-only tamper** (all scalars + hash intact; a semantically identical noncanonical serialization): the same structural refusal on both surfaces.
+- **The RR6 positive regression**: the public inside-binding subsegment path READY → schema-8 capture → the FIRST §12 read green (the sample interval and induced interval asserted) → recovery green — self-authentication did not collapse containment.
+- **The forbidden-current-table spy** green during the §12 read (authenticating the immutable revision binding is §12's allowed authority; zero current-surface statements).
+
+## Gates (first-run dispositions recorded exactly)
+
+- Battery first run 2/4 → 4/4 after fixture-level corrections, disclosed: an IndentationError from a wrapped assert; the per-mode reason expectation refined (BOTH tamper modes surface `binding_json is not the canonical document` — the shared law checks document bytes before the digest, and under a scalar tamper the recomputed document over the tampered fields no longer matches the untouched stored bytes — the precise reason is correct, my initial per-mode split was not); and the recovery leg retargeted from the M17A verifier to the M17C recovery chain, where the binding-document law actually lives (the M17A verifier does not certify PF-03 bindings). The old history-matrix `binding_disagreement` fragment updated to the new structural-law message (the same tamper, the new law's wording — firing EARLIER than the RR6 containment check, which is the point).
+- Affected batteries **182/182** (all fourteen m17cc files + m17a/m17b recovery + shot mapping + bf recovery + sr2); committed-tree validators green after the four-boundary carve; frontend green (143/143 + tsc + build).
+- Local full backend suite, FIRST RUN: **3054 passed / 8 skipped / 0 failed in 47:36, exit 0** (collection 3062 = the prior 3058 + the 4-test battery — exact).
+- **CI run `37013556461` on `e9fc4d5`: SUCCESS, attempt 1 — Backend 3061 passed / 20 skipped / 0 failed** (CI total 3081 = its prior 3077 + the 4-test battery, exact); Frontend green attempt 1 (143/143).
+
+## Fences honored
+
+No Codex/second review; no merge/ready; PR #26 remains draft, unmerged, unready. The next gate is another fresh independent exhaustive first-pass review of the corrected HEAD; RR7 is not considered closed merely because the correction battery passes.
