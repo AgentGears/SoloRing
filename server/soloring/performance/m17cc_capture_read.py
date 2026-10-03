@@ -90,6 +90,20 @@ def vocal_origin_of(seg: dict):
     return None
 
 
+def exact_projection_equal(relational_value, embedded_value) -> bool:
+    """SR-M17CC-03: the captured companion graph is a MECHANICAL
+    projection of the immutable canonical document — agreement must be
+    exact in BOTH value and lawful type. Python's cross-type equality
+    aliases (``False == 0``, ``True == 1``, ``1.0 == 1``) must not
+    satisfy field identity: a JSON ``false``/``true``/float in the
+    embedded document is never the integer (or string) the relational
+    companion stores, even when every canonical hash was coherently
+    recomputed over the forged document."""
+    if type(relational_value) is not type(embedded_value):
+        return False
+    return relational_value == embedded_value
+
+
 def embedded_performance_value(performance_pack) -> dict:
     """The canonical embedded ``performance`` block: grammar v2 +
     the position-ordered projection of the frozen keys from each

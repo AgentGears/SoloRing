@@ -60,12 +60,33 @@ _VOCAL_KEYS = (
 
 
 def _rat(num, den, what: str, revision_id: str) -> dict:
-    """A persisted rational pair answers as its canonical {num, den}."""
-    if not isinstance(num, int) or not isinstance(den, int) or den <= 0:
+    """A persisted rational pair answers as its canonical {num, den}.
+    SR-M17CC-02: the SAME canonical law recovery enforces — an actual
+    non-bool integer pair (bool is an int subclass, and a JSON
+    true/false is not a persisted rational), a positive denominator,
+    gcd-reduced, canonical zero — through the ONE shared temporal
+    primitive, never a parallel §12 grammar."""
+    from soloring.performance.temporal import (
+        RationalError, canonical_rational,
+    )
+    if (isinstance(num, bool) or not isinstance(num, int)
+            or isinstance(den, bool) or not isinstance(den, int)):
         raise internal_invariant(
             f"ShotRevision {revision_id} performance companion "
             f"{what} is not a canonical rational pair "
             f"({num!r}, {den!r}).")
+    try:
+        reduced = canonical_rational(num, den)
+    except RationalError as exc:
+        raise internal_invariant(
+            f"ShotRevision {revision_id} performance companion "
+            f"{what} fails the canonical rational law: {exc}"
+        ) from exc
+    if reduced != (num, den):
+        raise internal_invariant(
+            f"ShotRevision {revision_id} performance companion "
+            f"{what} rational {num}/{den} is not in canonical "
+            "reduced form.")
     return {"num": num, "den": den}
 
 
@@ -86,6 +107,9 @@ def _verify_embedded_grammar(perf: dict, revision_id: str) -> list[dict]:
         raise internal_invariant(
             f"ShotRevision {revision_id} performance history declares "
             f"unknown schema {perf.get('schema_version')!r}.")
+    from soloring.performance.m17cc_capture_read import (
+        exact_projection_equal,
+    )
     segments = perf.get("segments")
     if not isinstance(segments, list) or not segments:
         raise internal_invariant(
@@ -97,7 +121,10 @@ def _verify_embedded_grammar(perf: dict, revision_id: str) -> list[dict]:
                 f"ShotRevision {revision_id} performance history "
                 f"segment {index} is not the exact frozen key "
                 "projection.")
-        if seg["position"] != index:
+        # SR-M17CC-03: type-exact — a JSON false/true/float that
+        # Python-compares equal to the index is NOT the canonical
+        # integer position
+        if not exact_projection_equal(seg["position"], index):
             raise internal_invariant(
                 f"ShotRevision {revision_id} performance history "
                 f"segment {index} declares position "
@@ -158,6 +185,25 @@ async def verify_performance_history(session, revision_id: str,
             "bytes disagree with its companion parent spec bytes.")
     segments = _verify_embedded_grammar(spec, revision_id)
 
+    # SR-M17CC-04: the Shot's project — the immutable lineage anchor
+    # recovery checks PR/VP coherence against (the ShotRevision's own
+    # Shot row, never a current working surface)
+    sr = (await session.execute(text(
+        "SELECT shot_id FROM shot_revisions WHERE id = :r"),
+        {"r": revision_id})).mappings().one_or_none()
+    if sr is None:
+        raise internal_invariant(
+            f"ShotRevision {revision_id} has no Shot row — corrupted "
+            "history.")
+    shot = (await session.execute(text(
+        "SELECT project_id FROM shots WHERE id = :s"),
+        {"s": sr.shot_id})).mappings().one_or_none()
+    if shot is None:
+        raise internal_invariant(
+            f"ShotRevision {revision_id} names a missing Shot "
+            f"{sr.shot_id!r}.")
+    shot_project_id = shot.project_id
+
     children = (await session.execute(text(
         "SELECT " + _CHILD_COLUMNS +
         " FROM shot_revision_performance_segments "
@@ -172,7 +218,8 @@ async def verify_performance_history(session, revision_id: str,
     answer_segments = []
     for row, seg in zip(children, segments):
         answer_segments.append(await _verify_one_child(
-            session, settings, revision_id, row, seg))
+            session, settings, revision_id, row, seg,
+            shot_project_id=shot_project_id))
     return {
         "schema_version": 1,
         "spec_hash": parent.spec_hash,
@@ -181,7 +228,8 @@ async def verify_performance_history(session, revision_id: str,
 
 
 async def _verify_one_child(session, settings, revision_id: str,
-                            row, seg: dict) -> dict:
+                            row, seg: dict, *,
+                            shot_project_id: str) -> dict:
     """Verify ONE captured child against its embedded segment and the
     immutable closure it names, then answer the §12 questions for it."""
     position = row["position"]
@@ -195,6 +243,9 @@ async def _verify_one_child(session, settings, revision_id: str,
             "canonical embedded segment.")
 
     vocal = seg["vocal"]
+    from soloring.performance.m17cc_capture_read import (
+        exact_projection_equal,
+    )
     for column, embedded_value in (
         ("subject_id", seg["subject_id"]),
         ("performance_revision_id", seg["performance_revision_id"]),
@@ -215,7 +266,10 @@ async def _verify_one_child(session, settings, revision_id: str,
         ("vocal_mapping_hash", seg["vocal_mapping_hash"]),
         ("vocal_mapping_position", seg["vocal_mapping_position"]),
     ):
-        if row[column] != embedded_value:
+        # SR-M17CC-03: TYPE-EXACT projection — Python cross-type
+        # equality aliases (False == 0, 1.0 == 1) must not satisfy
+        # companion/embedded field identity
+        if not exact_projection_equal(row[column], embedded_value):
             raise internal_invariant(
                 f"{where} column {column} disagrees with the embedded "
                 "captured segment.")
@@ -229,7 +283,7 @@ async def _verify_one_child(session, settings, revision_id: str,
         ("sample_rate_hz", "sample_rate_hz"),
     ):
         captured = vocal[embedded_key] if vocal is not None else None
-        if row[column] != captured:
+        if not exact_projection_equal(row[column], captured):
             raise internal_invariant(
                 f"{where} vocal-group column {column} disagrees with "
                 "the embedded captured vocal grammar (all-or-none).")
@@ -262,7 +316,8 @@ async def _verify_one_child(session, settings, revision_id: str,
     verify_mapping_hash_closure(row, where, seg=seg)
 
     pr = (await session.execute(text(
-        "SELECT subject_id, performance_kind, performance_profile_id, "
+        "SELECT subject_id, project_id, performance_kind, "
+        "performance_profile_id, "
         "payload_schema_version, source_kind, temporal_start_num, "
         "temporal_start_den, temporal_end_num, temporal_end_den, "
         "canonical_channel_payload_sha256, "
@@ -283,6 +338,13 @@ async def _verify_one_child(session, settings, revision_id: str,
         raise internal_invariant(
             f"{where} disagrees with the immutable PerformanceRevision "
             f"{row['performance_revision_id']!r} it names.")
+    # SR-M17CC-04: immutable PR↔Shot project coherence — the same law
+    # recovery enforces (§13.4), for every captured child
+    if pr.project_id != shot_project_id:
+        raise internal_invariant(
+            f"{where} crosses projects: PR project "
+            f"{pr.project_id!r} != Shot project "
+            f"{shot_project_id!r}")
 
     blob = (await session.execute(text(
         "SELECT size_bytes FROM blobs WHERE hash = :h"),
@@ -336,6 +398,30 @@ async def _verify_one_child(session, settings, revision_id: str,
         "vocal": None,
         "segment_hash": row.segment_hash,
     }
+
+    # SR-M17CC-02: §8.2/§13.4 parity with recovery — every captured
+    # rational was certified canonical by _rat above; the captured
+    # interval must additionally be NONEMPTY, and a GENERIC captured
+    # interval must lie inside the immutable PerformanceRevision
+    # temporal domain (the dialogue-bound branch proves its interval
+    # exactly through the binding induction below instead)
+    start = Fraction(row.performance_start_num,
+                     row.performance_start_den)
+    end = Fraction(row.performance_end_num,
+                   row.performance_end_den)
+    if start >= end:
+        raise internal_invariant(
+            f"{where} captured interval is empty/inverted")
+    if vocal is None:
+        domain_lo = Fraction(pr.temporal_start_num,
+                             pr.temporal_start_den)
+        domain_hi = Fraction(pr.temporal_end_num,
+                             pr.temporal_end_den)
+        if not (domain_lo <= start and end <= domain_hi):
+            raise internal_invariant(
+                f"{where} captured interval lies outside the immutable "
+                f"PerformanceRevision domain [{domain_lo}, "
+                f"{domain_hi})")
 
     if vocal is not None:
         binding = (await session.execute(text(
@@ -427,6 +513,7 @@ async def _verify_one_child(session, settings, revision_id: str,
         vp = (await session.execute(text(
             "SELECT dialogue_line_revision_id, revision_number, "
             "speaker_subject_id, native_sample_rate_hz, "
+            "trim_start_sample, trim_end_sample_exclusive, "
             "retained_audio_blob_hash, adopted_at "
             "FROM vocal_performance_revisions WHERE id = :vp"),
             {"vp": row.vocal_performance_revision_id}
@@ -436,6 +523,36 @@ async def _verify_one_child(session, settings, revision_id: str,
                 f"{where} names a missing immutable "
                 f"VocalPerformanceRevision "
                 f"{row.vocal_performance_revision_id!r}.")
+        # SR-M17CC-04: the immutable VP semantic closure §12 EXPOSES —
+        # the same §13.4 laws recovery enforces, proven BEFORE the VP
+        # fields answer as historical truth (speaker/subject
+        # agreement, native-rate agreement, captured sample
+        # containment in the immutable VP trim, and VP dialogue-line
+        # lineage project coherence)
+        if vp.speaker_subject_id != row.subject_id:
+            raise internal_invariant(
+                f"{where} subject disagrees with the VP speaker "
+                f"({vp.speaker_subject_id!r}) — subject/speaker "
+                "agreement is historical")
+        if vp.native_sample_rate_hz != row.sample_rate_hz:
+            raise internal_invariant(
+                f"{where} captured sample rate disagrees with the VP "
+                "native sample rate")
+        if not (vp.trim_start_sample <= row.source_start_sample
+                and row.source_end_sample_exclusive
+                <= vp.trim_end_sample_exclusive):
+            raise internal_invariant(
+                f"{where} captured sample interval lies outside the VP "
+                "trim")
+        line = (await session.execute(text(
+            "SELECT project_id FROM dialogue_lines WHERE id = ("
+            "SELECT dialogue_line_id FROM dialogue_line_revisions "
+            "WHERE id = :dlr)"),
+            {"dlr": vp.dialogue_line_revision_id}
+        )).mappings().one_or_none()
+        if line is None or line.project_id != shot_project_id:
+            raise internal_invariant(
+                f"{where} VP lineage crosses projects")
         answer["vocal"] = {
             "vocal_performance_revision_id":
                 row.vocal_performance_revision_id,

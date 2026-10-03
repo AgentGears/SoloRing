@@ -64,6 +64,7 @@ BLOCKED_TIMING_MISMATCH = "BLOCKED_TIMING_MISMATCH"
 BLOCKED_SUBJECT_OR_PROJECT = "BLOCKED_SUBJECT_OR_PROJECT"
 BLOCKED_CHANNEL_CONFLICT = "BLOCKED_CHANNEL_CONFLICT"
 BLOCKED_SHOT_DEPENDENCY = "BLOCKED_SHOT_DEPENDENCY"
+BLOCKED_POSITIONS_NOT_DENSE = "BLOCKED_POSITIONS_NOT_DENSE"
 
 SQLITE_INT_MAX = 2 ** 63 - 1
 
@@ -789,6 +790,24 @@ async def project_shot_performance_readiness(
             session, settings, shot, row, {}, dependency_ids)
         row_states.append([row, state, diagnostics])
         states.append(state)
+
+    # SR-M17CC-01: the captured-history grammar is DENSE canonical
+    # positions [0..n-1] — §12 and recovery index every embedded
+    # segment against its zero-based array position. A sparse working
+    # set (e.g. a lawful public PUT solely at position 1) stays
+    # representable working state but must NEVER project READY: a
+    # sparse all-READY set would capture successfully and mint a
+    # ShotRevision whose own FIRST §12 read and recovery verification
+    # reject it. Every segment of a non-dense set is blocked (the
+    # SET is not capturable, not one bad row).
+    if [row.position for row in rows] != list(range(len(rows))):
+        for entry in row_states:
+            entry[1] = BLOCKED_POSITIONS_NOT_DENSE
+            entry[2] = {
+                "reason": "performance segment positions are not the "
+                          "dense canonical [0..n-1] sequence — capture "
+                          "requires every position 0..n-1 present"}
+        states = [entry[1] for entry in row_states]
 
     # channel conflict (frozen §8.5): same subject + overlapping shot
     # intervals + intersecting immutable channel_key sets. Channel keys

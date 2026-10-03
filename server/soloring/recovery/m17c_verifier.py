@@ -1182,9 +1182,15 @@ def _verify_one_schema8(con: sqlite3.Connection, blob_root: Path,
 
 def _verify_m17cc_child(con, blob_root, rev_id, shot_id, row, seg):
     import hashlib
+    from soloring.performance.m17cc_capture_read import (
+        exact_projection_equal,
+    )
     where = (f"ShotRevision {rev_id} performance companion child at "
              f"position {row['position']}")
-    if row["position"] != seg["position"]:
+    # SR-M17CC-03: TYPE-EXACT — a JSON false/true/float embedded
+    # value that Python-compares equal to the relational integer is
+    # not the mechanical projection the captured grammar requires
+    if not exact_projection_equal(row["position"], seg["position"]):
         raise _corrupt(
             f"{where} disagrees with the embedded captured ordering")
     if row["segment_json"] != _canonical(seg) \
@@ -1211,7 +1217,7 @@ def _verify_m17cc_child(con, blob_root, rev_id, shot_id, row, seg):
         ("vocal_mapping_hash", seg["vocal_mapping_hash"]),
         ("vocal_mapping_position", seg["vocal_mapping_position"]),
     ):
-        if row[column] != want:
+        if not exact_projection_equal(row[column], want):
             raise _corrupt(
                 f"{where} column {column} disagrees with the embedded "
                 "captured segment")
@@ -1225,7 +1231,7 @@ def _verify_m17cc_child(con, blob_root, rev_id, shot_id, row, seg):
         ("sample_rate_hz", "sample_rate_hz"),
     ):
         captured = vocal[key] if vocal is not None else None
-        if row[column] != captured:
+        if not exact_projection_equal(row[column], captured):
             raise _corrupt(
                 f"{where} vocal-group column {column} disagrees with "
                 "the embedded captured vocal grammar (all-or-none)")
@@ -1522,6 +1528,36 @@ def _verify_generation_performance_inputs(
         gwhere = (f"generation performance input "
                   f"{row['generation_id']!r}/{row['input_key']!r}"
                   f"@{row['position']}")
+        # SR-M17CC-05: total over SQLite storage classes — certify the
+        # persisted types BEFORE any string/integer operation. A
+        # 64-byte BLOB passes the schema's length CHECK on a
+        # TEXT-affinity hash column and returns as Python bytes, for
+        # which .strip(str) raises a raw TypeError; a REAL/bool/None
+        # coordinate is not the nonnegative integer the tie-back laws
+        # assume. Malformed storage terminates HERE as typed
+        # corruption, never an uncontrolled Python exception.
+        for column in ("position",
+                       "shot_revision_segment_position"):
+            value = row[column]
+            if isinstance(value, bool) or not isinstance(value, int) \
+                    or value < 0:
+                raise _corrupt(
+                    f"{gwhere} {column} {value!r} is not a persisted "
+                    "nonnegative integer (malformed SQLite storage "
+                    "class)")
+        for column in ("blob_hash", "segment_hash",
+                       "derived_input_hash"):
+            if not isinstance(row[column], str):
+                raise _corrupt(
+                    f"{gwhere} {column} is not persisted text "
+                    f"(malformed SQLite storage class: "
+                    f"{row[column]!r})")
+        if row["binding_hash"] is not None and \
+                not isinstance(row["binding_hash"], str):
+            raise _corrupt(
+                f"{gwhere} binding_hash is not persisted text "
+                f"(malformed SQLite storage class: "
+                f"{row['binding_hash']!r})")
         gen = con.execute(
             "SELECT shot_revision_id, created_at, workflow_spec_json, "
             "workflow_spec_hash FROM generations WHERE id = ?",
