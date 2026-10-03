@@ -125,6 +125,8 @@ ALLOWLIST = (
     "tests/test_m17cc_rr9_corrections.py",
     # RR10-M17CC correction battery
     "tests/test_m17cc_rr10_corrections.py",
+    # SR-M17CC second-review correction battery
+    "tests/test_m17cc_sr_corrections.py",
     "server/soloring/recovery/backup.py",
     "server/soloring/recovery/successor_semantics.py",
     "server/soloring/performance/revision.py",
