@@ -176,12 +176,28 @@ async def _snapshot_one_read(
                 raise SoloRingError(
                     first["code"], first["message"],
                     status_code=409, details=first["details"])
+            # M17C-C slice 2 (frozen R4 11.1): the performance plane
+            # resolves on THIS SAME pinned snapshot, last in the frozen
+            # precedence chain (after M16), as a complete immutable-
+            # in-practice value — mappings, PR closure fields, bindings,
+            # paired vocal mappings, and the readiness projection all
+            # fixed in memory before the fenced persistence unit. None
+            # when the Shot carries no working mappings. Impossible
+            # persisted history fails closed here exactly as every other
+            # M17C-B authority read; non-READY working states are DATA
+            # (the capture path gates on them), so non-capture
+            # consumers of this seam stay unaffected.
+            from soloring.performance.m17cc_capture_read import (
+                resolve_performance_plane,
+            )
+            performance = await resolve_performance_plane(
+                conn, settings, shot_id)
             await conn.commit()
             return (
                 shot, refs, resolved, outcome.states,
                 relation_outcome.relation_states,
                 visual_result, spatial_result, production_world_result,
-                intra,
+                intra, performance,
             )
         except Exception:
             with contextlib.suppress(Exception):
@@ -441,6 +457,7 @@ async def _persist_revision_fenced(
     *,
     intra_shot_pack=None,
     intra_shot_children=None,
+    performance_pack=None,
 ) -> str:
     """The ShotRevision write phase as ONE BEGIN IMMEDIATE unit (M6 §9/§57,
     M6C re-gate blocker 2; M7D §10.3 adds the relation children):
@@ -494,6 +511,27 @@ async def _persist_revision_fenced(
                             f"ShotRevision {existing[0]} convergence "
                             "missing the intra_shot companion the "
                             "snapshot hash requires")
+                    # M17C-C slice 3: the loser validates the
+                    # committed winner's COMPLETE performance companion
+                    # closure — matching snapshot hash alone never
+                    # implies closure. A schema-8 winner missing or
+                    # contradicting its companions is durable-closure
+                    # corruption (internal integrity), never repaired
+                    # and never filled from current state; a schema-<8
+                    # winner carrying companions is equally impossible.
+                    from soloring.performance.m17cc_capture_read import (
+                        _performance_parent_exists,
+                        verify_performance_companions,
+                    )
+                    if performance_pack is not None:
+                        await verify_performance_companions(
+                            conn, existing[0], performance_pack)
+                    elif await _performance_parent_exists(
+                            conn, existing[0]):
+                        raise internal_invariant(
+                            f"ShotRevision {existing[0]} convergence "
+                            "carries performance companions its "
+                            "snapshot hash does not require")
                     await conn.exec_driver_sql("COMMIT")
                     return existing[0]
 
@@ -676,6 +714,16 @@ async def _persist_revision_fenced(
                             "sp": child["source_proposal_id"],
                         } for child in (intra_shot_children or [])],
                     )
+                if performance_pack is not None:
+                    # M17C-C slice 3: the companions persist from the
+                    # SAME already-captured value — parent first
+                    # (immediate FKs), then the exact child projection;
+                    # zero companions when the pack is None (schema <8)
+                    from soloring.performance.m17cc_capture_read import (
+                        persist_performance_companions,
+                    )
+                    await persist_performance_companions(
+                        conn, revision_id, performance_pack)
                 await conn.exec_driver_sql("COMMIT")
                 return revision_id
             except IntegrityError:
@@ -731,6 +779,7 @@ async def capture_revision_with_visual(
     spatial_result = read[6]
     production_world_result = read[7]
     intra = read[8]
+    performance = read[9]
     visual_pack = (
         visual_result.pack if visual_result is not None else None
     )
@@ -766,10 +815,24 @@ async def capture_revision_with_visual(
                     (packed["target"]["kind"], packed["target"]["id"])))
             for i, (public, packed) in enumerate(
                 zip(intra["events"], intra_shot_pack["events"]))]
+    # M17C-C slice 2 (frozen R4 11.2/11.4): the readiness gate runs on
+    # the CAPTURE path only, from the pinned read value — a non-READY
+    # working state refuses capture with the frozen typed refusal
+    # (corruption already failed closed inside the read). The gate sits
+    # BEFORE any builder invocation, mirroring the M7D/M8/M10/M13/M16
+    # blocker precedence.
+    if performance is not None and not performance["ready"]:
+        from soloring.errors import ErrorCode
+        raise SoloRingError(
+            ErrorCode.PERFORMANCE_CAPTURE_NOT_READY,
+            "the Shot's performance plane is not READY — capture "
+            "requires every mapping ready", status_code=409,
+            details={"segments": performance["segment_readiness"]})
     snapshot, continuity_spec = build_capturable_snapshot(
         shot, refs, resolved, feature_states, relation_states, visual_pack,
         spatial_pack, production_world_pack,
         intra_shot_pack=intra_shot_pack,
+        performance_pack=performance,
     )
     snapshot_hash = canonical_hash(snapshot)
     snapshot_json = canonical_json_str(snapshot)
@@ -784,6 +847,7 @@ async def capture_revision_with_visual(
         visual_result, spatial_result, production_world_result,
         intra_shot_pack=intra_shot_pack,
         intra_shot_children=intra_shot_children,
+        performance_pack=performance,
     )
     revision = await session.get(ShotRevision, revision_id)
     assert revision is not None

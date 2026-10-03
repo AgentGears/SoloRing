@@ -23,6 +23,55 @@ ALLOWED_PATTERNS = [
     r"^post-m16-integrated-r3-evidence/harness/",
     r"^SoloRing-Post-M16-Integrated-Sequence-Regression-R3-CLOSED"
     r"\.md$",
+    # PR #26 review records (M17C-A first pass + second-review
+    # reconciliation): reviewed evidence documents, no product code
+    r"^SoloRing-PR26-First-Pass-Review-R1\.md$",
+    r"^SoloRing-PR26-Reconciliation-and-Correction-Record\.md$",
+    # M17C-C scope record + slice-1 surfaces
+    r"^SoloRing-M17C-C-Scope-R0\.md$",
+    r"^server/alembic/versions/0022_m17c_schema8_capture"
+    r"\.py$",
+    # FPR-M17CC-04: the closure-preimage successor
+    r"^server/alembic/versions/0023_m17cc_capture_closure_preimage"
+    r"\.py$",
+    r"^tests/test_m17cc_migration\.py$",
+    # M17C-C slice 2 (the coherent performance-plane read)
+    r"^server/soloring/performance/m17cc_capture_read\.py$",
+    r"^tests/test_m17cc_capture\.py$",
+    r"^tests/m17cc_capture_helper\.py$",
+    # M17C-C slice 3 (frozen-companion persistence + winner reuse)
+    r"^tests/test_m17cc_persist\.py$",
+    # M17C-C slice 4 (§12 historical inspection)
+    r"^server/soloring/performance/m17cc_history\.py$",
+    r"^tests/test_m17cc_history\.py$",
+    # M17C-C slice 5 (§13.4-13.6 recovery verifier)
+    r"^tests/test_m17cc_recovery\.py$",
+    # M17C-C slice 6 (§1.7 backup/restore + downgrade closure)
+    r"^tests/test_m17cc_roundtrip\.py$",
+    # FPR-M17CC correction battery
+    r"^tests/test_m17cc_fpr_corrections\.py$",
+    # RR-M17CC correction battery
+    r"^tests/test_m17cc_rr_corrections\.py$",
+    # RR2-M17CC correction battery
+    r"^tests/test_m17cc_rr2_corrections\.py$",
+    # RR3-M17CC correction battery
+    r"^tests/test_m17cc_rr3_corrections\.py$",
+    # RR4-M17CC correction battery
+    r"^tests/test_m17cc_rr4_corrections\.py$",
+    # RR5-M17CC correction battery
+    r"^tests/test_m17cc_rr5_corrections\.py$",
+    # RR6-M17CC correction battery
+    r"^tests/test_m17cc_rr6_corrections\.py$",
+    # RR7-M17CC correction battery
+    r"^tests/test_m17cc_rr7_corrections\.py$",
+    # RR8-M17CC correction battery
+    r"^tests/test_m17cc_rr8_corrections\.py$",
+    # RR9-M17CC correction battery
+    r"^tests/test_m17cc_rr9_corrections\.py$",
+    # RR10-M17CC correction battery
+    r"^tests/test_m17cc_rr10_corrections\.py$",
+    # SR-M17CC second-review correction battery
+    r"^tests/test_m17cc_sr_corrections\.py$",
     # M17A implementation (frozen R5): the dialogue/vocal foundation
     # surface — performance package, migration, API, recovery
     # verifier, boundary validators, and the M17A tests.
@@ -53,6 +102,27 @@ ALLOWED_PATTERNS = [
     r"^scripts/m17b_validate_proof_map\.py$",
     r"^server/soloring/api/m17b_performance\.py$",
     r"^server/soloring/api/schemas/m17b_performance\.py$",
+    # M17C-A (PR #26): frozen at c502b81 (B-F1 restored its exact
+    # bytes); M17C-B (PR #26, B-F1): the successor working-mapping
+    # migration — reviewed successor surface + successor-maintained
+    # files swept for the head-advance
+    r"^server/soloring/performance/m17c_[a-z_]+\.py$",
+    r"^server/soloring/performance/m17cc_models\.py$",
+    r"^server/soloring/api/m17c_performance\.py$",
+    r"^server/soloring/api/schemas/m17c_performance\.py$",
+    r"^server/soloring/recovery/m17c_verifier\.py$",
+    r"^server/alembic/versions/0020_m17c_perf_capture_r2"
+    r"\.py$",
+    r"^server/alembic/versions/0021_m17c_shot_performance_mappings"
+    r"\.py$",
+    r"^tests/m17c_seed\.py$",
+    r"^tests/test_m17c_[a-z0-9_]+\.py$",
+    r"^tests/test_post_m13_next_security\.py$",
+    r"^tests/test_m14_b5_increment3\.py$",
+    r"^tests/test_m14_base_corpus\.py$",
+    r"^tests/test_m15_baseline\.py$",
+    r"^tests/test_m16_recovery\.py$",
+    r"^scripts/m17c_validate_[a-z0-9_]+\.py$",
 
     r"^docs/SoloRing-M14-[^/]+\.md$",
     r"^scripts/m14_validate_[a-z0-9_]+\.py$",

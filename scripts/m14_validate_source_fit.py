@@ -93,6 +93,25 @@ REVIEWED_SUCCESSOR_PATHS = frozenset({
     "server/soloring/api/main.py",
     "server/soloring/db/models.py",
     "server/soloring/errors.py",
+    # M17C-A (PR #26, second-review reconciliation): the dialogue-bound
+    # performance surface lawfully owns the PerformanceRevision
+    # vocabulary
+    "server/soloring/performance/m17c_binding.py",
+    "server/soloring/performance/m17c_contract.py",
+    "server/soloring/performance/m17c_models.py",
+    "server/soloring/performance/m17c_transition.py",
+    "server/soloring/api/m17c_performance.py",
+    "server/soloring/api/schemas/m17c_performance.py",
+    "server/soloring/recovery/m17c_verifier.py",
+    "server/alembic/versions/0021_m17c_shot_performance_mappings.py",
+    # M17C-B (PR #26): the Shot performance working-mapping surface
+    "server/soloring/performance/m17c_shot_mapping.py",
+    "server/soloring/performance/m17cc_models.py",
+    "server/soloring/performance/m17cc_capture_read.py",
+    "server/soloring/performance/m17cc_history.py",
+    # FPR-M17CC-03: the successor-aware observation-readiness
+    # unwrap legitimately names the intra-shot block
+    "server/soloring/observation/readiness.py",
 })
 
 FORBIDDEN_PATTERNS: list[tuple[str, str]] = [

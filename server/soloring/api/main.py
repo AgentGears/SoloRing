@@ -10,7 +10,7 @@ import logging
 import sqlite3
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from soloring.api.errors import register_exception_handlers
@@ -36,10 +36,37 @@ from soloring.api.takes import router as takes_router
 from soloring.api.visual import router as visual_router
 from soloring.api.performance import router as performance_router
 from soloring.api.m17b_performance import (router as m17b_performance_router)
+from soloring.api.m17c_performance import (router as m17c_performance_router)
 from soloring.db.engine import create_soloring_engine, create_session_factory
 from soloring.settings import Settings, get_settings
 
 log = logging.getLogger("soloring.api")
+
+_M17C_TRANSITION_ROUTES = {
+    ("POST", "/performance-candidates/{candidate_id}/adopt"),
+    ("POST", "/performance-revisions/{revision_id}/retarget-candidates"),
+}
+
+
+def _m17b_without_m17c_transition_routes() -> APIRouter:
+    """Return M17B routes excluding the two transition paths owned by M17C.
+
+    M17C upgrades those published path/method pairs with PF-03 closure laws.
+    Registering both predecessor and upgraded handlers would make runtime route
+    selection depend on insertion order while OpenAPI could describe the other
+    handler. Filtering at app assembly leaves exactly one public owner without
+    mutating the published M17B router module.
+    """
+    filtered = APIRouter()
+    for route in m17b_performance_router.routes:
+        path = getattr(route, "path", None)
+        methods = getattr(route, "methods", None) or set()
+        if path is not None and any(
+            (method, path) in _M17C_TRANSITION_ROUTES for method in methods
+        ):
+            continue
+        filtered.routes.append(route)
+    return filtered
 
 
 @asynccontextmanager
@@ -96,7 +123,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(spatial_plans_router)
     app.include_router(production_world_router)
     app.include_router(performance_router)
-    app.include_router(m17b_performance_router)
+    app.include_router(m17c_performance_router)
+    app.include_router(_m17b_without_m17c_transition_routes())
 
     return app
 

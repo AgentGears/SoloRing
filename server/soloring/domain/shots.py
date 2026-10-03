@@ -387,20 +387,50 @@ async def read_shot_detail(engine: AsyncEngine, shot_id: str, *, settings=None):
                     relation_outcome=relation_outcome,
                     production_world_outcome=m13_outcome)
                 if m13_ready:
-                    effective_hash = effective_working_snapshot_hash(
-                        shot, refs, resolved, outcome.states,
-                        relation_outcome.relation_states,
-                        visual_result.pack,
-                        spatial_outcome.pack if spatial_outcome is not None
-                        else None,
-                        production_world_pack,
-                        intra_shot_pack=(
-                            _working_intra_pack(shot_id, intra)
-                            if intra["events"] else None),
+                    # FPR-M17CC-02 (first-pass review): the Performance
+                    # plane resolves on THIS SAME pinned snapshot — the
+                    # effective working hash must be built by the same
+                    # canonical construction capture uses, so a schema-8
+                    # canon compares equal against unchanged Performance
+                    # state and a Performance-only change moves the hash.
+                    # None when the Shot carries no working mappings
+                    # keeps the exact predecessor bytes.
+                    #
+                    # RR-M17CC-02 (re-review, posture FROZEN by the
+                    # correction commission): mappings that exist but
+                    # are lawfully non-READY (e.g. the supported DELETE
+                    # of a paired vocal mapping) make the authoritative
+                    # working hash UNAVAILABLE — hash and differs are
+                    # null, exactly like the M16 unready-layer posture
+                    # above; a blocked state is never hashed into a
+                    # second, uncapturable canon.
+                    from soloring.performance.m17cc_capture_read import (
+                        resolve_performance_plane,
                     )
-                    differs = await canon.differs_from_approved(
-                        conn, shot, refs, effective_hash
-                    )
+                    performance = await resolve_performance_plane(
+                        conn, settings, shot_id)
+                    if (performance is not None
+                            and not performance["ready"]):
+                        effective_hash = None
+                        differs = None
+                    else:
+                        effective_hash = (
+                            effective_working_snapshot_hash(
+                                shot, refs, resolved, outcome.states,
+                                relation_outcome.relation_states,
+                                visual_result.pack,
+                                spatial_outcome.pack
+                                if spatial_outcome is not None
+                                else None,
+                                production_world_pack,
+                                intra_shot_pack=(
+                                    _working_intra_pack(shot_id, intra)
+                                    if intra["events"] else None),
+                                performance_pack=performance,
+                            ))
+                        differs = await canon.differs_from_approved(
+                            conn, shot, refs, effective_hash
+                        )
                 else:
                     effective_hash = None
                     differs = None

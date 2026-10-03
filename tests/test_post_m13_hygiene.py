@@ -225,8 +225,11 @@ async def test_hyg_base_02_migration_head_unchanged(tmp_path, monkeypatch):
     versions = (Path(__file__).resolve().parents[1] / "server"
                 / "alembic" / "versions")
     files = sorted(p.name for p in versions.glob("0*.py"))
-    assert files[-1] == "0019_m17b_performance_revisions.py"
-    assert not any(f > "0019_m17b_performance_revisions.py"
+    # M17C succession (PR #26): the admitted successors beyond the
+    # frozen 0019 are 0020/0021 (M17C-A/B) and 0022 (M17C-C capture
+    # storage); head is exactly 0022.
+    assert files[-1] == "0023_m17cc_capture_closure_preimage.py"
+    assert not any(f > "0023_m17cc_capture_closure_preimage.py"
                    for f in files)
 
 

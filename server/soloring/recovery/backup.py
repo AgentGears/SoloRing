@@ -43,7 +43,28 @@ from soloring.workflows.artifact_store import WorkflowArtifactStore
 # verified through M13 + M14 + M15 + M16 semantics.
 # M17A (frozen R5 §12): the dialogue/vocal verifier advances the
 # expected head to 0018 and adds three physical Blob-FK paths.
-EXPECTED_ALEMBIC_HEAD = "0019_m17b_performance_revisions"
+# M17C-A (PR #26, frozen at c502b81): migration 0020 adds the four
+# PF-03 binding/classification companion tables and NO new Blob-FK
+# paths. M17C-B (PR #26, SR2-01 corrective): successor migration 0021
+# adds the PF-02 working-mapping table (also no new Blob-FK path), so
+# the EXPECTED head advances to 0021 while 0020 remains a DISTINCT
+# supported restore head — both share the exact thirteen-path M17B
+# Blob-FK inventory.
+M17C_A_ALEMBIC_HEAD = "0020_m17c_perf_capture_r2"
+M17C_B_ALEMBIC_HEAD = "0021_m17c_shot_performance_mappings"
+# M17C-C (frozen R4 §§10.4-10.6): schema-8 capture storage — the
+# immutable capture companions and the Generation-owned derived-input
+# table. The EXPECTED head advances to 0022; 0020/0021 remain distinct
+# supported restore heads.
+M17C_C_ALEMBIC_HEAD = "0022_m17c_schema8_capture"
+# FPR-M17CC-04 (first-pass review): the closure-preimage successor —
+# adds the captured mapping-document preimage columns and NO Blob-FK
+# path, so the physical inventory stays the fourteen paths of 0022.
+# 0022 remains a supported restore head (with its schema-8 companion
+# rows refused by the verifier: they cannot certify the mapping-hash
+# closure).
+M17C_C2_ALEMBIC_HEAD = "0023_m17cc_capture_closure_preimage"
+EXPECTED_ALEMBIC_HEAD = M17C_C2_ALEMBIC_HEAD
 BACKUP_MANIFEST_SCHEMA_VERSION = 1
 
 # M13 (frozen R3 §23): restore is head-dispatched across five heads. M14
@@ -79,6 +100,23 @@ SUPPORTED_RESTORE_ALEMBIC_HEADS = frozenset({
     # performance/retarget semantic verifier; physical Blob inventory
     # is exactly thirteen paths.
     M17B_ALEMBIC_HEAD,
+    # M17C-A head (PR #26, frozen at c502b81): restores at 0020 verify
+    # through M17B depth PLUS the M17C binding-state verifier in its
+    # 0020 form (four PF-03 tables required; the PF-02 table must be
+    # absent); thirteen-path physical inventory.
+    M17C_A_ALEMBIC_HEAD,
+    # M17C-B head (PR #26, SR2-01/02 corrective): restores at 0021 run
+    # the same M17C verifier in its 0021 form — the PF-02 table is
+    # REQUIRED with a deterministic schema proof; still thirteen paths.
+    M17C_B_ALEMBIC_HEAD,
+    # M17C-C head (frozen R4 §13.5): 0022 adds exactly ONE Blob-FK path
+    # (generation_performance_inputs.blob_hash) — the capture companion
+    # tables duplicate already-FK-pinned payload hashes without
+    # independent FKs — so the physical inventory becomes fourteen
+    # paths at 0022 only. FPR-M17CC-04: the 0023 closure-preimage
+    # successor adds NO Blob-FK path — the same fourteen paths.
+    M17C_C_ALEMBIC_HEAD,
+    M17C_C2_ALEMBIC_HEAD,
 })
 
 ARTIFACT_KINDS = (
@@ -168,8 +206,20 @@ def _blob_fk_policy_for_head(head: str) -> frozenset:
         return M14_BLOB_FK_COLUMNS
     if head == M17A_ALEMBIC_HEAD:
         return M17A_BLOB_FK_COLUMNS
-    if head == M17B_ALEMBIC_HEAD:
+    if head in (M17B_ALEMBIC_HEAD, M17C_A_ALEMBIC_HEAD,
+                M17C_B_ALEMBIC_HEAD):
+        # M17C-A adds no Blob FK (binding companions reference no
+        # blobs) and M17C-B's working-mapping table references no
+        # blobs either: 0020/0021 share the exact thirteen-path M17B
+        # inventory.
         return M17B_BLOB_FK_COLUMNS
+    if head in (M17C_C_ALEMBIC_HEAD, M17C_C2_ALEMBIC_HEAD):
+        # M17C-C §13.5: exactly ONE new path —
+        # generation_performance_inputs.blob_hash (the capture
+        # companions carry no independent Blob FK). Fourteen paths
+        # (0023 adds no path).
+        return frozenset(set(M17B_BLOB_FK_COLUMNS) | {
+            ("generation_performance_inputs", "blob_hash")})
     raise RecoveryCorruption(f"unsupported recovery head {head!r}.")
 
 _HEX = set("0123456789abcdef")
@@ -264,6 +314,41 @@ def _verify_bytes(path: Path, expected_hash: str) -> int:
     return size
 
 
+def _verify_manifest_hashed_bytes(path: Path, expected_hash: str,
+                                  *, what: str,
+                                  mismatch: str | None = None) -> None:
+    """IND3-01: the manifest/restore-tree layer's own CONTENT read for
+    one hashed file — narrow expected-filesystem-failure normalization
+    with file identity/path context (disappearance, permission, and
+    representative storage failures become ``RecoveryCorruption``).
+    An already-raised ``RecoveryCorruption`` (hash mismatch) passes
+    through unchanged (``RecoveryCorruption`` is not an ``OSError``);
+    ``mismatch`` optionally restates the mismatch with the caller's
+    frozen diagnostic (the predecessor DB law keeps its exact
+    ``database_sha256`` message). Deliberately local to manifest
+    verification — the generic ``_stream_hash``/``_copy_verified``
+    machinery keeps its own contracts."""
+    try:
+        _verify_bytes(path, expected_hash)
+    except FileNotFoundError as exc:
+        raise RecoveryCorruption(
+            f"{what} {expected_hash} at {path} is missing (disappeared "
+            "during manifest content verification)") from exc
+    except PermissionError as exc:
+        raise RecoveryCorruption(
+            f"{what} {expected_hash} at {path} is unreadable "
+            "(permission denied) during the manifest content read"
+        ) from exc
+    except OSError as exc:
+        raise RecoveryCorruption(
+            f"{what} {expected_hash} at {path} could not be read "
+            f"through a storage error: {exc}") from exc
+    except RecoveryCorruption as exc:
+        if mismatch is not None:
+            raise RecoveryCorruption(mismatch) from exc
+        raise
+
+
 def _copy_verified(src: Path, dst: Path, expected_hash: str) -> int:
     """§7.4 step 9: hash source, copy exact bytes, re-hash the copy."""
     _verify_bytes(src, expected_hash)
@@ -324,7 +409,8 @@ def _drop_sidecar_files(staged_db: Path) -> None:
             side.unlink()
 
 
-def _verify_staged_db(staged_db: Path, expected_head: str = EXPECTED_ALEMBIC_HEAD) -> None:
+def _verify_staged_db(staged_db: Path,
+                      expected_head: str = EXPECTED_ALEMBIC_HEAD) -> None:
     con = sqlite3.connect(str(staged_db))
     try:
         row = con.execute("PRAGMA quick_check").fetchone()
@@ -344,6 +430,12 @@ def _verify_staged_db(staged_db: Path, expected_head: str = EXPECTED_ALEMBIC_HEA
                 "staged DB has no alembic_version table; cannot prove the "
                 "migration head."
             ) from exc
+        # SR2-01 note: the BACKUP-side guard keeps requiring exactly the
+        # EXPECTED head (the M12-era staleness law: a database stamped
+        # at an old head must migrate before backing up as current);
+        # SUPPORTED historical heads (0020 included) are RESTORE-side
+        # concepts — genuine historical backups restore, stale-headed
+        # live databases do not back up.
         if versions != [expected_head]:
             raise RecoveryCorruption(
                 f"staged DB migration head is {versions!r}; recovery "
@@ -1013,11 +1105,16 @@ def parse_backup_manifest_v1(raw: bytes) -> dict:
 
 
 def build_backup_manifest(
-    *, database_sha256: str, liveness: _Liveness
+    *, database_sha256: str, liveness: _Liveness, head: str
 ) -> dict:
+    """SR2-01: the manifest records the ACTUAL staged migration head
+    (already proven to be exactly one SUPPORTED restore head by
+    ``_verify_staged_db``) — never a hardcoded expected head, so a
+    database backed up at a supported historical head restores against
+    its own head."""
     return {
         "schema_version": BACKUP_MANIFEST_SCHEMA_VERSION,
-        "alembic_version": EXPECTED_ALEMBIC_HEAD,
+        "alembic_version": head,
         "database_sha256": database_sha256,
         "blob_hashes": list(liveness.blob_hashes),
         "workflow_artifacts": [
@@ -1074,31 +1171,82 @@ def _artifact_path(root: Path, kind: str, content_hash: str) -> Path:
 def _verify_manifest_files(root: Path, manifest: dict) -> None:
     """Verify a tree's DB + Blob + artifact bytes against a manifest."""
     db_path = root / "soloring.db"
-    if not db_path.is_file():
-        raise RecoveryCorruption("backup DB is missing.")
-    db_hash, _ = _stream_hash(db_path)
-    if db_hash != manifest["database_sha256"]:
+    # IND3-01 adjacent audit: the backup DB probe and content read sit
+    # in the same public restore path with the same leak shape —
+    # normalized with the same narrow approach
+    try:
+        db_present = db_path.is_file()
+    except PermissionError as exc:
         raise RecoveryCorruption(
-            "backup DB bytes disagree with manifest database_sha256."
-        )
+            f"backup DB at {db_path} is unreadable (permission denied) "
+            "during the storage probe") from exc
+    except OSError as exc:
+        raise RecoveryCorruption(
+            f"backup DB at {db_path} could not be probed through a "
+            f"storage error: {exc}") from exc
+    if not db_present:
+        raise RecoveryCorruption("backup DB is missing.")
+    # the predecessor DB mismatch diagnostic keeps its exact frozen
+    # wording (M10F cells 02/05 pin the database_sha256 token)
+    _verify_manifest_hashed_bytes(
+        db_path, manifest["database_sha256"], what="backup DB",
+        mismatch="backup DB bytes disagree with manifest "
+                 "database_sha256.")
 
     blob_root = root / "blobs"
     for h in manifest["blob_hashes"]:
         path = blob_root / _blob_relative_path(h)
-        if not path.is_file():
+        # IND2-02: the manifest existence probe and hash read are one
+        # narrow filesystem boundary — permission/stat failures
+        # translate to recovery corruption with blob context, never a
+        # raw OS error
+        try:
+            present = path.is_file()
+        except PermissionError as exc:
+            raise RecoveryCorruption(
+                f"backup Blob {h} at {path} is unreadable (permission "
+                "denied) during the storage probe") from exc
+        except OSError as exc:
+            raise RecoveryCorruption(
+                f"backup Blob {h} at {path} could not be probed "
+                f"through a storage error: {exc}") from exc
+        if not present:
             raise RecoveryCorruption(f"backup Blob {h} is missing.")
-        _verify_bytes(path, h)
+        # IND3-01: the manifest layer's own CONTENT read (a successful
+        # probe followed by an open/read failure never leaks a raw OS
+        # exception; a hash mismatch passes through unchanged)
+        _verify_manifest_hashed_bytes(path, h, what="backup Blob")
 
     artifact_root = root / "workflow-artifacts"
     for entry in manifest["workflow_artifacts"]:
         path = _artifact_path(
             artifact_root, entry["kind"], entry["sha256"])
-        if not path.is_file():
+        # F-01: the metadata/existence probe inside a narrow filesystem
+        # boundary — permission/stat failures become recovery corruption
+        # with artifact kind/hash/path context; ordinary absence keeps
+        # the established missing-artifact semantics
+        try:
+            artifact_present = path.is_file()
+        except PermissionError as exc:
+            raise RecoveryCorruption(
+                f"backup workflow artifact {entry['kind']} "
+                f"{entry['sha256']} at {path} is unreadable (permission "
+                "denied) during the storage probe") from exc
+        except OSError as exc:
+            raise RecoveryCorruption(
+                f"backup workflow artifact {entry['kind']} "
+                f"{entry['sha256']} at {path} could not be probed "
+                f"through a storage error: {exc}") from exc
+        if not artifact_present:
             raise RecoveryCorruption(
                 f"backup workflow artifact {entry['kind']} "
                 f"{entry['sha256']} is missing."
             )
-        _verify_bytes(path, entry["sha256"])
+        # IND3-01 adjacent audit: the artifact content read shares the
+        # manifest layer's public-restore leak shape — same wrapper
+        _verify_manifest_hashed_bytes(
+            path, entry["sha256"],
+            what=f"backup workflow artifact {entry['kind']}")
 
 
 def _verify_liveness_equal(db_path: Path, manifest: dict,
@@ -1142,12 +1290,25 @@ def _verify_backup_tree(root: Path, full_liveness: bool) -> dict:
     parsed source manifest instead.
     """
     manifest_path = root / "backup-manifest.json"
+    # F-02: the manifest ACQUISITION boundary — missing stays the
+    # frozen behavior; permission and representative storage failures
+    # translate to recovery corruption with manifest identity/path
+    # context. Everything after the bytes (UTF-8, JSON, canonical
+    # grammar) stays parse_backup_manifest_v1's contract.
     try:
         raw = manifest_path.read_bytes()
     except FileNotFoundError as exc:
         raise RecoveryCorruption(
             f"{root} has no backup-manifest.json."
         ) from exc
+    except PermissionError as exc:
+        raise RecoveryCorruption(
+            f"backup-manifest.json at {manifest_path} is unreadable "
+            "(permission denied) during manifest acquisition") from exc
+    except OSError as exc:
+        raise RecoveryCorruption(
+            f"backup-manifest.json at {manifest_path} could not be "
+            f"read through a storage error: {exc}") from exc
     manifest = parse_backup_manifest_v1(raw)
     _verify_manifest_files(root, manifest)
     if full_liveness:
@@ -1859,7 +2020,8 @@ async def backup(
 
         db_hash, db_bytes = await asyncio.to_thread(_stream_hash, staged_db)
         manifest = build_backup_manifest(
-            database_sha256=db_hash, liveness=liveness)
+            database_sha256=db_hash, liveness=liveness,
+            head=await asyncio.to_thread(_staged_db_head, staged_db))
         (stage / "backup-manifest.json").write_bytes(
             canonical_json_bytes(manifest))
 

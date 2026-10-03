@@ -146,7 +146,7 @@ def template(tmp_path_factory):
     data_dir.mkdir()
     settings = Settings(data_dir=data_dir)
     seeded = _seed_m12_state(data_dir, settings)
-    _stamp_head(data_dir, "0019_m17b_performance_revisions")
+    _stamp_head(data_dir, "0023_m17cc_capture_closure_preimage")
     backup_root = base / "backup"
     asyncio.run(rb.backup(settings, backup_root))
     return {"data_dir": data_dir, "settings": settings, "seed": seeded,
@@ -168,10 +168,10 @@ def env(template, tmp_path):
 
 def test_current_backup_requires_0013_head(template):
     """M12-RECOVERY:01."""
-    assert rb.EXPECTED_ALEMBIC_HEAD == "0019_m17b_performance_revisions"
+    assert rb.EXPECTED_ALEMBIC_HEAD == "0023_m17cc_capture_closure_preimage"
     manifest = json.loads(
         (template["backup_root"] / "backup-manifest.json").read_text())
-    assert manifest["alembic_version"] == "0019_m17b_performance_revisions"
+    assert manifest["alembic_version"] == "0023_m17cc_capture_closure_preimage"
     assert rb.SUPPORTED_RESTORE_ALEMBIC_HEADS == {
         "0011_m10_derived_spatial_execution",
         "0012_m11_reusable_production_revisions",
@@ -182,6 +182,10 @@ def test_current_backup_requires_0013_head(template):
         "0017_m16_intra_shot_consequences",
         "0018_m17a_dialogue_vocal_foundation",
         "0019_m17b_performance_revisions",
+        "0020_m17c_perf_capture_r2",
+        "0021_m17c_shot_performance_mappings",
+        "0022_m17c_schema8_capture",
+        "0023_m17cc_capture_closure_preimage",
     }
 
 
@@ -195,8 +199,10 @@ def test_0013_blob_fk_inventory_remains_exactly_seven_paths(env):
     assert set(rb.M11_BLOB_FK_COLUMNS) <= found  # predecessor seven unchanged
     # the current schema (0018 head) carries the exact
     # eleven-path M17A inventory (frozen R5 §12.1)
-    assert found == set(rb.M17B_BLOB_FK_COLUMNS)
-    assert len(found) == 13
+    assert found == set(rb.M17B_BLOB_FK_COLUMNS) | {
+        # M17C-C slice 1 (13.5): the 14th path at 0022 only
+        ("generation_performance_inputs", "blob_hash")}
+    assert len(found) == 14
     assert ("composition_working_occurrences", "production_revision_id") not in found
 
 
@@ -212,7 +218,7 @@ def test_restore_0013_verifies_composition_snapshots_and_projections(
         n = con.execute("SELECT COUNT(*) FROM composition_revisions").fetchone()[0]
     finally:
         con.close()
-    assert ver == "0019_m17b_performance_revisions"
+    assert ver == "0023_m17cc_capture_closure_preimage"
     assert n == 1
 
 

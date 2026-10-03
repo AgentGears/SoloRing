@@ -628,6 +628,28 @@ async def create_generation_request(
             "that no published workflow can realize",
             status_code=409,
             details={"shot_revision_id": revision.id})
+    # FPR-M17CC-01 (first-pass review): schema 8 wraps the EXACT
+    # predecessor base — a wrapped schema-7 keeps its intra-Shot event
+    # authority, a wrapped schema-5/6 keeps its spatial/observation
+    # authority — but the successor dispatch below reads the OUTER
+    # schema number, so without this gate a legal schema-8 capture
+    # would BYPASS the M16 capability refusal above and silently treat
+    # captured spatial/observation/event predecessor authority as
+    # absent. M17C-D owns Performance translation; until its execution
+    # lane exists, a schema-8 ShotRevision refuses realization HERE —
+    # same contract as the M16 refusal: terminal capability refusal
+    # before any Generation row, GenerationInput, derived artifact,
+    # package publication/queueing, or worker submission. No lowering,
+    # no predecessor-only execution of a performance-bearing revision.
+    if snapshot_schema == 8:
+        raise SoloRingError(
+            ErrorCode.PERFORMANCE_REALIZATION_UNSUPPORTED,
+            "schema-8 ShotRevisions carry captured Performance "
+            "authority beneath the wrap that no published workflow can "
+            "realize until the M17C-D execution lane exists — "
+            "predecessor authority is never silently lowered",
+            status_code=409,
+            details={"shot_revision_id": revision.id})
     if release is not None:
         # the captured revision proved executable: NOW the release bytes
         # take their durable content-addressed place

@@ -78,8 +78,10 @@ def test_h05_no_shotrevision_schema_8():
                    for t in tabs)
     vers = sorted(p.name for p in
                   (SERVER / "alembic" / "versions").glob("*.py"))
-    assert vers[-1] == "0019_m17b_performance_revisions.py"
-    assert not any("schema_8" in v or "0020" in v for v in vers)
+    # M17C-A (successor-admitted): the one migration beyond 0019 is
+    # 0020; schema-8 Shot capture remains a future M17C-C surface.
+    assert vers[-1] == "0023_m17cc_capture_closure_preimage.py"
+    assert not any("schema_8" in v for v in vers)
 
 
 def test_h06_no_generation_workflowspec_performance_schema():
@@ -125,8 +127,31 @@ def test_h06_no_generation_workflowspec_performance_schema():
 
     src = (SERVER / "soloring" / "generation" / "service.py"
            ).read_text(encoding="utf-8", errors="replace")
-    assert "performance" not in src.lower(), \
-        "generation service mentions performance vocabulary"
+    # FPR-M17CC-01: the typed schema-8 realization refusal necessarily
+    # names the Performance plane; assert every occurrence of that
+    # vocabulary belongs to the refusal fence (the fence marker occurs
+    # exactly once and every performance word precedes it)
+    lowered = src.lower()
+    # FPR-M17CC-01: the typed schema-8 realization refusal necessarily
+    # names the Performance plane — every case-insensitive occurrence
+    # of that vocabulary must lie INSIDE the refusal block (the marker
+    # line through the raise's closing parenthesis)
+    marker = lowered.find("performance_realization_unsupported")
+    assert marker >= 0, "the schema-8 refusal fence marker not found"
+    block_start = lowered.rfind("\n", 0, lowered.rfind(
+        "# fpr-m17cc-01", 0, marker))
+    raise_close = lowered.find('details={"shot_revision_id"',
+                               marker)
+    assert raise_close > 0 and ")" in lowered[raise_close:]
+    block_end = lowered.find(")", raise_close) + 1
+    stray = [
+        i for i in range(len(lowered))
+        if lowered.startswith("performance", i)
+        and not (block_start <= i < block_end)
+    ]
+    assert not stray, \
+        "generation service mentions performance semantics beyond " \
+        f"the typed refusal fence (offsets {stray})"
 
     def _assert_no_performance(node, where: str) -> None:
         if isinstance(node, dict):

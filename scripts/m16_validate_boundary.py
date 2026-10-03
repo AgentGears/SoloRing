@@ -46,6 +46,8 @@ M16_SURFACE = (
     r"^server/soloring/api/schemas/shots\.py$",
     r"^server/soloring/recovery/backup\.py$",
     r"^server/soloring/recovery/m16_verifier\.py$",
+    r"^server/soloring/recovery/successor_semantics\.py$",
+    r"^server/soloring/observation/[a-z_]+\.py$",
     r"^server/soloring/db/models\.py$",
     r"^server/soloring/errors\.py$",
     r"^apps/web/src/(components|lib|app|__tests__)/",
@@ -105,6 +107,70 @@ M16_SURFACE = (
     r"^scripts/m17b_validate_proof_map\.py$",
     r"^server/soloring/api/m17b_performance\.py$",
     r"^server/soloring/api/schemas/m17b_performance\.py$",
+    # M17C-A (PR #26): frozen at c502b81 (B-F1 restored its exact
+    # bytes); M17C-B (PR #26, B-F1): the successor working-mapping
+    # migration — reviewed successor surface + successor-maintained
+    # files swept for the head-advance
+    r"^server/soloring/performance/m17c_[a-z_]+\.py$",
+    r"^server/soloring/performance/m17cc_models\.py$",
+    r"^server/soloring/api/m17c_performance\.py$",
+    r"^server/soloring/api/schemas/m17c_performance\.py$",
+    r"^server/soloring/recovery/m17c_verifier\.py$",
+    r"^server/alembic/versions/0020_m17c_perf_capture_r2"
+    r"\.py$",
+    r"^server/alembic/versions/0021_m17c_shot_performance_mappings"
+    r"\.py$",
+    r"^tests/m17c_seed\.py$",
+    r"^tests/test_m17c_[a-z0-9_]+\.py$",
+    r"^SoloRing-PR26-First-Pass-Review-R1\.md$",
+    r"^SoloRing-PR26-Reconciliation-and-Correction-Record\.md$",
+    # M17C-C scope record + slice-1 surfaces
+    r"^SoloRing-M17C-C-Scope-R0\.md$",
+    r"^server/alembic/versions/0022_m17c_schema8_capture"
+    r"\.py$",
+    # FPR-M17CC-04: the closure-preimage successor
+    r"^server/alembic/versions/0023_m17cc_capture_closure_preimage"
+    r"\.py$",
+    r"^tests/test_m17cc_migration\.py$",
+    # M17C-C slice 2 (the coherent performance-plane read)
+    r"^server/soloring/performance/m17cc_capture_read\.py$",
+    r"^tests/test_m17cc_capture\.py$",
+    r"^tests/m17cc_capture_helper\.py$",
+    # M17C-C slice 3 (frozen-companion persistence + winner reuse)
+    r"^tests/test_m17cc_persist\.py$",
+    # M17C-C slice 4 (§12 historical inspection)
+    r"^server/soloring/performance/m17cc_history\.py$",
+    r"^tests/test_m17cc_history\.py$",
+    # M17C-C slice 5 (§13.4-13.6 recovery verifier)
+    r"^tests/test_m17cc_recovery\.py$",
+    # M17C-C slice 6 (§1.7 backup/restore + downgrade closure)
+    r"^tests/test_m17cc_roundtrip\.py$",
+    # FPR-M17CC correction battery
+    r"^tests/test_m17cc_fpr_corrections\.py$",
+    # RR-M17CC correction battery
+    r"^tests/test_m17cc_rr_corrections\.py$",
+    # RR2-M17CC correction battery
+    r"^tests/test_m17cc_rr2_corrections\.py$",
+    # RR3-M17CC correction battery
+    r"^tests/test_m17cc_rr3_corrections\.py$",
+    # RR4-M17CC correction battery
+    r"^tests/test_m17cc_rr4_corrections\.py$",
+    # RR5-M17CC correction battery
+    r"^tests/test_m17cc_rr5_corrections\.py$",
+    # RR6-M17CC correction battery
+    r"^tests/test_m17cc_rr6_corrections\.py$",
+    # RR7-M17CC correction battery
+    r"^tests/test_m17cc_rr7_corrections\.py$",
+    # RR8-M17CC correction battery
+    r"^tests/test_m17cc_rr8_corrections\.py$",
+    # RR9-M17CC correction battery
+    r"^tests/test_m17cc_rr9_corrections\.py$",
+    # RR10-M17CC correction battery
+    r"^tests/test_m17cc_rr10_corrections\.py$",
+    # SR-M17CC second-review correction battery
+    r"^tests/test_m17cc_sr_corrections\.py$",
+    r"^tests/test_post_m13_next_security\.py$",
+    r"^tests/test_m14_base_corpus\.py$",
 
     # reviewed successor carves from the M16 correction rounds:
     # predecessor-test era head-pins/migration expectations, the m10f
@@ -150,6 +216,9 @@ FORBIDDEN_PATTERNS = [
 # M16 behavior there — every ADDED line in its diff must belong to the
 # schema-7 refusal fence vocabulary
 GENERATION_FENCE_OK = "INTRA_SHOT_REALIZATION_UNSUPPORTED"
+# FPR-M17CC-01: the schema-8 successor refusal is the same fence
+# family — capability refusal, never M16 semantics
+GENERATION_FENCE_OK_8 = "PERFORMANCE_REALIZATION_UNSUPPORTED"
 
 
 def generation_diff_is_fence_only() -> list[str]:
@@ -168,10 +237,14 @@ def generation_diff_is_fence_only() -> list[str]:
             continue
         if any(k in body for k in (
                 "INTRA_SHOT", "intra_shot", "schema_7", "schema 7",
-                "REALIZATION", "SoloRingError", "status_code=409",
+                "schema_8", "schema 8", "PERFORMANCE", "Performance",
+                "M17C-D", "REALIZATION", "SoloRingError",
+                "status_code=409",
                 "details=", "ErrorCode", "_artifact_store",
                 "WorkflowArtifactStore", "release", '"events"',
-                "ShotRevision", "no published workflow")):
+                "ShotRevision", "no published workflow", "snapshot_schema",
+                "predecessor", "lowered", "captured", "authority",
+                "wrapped", "lane", "exists", "beneath")):
             continue
         offenders.append(body.strip()[:70])
     return offenders
@@ -183,6 +256,41 @@ def git_changed_files() -> list[str]:
         cwd=REPO, capture_output=True, text=True, check=True,
     )
     return [f for f in out.stdout.splitlines() if f.strip()]
+
+
+def schema8_fence_check(src: str) -> list[str]:
+    """RR-M17CC-04 (re-review): POSITIVELY certify the schema-8
+    Generation refusal — a narrowly anchored structural check, not a
+    keyword allowlist. The gate fails when the fence is absent, or
+    when it sits below the first Generation-owned durable side effect
+    (the release placement) on the source line order.
+    """
+    problems: list[str] = []
+    token = "PERFORMANCE_REALIZATION_UNSUPPORTED"
+    fence = src.find(token)
+    if fence < 0:
+        problems.append(
+            "the schema-8 fail-closed realization refusal "
+            f"({token}) is absent from the generation service")
+        return problems
+    gate = src.rfind("if snapshot_schema == 8:", 0, fence)
+    if gate < 0 or fence - gate > 2000:
+        problems.append(
+            "the schema-8 refusal is not anchored to its "
+            "'if snapshot_schema == 8:' gate")
+    durable = src.find(
+        "        await _artifact_store.place_release(release)")
+    if durable >= 0 and fence > durable:
+        problems.append(
+            "the schema-8 refusal sits below the first "
+            "Generation-owned durable side effect (release "
+            "placement)")
+    raise_kw = src.rfind("raise SoloRingError(", 0, fence)
+    if raise_kw < 0 or fence - raise_kw > 400:
+        problems.append(
+            "the schema-8 fence marker is not part of a raise "
+            "statement")
+    return problems
 
 
 def main() -> int:
@@ -206,6 +314,9 @@ def main() -> int:
                     errors.append(
                         "generation/service.py: fail-closed schema-7 "
                         "fence absent")
+                for off in schema8_fence_check(text):
+                    errors.append(
+                        "generation/service.py: " + off)
                 for off in generation_diff_is_fence_only():
                     errors.append(
                         "generation/service.py: added line outside the "

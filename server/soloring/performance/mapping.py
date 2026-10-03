@@ -19,8 +19,11 @@ from soloring.domain.ids import new_uuid
 from soloring.errors import ErrorCode, SoloRingError, not_found
 from soloring.performance.models import (ShotVocalSegmentMapping,
                                          VocalPerformanceSelection)
-from soloring.performance.temporal import (RationalError,
-                                           canonical_rational, shot_ms)
+from soloring.performance.temporal import (PositionError,
+                                           RationalError,
+                                           canonical_rational,
+                                           shot_ms,
+                                           validate_mapping_position)
 from soloring.performance.vocal import get_vocal_performance_revision
 
 
@@ -33,9 +36,15 @@ async def put_shot_vocal_segment_mapping(
         shot_anchor_num: int, shot_anchor_den: int
         ) -> ShotVocalSegmentMapping:
     from soloring.domain.models import Shot
-    if position < 0:
+    # IR-04: the shared position-domain law runs BEFORE any ORM or
+    # SQLite access; failures keep this service's established 4xx
+    # vocabulary (an unbounded Python int would otherwise reach SQLite
+    # and surface as a raw OverflowError)
+    try:
+        validate_mapping_position(position)
+    except PositionError as exc:
         raise SoloRingError(ErrorCode.INVALID_SAMPLE_INTERVAL,
-                            "position must be >= 0", status_code=422)
+                            str(exc), status_code=422) from exc
     shot = await session.get(Shot, shot_id)
     if shot is None:
         raise not_found(ErrorCode.SHOT_NOT_FOUND,
@@ -58,10 +67,19 @@ async def put_shot_vocal_segment_mapping(
                             "Shot and VP resolve to different projects",
                             status_code=422)
     # M17A working-readiness: mapping may reference only the explicitly
-    # selected VP for its own DialogueLineRevision
+    # selected VP for its own DialogueLineRevision. SR2-07 split: a
+    # MISSING selection row is corruption (every DLR is created with
+    # one — the same law as the M17A readiness/read paths); a LAWFUL
+    # UNSET or different selection keeps the admission-shaped 409.
     sel = await session.get(VocalPerformanceSelection, rev.id)
-    if sel is None or \
-            sel.selected_vocal_performance_revision_id != vp.id:
+    if sel is None:
+        raise SoloRingError(
+            ErrorCode.INTERNAL_INVARIANT_VIOLATION,
+            f"DialogueLineRevision {rev.id!r} has no selection row — "
+            "every revision is created with one; this is corruption, "
+            "not a readiness state",
+            status_code=500)
+    if sel.selected_vocal_performance_revision_id != vp.id:
         raise SoloRingError(
             ErrorCode.VOCAL_MAPPING_SELECTION_STALE,
             "the referenced VocalPerformanceRevision is not the "
@@ -164,6 +182,14 @@ async def put_shot_vocal_segment_mapping(
 
 async def delete_shot_vocal_segment_mapping(
         session: AsyncSession, *, shot_id: str, position: int) -> None:
+    # IR-04: the shared position-domain law on the DELETE path too —
+    # stable 4xx BEFORE any storage access; 2^63-1 stays DB-safe and
+    # the delete of an absent position stays an idempotent no-op.
+    try:
+        validate_mapping_position(position)
+    except PositionError as exc:
+        raise SoloRingError(ErrorCode.INVALID_SAMPLE_INTERVAL,
+                            str(exc), status_code=422) from exc
     row = await session.get(ShotVocalSegmentMapping, (shot_id, position))
     if row is not None:
         await session.delete(row)
@@ -196,3 +222,152 @@ async def list_shot_vocal_segment_mappings(
             "current_readiness": readiness,
             "created_at": r.created_at, "updated_at": r.updated_at})
     return out
+
+
+# ---------------------------------------------------------------------------
+# RR2-M17CC-01 (third first-pass review): the ONE shared, transport-
+# neutral persisted structural law for a PRESENT ShotVocalSegmentMapping.
+# The live capture/readiness path and the M17A recovery verifier consume
+# the SAME document reconstruction so the two definitions cannot drift;
+# each caller keeps its own transport and error vocabulary.
+# ---------------------------------------------------------------------------
+
+def vocal_mapping_canonical_document(
+        *, vocal_performance_revision_id: str,
+        source_start_sample: int,
+        source_end_sample_exclusive: int,
+        sample_rate_hz: int,
+        performance_origin_num: int, performance_origin_den: int,
+        shot_anchor_num: int, shot_anchor_den: int) -> dict:
+    """The exact canonical vocal mapping document reconstructed from a
+    stored row's OWN fields (the grammar the M17A PUT writes)."""
+    return {
+        "mapping_schema_version": 1,
+        "vocal_performance_revision_id": vocal_performance_revision_id,
+        "source_start_sample": source_start_sample,
+        "source_end_sample_exclusive": source_end_sample_exclusive,
+        "sample_rate_hz": sample_rate_hz,
+        "performance_origin_ms": {
+            "num": performance_origin_num,
+            "den": performance_origin_den},
+        "shot_anchor_ms": {"num": shot_anchor_num,
+                           "den": shot_anchor_den},
+    }
+
+
+def verify_stored_vocal_mapping(
+        *, mapping_schema_version, mapping_json: str, mapping_hash: str,
+        position,
+        vocal_performance_revision_id: str,
+        source_start_sample,
+        source_end_sample_exclusive,
+        sample_rate_hz,
+        performance_origin_num, performance_origin_den,
+        shot_anchor_num, shot_anchor_den) -> None:
+    """Fail closed (raising ValueError with a precise reason) unless a
+    PRESENT vocal mapping row satisfies its complete persisted canonical
+    law: mapping_schema_version == 1, the stored mapping_json IS EXACTLY
+    the canonical serialized form (byte identity, per the frozen 11.4
+    noncanonical-BYTES refusal — RR3-M17CC-01: decoding alone proves
+    semantic equality, not canonical serialization; a pretty-printed,
+    reordered, or duplicate-key form that decodes to the canonical
+    document is NOT a serialization the canonical writer could emit),
+    and mapping_hash IS that document's canonical digest. Never
+    repairs, normalizes, reserializes-and-accepts, or substitutes the
+    row. Parsing is used ONLY to differentiate diagnostics, never as
+    the certification."""
+    import json as _json
+
+    canonical = vocal_mapping_canonical_document(
+        vocal_performance_revision_id=vocal_performance_revision_id,
+        source_start_sample=source_start_sample,
+        source_end_sample_exclusive=source_end_sample_exclusive,
+        sample_rate_hz=sample_rate_hz,
+        performance_origin_num=performance_origin_num,
+        performance_origin_den=performance_origin_den,
+        shot_anchor_num=shot_anchor_num,
+        shot_anchor_den=shot_anchor_den)
+    if mapping_schema_version != 1:
+        raise ValueError(
+            "mapping_schema_version is not the frozen 1")
+    # RR5-M17CC-02: the law is TOTAL over SQLite storage classes —
+    # every persisted scalar is certified to be an actual non-bool
+    # integer in its lawful domain BEFORE any arithmetic, hashing
+    # assumption, or Fraction use (INTEGER affinity + numeric CHECKs
+    # admit non-integral REALs; a 48000.5 coordinate or a REAL
+    # denominator must fail as the typed structural law, never escape
+    # through math.gcd/Fraction as a raw TypeError/OverflowError, and
+    # never certify). Position uses the ONE shared domain primitive;
+    # the rational pairs use the ONE shared canonical-rational
+    # primitive (actual integer pair, positive denominator, gcd
+    # reduction, canonical zero, signed-64-bit bounds) — the persisted
+    # row must ALREADY be that canonical form.
+    from soloring.performance.temporal import (
+        RationalError, canonical_rational, validate_mapping_position,
+    )
+
+    try:
+        validate_mapping_position(position)
+    except ValueError as exc:
+        raise ValueError(f"position {position!r} is outside the "
+                         f"persisted integer domain: {exc}") from exc
+    for what, value, lawful in (
+            ("source_start_sample", source_start_sample,
+             lambda v: v >= 0),
+            ("source_end_sample_exclusive",
+             source_end_sample_exclusive, lambda v: v >= 0),
+            ("sample_rate_hz", sample_rate_hz, lambda v: v > 0),
+    ):
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError(
+                f"{what} {value!r} is not a persisted integer "
+                "(non-integral SQLite storage class)")
+        if not lawful(value):
+            raise ValueError(
+                f"{what} {value!r} is outside its persisted domain")
+    if not (source_start_sample < source_end_sample_exclusive):
+        raise ValueError(
+            f"sample interval [{source_start_sample!r}, "
+            f"{source_end_sample_exclusive!r}) is not ordered")
+    for what, n, d in (
+            ("performance_origin_ms", performance_origin_num,
+             performance_origin_den),
+            ("shot_anchor_ms", shot_anchor_num, shot_anchor_den),
+    ):
+        if (isinstance(n, bool) or not isinstance(n, int)
+                or isinstance(d, bool) or not isinstance(d, int)):
+            raise ValueError(
+                f"{what} rational {n!r}/{d!r} is not a persisted "
+                "integer pair (non-integral SQLite storage class)")
+        try:
+            reduced = canonical_rational(n, d)
+        except RationalError as exc:
+            raise ValueError(
+                f"{what} rational {n!r}/{d!r} fails the canonical "
+                f"rational law: {exc}") from exc
+        if reduced != (n, d):
+            raise ValueError(
+                f"{what} rational {n}/{d} is not in canonical "
+                "reduced form")
+    # the CERTIFYING law: exact canonical serialized identity
+    canonical_bytes = canonical_json_str(canonical)
+    if mapping_json != canonical_bytes:
+        # diagnostic-only parse: distinguish a semantic forgery from a
+        # semantically identical but NONCANONICAL serialization
+        try:
+            doc = _json.loads(mapping_json)
+        except (ValueError, TypeError) as exc:
+            raise ValueError(
+                f"mapping_json is not the canonical serialized form "
+                f"and is not decodable JSON: {exc}") from exc
+        if doc != canonical:
+            raise ValueError(
+                "mapping_json is not the canonical document over the "
+                "row's own fields")
+        raise ValueError(
+            "mapping_json decodes to the canonical document but is "
+            "not its canonical serialized form")
+    if canonical_hash(canonical) != mapping_hash:
+        raise ValueError(
+            "mapping_hash is not the canonical digest of the row's "
+            "own mapping document")

@@ -199,6 +199,7 @@ def build_capturable_snapshot(
     shot, refs, resolved: list[ResolvedDependency], feature_states=(),
     relation_states=(), visual_pack=None, spatial_pack=None,
     production_world_pack=None, intra_shot_pack=None,
+    performance_pack=None,
 ) -> tuple[dict, dict | None]:
     """(snapshot value, continuity spec or None) from ONE captured value.
 
@@ -239,24 +240,32 @@ def build_capturable_snapshot(
                 "zero-dependency shot — the schema lattice declares "
                 "this cell unreachable."
             )
-        return build_snapshot(shot, refs), None
-    v1 = build_snapshot(shot, refs)
-    if not states and not relations:
-        spec = build_continuity_spec(deps)
-        base = {"schema_version": 4 if visual_pack else 2,
-                "intent": v1["intent"],
-                "references": v1["references"],
-                "continuity": spec}
-        if visual_pack:
-            base["visual_reference_pack"] = visual_pack
+        if performance_pack is None:
+            return build_snapshot(shot, refs), None
+        # FPR-M17CC-07 (first-pass review): schema 8 wraps the exact
+        # predecessor base for ANY schema 1-7 — including the
+        # zero-dependency schema-1 cell. Fall through to the
+        # Performance wrapper instead of returning the unwrapped base.
+        base = build_snapshot(shot, refs)
+        spec = None
     else:
-        spec = build_continuity_spec_v2(deps, states, relations)
-        base = {"schema_version": 4 if visual_pack else 3,
-                "intent": v1["intent"],
-                "references": v1["references"],
-                "continuity": spec}
-        if visual_pack:
-            base["visual_reference_pack"] = visual_pack
+        v1 = build_snapshot(shot, refs)
+        if not states and not relations:
+            spec = build_continuity_spec(deps)
+            base = {"schema_version": 4 if visual_pack else 2,
+                    "intent": v1["intent"],
+                    "references": v1["references"],
+                    "continuity": spec}
+            if visual_pack:
+                base["visual_reference_pack"] = visual_pack
+        else:
+            spec = build_continuity_spec_v2(deps, states, relations)
+            base = {"schema_version": 4 if visual_pack else 3,
+                    "intent": v1["intent"],
+                    "references": v1["references"],
+                    "continuity": spec}
+            if visual_pack:
+                base["visual_reference_pack"] = visual_pack
     if spatial_pack is not None:
         # M10D §48-49: any non-empty M10 pack wraps the exact lower
         # semantic base as schema 5 (M8 present or absent). No empty
@@ -293,23 +302,98 @@ def build_capturable_snapshot(
                 **{k: v for k, v in base.items()
                    if k != "schema_version"},
                 "intra_shot": intra_shot_pack}
+    if performance_pack is not None:
+        # M17C-C slice 2 (frozen R4 11.2): schema 8 wraps the EXACT
+        # predecessor base (any of schemas 1-7) with the canonical
+        # non-empty performance block. PURE schema construction — the
+        # builder consumes only the in-memory capture value; it never
+        # queries persistence, readiness, mappings, or bindings.
+        segments = _performance_segments_value(performance_pack)
+        base = {"schema_version": 8,
+                **{k: v for k, v in base.items()
+                   if k != "schema_version"},
+                # RR-M17CC-03: grammar v2 — the block carries the
+                # mapping hashes + preimage, snapshot-anchored
+                "performance": {"schema_version": 2,
+                                "segments": segments}}
     return base, spec
+
+
+def _performance_segments_value(performance_pack) -> list[dict]:
+    """The embedded performance.segments value under the frozen 11.2
+    grammar: non-empty, canonically ordered by position, uniform closed
+    vocal grammar (complete vocal object or explicit null). PURE
+    projection of the frozen embedded keys from each captured segment —
+    the read value may carry extra projection keys (blob/mapping
+    hashes) that only companion persistence consumes; the SNAPSHOT
+    embeds exactly the frozen 11.2 shape. Structural internal
+    invariants over an IN-MEMORY captured value — the caller (the one
+    capture read) is their single producer."""
+    from soloring.errors import internal_invariant
+
+    if not isinstance(performance_pack, dict):
+        raise internal_invariant(
+            "performance_pack must be the capture-read value dict")
+    segments = performance_pack.get("segments")
+    if not segments:
+        raise internal_invariant(
+            "schema-8 wrap requires a non-empty performance block — "
+            "no mapping means the exact predecessor snapshot")
+    positions = [s["position"] for s in segments]
+    if positions != sorted(positions) or len(set(positions)) != len(
+            positions):
+        raise internal_invariant(
+            "performance segments must be canonically ordered by "
+            "unique position")
+    # RR-M17CC-03 (grammar v2): the builder delegates to the ONE
+    # shared embedded projection in m17cc_capture_read — fourteen
+    # frozen keys including the two mapping hashes and their preimage,
+    # so the snapshot itself anchors the mapping identity
+    from soloring.performance.m17cc_capture_read import (
+        EMBEDDED_SEGMENT_KEYS, _embedded_segment,
+    )
+    value = []
+    for s in segments:
+        core_keys = {k for k in EMBEDDED_SEGMENT_KEYS
+                     if k != "vocal_performance_origin_ms"}
+        if not core_keys <= set(s):
+            raise internal_invariant(
+                "captured performance segment lacks a frozen "
+                "grammar-v2 field")
+        if s["vocal"] is not None and not (
+                {"vocal_performance_revision_id", "vocal_binding_hash",
+                 "source_start_sample", "source_end_sample_exclusive",
+                 "sample_rate_hz"} <= set(s["vocal"])):
+            raise internal_invariant(
+                "performance segment vocal grammar diverges from "
+                "the frozen 11.2 shape")
+        value.append(_embedded_segment(s))
+    return value
 
 
 def effective_working_snapshot_hash(
     shot, refs, resolved: list[ResolvedDependency], feature_states=(),
     relation_states=(), visual_pack=None, spatial_pack=None,
     production_world_pack=None, intra_shot_pack=None,
+    performance_pack=None,
 ) -> str:
     """The Shot's effective working hash (M6-F15 + M7C §10.4 + M7D §10.2).
 
     Includes current approvals AND current effective Feature AND Relation
     states: mutating any of them changes this hash without any Shot-row
     mutation. Delegates to THE builder — never a second hash
-    implementation."""
+    implementation.
+
+    FPR-M17CC-02 (first-pass review): the Performance plane participates
+    through the same builder capture uses — ``differs_from_approved``
+    assumes this hash was built by the canonical capture construction,
+    so a schema-8 canon revision must compare equal against unchanged
+    Performance state, and a Performance-only change must move it. None
+    keeps the exact predecessor bytes."""
     snapshot, _ = build_capturable_snapshot(
         shot, refs, resolved, feature_states, relation_states, visual_pack,
         spatial_pack, production_world_pack, intra_shot_pack,
+        performance_pack,
     )
     return canonical_hash(snapshot)
 
