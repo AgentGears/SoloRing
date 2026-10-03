@@ -1008,3 +1008,27 @@ SR-01 sparse-PUT adversary (blocked classification asserted, 409 capture, zero n
 ## Fences honored
 
 No Codex/second review beyond the one already reconciled; no merge/ready; PR #26 remains draft, unmerged, unready. Green gates are corroboration only — SR-M17CC-01..05 are not closed by this implementation: the corrected implementation HEAD gets a **fresh independent first-pass review** next, per the commission.
+
+---
+
+# M17C-C fourteenth first-pass review — 2026-10-03 — NOT CLEAN (SR-M17CC-03 remains OPEN at Medium)
+
+The fresh independent first-pass review of the corrected executable tree is complete — executable head **`5c71022a312cb98c41f1b0f2d38ffb6f59813027`**, implementation commit **`6bc1ac430c78b493ce66e9d56792309756a0b146`**, with **`d9f56e58979ab1b60c1604935cc0ecffe9f78869`** confirmed documentation-only above it. PR #26 still open, draft, unmerged (base `d893d65c343777b6711c0f772e2059ce273e985f`). No Codex/second-review run occurred. **Verdict: NOT CLEAN — 0 High / 1 Medium / 0 Low.**
+
+## Register resolution (frozen by the review)
+
+- **SR-M17CC-01: CLOSED** — the density gate is effective (a sparse working set survives as lawful working data but every row is reclassified `BLOCKED_POSITIONS_NOT_DENSE`, so `resolve_performance_plane()` cannot treat it as capturable); the dense `[0..n-1]` historical grammar remains unchanged, the correct boundary.
+- **SR-M17CC-02: CLOSED** — §12 rejects bool/non-int rational storage, runs the shared canonicalization primitive, requires the persisted representation itself to be canonical, rejects empty/inverted captured intervals, and checks generic captures against the immutable PR domain; no remaining history/recovery divergence in the commissioned timing cases.
+- **SR-M17CC-03: NOT CLOSED — Medium (residual).** The decisive `position:false` path is fixed, but the frozen finding explicitly identified the broader Python cross-type equality class, not only position: **the snapshot-anchored vocal-origin preimage still uses ordinary comparisons** in `verify_mapping_hash_closure()` and in recovery (`row["vocal_performance_origin_num"] != embedded_origin["num"]` and the denominator equivalent) — a child integer origin `0/1` still compares equal to embedded JSON `false/1.0`. A coherent adversary can leave the child and its `vocal_mapping_hash` based on integer `0/1`, rewrite only the embedded origin scalar type, and recompute `segment_json`/hash, parent spec bytes/hash, and outer snapshot bytes/hash; both §12 and recovery accept the origin comparison because Python evaluates `0 == False` and `1 == 1.0` as true — the immutable serialized preimage and relational projection remain only Python-value-equivalent at this coordinate, not type-exact. **The same seam has a second failure manifestation:** `_verify_embedded_grammar()` does not validate the shape of `vocal_performance_origin_ms` or the nested timing rational objects before later code subscripts `["num"]`/`["den"]` — a coherently rehashed embedded `"vocal_performance_origin_ms": false` reaches `embedded_origin["num"]` and raises a raw `TypeError`; similarly a malformed `performance_start_ms` object can fail while the projection tuple is being constructed. Recovery therefore still has a malformed-captured-JSON route that escapes `RECOVERY_CORRUPTION`, and §12 does not convert it through its typed internal-invariant contract.
+- **SR-M17CC-04: CLOSED** — §12 proves PR→Shot project coherence for every child and, before exposing dialogue VP fields, speaker/subject, native-rate, trim containment, and dialogue-lineage project coherence; the new reads remain historical/immutable lineage reads, not current selection or working-mapping reads.
+- **SR-M17CC-05: CLOSED** — GPI recovery certifies the two integer coordinates and all hash-string storage classes before arithmetic, slicing, `len`, or `.strip`; the 64-byte BLOB and REAL-coordinate escape routes are closed through typed corruption.
+
+The committed green evidence verified internally consistent but remains corroboration only; the review independently confirmed CI `37124494037` succeeded (focused backend 107 passed; full backend 3103 passed / 20 skipped; frontend 143/143 with `tsc --noEmit` and a successful production build).
+
+## Required narrow correction (as frozen by the review)
+
+Extend the shared type-exact law to the snapshot-anchored vocal-origin preimage, and validate the closed nested rational/origin object grammar before any subscripting. Decisive regressions: an embedded `origin.num: false` versus relational integer `0` with the whole hash chain recomputed, plus a non-object nested rational/origin adversary proving §12 returns typed internal corruption and recovery returns `RECOVERY_CORRUPTION` — never raw `TypeError`.
+
+## Frozen disposition
+
+**FIRST-PASS REVIEW COMPLETE — NOT CLEAN. SR-M17CC-01, -02, -04 and -05 CLOSED; SR-M17CC-03 remains OPEN at Medium. No Codex/second review is authorized at this state. PR #26 remains draft, unmerged, unready; no correction has been started by this review — the residual SR-03 correction awaits its gate.**
