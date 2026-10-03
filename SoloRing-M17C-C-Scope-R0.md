@@ -1032,3 +1032,29 @@ Extend the shared type-exact law to the snapshot-anchored vocal-origin preimage,
 ## Frozen disposition
 
 **FIRST-PASS REVIEW COMPLETE — NOT CLEAN. SR-M17CC-01, -02, -04 and -05 CLOSED; SR-M17CC-03 remains OPEN at Medium. No Codex/second review is authorized at this state. PR #26 remains draft, unmerged, unready; no correction has been started by this review — the residual SR-03 correction awaits its gate.**
+
+---
+
+# M17C-C SR-M17CC-03 residual correction — 2026-10-03 — IMPLEMENTED
+
+The commissioned residual correction (strictly the fourteenth-review frozen Medium) is complete. Correction head: **`cbf599c`** (implementation + the residual battery appended to the existing `tests/test_m17cc_sr_corrections.py` — no new test file, therefore no validator admission was required; implementation/tests were committed before any gate).
+
+## Delivered (the commission exactly)
+
+1. **The remaining type-exact projection seam is closed.** The snapshot-anchored `vocal_performance_origin_ms.num`/`.den` comparisons in BOTH consumers — §12's `verify_mapping_hash_closure()` and recovery's child preimage block — now go through the ONE shared `exact_projection_equal` law: the immutable embedded JSON value and the relational projection must agree in both value AND lawful type; `False == 0`, `True == 1`, and `1.0 == 1` never satisfy captured identity at this coordinate.
+2. **The malformed nested-grammar escape is closed.** A NEW shared `embedded_rational_shape_error` validates that the nested captured objects required by the schema-8 segment grammar — `performance_start_ms`, `performance_end_ms`, `shot_anchor_ms`, and a non-null `vocal_performance_origin_ms` — are each an actual `{num, den}` object BEFORE any `["num"]`/`["den"]` access. It is wired into `_verify_embedded_grammar()` (§12: typed internal-invariant, "carries a malformed nested value") and the START of recovery's `_verify_m17cc_child` (typed `RECOVERY_CORRUPTION`, "carries a malformed nested captured value"). Malformed embedded JSON terminates through the existing typed contracts on both surfaces — no raw `TypeError`/`KeyError` can escape.
+3. **The decisive regressions, exactly as commissioned.** (a) The coherent `origin.num: 0 → false` rewrite — the relational child left at integer `0/1`, its mapping hashes rebuilt from the row's own untouched integer preimage, the complete segment/spec/snapshot hash chain recomputed — is refused by BOTH §12 and recovery with the origin-preimage disagreement message; the lawful dialogue-bound control was proven green immediately BEFORE the tamper. (b) The non-object nested adversaries (`vocal_performance_origin_ms: false` and `performance_start_ms: false`, with the surrounding canonical hashes refreshed by a bytes-only coherent rewriter that leaves every relational column untouched) fail typed on both surfaces — §12 through the internal-invariant contract, recovery as `RECOVERY_CORRUPTION` — never a raw Python exception.
+4. **No broadening.** Capture grammar, readiness, PF-02/PF-03 authority, mapping semantics, schema/storage, migrations, Generation behavior, and error vocabulary untouched. SR-01/02/04/05 and all earlier FPR/RR closures re-proved green (below); no executable regression of any prior law was demonstrated.
+
+## Gates (first-run dispositions recorded exactly)
+
+- Extended SR battery **13/13 on FIRST run** (the three residual tests green on first run — no fixture corrections, no re-runs after edits).
+- Directly endangered batteries first: history/recovery/capture/persist/roundtrip/migration + the SR battery **92/92**; prior type-totality + correction + live-seam batteries (RR/RR2–RR10 incl. RR5's mapping totality and RR7's read-isolation guard, FPR, shot mapping, sr26) **114/114**.
+- Committed-tree validators **21/21 green** (no validator change — the residual battery lives in the already-admitted SR battery file).
+- Frontend green (vitest 143/143 + tsc + build).
+- Local full backend suite, FIRST RUN: **3099 passed / 8 skipped / 0 failed in 49:40, exit 0** (collection 3107 = the prior 3104 + the 3 residual tests — exact).
+- **CI run `37152752470` on `cbf599c`: SUCCESS, attempt 1 — Backend 3106 passed / 20 skipped / 0 failed** (CI total 3126 = its prior 3123 + the 3 residual tests, exact); Frontend green attempt 1. Corroboration only.
+
+## Fences honored
+
+No Codex/second review; no ready-mark; no merge; PR #26 remains draft, unmerged, unready. **This correction does not close SR-M17CC-03** — the work now stops and holds for the **fifteenth fresh independent first-pass review** of the corrected head.
