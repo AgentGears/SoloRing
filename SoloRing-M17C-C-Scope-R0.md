@@ -929,3 +929,20 @@ The commissioned proof-only correction is complete. Correction head: **`83d5c99`
 ## Fences honored
 
 No product source change; no Codex/second review; no merge/ready; PR #26 remains draft, unmerged, unready. RR11 is NOT closed by editing prose or by the green proof — a thirteenth fresh independent first-pass review must independently verify both corrected prose and the executable evidence before closing it.
+
+---
+
+# M17C-C thirteenth first-pass review — 2026-10-03 — CLEAN (no new register)
+
+The independent fresh review of proof HEAD `83d5c99` (record `6ad263e`; no Codex/second reviewer) is complete. **Verdict: CLEAN — 0 High / 0 Medium / 0 Low. No new findings register.**
+
+## Register status
+
+- **RR11-M17CC-01: CLOSED** — the proof-only correction is complete and accurate: the previously inverted statement is corrected in the RR10 record (`bytes != str` evaluates to `True`, so malformed BLOB/`bytes` serialized fields make the existing `!=` guards true and enter the typed divergence branches). The executable evidence verified substantive: `83d5c99` modifies only `tests/test_m17cc_rr10_corrections.py` (no product source changed); the two new cases independently exercise `binding_json` and `binding_hash` as `bytes`, assert the actual Python comparison premise, require `CATEGORY_BINDING_JSON`/`CATEGORY_BINDING_HASH`, and pin PF-03 to the unchanged RR8 message `M17C vocal binding canonical bytes/hash diverge`; the correction record accurately describes that proof and explicitly keeps RR10 closed.
+- **RR10, RR9, RR8, RR7, and all earlier FPR/RR findings remain CLOSED.** No regression found in the shared binding law: VP identity remains certified before serialization; all document-bearing numeric values are type/domain-certified; canonical rational certification remains before document construction; `binding_json`/`binding_hash` comparisons are exception-safe over malformed storage classes; the five RR8 mappings unchanged; no new duplicate grammar or altered transport contract.
+- **Evidentiary distinction examined and accepted:** the new tests are unit-level Python-`bytes` cases rather than another `typeof(...) = 'blob'` database adversary — sufficient for this frozen proof defect because the disputed proposition was Python comparison behavior; and the storage representation is reachable, not artificial (the physical schema leaves both serialized fields as TEXT-affinity values; a 64-byte ASCII BLOB can satisfy the existing `binding_hash` length/hex CHECK; SQLite/SQLAlchemy returns such BLOB values as Python `bytes`).
+- **Repository discipline intact:** PR #26 open, draft, unmerged; current tip is record-only `6ad263e`; exact proof head `83d5c992b00f84a7cf31feb75d7dcc5cc532b02d`; `283f5fd → 83d5c99` changes only the RR10 test file; `83d5c99 → 6ad263e` changes only this record. CI `37076818197` independently corroborated on synthetic merge `1e311b3` of the exact proof head into unchanged base `d893d65` (focused M17C 107 passed; full backend 3093 passed / 20 skipped; frontend 143/143; typecheck clean; production build successful). The recorded local/full gate arithmetic verified internally consistent (3086/8 with collection 3094, exactly +2 from the prior tree).
+
+## Frozen disposition
+
+**FIRST-PASS REVIEW COMPLETE — CLEAN. No new findings register. RR11-M17CC-01 CLOSED; RR10, RR9, RR8, RR7, and all earlier FPR/RR findings remain CLOSED.** This is the FIRST clean independent first-pass state after the correction sequence (FPR 8 → RR 4 → RR2 → RR3 → RR4 → RR5 → RR6 → RR7 → RR8 → RR9 → RR10 → RR11, every register corrected under an explicit commission and re-reviewed). The project is **eligible for the Codex/second-review phase — NOT run**. PR #26 remains draft, unmerged, unready; **merge/ready authorization remains withheld pending the user's next explicit gate.**
