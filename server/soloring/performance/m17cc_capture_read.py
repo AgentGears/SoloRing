@@ -104,6 +104,29 @@ def exact_projection_equal(relational_value, embedded_value) -> bool:
     return relational_value == embedded_value
 
 
+def embedded_rational_shape_error(seg: dict) -> str | None:
+    """SR-M17CC-03 (residual): the nested rational objects of the
+    frozen schema-8 segment grammar — ``performance_start_ms`` /
+    ``performance_end_ms`` / ``shot_anchor_ms``, and a non-null
+    ``vocal_performance_origin_ms`` — must each be an actual
+    ``{num, den}`` object BEFORE any ``["num"]``/``["den"]`` access.
+    Returns the precise violation, or ``None`` when the shapes are
+    lawful. Malformed embedded JSON terminates through each
+    consumer's typed contract (§12's internal invariant / recovery's
+    RECOVERY_CORRUPTION), never a raw TypeError/KeyError."""
+    for key in ("performance_start_ms", "performance_end_ms",
+                "shot_anchor_ms"):
+        value = seg.get(key)
+        if not isinstance(value, dict) or set(value) != {"num", "den"}:
+            return f"{key} {value!r} is not the frozen rational object"
+    origin = seg.get("vocal_performance_origin_ms")
+    if origin is not None and (not isinstance(origin, dict)
+                               or set(origin) != {"num", "den"}):
+        return (f"vocal_performance_origin_ms {origin!r} is not the "
+                "frozen rational object")
+    return None
+
+
 def embedded_performance_value(performance_pack) -> dict:
     """The canonical embedded ``performance`` block: grammar v2 +
     the position-ordered projection of the frozen keys from each
@@ -567,10 +590,16 @@ def verify_mapping_hash_closure(row, where: str, seg=None) -> None:
                     f"{where} vocal performance-origin preimage "
                     "disagrees with the snapshot-anchored embedded "
                     "segment")
-        elif (row["vocal_performance_origin_num"]
-                != embedded_origin["num"]
-                or row["vocal_performance_origin_den"]
-                != embedded_origin["den"]):
+        # SR-M17CC-03 (residual): TYPE-EXACT origin projection — an
+        # embedded JSON false/float that Python-compares equal to the
+        # relational integer (0 == False, 1 == 1.0) is not the
+        # mechanical projection the captured identity requires
+        elif (not exact_projection_equal(
+                    row["vocal_performance_origin_num"],
+                    embedded_origin["num"])
+                or not exact_projection_equal(
+                    row["vocal_performance_origin_den"],
+                    embedded_origin["den"])):
             raise internal_invariant(
                 f"{where} vocal performance-origin preimage disagrees "
                 "with the snapshot-anchored embedded segment")

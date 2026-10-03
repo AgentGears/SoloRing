@@ -108,7 +108,7 @@ def _verify_embedded_grammar(perf: dict, revision_id: str) -> list[dict]:
             f"ShotRevision {revision_id} performance history declares "
             f"unknown schema {perf.get('schema_version')!r}.")
     from soloring.performance.m17cc_capture_read import (
-        exact_projection_equal,
+        embedded_rational_shape_error, exact_projection_equal,
     )
     segments = perf.get("segments")
     if not isinstance(segments, list) or not segments:
@@ -129,6 +129,17 @@ def _verify_embedded_grammar(perf: dict, revision_id: str) -> list[dict]:
                 f"ShotRevision {revision_id} performance history "
                 f"segment {index} declares position "
                 f"{seg['position']!r} — captured order is canonical.")
+        # SR-M17CC-03 (residual): the nested rational objects are
+        # SHAPE-VALIDATED here, before ANY downstream ["num"]/
+        # ["den"] access — malformed embedded JSON terminates through
+        # the typed internal-invariant contract, never a raw
+        # TypeError/KeyError
+        shape_error = embedded_rational_shape_error(seg)
+        if shape_error is not None:
+            raise internal_invariant(
+                f"ShotRevision {revision_id} performance history "
+                f"segment {index} carries a malformed nested value: "
+                f"{shape_error}.")
         vocal = seg["vocal"]
         if vocal is not None and (not isinstance(vocal, dict)
                                   or set(vocal) != set(_VOCAL_KEYS)):

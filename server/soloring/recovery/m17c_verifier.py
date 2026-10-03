@@ -1183,10 +1183,19 @@ def _verify_one_schema8(con: sqlite3.Connection, blob_root: Path,
 def _verify_m17cc_child(con, blob_root, rev_id, shot_id, row, seg):
     import hashlib
     from soloring.performance.m17cc_capture_read import (
-        exact_projection_equal,
+        embedded_rational_shape_error, exact_projection_equal,
     )
     where = (f"ShotRevision {rev_id} performance companion child at "
              f"position {row['position']}")
+    # SR-M17CC-03 (residual): the nested rational objects are
+    # SHAPE-VALIDATED before ANY ["num"]/["den"] access below —
+    # malformed embedded JSON terminates as typed RECOVERY_CORRUPTION,
+    # never a raw TypeError/KeyError
+    shape_error = embedded_rational_shape_error(seg)
+    if shape_error is not None:
+        raise _corrupt(
+            f"{where} carries a malformed nested captured value: "
+            f"{shape_error}")
     # SR-M17CC-03: TYPE-EXACT — a JSON false/true/float embedded
     # value that Python-compares equal to the relational integer is
     # not the mechanical projection the captured grammar requires
@@ -1295,9 +1304,16 @@ def _verify_m17cc_child(con, blob_root, rev_id, shot_id, row, seg):
             raise _corrupt(
                 f"{where} vocal performance-origin preimage disagrees "
                 "with the snapshot-anchored embedded segment")
-    elif (row["vocal_performance_origin_num"] != embedded_origin["num"]
-            or row["vocal_performance_origin_den"]
-            != embedded_origin["den"]):
+    # SR-M17CC-03 (residual): TYPE-EXACT origin projection — an
+    # embedded JSON false/float that Python-compares equal to the
+    # relational integer (0 == False, 1 == 1.0) is not the
+    # mechanical projection the captured identity requires
+    elif (not exact_projection_equal(
+                row["vocal_performance_origin_num"],
+                embedded_origin["num"])
+            or not exact_projection_equal(
+                row["vocal_performance_origin_den"],
+                embedded_origin["den"])):
         raise _corrupt(
             f"{where} vocal performance-origin preimage disagrees with "
             "the snapshot-anchored embedded segment")

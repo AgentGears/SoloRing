@@ -52,6 +52,7 @@ lawful control.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 
 import pytest
@@ -389,6 +390,126 @@ async def test_sr05_gpi_storage_classes_typed_corruption(
     assert stored == kind, stored
 
     _verify_staged_raises(root, fragment)
+
+
+# ---------------------------------------------------------------------------
+# SR-03 residual — the vocal-origin preimage is type-exact and the
+# nested rational/origin object grammar is shape-validated BEFORE any
+# subscripting (the fourteenth-review commission)
+# ---------------------------------------------------------------------------
+
+def _rewrite_embedded_bytes_only(db_root, revision_id, position,
+                                 updates):
+    """The bytes-only coherent rewriter for NON-OBJECT nested values:
+    mutate the embedded segment, refresh segment/spec/snapshot
+    canonical bytes+hashes, and leave EVERY relational child column
+    (including the stored mapping hashes, which still recompute from
+    the row's own untouched integer preimage) alone — exactly the
+    review's malformed-embedded-JSON shape."""
+    con = sqlite3.connect(db_root / "soloring.db")
+    try:
+        con.execute("PRAGMA foreign_keys=OFF")
+        spec = json.loads(con.execute(
+            f"SELECT spec_json FROM {_PARENTS} WHERE "
+            "shot_revision_id = ?", (revision_id,)).fetchone()[0])
+        snap = json.loads(con.execute(
+            "SELECT snapshot_json FROM shot_revisions WHERE id = ?",
+            (revision_id,)).fetchone()[0])
+        seg = spec["segments"][position]
+        seg.update(updates)
+        snap["performance"]["segments"][position].update(updates)
+        from soloring.domain.canonical import (
+            canonical_hash as ch, canonical_json_str as cj,
+        )
+        con.execute(
+            f"UPDATE {_PARENTS} SET spec_json = ?, spec_hash = ? "
+            "WHERE shot_revision_id = ?",
+            (cj(spec), ch(spec), revision_id))
+        con.execute(
+            "UPDATE shot_revisions SET snapshot_json = ?, "
+            "snapshot_hash = ? WHERE id = ?",
+            (cj(snap), ch(snap), revision_id))
+        con.execute(
+            f"UPDATE {_CHILDREN} SET segment_json = ?, segment_hash "
+            "= ? WHERE shot_revision_id = ? AND position = ?",
+            (cj(seg), ch(seg), revision_id, position))
+        con.commit()
+    finally:
+        con.close()
+
+
+@pytest.mark.asyncio
+async def test_sr03r_embedded_origin_false_refused_by_both(
+        client, tmp_path):
+    """The decisive residual type-exact adversary: coherently rewrite
+    the embedded vocal_performance_origin_ms.num from integer 0 to
+    JSON false — the relational child stays integer 0/1 and its
+    mapping hashes stay the integer-preimage values (the coherent
+    rewriter rebuilds them from the row's own untouched columns) —
+    while segment/spec/snapshot bytes+hashes are all recomputed.
+    0 == False must NOT satisfy the captured origin identity at
+    either §12 or recovery."""
+    from tests.test_m17cc_recovery import _coherent_child_rewrite
+
+    world, revision = await _stage_lawful(client)
+    root = await _lawful_backup(client, tmp_path, "sr03r-false-origin")
+
+    # the lawful dialogue-bound control: green before the tamper
+    r = await client.get(f"/shot-revisions/{revision.id}/continuity")
+    assert r.status_code == 200, r.text
+
+    updates = {"vocal_performance_origin_ms":
+               {"num": False, "den": 1}}
+    _coherent_child_rewrite(
+        _live_root(client), revision.id, 0, updates)
+    r = await client.get(f"/shot-revisions/{revision.id}/continuity")
+    assert r.status_code == 500, r.text
+    assert ("vocal performance-origin preimage disagrees with the "
+            "snapshot-anchored embedded segment"
+            in r.json()["message"]), r.text
+
+    _coherent_child_rewrite(root, revision.id, 0, updates)
+    _verify_staged_raises(
+        root, "vocal performance-origin preimage disagrees with the "
+        "snapshot-anchored embedded segment")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("updates,s12_fragment,recovery_fragment", [
+    ({"vocal_performance_origin_ms": False},
+     "carries a malformed nested value: "
+     "vocal_performance_origin_ms False is not the frozen rational "
+     "object",
+     "carries a malformed nested captured value: "
+     "vocal_performance_origin_ms False is not the frozen rational "
+     "object"),
+    ({"performance_start_ms": False},
+     "carries a malformed nested value: performance_start_ms False "
+     "is not the frozen rational object",
+     "carries a malformed nested captured value: "
+     "performance_start_ms False is not the frozen rational object"),
+])
+async def test_sr03r_nonobject_nested_values_typed_never_raw(
+        client, tmp_path, updates, s12_fragment, recovery_fragment):
+    """The malformed-grammar escape: a NON-OBJECT nested value (the
+    origin, or a timing rational) with the surrounding canonical
+    hashes refreshed — §12 fails through its typed
+    internal-invariant contract and recovery through
+    RECOVERY_CORRUPTION; neither may emit a raw TypeError/KeyError
+    (the former code path subscripted ["num"]/["den"] on the forged
+    scalar)."""
+    world, revision = await _stage_lawful(client)
+    root = await _lawful_backup(client, tmp_path,
+                                f"sr03r-nonobj-{list(updates)[0]}")
+
+    _rewrite_embedded_bytes_only(
+        _live_root(client), revision.id, 0, updates)
+    r = await client.get(f"/shot-revisions/{revision.id}/continuity")
+    assert r.status_code == 500, r.text
+    assert s12_fragment in r.json()["message"], r.text
+
+    _rewrite_embedded_bytes_only(root, revision.id, 0, updates)
+    _verify_staged_raises(root, recovery_fragment)
 
 
 # ---------------------------------------------------------------------------
