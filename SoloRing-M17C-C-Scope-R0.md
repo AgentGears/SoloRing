@@ -1078,3 +1078,29 @@ The fifteenth fresh independent first-pass review of executable head **`cbf599c4
 ## Frozen disposition
 
 **FIFTEENTH FIRST-PASS REVIEW COMPLETE — NOT CLEAN. SR-M17CC-03 is CLOSED for its frozen residual correction. New register `RR12-M17CC-01..02` frozen at 0H / 2M / 0L.** PR #26 remains draft, unmerged, unready. No Codex/second review, ready-mark, merge, or correction work has been initiated — the RR12 correction cycle awaits its gate.
+
+---
+
+# M17C-C RR12-M17CC-01..02 CORRECTION — 2026-10-04 — IMPLEMENTED
+
+The commissioned correction (strictly the two frozen Medium findings) is complete. Correction heads: **`c7dbfa7`** (implementation + battery, committed first) then **`5691918`** (the four validator admissions, committed afterward per the gate discipline; all validators ran against the committed carve-inclusive tree).
+
+## Delivered (the commission exactly)
+
+1. **RR12-01 — the captured vocal preimage's persisted scalar law.** ONE new transport-neutral primitive, `captured_vocal_preimage_error` (in `m17cc_capture_read`; both `sqlite3.Row` and mapping rows subscript), certifies the captured vocal preimage **BEFORE it is hashed, anchored into snapshot identity, or used in any exact arithmetic**: actual non-bool persisted integers for `source_start_sample`/`source_end_sample_exclusive`/`sample_rate_hz` with `0 <= start < end` and `rate > 0`; an actual mapping-position-domain integer for `vocal_mapping_position` (the ONE shared position primitive); and an actual canonical-reduced integer rational for the captured origin (the ONE shared temporal primitive — positive denominator, canonical zero, signed-64-bit persistence range). §12 consumes it at the START of `verify_mapping_hash_closure` (typed internal invariant, before `expected_mapping_hashes`); recovery consumes it at the top of `_verify_m17cc_child` (typed `RECOVERY_CORRUPTION`, before the mapping-hash closure and the §8.3 arithmetic). ONE law, both transports, no divergent history/recovery scalar grammar — the coherent REAL coordinate that previously passed every projection/hash law and then raised raw `TypeError` at `Fraction((float - int) * 1000, rate)` now refuses typed BEFORE arithmetic.
+2. **RR12-02 — the inner Performance schema discriminator.** ONE new shared `is_actual_int_schema` law (actual non-bool integer exactly equal to the frozen version), consumed by BOTH §12's `_verify_embedded_grammar` and recovery's `_m17cc_embedded_grammar`; the explicit grammar-v1 diagnostic and the unknown-schema messages are preserved verbatim (only `!= 2` became `not is_actual_int_schema(..., 2)`) — the coherent parent+snapshot `2 → 2.0` rewrite (children untouched) now refuses typed on both surfaces instead of certifying a JSON float the canonical writer cannot emit.
+3. **The decisive evidence, exactly as commissioned.** (a) The coherent SQLite REAL `source_start_sample = 48000.5`: the child column REAL (`typeof(...) == 'real'` demonstrated), the embedded vocal object carrying JSON `48000.5`, the mapping hash rebuilt from the malformed preimage, and the complete segment/spec/snapshot hash chain recomputed; the lawful dialogue-bound control proven green BEFORE the tamper; BOTH surfaces refuse through the shared scalar law BEFORE exact arithmetic — no raw `TypeError` escapes. (b) The coherent malformed-origin adversaries — the noncanonical integer rational `2/2` and the REAL scalar `0.5` (child columns + embedded values + hashes coherently rebuilt) — both surfaces typed-refuse through the shared captured-preimage law. (c) The coherent `2 → 2.0` parent+snapshot discriminator rewrite (canonical parent hash and outer snapshot bytes/hash refreshed, children lawful) — §12 refuses "declares unknown schema 2.0", recovery refuses `RECOVERY_CORRUPTION` "unknown schema". (d) Lawful dialogue-bound captured history remains green at both surfaces.
+4. **No broadening.** Capture grammar, PF-02/PF-03 authority, readiness, mappings, migrations, storage schema, Generation behavior, and error vocabulary untouched. SR-M17CC-03 remains CLOSED; SR-01/02/04/05 and all prior FPR/RR closures re-proved green; no genuine regression demonstrated.
+
+## Gates (first-run dispositions recorded exactly)
+
+- RR12 battery (`tests/test_m17cc_rr12_corrections.py`) **5/5 on FIRST run** — no fixture corrections, no re-runs after edits.
+- Directly endangered batteries first: history/recovery/capture/persist/roundtrip/migration + rr12 + sr **97/97**; prior storage-totality/type-exact + correction + live-seam batteries (RR5 mapping totality, RR7 isolation guard, RR8 pins, RR9/RR10 binding totality, FPR, RR/RR2–RR6, shot mapping, sr26, binding transitions) **126/126**.
+- Committed-tree validators **21/21 green** (implementation `c7dbfa7` committed before the validator-admission commit `5691918`).
+- Frontend green (vitest 143/143 + tsc + build).
+- Local full backend suite, FIRST RUN: **3104 passed / 8 skipped / 0 failed in 48:40, exit 0** (collection 3112 = the prior 3107 + the 5-test battery — exact).
+- **CI run `37182093494` on `5691918`: SUCCESS, attempt 1 — Backend 3111 passed / 20 skipped / 0 failed** (CI total 3131 = its prior 3126 + the 5-test battery, exact); Frontend green attempt 1. Corroboration only.
+
+## Fences honored
+
+No Codex/second review; no ready-mark; no merge; PR #26 remains draft, unmerged, unready. **This correction does not close RR12-M17CC-01..02** — the work stops here and holds for the **sixteenth fresh independent first-pass review** of the corrected executable head.
