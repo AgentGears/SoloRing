@@ -1151,3 +1151,22 @@ The commissioned correction (strictly the frozen Medium finding) is complete. Co
 ## Fences honored
 
 No Codex/second review; no ready-mark; no merge; PR #26 remains draft, unmerged, unready. **This correction does not close RR13-M17CC-01** — the work stops here and holds for the **seventeenth fresh independent first-pass review** of the corrected executable head.
+
+---
+
+# M17C-C seventeenth first-pass review — 2026-10-04 — NOT CLEAN (register RR14-M17CC-01 FROZEN)
+
+The seventeenth fresh independent first-pass review of executable head **`dafa335f5c98b42c3630fae9efd048cbc79fbf44`** is complete (implementation **`97acdc318d0a9f2fdf8f43a5eee4e372b04e7950`**; record-only **`012ef5f862ce99c9c098932ec9478e7e58118280`** above it; PR #26 open, draft, unmerged; no Codex/second review run). **Verdict: NOT CLEAN — 0 High / 0 Medium / 1 Low.**
+
+## Register resolution
+
+- **RR13-M17CC-01: substantively CLOSED** — `performance_block_key_error()` verified genuinely ONE shared top-level grammar law, consumed by both §12 and recovery, correctly placed after schema discrimination/v1 refusal; the coherent extra-top-level-member adversary fails typed on both surfaces while the canonical writer-produced control remains green. **No new product defect met the evidence threshold in the fresh adjacent scan.**
+- RR12, SR-M17CC-01..05, and all earlier FPR/RR findings remain CLOSED. CI `37197931261` independently corroborated on synthetic merge `73d01a3` (exact carve head `dafa335` into unchanged base `d893d65`: focused 107, backend 3113/20 with collection 3114, frontend 143/143, typecheck clean, production build successful).
+
+## Frozen finding
+
+- **RR14-M17CC-01 — Low — the RR13 correction record overstates the missing-key diagnostics.** The product behavior is correct, but the pushed RR13 correction record claims, in substance, that "a block missing frozen members now reports the precise missing members." That is true for a schema-2 block missing `segments` (execution reaches `performance_block_key_error()`), but NOT true for a block missing `schema_version`: because the shared key-set law was intentionally placed after schema discrimination, `{"segments": [...]}` never reaches the key-set law and retains the pre-existing `unknown schema None` diagnostic. This is not a product correctness problem — the malformed block still fails typed on both surfaces, and the ordering is consistent with the commission's requirement to preserve schema/v1 diagnostic precedence. It is a **proof-record accuracy defect only**. **Required correction (proof/documentation only):** correct the RR13 record to say precisely that unknown top-level members are reported by the shared key-set law; that with a valid integer schema-2 discriminator, missing remaining frozen members such as `segments` are reported precisely; and that a missing or malformed `schema_version` continues to fail first through the existing schema-discriminator diagnostic BY DESIGN. No product source change indicated; a tiny diagnostic regression may be added if desired but is not necessary to establish the product law.
+
+## Frozen disposition
+
+**SEVENTEENTH FIRST-PASS REVIEW COMPLETE — NOT CLEAN. RR13-M17CC-01: CLOSED. RR12, SR-M17CC-01..05, and all earlier FPR/RR findings remain CLOSED. New register: `RR14-M17CC-01` — 0H / 0M / 1L.** PR #26 remains draft, unmerged, unready. No Codex/second review, ready-mark, merge, or correction work has been initiated — the RR14 proof-record correction awaits its gate.
