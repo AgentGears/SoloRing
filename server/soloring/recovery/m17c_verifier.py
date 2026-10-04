@@ -1073,6 +1073,7 @@ def _verify_m17cc_capture_state(con: sqlite3.Connection,
 def _m17cc_embedded_grammar(perf, rev_id: str) -> list:
     from soloring.performance.m17cc_capture_read import (
         EMBEDDED_SEGMENT_KEYS, is_actual_int_schema,
+        performance_block_key_error,
     )
     # RR-M17CC-03: grammar v2 — the mapping hashes + preimage are
     # snapshot-anchored. Grammar v1 (0023-era companion-only preimage)
@@ -1090,6 +1091,13 @@ def _m17cc_embedded_grammar(perf, rev_id: str) -> list:
         raise _corrupt(
             f"ShotRevision {rev_id} performance history declares "
             f"unknown schema {perf!r}")
+    # RR13-M17CC-01: the TOP-LEVEL key grammar — the ONE shared law,
+    # after the discriminator/v1 refusal so every existing diagnostic
+    # stays distinguishable
+    key_error = performance_block_key_error(perf)
+    if key_error is not None:
+        raise _corrupt(
+            f"ShotRevision {rev_id} performance history {key_error}.")
     segments = perf.get("segments")
     if not isinstance(segments, list) or not segments:
         raise _corrupt(

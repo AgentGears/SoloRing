@@ -100,7 +100,7 @@ def _verify_embedded_grammar(perf: dict, revision_id: str) -> list[dict]:
     certified."""
     from soloring.performance.m17cc_capture_read import (
         embedded_rational_shape_error, exact_projection_equal,
-        is_actual_int_schema,
+        is_actual_int_schema, performance_block_key_error,
     )
     # RR12-M17CC-02: the discriminator must be an ACTUAL non-bool
     # integer exactly 2 (the ONE shared discriminator law) — ordinary
@@ -115,6 +115,16 @@ def _verify_embedded_grammar(perf: dict, revision_id: str) -> list[dict]:
         raise internal_invariant(
             f"ShotRevision {revision_id} performance history declares "
             f"unknown schema {perf.get('schema_version')!r}.")
+    # RR13-M17CC-01: the TOP-LEVEL key grammar — the ONE shared law,
+    # after the discriminator/v1 refusal so every existing diagnostic
+    # stays distinguishable. A coherently re-signed block with an
+    # unknown top-level member is not the frozen grammar the writer
+    # emits, whatever its canonical bytes authenticate.
+    key_error = performance_block_key_error(perf)
+    if key_error is not None:
+        raise internal_invariant(
+            f"ShotRevision {revision_id} performance history "
+            f"{key_error}.")
     segments = perf.get("segments")
     if not isinstance(segments, list) or not segments:
         raise internal_invariant(

@@ -115,6 +115,37 @@ def is_actual_int_schema(value, frozen: int) -> bool:
             and value == frozen)
 
 
+PERFORMANCE_BLOCK_KEYS = frozenset({"schema_version", "segments"})
+
+
+def performance_block_key_error(perf) -> str | None:
+    """RR13-M17CC-01: the versioned Performance block's TOP-LEVEL key
+    grammar — exactly the frozen key set the canonical writer emits
+    (``embedded_performance_value`` produces only ``schema_version``
+    and ``segments``). Canonical bytes and hashes authenticate WHAT
+    was stored, not that it belongs to the frozen grammar: a
+    coherently re-signed block carrying an unknown top-level member
+    would be certified by both surfaces while the unrecognized member
+    entered immutable snapshot identity and disappeared semantically
+    during reconstruction. Returns the precise violation, or ``None``
+    when the key set is exactly frozen. Consumed AFTER the schema
+    discriminator / grammar-v1 refusal so every existing diagnostic
+    stays distinguishable."""
+    if not isinstance(perf, dict) or set(perf) != set(
+            PERFORMANCE_BLOCK_KEYS):
+        if isinstance(perf, dict):
+            extra = sorted(set(perf) - set(PERFORMANCE_BLOCK_KEYS))
+            if extra:
+                return (f"carries unknown top-level member(s) "
+                        f"{extra!r} outside the frozen schema-2 "
+                        "grammar")
+            missing = sorted(set(PERFORMANCE_BLOCK_KEYS) - set(perf))
+            return (f"is missing frozen top-level member(s) "
+                    f"{missing!r}")
+        return "is not the frozen schema-2 key set object"
+    return None
+
+
 def captured_vocal_preimage_error(row) -> str | None:
     """RR12-M17CC-01: the captured vocal preimage's persisted scalar
     law — certified BEFORE the preimage is hashed, anchored into
