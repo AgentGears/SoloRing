@@ -1124,3 +1124,30 @@ The sixteenth fresh independent first-pass review of executable head **`5691918e
 ## Frozen disposition
 
 **SIXTEENTH FIRST-PASS REVIEW COMPLETE — NOT CLEAN. RR12-M17CC-01: CLOSED. RR12-M17CC-02: CLOSED. SR-M17CC-01..05 remain CLOSED. All earlier FPR/RR closures remain CLOSED. New frozen register: `RR13-M17CC-01` — 0H / 1M / 0L. No other suspected issue from this pass met the evidence threshold.** PR #26 remains draft, unmerged, unready. No Codex/second review, ready-mark, merge, or correction work has been initiated — the RR13 correction cycle awaits its gate.
+
+---
+
+# M17C-C RR13-M17CC-01 CORRECTION — 2026-10-04 — IMPLEMENTED
+
+The commissioned correction (strictly the frozen Medium finding) is complete. Correction heads: **`97acdc3`** (implementation + battery, committed first) then **`dafa335`** (the four validator admissions, committed afterward per the gate discipline; all validators ran against the committed carve-inclusive tree).
+
+## Delivered (the commission exactly)
+
+1. **The top-level Performance grammar is closed.** ONE shared structural law — `performance_block_key_error` over the frozen `PERFORMANCE_BLOCK_KEYS = {"schema_version", "segments"}` (exactly what the canonical writer emits; `embedded_performance_value` produces only those two members) — consumed by BOTH §12's `_verify_embedded_grammar()` and recovery's `_m17cc_embedded_grammar()`. No second key grammar.
+2. **Diagnostic ordering and existing contracts preserved.** The law is placed AFTER the schema discriminator and the explicit grammar-v1/pre-anchor refusal: a v1 block carrying the two frozen keys still reaches its v1 refusal, a `2.0` block still reaches "unknown schema 2.0", and a block missing frozen members now reports the precise missing members. The RR12 actual-integer discriminator and the existing exact segment / rational-object / vocal-object grammars are unchanged.
+3. **The decisive adversary is top-level, exactly as commissioned.** From a lawful schema-8 capture: one unknown member (`"unexpected": {"meaning": "not emitted by the writer"}`) added directly to the Performance block in BOTH the companion `spec_json` and the snapshot `performance`, with `spec_hash`, `snapshot_json`, and `snapshot_hash` recomputed and every child and segment untouched — §12 returns its typed internal-corruption contract ("carries unknown top-level member(s) `['unexpected']` outside the frozen schema-2 grammar") and staged recovery returns typed `RECOVERY_CORRUPTION` with the same law's wording. The ordinary writer-produced schema-2 block remains green at both surfaces (the stored spec asserted to carry exactly the frozen key set, §12 200, recovery green), and the lawful control was proven green immediately before the tamper. No nested surrogate was used.
+4. **Prior closures preserved.** The mandated re-runs green: the RR12 REAL/preimage-totality proofs and the `2 → 2.0` discriminator proof, the SR-03 nested-shape/type-exact proofs, and the directly endangered schema-8 history/recovery/capture/persistence batteries (below). RR12-M17CC-01/02 and SR-M17CC-01..05 remain CLOSED; no regression demonstrated.
+5. **No broadening.** No writer format change, migration, storage schema change, capture/readiness change, PF-02/PF-03 authority change, Generation change, or new grammar version — this is validation of the already-frozen grammar, not a schema evolution.
+
+## Gates (first-run dispositions recorded exactly)
+
+- RR13 battery (`tests/test_m17cc_rr13_corrections.py`) **2/2 on FIRST run** — no fixture corrections, no re-runs after edits.
+- Mandated re-runs + directly endangered suites first: RR12 + SR + RR13 + history/recovery/capture/persist/roundtrip/migration **99/99**; prior correction + live-seam batteries **126/126**.
+- Committed-tree validators **21/21 green** (implementation `97acdc3` committed before the validator-admission commit `dafa335`).
+- Frontend green (vitest 143/143 + tsc + build).
+- Local full backend suite, FIRST RUN: **3106 passed / 8 skipped / 0 failed in 48:11, exit 0** (collection 3114 = the prior 3112 + the 2-test battery — exact).
+- **CI run `37197931261` on `dafa335`: SUCCESS, attempt 1 — Backend 3113 passed / 20 skipped / 0 failed** (CI total 3133 = its prior 3131 + the 2-test battery, exact); Frontend green attempt 1. Corroboration only.
+
+## Fences honored
+
+No Codex/second review; no ready-mark; no merge; PR #26 remains draft, unmerged, unready. **This correction does not close RR13-M17CC-01** — the work stops here and holds for the **seventeenth fresh independent first-pass review** of the corrected executable head.
