@@ -98,7 +98,15 @@ def _verify_embedded_grammar(perf: dict, revision_id: str) -> list[dict]:
     object or explicit null). Grammar v1 (0023-era companion-only
     preimage) is REFUSED — pre-anchor captures are never silently
     certified."""
-    if perf.get("schema_version") != 2:
+    from soloring.performance.m17cc_capture_read import (
+        embedded_rational_shape_error, exact_projection_equal,
+        is_actual_int_schema,
+    )
+    # RR12-M17CC-02: the discriminator must be an ACTUAL non-bool
+    # integer exactly 2 (the ONE shared discriminator law) — ordinary
+    # numeric equality admits JSON 2.0, a value the canonical writer
+    # cannot emit
+    if not is_actual_int_schema(perf.get("schema_version"), 2):
         if perf.get("schema_version") == 1:
             raise internal_invariant(
                 f"ShotRevision {revision_id} carries a grammar-v1 "
@@ -107,9 +115,6 @@ def _verify_embedded_grammar(perf: dict, revision_id: str) -> list[dict]:
         raise internal_invariant(
             f"ShotRevision {revision_id} performance history declares "
             f"unknown schema {perf.get('schema_version')!r}.")
-    from soloring.performance.m17cc_capture_read import (
-        embedded_rational_shape_error, exact_projection_equal,
-    )
     segments = perf.get("segments")
     if not isinstance(segments, list) or not segments:
         raise internal_invariant(

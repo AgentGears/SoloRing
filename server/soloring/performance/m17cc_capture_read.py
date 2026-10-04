@@ -104,6 +104,84 @@ def exact_projection_equal(relational_value, embedded_value) -> bool:
     return relational_value == embedded_value
 
 
+def is_actual_int_schema(value, frozen: int) -> bool:
+    """RR12-M17CC-02: a captured grammar discriminator must be an
+    ACTUAL non-bool Python integer exactly equal to the frozen
+    version — ordinary numeric equality admits JSON floats
+    (``2.0 == 2``) the canonical writer can never emit. The ONE
+    shared discriminator law, consumed by BOTH the §12 grammar and
+    the recovery capture-state grammar."""
+    return (not isinstance(value, bool) and isinstance(value, int)
+            and value == frozen)
+
+
+def captured_vocal_preimage_error(row) -> str | None:
+    """RR12-M17CC-01: the captured vocal preimage's persisted scalar
+    law — certified BEFORE the preimage is hashed, anchored into
+    snapshot identity, or used in any exact arithmetic. The §12/
+    recovery projection equality proves same-type-and-value against
+    the embedded JSON, NOT that the shared type is lawful authority:
+    a coherent REAL coordinate (child float + embedded JSON float,
+    every hash recomputed) would reach Fraction arithmetic and raise
+    a raw TypeError. This ONE transport-neutral law (both sqlite3.Row
+    and mapping rows subscript) requires actual non-bool persisted
+    integers for the sample coordinates and rate with
+    ``0 <= start < end`` and ``rate > 0``, an actual mapping-position-
+    domain integer for ``vocal_mapping_position`` (the ONE shared
+    position primitive), and an actual canonical-reduced integer
+    rational for the captured origin (the ONE shared temporal
+    primitive — positive denominator, canonical zero, signed-64-bit
+    persistence range). Returns the precise violation, or ``None``
+    for generic children. §12 maps failure to its internal-invariant
+    contract; recovery to RECOVERY_CORRUPTION."""
+    if row["vocal_performance_revision_id"] is None:
+        return None
+    for what, value in (
+            ("source_start_sample", row["source_start_sample"]),
+            ("source_end_sample_exclusive",
+             row["source_end_sample_exclusive"]),
+            ("sample_rate_hz", row["sample_rate_hz"]),
+            ("vocal_mapping_position", row["vocal_mapping_position"]),
+    ):
+        if isinstance(value, bool) or not isinstance(value, int):
+            return (f"{what} {value!r} is not a persisted integer "
+                    "(non-integral SQLite storage class)")
+    start = row["source_start_sample"]
+    end = row["source_end_sample_exclusive"]
+    rate = row["sample_rate_hz"]
+    if not (0 <= start < end):
+        return (f"captured sample interval [{start!r}, {end!r}) does "
+                "not satisfy 0 <= start < end")
+    if rate <= 0:
+        return f"captured sample_rate_hz {rate!r} is not positive"
+    from soloring.performance.temporal import (
+        PositionError, RationalError, canonical_rational,
+        validate_mapping_position,
+    )
+    try:
+        validate_mapping_position(row["vocal_mapping_position"])
+    except PositionError as exc:
+        return (f"captured vocal_mapping_position "
+                f"{row['vocal_mapping_position']!r} is outside the "
+                f"persisted mapping-position domain: {exc}")
+    num = row["vocal_performance_origin_num"]
+    den = row["vocal_performance_origin_den"]
+    if isinstance(num, bool) or not isinstance(num, int) \
+            or isinstance(den, bool) or not isinstance(den, int):
+        return (f"captured vocal_performance_origin {num!r}/{den!r} "
+                "is not a persisted integer pair (non-integral SQLite "
+                "storage class)")
+    try:
+        reduced = canonical_rational(num, den)
+    except RationalError as exc:
+        return (f"captured vocal_performance_origin {num!r}/{den!r} "
+                f"fails the canonical rational law: {exc}")
+    if reduced != (num, den):
+        return (f"captured vocal_performance_origin {num}/{den} is "
+                "not in canonical reduced form")
+    return None
+
+
 def embedded_rational_shape_error(seg: dict) -> str | None:
     """SR-M17CC-03 (residual): the nested rational objects of the
     frozen schema-8 segment grammar — ``performance_start_ms`` /
@@ -542,6 +620,15 @@ def verify_mapping_hash_closure(row, where: str, seg=None) -> None:
     identity): a coherent child-side preimage+hash rewrite is refused
     by the independent snapshot, not merely by row-local recomputation."""
     from soloring.errors import internal_invariant
+
+    # RR12-M17CC-01: the persisted scalar law of the captured vocal
+    # preimage — certified BEFORE the preimage is hashed (below) or
+    # used in any exact arithmetic downstream
+    preimage_error = captured_vocal_preimage_error(row)
+    if preimage_error is not None:
+        raise internal_invariant(
+            f"{where} captured vocal preimage violates its persisted "
+            f"scalar law: {preimage_error}")
 
     try:
         vocal = _child_preimage_vocal(row)

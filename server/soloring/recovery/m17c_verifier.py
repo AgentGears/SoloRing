@@ -1072,7 +1072,7 @@ def _verify_m17cc_capture_state(con: sqlite3.Connection,
 
 def _m17cc_embedded_grammar(perf, rev_id: str) -> list:
     from soloring.performance.m17cc_capture_read import (
-        EMBEDDED_SEGMENT_KEYS,
+        EMBEDDED_SEGMENT_KEYS, is_actual_int_schema,
     )
     # RR-M17CC-03: grammar v2 — the mapping hashes + preimage are
     # snapshot-anchored. Grammar v1 (0023-era companion-only preimage)
@@ -1082,7 +1082,11 @@ def _m17cc_embedded_grammar(perf, rev_id: str) -> list:
             f"ShotRevision {rev_id} carries a grammar-v1 performance "
             "block captured before the mapping-hash anchor existed — "
             "re-capture at the corrected head")
-    if not isinstance(perf, dict) or perf.get("schema_version") != 2:
+    # RR12-M17CC-02: the discriminator must be an ACTUAL non-bool
+    # integer exactly 2 — ordinary numeric equality admits JSON 2.0,
+    # a value the canonical writer cannot emit
+    if not isinstance(perf, dict) or not is_actual_int_schema(
+            perf.get("schema_version"), 2):
         raise _corrupt(
             f"ShotRevision {rev_id} performance history declares "
             f"unknown schema {perf!r}")
@@ -1183,11 +1187,12 @@ def _verify_one_schema8(con: sqlite3.Connection, blob_root: Path,
 def _verify_m17cc_child(con, blob_root, rev_id, shot_id, row, seg):
     import hashlib
     from soloring.performance.m17cc_capture_read import (
-        embedded_rational_shape_error, exact_projection_equal,
+        captured_vocal_preimage_error, embedded_rational_shape_error,
+        exact_projection_equal,
     )
     where = (f"ShotRevision {rev_id} performance companion child at "
              f"position {row['position']}")
-    # SR-M17CC-03 (residual): the nested rational objects are
+    # RR-M17CC-03 (residual): the nested rational objects are
     # SHAPE-VALIDATED before ANY ["num"]/["den"] access below —
     # malformed embedded JSON terminates as typed RECOVERY_CORRUPTION,
     # never a raw TypeError/KeyError
@@ -1196,6 +1201,14 @@ def _verify_m17cc_child(con, blob_root, rev_id, shot_id, row, seg):
         raise _corrupt(
             f"{where} carries a malformed nested captured value: "
             f"{shape_error}")
+    # RR12-M17CC-01: the persisted scalar law of the captured vocal
+    # preimage — certified BEFORE the preimage is hashed (the
+    # mapping-hash closure below) or used in exact §8.3 arithmetic
+    preimage_error = captured_vocal_preimage_error(row)
+    if preimage_error is not None:
+        raise _corrupt(
+            f"{where} captured vocal preimage violates its persisted "
+            f"scalar law: {preimage_error}")
     # SR-M17CC-03: TYPE-EXACT — a JSON false/true/float embedded
     # value that Python-compares equal to the relational integer is
     # not the mechanical projection the captured grammar requires
