@@ -1211,3 +1211,33 @@ The reviewer declined to promote (a) a `generation_performance_inputs.derived_in
 ## Frozen disposition
 
 **INDEPENDENT SECOND REVIEW (RERUN) RECONCILED — NOT CLEAN. Register `ISR2-M17CC-01..03` frozen — CONFIRMED — 0H / 2M / 1L.** The eighteenth first-pass CLEAN disposition remains historically correct; these are three NEW findings that reopen nothing. PR #26 remains draft, unmerged, unready. **No correction has started — the `ISR2-M17CC-01..03` correction cycle awaits its commission.**
+
+---
+
+# M17C-C ISR2-M17CC-01..03 CORRECTION — 2026-10-04 — IMPLEMENTED
+
+The commissioned correction cycle is complete. Correction heads: **`cb1a90a`** (implementation + battery, committed first) then **`86717fe`** (the four validator admissions, committed afterward; all validators ran against the committed carve-inclusive tree).
+
+## Delivered (the commission exactly)
+
+1. **ISR2-01 — the outer schema-8 ShotRevision envelope is authenticated in recovery.** The schema-8 pass in `_verify_m17cc_capture_state` now reads `snapshot_hash` alongside `snapshot_json` and requires `canonical_json_str(decoded) == persisted snapshot_json` AND `canonical_hash(decoded) == persisted snapshot_hash` BEFORE any M17C-C closure interpretation — the same pair the public historical path proves. A canonical snapshot with one predecessor field coherently rewritten but a stale hash, or semantically identical noncanonical bytes, no longer certifies. Predecessor (<8) recovery posture deliberately unchanged — the law is restricted to the schema-8 successor case exactly as commissioned.
+2. **ISR2-02 — frozen physical contracts for all three M17C-C tables, through the existing machinery.** `_srpfs_contract` / `_srpss_contract(successor=…)` / `_gpi_contract` (frozen from PRAGMA + sqlite_master evidence of genuinely migrated 0022 and 0023 databases, probed by real alembic upgrades) run through the SAME `_verify_table_schema` primitive inside the existing physical-schema phase — BEFORE any semantic row traversal — with SEPARATE lawful segment contracts per head (0023 adds the captured mapping-preimage columns and their constraints). **Disclosed enabling change:** the ORM model's segment `CheckConstraint` declarations were REORDERED to the migration's exact declaration order, because the two engines stored the same constraint SET in different DDL orders and one frozen ordered contract must hold across both (the PF-03 determinism precedent; no schema semantics change, no migration touched, no head change). A staged successor-head database with a weakened CHECK / FK / index / PK shape now refuses at the physical boundary even with EMPTY tables, where `quick_check`, `foreign_key_check`, presence, and row semantics all stay green.
+3. **ISR2-03 — §12's retained Blob size is part of the verified closure.** After `_verified_payload_bytes` physically reads and content-address-verifies the payload, `blobs.size_bytes` must be an actual nonnegative integer exactly equal to the physical byte count before either is exposed as historical truth — failing through the existing typed internal-invariant contract, never normalizing. The bytes/hash verification and historical error contract are preserved; recovery/backup liveness already proved the same equality, closing the asymmetry.
+4. **The two frozen non-findings stay out of scope** — no canonical GPI `derived_input_hash` preimage was invented, and the populated-0022→0023 migration-refusal policy is untouched. No unrelated redesign; the predecessor recovery chain is unchanged beyond the successor tables' contracts.
+
+## The decisive evidence (the commission's adversaries, 8/8 on FIRST run)
+
+The two outer adversaries — a canonical `snapshot_json` with one predecessor field changed but a stale hash, and semantically identical noncanonical bytes with a semantics-matching hash (Performance block and every companion row untouched) — are refused by BOTH the direct M17C recovery verifier AND the full restore, typed. The three empty-0023 physical adversaries (the `ck_srpfs_schema` expression weakened in place; `fk_srpss_pr` RESTRICT→CASCADE with the migration's index recreated so only the FK diverges; `ix_srpss_pr` dropped) each refuse at the physical boundary with the UNDAMAGED empty state proven green first; the GENUINE 0022 shape (a real alembic 0021→0022 upgrade of a reshaped staged database) passes the 0022 contracts green and then refuses the same CHECK damage at 0022. The two retained-size adversaries (off-by-one integer; a genuine SQLite REAL with `typeof` proven) make §12 typed-refuse, with the lawful control asserting the exposed `size_bytes` equals the decoded payload byte count immediately before the tamper.
+
+## Gates (first-run dispositions recorded exactly)
+
+- ISR2 battery (`tests/test_m17cc_isr2_corrections.py`) **8/8 on FIRST run** — no fixture corrections, no re-runs after edits (one disclosed intermediate correction DURING development, before any battery run: the first contract draft transcribed the segments CHECK declaration order differently from the probed migration truth and was refused by the lawful recovery battery — the probe-driven reorder is the frozen form above).
+- Directly endangered suites first: recovery/roundtrip/migration/history/capture/persist + isr2 **87/87** (the real 0021→0022 and 0022→0023 upgrade/round-trip batteries now exercise the new physical contracts on genuinely migrated shapes); prior correction + live-seam batteries **122/122**.
+- Committed-tree validators **21/21 green** (implementation `cb1a90a` committed before the validator-admission commit `86717fe`).
+- Frontend green (vitest 143/143 + tsc + build).
+- Local full backend suite, FIRST RUN: **3114 passed / 8 skipped / 0 failed in 49:34, exit 0** (collection 3122 = the prior 3114 + the 8-test battery — exact).
+- **CI run `37218609448` on `86717fe`: SUCCESS, attempt 1 — Backend 3121 passed / 20 skipped / 0 failed** (CI total 3141 = its prior 3133 + the 8-test battery, exact); Frontend green attempt 1. Corroboration only.
+
+## Fences honored
+
+No ready-mark; no merge; no publication; PR #26 remains draft, unmerged, unready. **The ISR2 findings are NOT closed by this implementation or the green gates** — they remain open until a fresh independent review verifies them. The work stops here and holds for that review of the corrected executable head (`86717fe`).
