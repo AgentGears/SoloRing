@@ -385,6 +385,18 @@ async def _verify_one_child(session, settings, revision_id: str,
     # metadata may never substitute for the bytes
     payload_bytes = _verified_payload_bytes(
         settings, where, row.performance_payload_blob_hash)
+    # ISR2-M17CC-03: the retained size is part of the VERIFIED closure
+    # — an actual nonnegative integer exactly equal to the physically
+    # read byte count, proven before either is exposed as historical
+    # truth (the historical answer may never attest contradictory
+    # retained-closure data; recovery/backup liveness already proves
+    # the same equality)
+    size_bytes = blob.size_bytes
+    if isinstance(size_bytes, bool) or not isinstance(size_bytes, int) \
+            or size_bytes < 0 or size_bytes != len(payload_bytes):
+        raise internal_invariant(
+            f"{where} retained Blob size {size_bytes!r} disagrees with "
+            f"the physically read payload bytes ({len(payload_bytes)})")
 
     answer = {
         "position": position,

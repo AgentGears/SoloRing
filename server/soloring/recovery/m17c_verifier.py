@@ -174,6 +174,203 @@ _PF03_CONTRACTS = {
             "performance_revision_id", "performance_revisions", "prsc"),
 }
 
+# ---------------------------------------------------------------------------
+# ISR2-M17CC-02: the frozen PHYSICAL schema contracts for the three
+# M17C-C successor tables, proven from PRAGMA evidence + the stored
+# sqlite_master DDL of a genuinely migrated 0022/0023 database (the
+# same _verify_table_schema machinery the predecessor tables use).
+# The segment table's lawful shape DIFFERS by head: 0023 recreates it
+# with the captured mapping-preimage columns and their constraints.
+# ---------------------------------------------------------------------------
+
+
+def _srpfs_contract() -> dict:
+    n = "ck_shot_revision_performance_specs_ck_srpfs"
+    return {
+        "columns": {
+            "shot_revision_id": ("VARCHAR(36)", 1, 1),
+            "schema_version": ("INTEGER", 1, 0),
+            "spec_json": ("TEXT", 1, 0),
+            "spec_hash": ("TEXT", 1, 0),
+        },
+        "pk_columns": ["shot_revision_id"],
+        "checks": [
+            (f"{n}_schema", "schema_version = 1"),
+            (f"{n}_hash_len", "length(spec_hash) = 64"),
+            (f"{n}_hash_hex",
+             "spec_hash NOT GLOB '*[^0-9a-f]*'"),
+        ],
+        "fks": sorted([
+            (0, "shot_revisions", "shot_revision_id", "id")
+            + _FK_RESTRICT,
+        ]),
+        "explicit_indexes": {},
+        "unique_indexes": {},
+    }
+
+
+def _srpss_contract(*, successor: bool) -> dict:
+    n = "ck_shot_revision_performance_segments_ck_srpss"
+    columns = {
+        "shot_revision_id": ("VARCHAR(36)", 1, 1),
+        "position": ("INTEGER", 1, 2),
+        "subject_id": ("VARCHAR(36)", 1, 0),
+        "performance_revision_id": ("VARCHAR(36)", 1, 0),
+        "performance_payload_blob_hash": ("TEXT", 1, 0),
+        "performance_payload_sha256": ("TEXT", 1, 0),
+        "performance_profile_id": ("TEXT", 1, 0),
+        "performance_kind": ("TEXT", 1, 0),
+        "performance_start_num": ("INTEGER", 1, 0),
+        "performance_start_den": ("INTEGER", 1, 0),
+        "performance_end_num": ("INTEGER", 1, 0),
+        "performance_end_den": ("INTEGER", 1, 0),
+        "shot_anchor_num": ("INTEGER", 1, 0),
+        "shot_anchor_den": ("INTEGER", 1, 0),
+        "performance_mapping_hash": ("TEXT", 1, 0),
+        "vocal_performance_revision_id": ("VARCHAR(36)", 0, 0),
+        "vocal_binding_hash": ("TEXT", 0, 0),
+        "vocal_mapping_hash": ("TEXT", 0, 0),
+        "source_start_sample": ("INTEGER", 0, 0),
+        "source_end_sample_exclusive": ("INTEGER", 0, 0),
+        "sample_rate_hz": ("INTEGER", 0, 0),
+        "segment_json": ("TEXT", 1, 0),
+        "segment_hash": ("TEXT", 1, 0),
+    }
+    checks = [
+        (f"{n}_position", "position >= 0"),
+    ]
+    if successor:
+        # FPR-M17CC-04 / 0023: the captured vocal-mapping preimage
+        # columns join the all-or-none group and carry their own laws
+        # (declaration order per the migration's stored DDL)
+        columns.update({
+            "vocal_performance_origin_num": ("INTEGER", 0, 0),
+            "vocal_performance_origin_den": ("INTEGER", 0, 0),
+            "vocal_mapping_position": ("INTEGER", 0, 0),
+        })
+        checks.append((
+            f"{n}_vocal_group_all_or_none",
+            "(vocal_performance_revision_id IS NULL AND "
+            "vocal_binding_hash IS NULL AND vocal_mapping_hash IS "
+            "NULL AND source_start_sample IS NULL AND "
+            "source_end_sample_exclusive IS NULL AND sample_rate_hz "
+            "IS NULL AND vocal_performance_origin_num IS NULL AND "
+            "vocal_performance_origin_den IS NULL AND "
+            "vocal_mapping_position IS NULL) OR "
+            "(vocal_performance_revision_id IS NOT NULL AND "
+            "vocal_binding_hash IS NOT NULL AND vocal_mapping_hash "
+            "IS NOT NULL AND source_start_sample IS NOT NULL AND "
+            "source_end_sample_exclusive IS NOT NULL AND "
+            "sample_rate_hz IS NOT NULL AND "
+            "vocal_performance_origin_num IS NOT NULL AND "
+            "vocal_performance_origin_den IS NOT NULL AND "
+            "vocal_mapping_position IS NOT NULL)"))
+        checks.extend([
+            (f"{n}_payload_hash_len",
+             "length(performance_payload_blob_hash) = 64"),
+            (f"{n}_binding_hash_len",
+             "length(vocal_binding_hash) = 64 OR vocal_binding_hash "
+             "IS NULL"),
+            (f"{n}_segment_hash_len", "length(segment_hash) = 64"),
+            (f"{n}_vocal_position",
+             "vocal_mapping_position >= 0 OR vocal_mapping_position "
+             "IS NULL"),
+            (f"{n}_vocal_origin_den",
+             "vocal_performance_origin_den > 0 OR "
+             "vocal_performance_origin_den IS NULL"),
+        ])
+    else:
+        checks.extend([
+            (f"{n}_vocal_group_all_or_none",
+             "(vocal_performance_revision_id IS NULL AND "
+             "vocal_binding_hash IS NULL AND vocal_mapping_hash IS "
+             "NULL AND source_start_sample IS NULL AND "
+             "source_end_sample_exclusive IS NULL AND sample_rate_hz "
+             "IS NULL) OR (vocal_performance_revision_id IS NOT NULL "
+             "AND vocal_binding_hash IS NOT NULL AND "
+             "vocal_mapping_hash IS NOT NULL AND "
+             "source_start_sample IS NOT NULL AND "
+             "source_end_sample_exclusive IS NOT NULL AND "
+             "sample_rate_hz IS NOT NULL)"),
+            (f"{n}_payload_hash_len",
+             "length(performance_payload_blob_hash) = 64"),
+            (f"{n}_binding_hash_len",
+             "length(vocal_binding_hash) = 64 OR vocal_binding_hash "
+             "IS NULL"),
+            (f"{n}_segment_hash_len", "length(segment_hash) = 64"),
+        ])
+    return {
+        "columns": columns,
+        "pk_columns": ["shot_revision_id", "position"],
+        "checks": checks,
+        "fks": sorted([
+            (0, "shot_revisions", "shot_revision_id", "id")
+            + _FK_RESTRICT,
+            (0, "performance_revisions", "performance_revision_id",
+             "id") + _FK_RESTRICT,
+        ]),
+        "explicit_indexes": {
+            "ix_srpss_pr": (0, "c", 0),
+        },
+        "unique_indexes": {},
+    }
+
+
+def _gpi_contract() -> dict:
+    n = "ck_generation_performance_inputs_ck_gpi"
+    return {
+        "columns": {
+            "generation_id": ("VARCHAR(36)", 1, 1),
+            "input_key": ("TEXT", 1, 2),
+            "position": ("INTEGER", 1, 3),
+            "artifact_role": ("TEXT", 1, 0),
+            "shot_revision_segment_position": ("INTEGER", 1, 0),
+            "performance_revision_id": ("VARCHAR(36)", 1, 0),
+            "vocal_performance_revision_id": ("VARCHAR(36)", 0, 0),
+            "blob_hash": ("TEXT", 1, 0),
+            "binding_hash": ("TEXT", 0, 0),
+            "segment_hash": ("TEXT", 1, 0),
+            "translation_identity": ("TEXT", 1, 0),
+            "derived_input_hash": ("TEXT", 1, 0),
+            "created_at": ("TEXT", 1, 0),
+        },
+        "pk_columns": ["generation_id", "input_key", "position"],
+        "checks": [
+            (f"{n}_role",
+             "artifact_role IN ('performance.controls', "
+             "'performance.vocal_audio')"),
+            (f"{n}_position", "position >= 0"),
+            (f"{n}_blob_hash_len", "length(blob_hash) = 64"),
+            (f"{n}_binding_hash_len",
+             "length(binding_hash) = 64 OR binding_hash IS NULL"),
+            (f"{n}_segment_hash_len", "length(segment_hash) = 64"),
+            (f"{n}_derived_hash_len",
+             "length(derived_input_hash) = 64"),
+        ],
+        "fks": sorted([
+            (0, "generations", "generation_id", "id") + _FK_RESTRICT,
+            (0, "blobs", "blob_hash", "hash") + _FK_RESTRICT,
+        ]),
+        "explicit_indexes": {},
+        "unique_indexes": {},
+    }
+
+
+_M17CC_TABLE_CONTRACTS = {
+    _HEAD_0022: {
+        "shot_revision_performance_specs": _srpfs_contract(),
+        "shot_revision_performance_segments":
+            _srpss_contract(successor=False),
+        "generation_performance_inputs": _gpi_contract(),
+    },
+    _HEAD_0023: {
+        "shot_revision_performance_specs": _srpfs_contract(),
+        "shot_revision_performance_segments":
+            _srpss_contract(successor=True),
+        "generation_performance_inputs": _gpi_contract(),
+    },
+}
+
 # IR-01: the migration-0021 working-mapping table contract
 _SPSM_CONTRACT = {
     "columns": {
@@ -507,6 +704,18 @@ def verify_m17c_binding_state(staged_db: Path,
                 _verify_table_schema(con, table, contract)
             if head != _HEAD_0020:
                 _verify_spsm_schema(con)
+            if head in (_HEAD_0022, _HEAD_0023):
+                # ISR2-M17CC-02: the successor tables' PHYSICAL
+                # contracts — the same _verify_table_schema machinery
+                # the predecessor tables already use, proven BEFORE
+                # any semantic row traversal. A staged successor-head
+                # database whose CHECKs/FKs/indexes/PK shape were
+                # weakened (even with EMPTY tables, where quick_check,
+                # foreign_key_check, presence, and row semantics all
+                # stay green) refuses at the physical boundary.
+                for table, contract in \
+                        _M17CC_TABLE_CONTRACTS[head].items():
+                    _verify_table_schema(con, table, contract)
         except sqlite3.Error as exc:
             raise _corrupt(
                 f"physical schema verification failed structurally on "
@@ -1064,9 +1273,32 @@ def _verify_m17cc_capture_state(con: sqlite3.Connection,
                     f"{rev_id!r}")
 
     for rev_id, shot_id in schema8_ids:
-        snap = json.loads(con.execute(
-            "SELECT snapshot_json FROM shot_revisions WHERE id = ?",
-            (rev_id,)).fetchone()[0])
+        snapshot_json, snapshot_hash = con.execute(
+            "SELECT snapshot_json, snapshot_hash FROM shot_revisions "
+            "WHERE id = ?", (rev_id,)).fetchone()
+        # ISR2-M17CC-01: the outer schema-8 ShotRevision envelope is
+        # SELF-AUTHENTICATED before any M17C-C closure interpretation —
+        # the persisted bytes must BE the canonical serialization of
+        # the decoded snapshot, and snapshot_hash its canonical digest
+        # (the same pair the public historical path proves). A schema-8
+        # snapshot with one predecessor field coherently rewritten but
+        # a stale hash, or semantically identical noncanonical bytes,
+        # no longer certifies. Predecessor (<8) recovery posture is
+        # deliberately unchanged.
+        try:
+            snap = json.loads(snapshot_json)
+        except (ValueError, TypeError) as exc:
+            raise _corrupt(
+                f"ShotRevision {rev_id} schema-8 snapshot_json is not "
+                f"decodable: {exc}") from exc
+        if _canonical(snap) != snapshot_json:
+            raise _corrupt(
+                f"ShotRevision {rev_id} schema-8 snapshot_json is not "
+                "the canonical serialization of its decoded snapshot")
+        if _hash(snap) != snapshot_hash:
+            raise _corrupt(
+                f"ShotRevision {rev_id} schema-8 snapshot_hash does "
+                "not authenticate its snapshot bytes")
         _verify_one_schema8(con, blob_root, rev_id, shot_id, snap)
 
 

@@ -53,6 +53,11 @@ class ShotRevisionPerformanceSegment(Base):
     group."""
 
     __tablename__ = "shot_revision_performance_segments"
+    # ISR2-M17CC-02: the CHECK declarations follow the EXACT order of
+    # the 0023 migration's DDL so the stored sqlite_master form is
+    # deterministic across the ORM (create_all) and alembic engines —
+    # the ordered CHECK multiset is part of the frozen physical
+    # contract the recovery verifier proves
     __table_args__ = (
         CheckConstraint("position >= 0", name="ck_srpss_position"),
         CheckConstraint(
@@ -75,14 +80,6 @@ class ShotRevisionPerformanceSegment(Base):
             "AND vocal_performance_origin_den IS NOT NULL "
             "AND vocal_mapping_position IS NOT NULL)",
             name="ck_srpss_vocal_group_all_or_none"),
-        # FPR-M17CC-04: the captured mapping-document preimage
-        CheckConstraint(
-            "vocal_mapping_position >= 0 OR vocal_mapping_position "
-            "IS NULL", name="ck_srpss_vocal_position"),
-        CheckConstraint(
-            "vocal_performance_origin_den > 0 OR "
-            "vocal_performance_origin_den IS NULL",
-            name="ck_srpss_vocal_origin_den"),
         CheckConstraint(
             "length(performance_payload_blob_hash) = 64",
             name="ck_srpss_payload_hash_len"),
@@ -91,6 +88,14 @@ class ShotRevisionPerformanceSegment(Base):
             "NULL", name="ck_srpss_binding_hash_len"),
         CheckConstraint("length(segment_hash) = 64",
                         name="ck_srpss_segment_hash_len"),
+        # FPR-M17CC-04: the captured mapping-document preimage
+        CheckConstraint(
+            "vocal_mapping_position >= 0 OR vocal_mapping_position "
+            "IS NULL", name="ck_srpss_vocal_position"),
+        CheckConstraint(
+            "vocal_performance_origin_den > 0 OR "
+            "vocal_performance_origin_den IS NULL",
+            name="ck_srpss_vocal_origin_den"),
         ForeignKeyConstraint(
             ["shot_revision_id"], ["shot_revisions.id"],
             name="fk_srpss_revision", ondelete="RESTRICT"),
