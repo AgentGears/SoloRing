@@ -46,6 +46,8 @@ M16_SURFACE = (
     r"^server/soloring/api/schemas/shots\.py$",
     r"^server/soloring/recovery/backup\.py$",
     r"^server/soloring/recovery/m16_verifier\.py$",
+    # RR16-M17CC: the shared recovery-side outer-ShotRevision parser
+    r"^server/soloring/recovery/outer_snapshot\.py$",
     r"^server/soloring/recovery/successor_semantics\.py$",
     r"^server/soloring/observation/[a-z_]+\.py$",
     r"^server/soloring/db/models\.py$",

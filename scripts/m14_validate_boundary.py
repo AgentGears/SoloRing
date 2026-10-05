@@ -92,6 +92,8 @@ ALLOWED_PATTERNS = [
     r"^server/soloring/db/models\.py$",
     r"^server/soloring/errors\.py$",
     r"^server/soloring/recovery/backup\.py$",
+    # RR16-M17CC: the shared recovery-side outer-ShotRevision parser
+    r"^server/soloring/recovery/outer_snapshot\.py$",
     r"^server/soloring/recovery/successor_semantics\.py$",
     r"^server/soloring/recovery/m17a_verifier\.py$",
     r"^server/alembic/versions/0018_m17a_dialogue_vocal_foundation"

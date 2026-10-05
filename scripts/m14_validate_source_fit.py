@@ -42,6 +42,9 @@ REVIEWED_SUCCESSOR_PATHS = frozenset({
     "server/soloring/recovery/semantic_successors.py",
     "server/soloring/recovery/successor_semantics.py",
     "server/soloring/recovery/m16_verifier.py",
+    # RR16-M17CC: the shared recovery-side outer-ShotRevision parser
+    # (consumed by the M16 verifier's ShotRevision reads)
+    "server/soloring/recovery/outer_snapshot.py",
     # M16-A exact authority/lifecycle slice + the reviewed M16-B
     # resolver/Shot-detail readiness integration seam.
     "server/soloring/continuity/intra_shot_models.py",
