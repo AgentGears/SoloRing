@@ -16,6 +16,12 @@ from soloring.domain.ids import is_uuid
 from soloring.errors import validation_error
 
 SAFE_INT_MAX = 9_007_199_254_740_991
+# RR19-M17CC-01: the predecessor Shot-duration STORAGE domain's upper
+# bound — the maximum signed SQLite INTEGER (shots.duration_ms and
+# shot_revision_intra_shot_specs.duration_ms are INTEGER columns, so
+# no lawful writer can persist a duration above this; JSON-recovered
+# durations must obey the same physical authority domain)
+SQLITE_INT_MAX = 9_223_372_036_854_775_807
 MAX_ACTIVE_EVENTS_PER_SHOT = 10_000
 MAX_PROPOSAL_CANONICAL_BYTES = 65_536
 MAX_PROPOSAL_REVIEW_BATCH = 10_000
@@ -56,20 +62,26 @@ def require_interior_time(time_ms: object, duration_ms: object) -> tuple[int, in
 
 def require_shot_duration(value: object, *, field: str,
                           minimum: int = 0) -> int:
-    """RR18-M17CC-01: the predecessor Shot-duration integer domain —
+    """RR18/RR19-M17CC-01: the predecessor Shot-duration domain —
     a PLAIN JSON integer (bool/float/numeric-string and every other
     non-integer rejected), never below ``minimum`` (0 for the
     published null-or-nonnegative Shot domain; 1 where M16 event
-    semantics require a genuine duration), with deliberately NO
-    JS-safe event-coordinate ceiling: ``SAFE_INT_MAX`` is an
-    event-grammar law (time_ms/ordinal/positions/counts), NOT a
-    Shot-duration law — a lawful captured duration above 2^53-1 must
-    verify exactly like any other (SQLite's own INTEGER storage is
-    the only upper bound)."""
+    semantics require a genuine duration), and never above the
+    maximum signed SQLite INTEGER (``SQLITE_INT_MAX``) — the storage
+    domain's physical authority bound. NO JS-safe event-coordinate
+    ceiling: ``SAFE_INT_MAX`` is an event-grammar law (time_ms /
+    ordinal / positions), NOT a Shot-duration law — a lawful captured
+    duration anywhere in [0, 2^63-1] verifies exactly (a JSON-recovered
+    duration above the INTEGER storage domain is malformed durable
+    authority the production writer cannot create)."""
     if type(value) is not int:  # bool is deliberately rejected
         raise validation_error(f"{field} must be a plain JSON integer")
     if value < minimum:
         raise validation_error(f"{field} must be at least {minimum}")
+    if value > SQLITE_INT_MAX:
+        raise validation_error(
+            f"{field} is above the signed SQLite INTEGER storage "
+            f"domain (maximum {SQLITE_INT_MAX})")
     return value
 
 
@@ -81,8 +93,10 @@ def captured_intent_duration_ms(snapshot: dict) -> int | None:
     range arithmetic on them: the outer snapshot's ``intent`` exists
     in the representation the M16 consumer expects and is a JSON
     OBJECT, and its ``duration_ms`` is either null or a PLAIN JSON
-    integer in the frozen persistence domain (``require_plain_int``
-    — bool rejected; the canonical writer emits integer-or-null).
+    integer in the predecessor Shot-duration STORAGE domain
+    (``require_shot_duration`` — bool rejected, the frozen minimum
+    discipline, and the signed SQLite INTEGER upper bound; the
+    canonical writer emits integer-or-null).
     Returns the captured duration, or ``None`` when the ShotRevision
     captured none — no duration is ever invented. Raises the
     canonical validation error, which each consumer maps to its own
@@ -95,11 +109,11 @@ def captured_intent_duration_ms(snapshot: dict) -> int | None:
     duration_ms = intent.get("duration_ms")
     if duration_ms is None:
         return None
-    # RR18-M17CC-01: the captured duration belongs to the predecessor
-    # Shot-duration domain — NO JS-safe event-coordinate ceiling (a
-    # lawful captured duration above 2^53-1 verifies exactly like any
-    # other; positivity is the consumer laws' concern: the captured
-    # history's companion-duration equality and the interior rule)
+    # RR18/RR19-M17CC-01: the captured duration belongs to the
+    # predecessor Shot-duration STORAGE domain (plain integer in
+    # [minimum, SQLITE_INT_MAX] — no JS-safe event-coordinate
+    # ceiling; positivity stays the consumer laws' concern: the
+    # companion-duration equality and the interior rule)
     return require_shot_duration(duration_ms,
                                  field="intent.duration_ms")
 
