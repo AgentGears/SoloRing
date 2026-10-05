@@ -39,12 +39,38 @@ def require_plain_int(value: object, *, field: str, minimum: int = 0,
 
 
 def require_interior_time(time_ms: object, duration_ms: object) -> tuple[int, int]:
-    """Return strict integer (time,duration) iff time is genuinely intra-Shot."""
+    """Return strict integer (time,duration) iff time is genuinely intra-Shot.
+
+    RR18-M17CC-01: the two integer DOMAINS stay separate — time_ms is
+    an event coordinate (plain JSON integer, JS-safe ceiling), while
+    duration_ms is the predecessor Shot duration (plain JSON integer,
+    positive, NO event-grammar ceiling; the published Shot domain is
+    unbounded above beyond SQLite's own INTEGER storage)."""
     t = require_plain_int(time_ms, field="time_ms", minimum=1)
-    duration = require_plain_int(duration_ms, field="duration_ms", minimum=1)
+    duration = require_shot_duration(duration_ms, field="duration_ms",
+                                     minimum=1)
     if t >= duration:
         raise validation_error("time_ms must be strictly less than duration_ms")
     return t, duration
+
+
+def require_shot_duration(value: object, *, field: str,
+                          minimum: int = 0) -> int:
+    """RR18-M17CC-01: the predecessor Shot-duration integer domain —
+    a PLAIN JSON integer (bool/float/numeric-string and every other
+    non-integer rejected), never below ``minimum`` (0 for the
+    published null-or-nonnegative Shot domain; 1 where M16 event
+    semantics require a genuine duration), with deliberately NO
+    JS-safe event-coordinate ceiling: ``SAFE_INT_MAX`` is an
+    event-grammar law (time_ms/ordinal/positions/counts), NOT a
+    Shot-duration law — a lawful captured duration above 2^53-1 must
+    verify exactly like any other (SQLite's own INTEGER storage is
+    the only upper bound)."""
+    if type(value) is not int:  # bool is deliberately rejected
+        raise validation_error(f"{field} must be a plain JSON integer")
+    if value < minimum:
+        raise validation_error(f"{field} must be at least {minimum}")
+    return value
 
 
 def captured_intent_duration_ms(snapshot: dict) -> int | None:
@@ -69,7 +95,13 @@ def captured_intent_duration_ms(snapshot: dict) -> int | None:
     duration_ms = intent.get("duration_ms")
     if duration_ms is None:
         return None
-    return require_plain_int(duration_ms, field="intent.duration_ms")
+    # RR18-M17CC-01: the captured duration belongs to the predecessor
+    # Shot-duration domain — NO JS-safe event-coordinate ceiling (a
+    # lawful captured duration above 2^53-1 verifies exactly like any
+    # other; positivity is the consumer laws' concern: the captured
+    # history's companion-duration equality and the interior rule)
+    return require_shot_duration(duration_ms,
+                                 field="intent.duration_ms")
 
 
 def require_hash(value: object, *, field: str) -> str:
@@ -168,7 +200,11 @@ def event_set_value(*, shot_id: str, duration_ms: object,
                     events: list[dict]) -> dict:
     if not is_uuid(shot_id):
         raise validation_error("shot_id must be a UUID")
-    duration = require_plain_int(duration_ms, field="duration_ms", minimum=1)
+    # RR18-M17CC-01: the event-set document's duration_ms is the SHOT
+    # duration (the predecessor domain — plain positive integer, NO
+    # JS-safe event-coordinate ceiling), not an event coordinate
+    duration = require_shot_duration(duration_ms, field="duration_ms",
+                                     minimum=1)
     return {
         "schema_version": 1,
         "shot_id": shot_id,
