@@ -5,6 +5,13 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict, Field
 
 from soloring.domain.normalize import SHOT_SUBJECT_MAX
+# RR20-M17CC-01: the ONE shared signed-SQLite-INTEGER authority bound
+# (a LOW storage/domain layer — the schema does NOT depend upward on
+# the M16 continuity package); duration_ms persists to a SQLite
+# INTEGER column, so the public authoring boundary certifies physical
+# representability BEFORE any SQLite bind (a raw driver OverflowError
+# is never the admission contract)
+from soloring.domain.storage import SQLITE_INT_MAX
 
 
 # Creative intent fields shared by create/patch/read (plan §9.1).
@@ -30,7 +37,8 @@ class ShotCreate(BaseModel):
     camera_motion: str | None = None
     lens: str | None = None
     mood: str | None = None
-    duration_ms: int | None = Field(default=None, ge=0)
+    duration_ms: int | None = Field(
+        default=None, ge=0, le=SQLITE_INT_MAX)
 
 
 class ShotPatch(BaseModel):
@@ -46,7 +54,8 @@ class ShotPatch(BaseModel):
     camera_motion: str | None = None
     lens: str | None = None
     mood: str | None = None
-    duration_ms: int | None = Field(default=None, ge=0)
+    duration_ms: int | None = Field(
+        default=None, ge=0, le=SQLITE_INT_MAX)
 
 
 class SemanticDependencyItem(BaseModel):

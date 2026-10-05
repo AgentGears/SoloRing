@@ -16,12 +16,13 @@ from soloring.domain.ids import is_uuid
 from soloring.errors import validation_error
 
 SAFE_INT_MAX = 9_007_199_254_740_991
-# RR19-M17CC-01: the predecessor Shot-duration STORAGE domain's upper
-# bound — the maximum signed SQLite INTEGER (shots.duration_ms and
-# shot_revision_intra_shot_specs.duration_ms are INTEGER columns, so
-# no lawful writer can persist a duration above this; JSON-recovered
-# durations must obey the same physical authority domain)
-SQLITE_INT_MAX = 9_223_372_036_854_775_807
+# RR20-M17CC-01: the ONE shared signed-SQLite-INTEGER authority bound
+# lives in the lowest domain layer (soloring.domain.storage) so the
+# public Shot authoring schemas and these M16 canonical/recovery
+# primitives enforce the SAME physical representability domain without
+# depending upward on each other — re-exported here for the M16
+# grammar's single canonical import site
+from soloring.domain.storage import SQLITE_INT_MAX  # noqa: E402
 MAX_ACTIVE_EVENTS_PER_SHOT = 10_000
 MAX_PROPOSAL_CANONICAL_BYTES = 65_536
 MAX_PROPOSAL_REVIEW_BATCH = 10_000
