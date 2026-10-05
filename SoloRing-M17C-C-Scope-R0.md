@@ -1309,3 +1309,29 @@ The twentieth fresh independent review of executable head **`34e930020a0392d8c4b
 ## Frozen disposition
 
 **TWENTIETH FRESH INDEPENDENT REVIEW COMPLETE — NOT CLEAN. RR15-M17CC-01: CLOSED. RR15-M17CC-02: CLOSED. ISR2-M17CC-01..03 remain CLOSED. All earlier RR/SR/FPR findings remain CLOSED. New register: `RR16-M17CC-01` — 0H / 1M / 0L. No other issue from this pass met the evidence threshold.** PR #26 remains draft, unmerged, unready. No second-review rerun, ready-mark, merge, publication, or correction work has been initiated — the RR16 correction cycle awaits its commission.
+
+---
+
+# M17C-C RR16-M17CC-01 CORRECTION — 2026-10-05 — IMPLEMENTED
+
+The commissioned correction cycle is complete. Correction heads: **`2e7dde7`** (implementation + battery, committed first) then **`eb1bfd0`** (the validator admissions — two commits: the boundary-allowlist/regex/source-fit admissions, then the follow-up admitting the new module to the third rule, the security-slice backend-change list, which the first refused validator run disclosed; all validators ran against the committed admission-inclusive tree).
+
+## Delivered (the commission exactly)
+
+1. **ONE shared recovery-side outer-ShotRevision parser.** `soloring.recovery.outer_snapshot.load_outer_snapshot` carries exactly the parse/shape boundary: it accepts the persisted text/bytes forms the recovery contract supports, converts EVERY decode failure into the typed `RecoveryCorruption` contract (the `ValueError` catch covers `JSONDecodeError` and `UnicodeDecodeError` — so malformed JSON and an invalid-UTF-8 SQLite BLOB are normalized; `TypeError` covers non-text/non-bytes storage classes), and requires a JSON OBJECT before any consumer calls `.get()` on the result. No semantic interpretation lives there — schema discrimination, canonical-bytes/hash authentication, and closure laws stay with the owning verifier.
+2. **M16 consumes the shared boundary for ALL of its ShotRevision snapshot reads** — the global history enumeration, the intra-shot companion sweep, and the proposal source-revision lookup. No residual bare `json.loads(snapshot_json)` over ShotRevision history remains in the M16 verifier (its remaining `json.loads` sites parse proposal/canonical-pair/review documents — already guarded where applicable — and are outside this commission's scope). Predecessor-first verification and the M16-before-M17C ordering are unchanged; the M17C-C classification keeps its own guarded decode and its RR15 authenticate-before-classification law untouched; existing valid historical snapshots are behavior-identical.
+3. **No broadening:** no ShotRevision schema redesign, migration work, capture/history semantics, RR15 authentication change, M17A/B/C grammar change, or generic JSON refactoring.
+4. **The decisive battery, exactly the frozen shapes on a lawful head-0023 mixed-successor database** (a GENUINE schema<8 revision captured before any mappings, plus lawful schema-8 state): the green control verifies green on the direct M17C-C verifier AND restores successfully through the full predecessor chain; the three malformed shapes on the old revision — malformed JSON and an actual invalid-UTF-8 BLOB (`typeof` proven `blob`; stale identity explicitly intentional, no canonical form existing to recompute), and valid non-object `[]` with a COHERENT hash isolating the object-shape law — each refuse through the typed contract on BOTH the direct M17C-C verifier and the full staged restore, with the backup manifest rehashed so the restore reaches semantic verification rather than failing artifact authentication first. The typed classes themselves are the never-raw proof: the direct chain's `SoloRingError` carrying `RECOVERY_CORRUPTION` and the restore chain's `RecoveryCorruption` are neither `JSONDecodeError`, `UnicodeDecodeError`, nor `AttributeError`.
+
+## Gates (first-run dispositions recorded exactly, in the commissioned order)
+
+- RR16 battery **first run 1/4, disclosed**: the two failing expectations were MY test's exception-class assumptions, not product defects — the direct M17C-C leg's typed contract is `SoloRingError` carrying the `RECOVERY_CORRUPTION` code (not M16's `RecoveryCorruption` class), and `RecoveryCorruption` exposes `str()` rather than `.message`; the product was typed throughout. After the two test-expectation corrections (no product or fixture change): **4/4**.
+- Directly endangered M16 recovery + M17C-C recovery/full-restore/round-trip/migration/backup + rr16 **71/71**; RR15 + ISR2 batteries **12/12**; prior correction + live-seam + predecessor recovery/schema batteries **94/94**.
+- Committed-tree validators: the FIRST run after the implementation commit **refused the new module (5 validator FAILs, disclosed)** — the boundary gates working as designed against an unadmitted new source file; the admission commits admit exactly `server/soloring/recovery/outer_snapshot.py` (both hygiene/next-security allowlists, the m16/m14 regexes, the m14 source-fit `REVIEWED_SUCCESSOR_PATHS`, and the security-slice backend-change rule) plus the RR16 battery carves; final **21/21 green**.
+- Frontend green (vitest 143/143 + tsc + build).
+- Local full backend suite, FIRST RUN: **3122 passed / 8 skipped / 0 failed in 46:40, exit 0** (collection 3130 = the prior 3126 + the 4-test battery — exact).
+- **CI run `37275398955` on `eb1bfd0`: SUCCESS, attempt 1 — Backend 3129 passed / 20 skipped / 0 failed** (CI total 3149 = its prior 3145 + the 4-test battery, exact); Frontend green attempt 1. Corroboration only.
+
+## Fences honored
+
+No second-review rerun; no ready-mark; no merge; no publication; PR #26 remains draft, unmerged, unready. **RR16-M17CC-01 remains OPEN until a fresh independent review closes it** — the work stops here and holds for the **twenty-first fresh independent first-pass review** of the corrected executable head (`eb1bfd0`).
