@@ -644,6 +644,10 @@ def main(repo: Path = REPO) -> int:
                 "server/alembic/versions/0023_")
             or f.startswith(
                 "server/soloring/recovery/m17c_")
+            # RR16-M17CC: the shared recovery-side outer-ShotRevision
+            # parser (consumed by the M16 verifier's reads)
+            or f == (
+                "server/soloring/recovery/outer_snapshot.py")
             or f.startswith(
                 "server/soloring/api/m17c_")
             or f.startswith(
