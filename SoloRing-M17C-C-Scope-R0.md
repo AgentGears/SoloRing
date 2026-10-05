@@ -1445,3 +1445,34 @@ The twenty-third fresh independent review of corrected executable head **`64d5fb
 ## Frozen disposition
 
 **TWENTY-THIRD FRESH INDEPENDENT REVIEW COMPLETE — NOT CLEAN. RR18-M17CC-01: CLOSED. New frozen register: `RR19-M17CC-01` — 0H / 1M / 0L. All earlier RR/ISR2/SR/FPR findings remain CLOSED.** PR #26 remains draft, unmerged, unready. No RR19 implementation has begun — the next step is the documentation-only record of this frozen register, after which the RR19 correction commission follows.
+
+---
+
+# M17C-C RR19-M17CC-01 CORRECTION — 2026-10-05 — IMPLEMENTED
+
+The commissioned correction cycle is complete. Correction heads: **`cbb833f`** (implementation + battery, committed first) then **`bc367c0`** (the four validator admissions, committed afterward; the first validator refusal recorded exactly as commissioned; all validators ran against the committed carve-inclusive tree; no new source module — the named constant lives in the already-admitted `intra_shot_canonical.py`).
+
+## Delivered (the commission exactly)
+
+1. **The authoritative duration primitive now models the actual STORAGE domain.** `require_shot_duration` enforces an actual non-bool Python/JSON integer, the caller-specified minimum, and **maximum signed SQLite INTEGER** via the new named constant `SQLITE_INT_MAX = 9_223_372_036_854_775_807` (2^63−1 — deliberately NOT `SAFE_INT_MAX`; one named primitive, no duplicated literals). The acceptance path is closed: a duration recovered from `snapshot_json` (TEXT, mechanically free of the INTEGER columns' constraint) at 2^63 or above no longer passes `captured_intent_duration_ms` / `require_interior_time` — JSON-recovered duration authority obeys the same physical storage domain the production writer's INTEGER columns impose.
+2. **RR18's domain separation preserved exactly:** `SAFE_INT_MAX` remains the event-coordinate ceiling (`time_ms`/`ordinal`); `require_interior_time`'s time operand keeps `require_plain_int`; durations anywhere in **[2^53, 2^63−1] inclusive — both frozen boundary points — remain lawful**; `1 <= time_ms < duration_ms` unchanged; `None` stays legal only in predecessor contexts permitting it.
+3. **RR17/RR18 preservation:** the malformed duration shapes — bool, float, numeric string, negative, and now `> 2^63−1` — all fail through the appropriate typed contract BEFORE arithmetic (the RR17/RR18 batteries re-proven green).
+4. **Documentation hygiene:** the stale `captured_intent_duration_ms` docstring (which still attributed duration validation to `require_plain_int` — the exact RR18 conflation) corrected to name the dedicated Shot-duration/storage-domain primitive.
+5. **No public Shot API tightening, DB CHECK change, migration change, or general numeric-policy work.**
+
+## The decisive battery (`tests/test_m17cc_rr19_corrections.py`, 3 tests, first run 3/3)
+
+The **positive boundary** (`duration_ms = 2^63−1`, `time_ms = 1`) through the real supported path: Shot authoring persists the storage maximum; M16 event creation at time 1 lawful; capture stores the EXACT integer identically in outer `intent.duration_ms` AND the immutable companion parent; historical inspection green; direct M16 recovery green; full staged restore green; a source-pinned proposal with a safe interior time verifies. The **negative boundary**: `intent.duration_ms = 2^63` injected into canonical `snapshot_json` TEXT of a lawful ordinary source revision, `snapshot_hash` recomputed, the pinning proposal's `source_shot_revision_hash` coherently updated, and source-hash coherence **proven by assertion** (pin == revision hash == the recomputed hash) — refused by direct M16 recovery AND the full staged restore (manifest rehashed) through typed `RecoveryCorruption` with the duration-STORAGE law owning the rejection ("above the signed SQLite INTEGER storage domain") BEFORE range arithmetic. The **separation regressions**: the lawful band `[2^53, 2^63−1]` green at unit level (both boundary points), `time_ms`/`ordinal` above `SAFE_INT_MAX` red, the RR17 shapes still refused — a fix that changes or removes `require_plain_int`'s event ceiling cannot satisfy the battery.
+
+## Gates (first-run dispositions recorded exactly, in the commissioned order)
+
+- RR19 battery **3/3 on FIRST run** — no fixture corrections, no re-runs after edits, no product or expectation changes needed.
+- M16 grammar + duration batteries (the JS-safe overflow cells) + RR19 + RR18 **22/22**; endangered M16 proposal/history/recovery/capture/event suites **60/60**; M17C-C history/recovery/full-restore/round-trip/migration/backup **77/77**; RR17 + RR16 + RR15 + ISR2 **20/20**; prior predecessor + live-seam **94/94**.
+- The **first validator run refused the unadmitted battery file exactly as commissioned** (hygiene: "changed file outside the hygiene allowlist: tests/test_m17cc_rr19_corrections.py") — validator-admission-only commit `bc367c0` afterward (the four boundary validators; no validator weakening, no unrelated allowlist expansion); final **21/21 green**.
+- Frontend green (vitest 143/143 + tsc + build).
+- Local full backend suite, FIRST RUN: **3133 passed / 8 skipped / 0 failed in 49:02, exit 0** (collection 3141 = the prior 3138 + the 3-test battery — exact).
+- **CI run `37334718431` on `bc367c0`: SUCCESS, attempt 1 — Backend 3140 passed / 20 skipped / 0 failed** (CI total 3160 = its prior 3157 + the 3-test battery, exact); Frontend green attempt 1. Corroboration only.
+
+## Fences honored
+
+No second-review rerun; no ready-mark; no merge; no publication; PR #26 remains draft, unmerged, unready. No reopening of RR18/RR17/RR16/RR15/ISR2 or earlier registers. **RR19-M17CC-01 remains OPEN until the twenty-fourth fresh independent first-pass review examines the corrected executable independently** — the work stops here and holds for that review of `bc367c0`.
