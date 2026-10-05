@@ -187,6 +187,9 @@ M16_SURFACE = (
     r"^tests/test_m17cc_rr18_corrections\.py$",
     # RR19-M17CC correction battery
     r"^tests/test_m17cc_rr19_corrections\.py$",
+    # RR20-M17CC correction battery + the shared storage-domain bound
+    r"^tests/test_m17cc_rr20_corrections\.py$",
+    r"^server/soloring/domain/storage\.py$",
     r"^tests/test_post_m13_next_security\.py$",
     r"^tests/test_m14_base_corpus\.py$",
 

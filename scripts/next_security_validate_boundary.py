@@ -143,6 +143,9 @@ ALLOWLIST = (
     "tests/test_m17cc_rr18_corrections.py",
     # RR19-M17CC correction battery
     "tests/test_m17cc_rr19_corrections.py",
+    # RR20-M17CC correction battery + the shared storage-domain bound
+    "tests/test_m17cc_rr20_corrections.py",
+    "server/soloring/domain/storage.py",
     # RR16-M17CC: the shared recovery-side outer-ShotRevision parser
     "server/soloring/recovery/outer_snapshot.py",
     "server/soloring/recovery/backup.py",
