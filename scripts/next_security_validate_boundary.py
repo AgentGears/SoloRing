@@ -657,6 +657,10 @@ def main(repo: Path = REPO) -> int:
             # parser (consumed by the M16 verifier's reads)
             or f == (
                 "server/soloring/recovery/outer_snapshot.py")
+            # RR20-M17CC: the shared signed-SQLite storage-domain
+            # bound (consumed by the Shot API schemas + M16 canonical)
+            or f == (
+                "server/soloring/domain/storage.py")
             or f.startswith(
                 "server/soloring/api/m17c_")
             or f.startswith(
