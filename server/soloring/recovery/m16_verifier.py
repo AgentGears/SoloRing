@@ -78,13 +78,27 @@ def _verify_proposal_source(row, rows) -> None:
         rows("SELECT snapshot_json FROM shot_revisions WHERE id = ?",
              (source_rev_id,))[0][0],
         what=f"proposal {pid} source ShotRevision {source_rev_id}")
-    if snap.get("intent", {}).get("duration_ms") is not None:
-        duration = snap["intent"]["duration_ms"]
+    # RR17-M17CC-01: the ONE shared captured-intent law — the nested
+    # representation is certified BEFORE any .get()/equality/range
+    # arithmetic over it (the former bare 1 <= t < duration over
+    # uncertified data raised raw TypeError on cross-type values)
+    from soloring.continuity.intra_shot_canonical import (
+        captured_intent_duration_ms, require_interior_time,
+    )
+    from soloring.errors import SoloRingError
+    try:
+        duration = captured_intent_duration_ms(snap)
+    except SoloRingError as exc:
+        _corrupt(f"proposal {pid} source revision intent violates "
+                 f"the frozen M16 representation: {exc.message}")
+    if duration is not None:
         t = doc["candidate_event"]["time_ms"]
-        if not 1 <= t < duration:
+        try:
+            require_interior_time(t, duration)
+        except SoloRingError as exc:
             _corrupt(
                 f"proposal {pid} time is not interior to the captured "
-                "source duration")
+                f"source duration: {exc.message}")
 
     if source_kind == "generation":
         if source_gen_id is None or source_take_id is not None:
@@ -733,8 +747,18 @@ def verify_m16_intra_shot_state(staged_db: Path) -> None:
             if snap.get("schema_version") == 7 or (
                     snap.get("schema_version") == 8
                     and "intra_shot" in snap):
-                verify_intra_shot_history_sync(
-                    con, rev_id, snapshot=snap)
+                # RR17-M17CC-01: the shared history module's typed
+                # laws surface as the recovery corruption contract on
+                # the restore path (never raw exceptions); the live
+                # API keeps its internal-invariant vocabulary
+                from soloring.errors import SoloRingError
+                try:
+                    verify_intra_shot_history_sync(
+                        con, rev_id, snapshot=snap)
+                except SoloRingError as exc:
+                    _corrupt(
+                        f"ShotRevision {rev_id} captured intra-shot "
+                        f"history violates its law: {exc.message}")
         for (rev_id,) in rows(
                 "SELECT DISTINCT shot_revision_id FROM "
                 "shot_revision_intra_shot_events"):

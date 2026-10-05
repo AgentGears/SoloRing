@@ -555,8 +555,21 @@ def _verify_core(parent, children, starts, world, revision_id: str,
             raise internal_invariant(
                 f"ShotRevision {revision_id} outer snapshot intra_shot "
                 "block disagrees with the rebuilt companion history")
-        if snapshot.get("intent", {}).get("duration_ms") != \
-                parent["duration_ms"]:
+        # RR17-M17CC-01: the ONE shared captured-intent law — the
+        # nested representation is certified BEFORE the equality
+        # comparison (a non-object intent such as [] previously
+        # reached .get() here and raised raw AttributeError)
+        from soloring.continuity.intra_shot_canonical import (
+            captured_intent_duration_ms,
+        )
+        from soloring.errors import SoloRingError
+        try:
+            captured_duration = captured_intent_duration_ms(snapshot)
+        except SoloRingError as exc:
+            raise internal_invariant(
+                f"ShotRevision {revision_id} captured intent violates "
+                f"the frozen M16 representation: {exc.message}") from exc
+        if captured_duration != parent["duration_ms"]:
             raise internal_invariant(
                 f"ShotRevision {revision_id} intra_shot duration "
                 "disagrees with the captured intent duration")

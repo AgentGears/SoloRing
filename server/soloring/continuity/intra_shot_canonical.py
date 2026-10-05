@@ -47,6 +47,31 @@ def require_interior_time(time_ms: object, duration_ms: object) -> tuple[int, in
     return t, duration
 
 
+def captured_intent_duration_ms(snapshot: dict) -> int | None:
+    """RR17-M17CC-01: the ONE shared predecessor helper for the
+    M16-owned captured-intent facts a ShotRevision consumer reads.
+
+    Establishes, BEFORE any consumer performs ``.get()``/equality/
+    range arithmetic on them: the outer snapshot's ``intent`` exists
+    in the representation the M16 consumer expects and is a JSON
+    OBJECT, and its ``duration_ms`` is either null or a PLAIN JSON
+    integer in the frozen persistence domain (``require_plain_int``
+    — bool rejected; the canonical writer emits integer-or-null).
+    Returns the captured duration, or ``None`` when the ShotRevision
+    captured none — no duration is ever invented. Raises the
+    canonical validation error, which each consumer maps to its own
+    typed contract. Deliberately NOT a general snapshot grammar:
+    only the nested facts actually consumed are certified."""
+    intent = snapshot.get("intent")
+    if not isinstance(intent, dict):
+        raise validation_error(
+            "captured snapshot intent must be a JSON object")
+    duration_ms = intent.get("duration_ms")
+    if duration_ms is None:
+        return None
+    return require_plain_int(duration_ms, field="intent.duration_ms")
+
+
 def require_hash(value: object, *, field: str) -> str:
     if (not isinstance(value, str) or len(value) != 64
             or any(c not in "0123456789abcdef" for c in value)):
