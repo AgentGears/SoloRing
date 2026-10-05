@@ -107,9 +107,9 @@ def _rebuild_with_ddl(con, table, new_ddl):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mode,fragment", [
     ("stale_hash",
-     "schema-8 snapshot_hash does not authenticate its snapshot bytes"),
+     "snapshot_hash does not authenticate its snapshot bytes"),
     ("noncanonical",
-     "schema-8 snapshot_json is not the canonical serialization of "
+     "snapshot_json is not the canonical serialization of "
      "its decoded snapshot"),
 ])
 async def test_isr201_outer_envelope_authenticated_both_surfaces(

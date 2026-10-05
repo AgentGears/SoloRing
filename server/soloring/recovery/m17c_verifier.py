@@ -312,6 +312,12 @@ def _srpss_contract(*, successor: bool) -> dict:
         "explicit_indexes": {
             "ix_srpss_pr": (0, "c", 0),
         },
+        # RR15-M17CC-02: the exact ordered column sequence of the
+        # migration's index (name + flags alone certify nothing about
+        # WHICH column is indexed)
+        "index_columns": {
+            "ix_srpss_pr": ["performance_revision_id"],
+        },
         "unique_indexes": {},
     }
 
@@ -560,6 +566,22 @@ def _verify_table_schema(con: sqlite3.Connection, table: str,
         raise _corrupt(
             f"{table} explicit-index contract diverges: expected "
             f"{contract['explicit_indexes']}, got {explicit}")
+    # RR15-M17CC-02: when the contract carries explicit-index column
+    # sequences, each named index must index EXACTLY those columns in
+    # order — the (unique, origin, partial) tuple above proves only
+    # the index's name and flags, so a same-name same-flags index
+    # rebuilt over a different column would otherwise certify. The
+    # key is optional: contracts that omit it (the frozen predecessor
+    # PF-03/PF-02 surfaces, whose own wrapper performs the equivalent
+    # check where required) keep byte-identical behavior.
+    for name, expected_cols in contract.get(
+            "index_columns", {}).items():
+        cols = [r[2] for r in con.execute(
+            f"PRAGMA index_info({name})")]
+        if cols != expected_cols:
+            raise _corrupt(
+                f"{table} explicit index {name!r} does not index "
+                f"exactly {expected_cols!r} (got {cols!r})")
     # IND-02: classify EVERY remaining autoindex by origin. 'pk'
     # entries are lawful ONLY as the exact consequence of the frozen
     # PK — each must index exactly the frozen PK columns in order.
@@ -1217,7 +1239,8 @@ def _verify_m17cc_capture_state(con: sqlite3.Connection,
     classified = {}
     schema8_ids = []
     for row in con.execute(
-            "SELECT id, shot_id, snapshot_json FROM shot_revisions"):
+            "SELECT id, shot_id, snapshot_json, snapshot_hash "
+            "FROM shot_revisions"):
         try:
             snap = json.loads(row["snapshot_json"])
         except (ValueError, TypeError) as exc:
@@ -1228,6 +1251,23 @@ def _verify_m17cc_capture_state(con: sqlite3.Connection,
             raise _corrupt(
                 f"ShotRevision {row['id']} snapshot is not a JSON "
                 "object")
+        # RR15-M17CC-01: EVERY envelope is authenticated BEFORE its
+        # schema discriminator is trusted for classification — the
+        # persisted bytes must BE the canonical serialization of the
+        # decoded snapshot and snapshot_hash its canonical digest
+        # (ISR2-01 proved this pair for revisions already classified
+        # schema 8; a discriminator corrupted DOWNWARD must not exempt
+        # its own document from the same authentication). This is the
+        # successor-head M17C-C verifier law; restoring an actual
+        # pre-0022 alembic head is a different, unchanged concern.
+        if _canonical(snap) != row["snapshot_json"]:
+            raise _corrupt(
+                f"ShotRevision {row['id']} snapshot_json is not the "
+                "canonical serialization of its decoded snapshot")
+        if _hash(snap) != row["snapshot_hash"]:
+            raise _corrupt(
+                f"ShotRevision {row['id']} snapshot_hash does not "
+                "authenticate its snapshot bytes")
         schema = snap.get("schema_version")
         classified[row["id"]] = (row["shot_id"], schema)
         if schema == 8:
@@ -1273,32 +1313,13 @@ def _verify_m17cc_capture_state(con: sqlite3.Connection,
                     f"{rev_id!r}")
 
     for rev_id, shot_id in schema8_ids:
-        snapshot_json, snapshot_hash = con.execute(
-            "SELECT snapshot_json, snapshot_hash FROM shot_revisions "
-            "WHERE id = ?", (rev_id,)).fetchone()
-        # ISR2-M17CC-01: the outer schema-8 ShotRevision envelope is
-        # SELF-AUTHENTICATED before any M17C-C closure interpretation —
-        # the persisted bytes must BE the canonical serialization of
-        # the decoded snapshot, and snapshot_hash its canonical digest
-        # (the same pair the public historical path proves). A schema-8
-        # snapshot with one predecessor field coherently rewritten but
-        # a stale hash, or semantically identical noncanonical bytes,
-        # no longer certifies. Predecessor (<8) recovery posture is
-        # deliberately unchanged.
-        try:
-            snap = json.loads(snapshot_json)
-        except (ValueError, TypeError) as exc:
-            raise _corrupt(
-                f"ShotRevision {rev_id} schema-8 snapshot_json is not "
-                f"decodable: {exc}") from exc
-        if _canonical(snap) != snapshot_json:
-            raise _corrupt(
-                f"ShotRevision {rev_id} schema-8 snapshot_json is not "
-                "the canonical serialization of its decoded snapshot")
-        if _hash(snap) != snapshot_hash:
-            raise _corrupt(
-                f"ShotRevision {rev_id} schema-8 snapshot_hash does "
-                "not authenticate its snapshot bytes")
+        # RR15-M17CC-01: every envelope was already authenticated in
+        # the classification pass above (canonical bytes + hash,
+        # BEFORE the discriminator was trusted) — the schema-8 closure
+        # walk only re-decodes
+        snap = json.loads(con.execute(
+            "SELECT snapshot_json FROM shot_revisions WHERE id = ?",
+            (rev_id,)).fetchone()[0])
         _verify_one_schema8(con, blob_root, rev_id, shot_id, snap)
 
 
