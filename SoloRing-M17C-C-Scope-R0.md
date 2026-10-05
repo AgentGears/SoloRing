@@ -1400,3 +1400,29 @@ The twenty-second fresh independent review of executable head **`eabf3e38f17cd22
 ## Frozen disposition
 
 **TWENTY-SECOND FRESH INDEPENDENT REVIEW COMPLETE — NOT CLEAN. RR17-M17CC-01: CLOSED. RR16, RR15, ISR2, RR14, and every earlier RR/SR/FPR finding remain CLOSED. New frozen register: `RR18-M17CC-01` — 0H / 1M / 0L — RR17 conflates the JS-safe M16 event-integer domain with the separately preserved predecessor Shot-duration domain, causing lawful large-duration captured history to be rejected. No other issue from this pass met the evidence threshold.** PR #26 remains draft, unmerged, unready. No second-review rerun, ready-mark, merge, publication, or RR18 correction work has been initiated — the RR18 correction cycle awaits its commission.
+
+---
+
+# M17C-C RR18-M17CC-01 CORRECTION — 2026-10-05 — IMPLEMENTED
+
+The commissioned correction cycle is complete. Correction heads: **`aec7235`** (implementation + battery, committed first) then **`64d5fbd`** (the four validator admissions, committed afterward; all validators ran against the committed carve-inclusive tree; no new source module — the primitive lives in the already-admitted `intra_shot_canonical.py`).
+
+## Delivered (the commission exactly)
+
+1. **ONE explicit duration-domain primitive.** `intra_shot_canonical.require_shot_duration` — a plain JSON integer (bool/float/numeric-string and every other non-integer rejected; negative rejected via `minimum`), deliberately with NO JS-safe event-coordinate ceiling: `SAFE_INT_MAX` is an event-grammar law (time_ms/ordinal/positions/counts), not a Shot-duration law; `minimum=0` for the published null-or-nonnegative domain, `minimum=1` where M16 event semantics require a genuine duration; SQLite's own INTEGER storage is the only upper bound.
+2. **Used for the DURATION operand everywhere the Shot duration is validated:** `captured_intent_duration_ms()` (RR17's totality intact — only the wrongly inherited ceiling removed; positivity stays the consumer laws' concern: the companion-duration equality and the interior rule); `require_interior_time()`'s duration operand (the TIME operand keeps `require_plain_int` with the JS-safe ceiling; the public meaning preserved exactly — time a plain JS-safe integer ≥ 1, duration a plain positive Shot-duration integer, `time_ms < duration_ms`; no second range-comparison helper); **and `event_set_value`'s `duration_ms`** — the event-set document's duration is the SHOT duration, not an event coordinate. That third site was **discovered during the first battery run** (the writer path itself rejected the frozen lawful state — the review's premise that the prospective validator accepts the large duration was false of the implemented writer), and it received the same domain separation; disclosed below with the first-run disposition.
+3. **NOT changed:** the public Shot/API ceiling (`ShotCreate`/`ShotPatch` `ge=0` stays), any database CHECK, the event grammar (time_ms/ordinal keep `require_plain_int` + the JS-safe ceiling), bool/float/string rejection, or `1 <= time_ms < duration_ms`. No migration redesign, Shot API tightening, or unrelated cleanup.
+4. **The decisive battery — the exact frozen state (`duration_ms = SAFE_INT_MAX + 1 = 2^53`, `event_time = 1`) through ALL EIGHT points:** (1) Shot create AND duration PATCH accept; (2) M16 event creation at `time_ms = 1` lawful; (3) capture succeeds with the EXACT large integer appearing identically in outer `intent.duration_ms` AND the immutable intra-shot companion parent; (4) historical inspection succeeds; (5) direct M16 recovery succeeds; (6) full staged backup/restore succeeds; (7) a proposal pinned to that revision with a safe interior event time validates; (8) the `time_ms = SAFE_INT_MAX + 1` and ordinal-overflow negatives STILL refuse — a broad relaxation of `require_plain_int` cannot satisfy the battery. Plus the RR17 corruption shapes (string/bool/float durations) remain typed refusals, with `None` lawful only where the predecessor context permits.
+
+## Gates (first-run dispositions recorded exactly, in the commissioned order)
+
+- RR18 battery **first run 0/4, disclosed**: (a) the writer-side `event_set_value` ceiling rejected event creation at the frozen large duration — the fix above (a product change within the commissioned boundary: the duration operand's domain separation applied consistently); (b) the RR17-shapes leg asserted the proposal-side fragment on a world with no proposals — the refusal correctly came from the history side; the fragment was corrected (a test-expectation correction). Rerun **4/4**.
+- M16 GRAMMAR + duration tests (incl. `GRAMMAR:03` and duration 01–05) + rr18 **19/19**; endangered M16 history/recovery/proposal/capture/events **60/60**; M17C-C history/full-restore/round-trip/migration/backup **77/77**; RR17 + RR16 + RR15 + ISR2 batteries **20/20**; prior correction + live-seam + predecessor recovery suites **129/129**.
+- Committed-tree validators **21/21 green** (implementation `aec7235` committed before the validator-admission commit `64d5fbd`).
+- Frontend green (vitest 143/143 + tsc + build).
+- Local full backend suite, FIRST RUN: **3130 passed / 8 skipped / 0 failed in 51:55, exit 0** (collection 3138 = the prior 3134 + the 4-test battery — exact).
+- **CI run `37313416659` on `64d5fbd`: SUCCESS, attempt 1 — Backend 3137 passed / 20 skipped / 0 failed** (CI total 3157 = its prior 3153 + the 4-test battery, exact); Frontend green attempt 1. Corroboration only.
+
+## Fences honored
+
+No second-review rerun; no ready-mark; no merge; no publication; PR #26 remains draft, unmerged, unready. **RR18-M17CC-01 remains OPEN until a fresh independent review closes it** — the work stops here and holds for the **twenty-third fresh independent first-pass review** of the corrected executable head (`64d5fbd`).
