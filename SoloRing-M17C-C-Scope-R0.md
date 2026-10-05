@@ -1261,3 +1261,31 @@ The nineteenth fresh independent review of executable head **`86717fe1ad6436334d
 ## Frozen disposition
 
 **NINETEENTH FRESH INDEPENDENT REVIEW COMPLETE — NOT CLEAN. The frozen second-review adversaries for ISR2-M17CC-01..03 are closed, and ISR2-M17CC-03 is fully closed. No earlier RR/SR/FPR register is reopened. New register: `RR15-M17CC-01..02` — 0H / 1M / 1L.** PR #26 remains draft, unmerged, unready. No further second review, ready-mark, merge, publication, or correction work is authorized at this state. The next step is the documentation-only recording of this frozen register; the RR15 correction cycle awaits its commission.
+
+---
+
+# M17C-C RR15-M17CC-01..02 CORRECTION — 2026-10-05 — IMPLEMENTED
+
+The commissioned correction cycle is complete. Correction heads: **`0985bd2`** (implementation + battery, committed first) then **`34e9300`** (the four validator admissions, committed afterward; all validators ran against the committed carve-inclusive tree).
+
+## Delivered (the commission exactly)
+
+1. **RR15-01 — authenticate before classification.** The classification pass in `_verify_m17cc_capture_state` now reads `snapshot_hash` alongside `snapshot_json` and authenticates **EVERY** ShotRevision envelope — canonical persisted bytes, then hash — **BEFORE** the schema discriminator is trusted for M17C-C classification, exactly the commissioned ordering (load → decode → prove canonical → prove hash → only now trust `schema_version` → classify → closure laws). The discriminator corrupted downward no longer exempts its own document from authentication. The redundant phase-2 re-authentication block is removed (every envelope is authenticated once, up front), and the messages generalize from "schema-8 snapshot…" to "snapshot…" — **a disclosed test-expectation update:** the two ISR2-01 fragments in `tests/test_m17cc_isr2_corrections.py` were updated to the generalized wording, and the ISR2-01 stale-hash and noncanonical-byte adversaries still refuse (now at classification time). This is a successor-head M17C-C verifier law only; restoring an actual pre-0022 alembic head is an unchanged, separate concern.
+2. **RR15-02 — index column identity.** The shared `_verify_table_schema` gained an OPTIONAL `index_columns` contract mapping (exact ordered `PRAGMA index_info` sequences per named explicit index) — mechanically general, and contracts that omit the key keep byte-identical behavior (the frozen predecessor PF-03 contracts untouched; PF-02 keeps its own wrapper check — neither opportunistically rewritten, per the commission). Both the 0022 and 0023 segment contracts now require `ix_srpss_pr → ["performance_revision_id"]`, so the same-name, same-flags index rebuilt over a different column no longer certifies.
+3. **The decisive proofs, exactly as commissioned.** The discriminator-downgrade adversary (from a lawful schema-8 capture: only the embedded outer discriminator `8 → 7` rewritten with canonical bytes persisted, precisely that revision's M17C-C companion closure removed, `snapshot_hash` left stale) is refused by the direct recovery verifier through outer authentication BEFORE classification can legitimize the downgraded shape, and the full staged restore independently refuses. The **mixed-successor control** — one lawful head-0023 database containing a GENUINE historical schema<8 revision (captured before any performance mappings existed) alongside a lawful schema-8 revision — remains green. The wrong-column `ix_srpss_pr` adversary is refused at the physical boundary at BOTH heads (0023 with the undamaged state green first; 0022 from a genuine alembic 0021→0022 upgrade proving the correct index green first), distinguishing name+flags+wrong-column from ISR2-02's absence law.
+4. **Preservation / no broadening.** ISR2-M17CC-01/02/03 frozen adversaries re-proven green (the ISR2 battery with the two generalized fragments); RR14 and all earlier closures stand; the GPI `derived_input_hash` non-finding and the populated-0022→0023 refusal untouched; no capture/readiness/history grammar, Generation behavior, migration-head semantics, PF-02/PF-03 authority, or unrelated DDL change.
+
+## Gates (first-run dispositions recorded exactly, in the commissioned order)
+
+- RR15 battery (`tests/test_m17cc_rr15_corrections.py`) **4/4 on FIRST run** (run together with the ISR2 battery — **12/12**, the ISR2 fragments' generalization green on first run after the disclosed edit).
+- Directly endangered recovery/full-restore/schema-contract + M17C-C recovery/round-trip/migration/backup batteries **100/100**.
+- ISR2 correction battery **8/8** (see above).
+- Predecessor PF-02/PF-03 schema-recovery batteries (the shared `_verify_table_schema` enhancement proven behavior-identical) **56/56**; prior correction + live-seam batteries **45/45**.
+- Committed-tree validators **21/21 green** (implementation `0985bd2` committed before the validator-admission commit `34e9300`).
+- Frontend green (vitest 143/143 + tsc + build).
+- Local full backend suite, FIRST RUN: **3118 passed / 8 skipped / 0 failed in 45:51, exit 0** (collection 3126 = the prior 3122 + the 4-test battery — exact).
+- **CI run `37265367335` on `34e9300`: SUCCESS, attempt 1 — Backend 3125 passed / 20 skipped / 0 failed** (CI total 3145 = its prior 3141 + the 4-test battery, exact); Frontend green attempt 1. Corroboration only.
+
+## Fences honored
+
+No second-review rerun; no ready-mark; no merge; no publication; PR #26 remains draft, unmerged, unready. **RR15-M17CC-01/02 remain open until a fresh independent review closes them** — the work stops here and holds for the **twentieth fresh independent first-pass review** of the corrected executable head (`34e9300`).
