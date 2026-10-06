@@ -51,26 +51,27 @@ export function durationInput(
 }
 
 /**
- * Validate a form value as the exact duration transport: "" → null
- * (unset); otherwise the value MUST already be canonical within
- * [0, SQLITE_INT_MAX]. Returns null for unset, the canonical string
- * for lawful values; THROWS on anything else (the caller surfaces a
- * typed validation error — never a silent `Number()` coercion).
+ * Validate a form value as the exact duration transport: ONLY the
+ * literal empty string is unset (RR22: "  " and every other
+ * noncanonical nonempty value REJECTS — the helper never trims a
+ * whitespace alias into validity); otherwise the value MUST already
+ * be canonical within [0, SQLITE_INT_MAX]. Returns null for unset,
+ * the canonical string for lawful values; THROWS on anything else
+ * (the caller surfaces a typed validation error — never a silent
+ * `Number()` coercion, never a normalization).
  */
 export function durationToTransport(
   raw: string,
 ): string | null {
-  const trimmedAll = raw;
-  const canonical = trimmedAll.trim() === "" ? "" : raw.trim();
-  if (canonical === "") return null;
-  if (!isCanonicalDurationDec(canonical)) {
+  if (raw === "") return null;
+  if (!isCanonicalDurationDec(raw)) {
     throw new Error(
       "duration_ms must be a whole number between 0 and "
         + SQLITE_INT_MAX_DEC
         + " (exact decimal digits only)",
     );
   }
-  return canonical;
+  return raw;
 }
 
 /**

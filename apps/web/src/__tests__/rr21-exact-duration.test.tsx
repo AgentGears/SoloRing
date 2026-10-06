@@ -56,12 +56,25 @@ describe("RR21 exact decimal grammar + domain", () => {
 
   it("transport: unset → null; exact strings pass through untouched", () => {
     expect(durationToTransport("")).toBeNull();
-    expect(durationToTransport("   ")).toBeNull();
     expect(durationToTransport(STRONG)).toBe(STRONG);
     expect(durationToTransport(SQLITE_INT_MAX_DEC))
       .toBe(SQLITE_INT_MAX_DEC);
     expect(() => durationToTransport("1.0")).toThrow();
     expect(() => durationToTransport("01")).toThrow();
+  });
+
+  it("RR22: noncanonical values never normalize — no trimming", () => {
+    // only the LITERAL empty string is unset; every other
+    // noncanonical form (whitespace aliases included) rejects
+    expect(durationToTransport("")).toBeNull();
+    for (const bad of [" 1", "1 ", "  ", "\t1", "01",
+      "+1", "-1", "1.0", "1e3"]) {
+      expect(() => durationToTransport(bad)).toThrow();
+    }
+    // the exact valid string still passes through untouched
+    expect(durationToTransport("1")).toBe("1");
+    expect(durationToTransport("0")).toBe("0");
+    expect(durationToTransport(STRONG)).toBe(STRONG);
   });
 
   it("input initialization comes from the string, not a number", () => {

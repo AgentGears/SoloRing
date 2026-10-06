@@ -18,37 +18,70 @@ from soloring.domain.storage import SQLITE_INT_MAX
 
 
 def _exact_duration(value):
-    """RR21-M17CC-01: the DELIBERATE exact-decimal admission contract
-    for Shot duration. The web boundary transports authoritative
-    duration as a canonical decimal string (the additive
-    ``duration_ms_dec`` coordinate) because JavaScript ``number``
-    cannot carry every lawful signed-SQLite integer — so the writer
-    path must accept that string form as an intentional, validated
-    contract: a bare decimal digit string ("0" or [1-9][0-9]*; no
-    sign, exponent, decimal point, whitespace, or leading-zero
-    alias) converted to the exact backend integer. Anything else
-    (floats, numeric strings with sign/exponent/point/whitespace,
-    leading-zero aliases) refuses as ordinary request validation —
-    no permissive Pydantic coercion, no ambiguous aliases. Plain
-    JSON integers remain accepted unchanged (they carry no string
-    ambiguity)."""
+    """RR21/RR22-M17CC-01: the CLOSED exact admission law for Shot
+    duration. The web boundary transports authoritative duration as a
+    canonical decimal string (the additive ``duration_ms_dec``
+    coordinate) because JavaScript ``number`` cannot carry every
+    lawful signed-SQLite integer — so the writer path accepts that
+    string form as an intentional, validated contract: a bare decimal
+    digit string ("0" or [1-9][0-9]*; no sign, exponent, decimal
+    point, whitespace, or leading-zero alias) converted to the exact
+    backend integer.
+
+    RR22: the gate is now MECHANICALLY CLOSED — this function
+    returns ONLY the accepted branches (the exact int, the converted
+    canonical string, or None) and raises on EVERY other
+    representation. There is deliberately NO catch-all ``return
+    value``: a raw JSON float (1.0, 1e3, 9007199254740993.0 — the
+    JSON decoder itself rounds the last to ...992.0), a bool, a
+    Decimal-like numeric wrapper, a container, and every ambiguous
+    string form all refuse here as ordinary request validation —
+    NOTHING falls through into Pydantic's non-strict ``int``
+    coercion, so an unsafe numeric lexeme can never round into a
+    different durable authority."""
+    if value is None:
+        return None
+    # bool is an int subclass — checked BEFORE the int branch
     if isinstance(value, bool):
         raise ValueError(
-            "duration_ms must be an integer or a canonical decimal "
-            "string")
-    if isinstance(value, str):
+            "duration_ms must be an integer, a canonical decimal "
+            "string, or null")
+    exact = None
+    if type(value) is int:
+        exact = value
+    elif type(value) is str:
         import re
-        if not re.fullmatch(r"0|[1-9][0-9]*", value):
+        if re.fullmatch(r"0|[1-9][0-9]*", value):
+            exact = int(value)
+        else:
             raise ValueError(
                 "duration_ms must be a canonical decimal string "
                 "(bare digits, no sign/exponent/point/whitespace/"
                 "leading zeros)")
-        return int(value)
-    return value
+    else:
+        raise ValueError(
+            "duration_ms must be an integer, a canonical decimal "
+            f"string, or null (got {type(value).__name__})")
+    # the RR20 storage bound, enforced INSIDE the closed gate (never
+    # delegated to a numeric Field constraint that would also apply
+    # to the None branch)
+    if not 0 <= exact <= SQLITE_INT_MAX:
+        raise ValueError(
+            f"duration_ms must be between 0 and {SQLITE_INT_MAX}")
+    return exact
 
 
+# RR22-M17CC-01: the FIELD TYPE tells the generated schema the
+# truth — the accepted input union is integer | canonical decimal
+# string | null, not merely integer | null. The BeforeValidator
+# normalizes the string branch to the exact int and enforces the
+# [0, SQLITE_INT_MAX] storage bound, rejecting everything else
+# (never letting a float or wrapper reach Pydantic's ordinary
+# coercion).
 ExactDuration = Annotated[
-    int | None, BeforeValidator(_exact_duration)]
+    int | str | None,
+    BeforeValidator(_exact_duration),
+]
 
 
 # Creative intent fields shared by create/patch/read (plan §9.1).
@@ -74,8 +107,7 @@ class ShotCreate(BaseModel):
     camera_motion: str | None = None
     lens: str | None = None
     mood: str | None = None
-    duration_ms: ExactDuration = Field(
-        default=None, ge=0, le=SQLITE_INT_MAX)
+    duration_ms: ExactDuration = Field(default=None)
 
 
 class ShotPatch(BaseModel):
@@ -91,8 +123,7 @@ class ShotPatch(BaseModel):
     camera_motion: str | None = None
     lens: str | None = None
     mood: str | None = None
-    duration_ms: ExactDuration = Field(
-        default=None, ge=0, le=SQLITE_INT_MAX)
+    duration_ms: ExactDuration = Field(default=None)
 
 
 class SemanticDependencyItem(BaseModel):
