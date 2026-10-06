@@ -91,6 +91,11 @@ ALLOWED_PATTERNS = [
     # RR20-M17CC correction battery + the shared storage-domain bound
     r"^tests/test_m17cc_rr20_corrections\.py$",
     r"^server/soloring/domain/storage\.py$",
+    # RR21-M17CC correction (the exact web duration round-trip)
+    r"^tests/test_m17cc_rr21_corrections\.py$",
+    r"^apps/web/src/lib/exactDuration\.ts$",
+    r"^apps/web/src/components/ShotForm\.tsx$",
+    r"^apps/web/src/__tests__/rr21-exact-duration\.test\.tsx$",
     # M17A implementation (frozen R5): the dialogue/vocal foundation
     # surface — performance package, migration, API, recovery
     # verifier, boundary validators, and the M17A tests.

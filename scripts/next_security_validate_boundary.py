@@ -146,6 +146,11 @@ ALLOWLIST = (
     # RR20-M17CC correction battery + the shared storage-domain bound
     "tests/test_m17cc_rr20_corrections.py",
     "server/soloring/domain/storage.py",
+    # RR21-M17CC correction (the exact web duration round-trip)
+    "tests/test_m17cc_rr21_corrections.py",
+    "apps/web/src/lib/exactDuration.ts",
+    "apps/web/src/components/ShotForm.tsx",
+    "apps/web/src/__tests__/rr21-exact-duration.test.tsx",
     # RR16-M17CC: the shared recovery-side outer-ShotRevision parser
     "server/soloring/recovery/outer_snapshot.py",
     "server/soloring/recovery/backup.py",

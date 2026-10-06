@@ -36,6 +36,9 @@ REVIEWED_SUCCESSOR_PATHS = frozenset({
     "apps/web/src/app/shots/[id]/page.tsx",
     "apps/web/src/lib/types.ts",
     "apps/web/src/lib/api.client.ts",
+    # RR21-M17CC: the exact web duration round-trip surfaces
+    "apps/web/src/lib/exactDuration.ts",
+    "apps/web/src/components/ShotForm.tsx",
     # M16-P0 predecessor repairs.
     "server/soloring/api/continuity.py",
     "server/soloring/recovery/__init__.py",
