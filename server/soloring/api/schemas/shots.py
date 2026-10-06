@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import (
+    BaseModel, BeforeValidator, ConfigDict, Field, model_validator,
+)
+from typing import Annotated
 
 from soloring.domain.normalize import SHOT_SUBJECT_MAX
 # RR20-M17CC-01: the ONE shared signed-SQLite-INTEGER authority bound
@@ -12,6 +15,40 @@ from soloring.domain.normalize import SHOT_SUBJECT_MAX
 # representability BEFORE any SQLite bind (a raw driver OverflowError
 # is never the admission contract)
 from soloring.domain.storage import SQLITE_INT_MAX
+
+
+def _exact_duration(value):
+    """RR21-M17CC-01: the DELIBERATE exact-decimal admission contract
+    for Shot duration. The web boundary transports authoritative
+    duration as a canonical decimal string (the additive
+    ``duration_ms_dec`` coordinate) because JavaScript ``number``
+    cannot carry every lawful signed-SQLite integer — so the writer
+    path must accept that string form as an intentional, validated
+    contract: a bare decimal digit string ("0" or [1-9][0-9]*; no
+    sign, exponent, decimal point, whitespace, or leading-zero
+    alias) converted to the exact backend integer. Anything else
+    (floats, numeric strings with sign/exponent/point/whitespace,
+    leading-zero aliases) refuses as ordinary request validation —
+    no permissive Pydantic coercion, no ambiguous aliases. Plain
+    JSON integers remain accepted unchanged (they carry no string
+    ambiguity)."""
+    if isinstance(value, bool):
+        raise ValueError(
+            "duration_ms must be an integer or a canonical decimal "
+            "string")
+    if isinstance(value, str):
+        import re
+        if not re.fullmatch(r"0|[1-9][0-9]*", value):
+            raise ValueError(
+                "duration_ms must be a canonical decimal string "
+                "(bare digits, no sign/exponent/point/whitespace/"
+                "leading zeros)")
+        return int(value)
+    return value
+
+
+ExactDuration = Annotated[
+    int | None, BeforeValidator(_exact_duration)]
 
 
 # Creative intent fields shared by create/patch/read (plan §9.1).
@@ -37,7 +74,7 @@ class ShotCreate(BaseModel):
     camera_motion: str | None = None
     lens: str | None = None
     mood: str | None = None
-    duration_ms: int | None = Field(
+    duration_ms: ExactDuration = Field(
         default=None, ge=0, le=SQLITE_INT_MAX)
 
 
@@ -54,7 +91,7 @@ class ShotPatch(BaseModel):
     camera_motion: str | None = None
     lens: str | None = None
     mood: str | None = None
-    duration_ms: int | None = Field(
+    duration_ms: ExactDuration = Field(
         default=None, ge=0, le=SQLITE_INT_MAX)
 
 
@@ -80,6 +117,24 @@ class ShotRead(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _derive_exact_duration(cls, data):
+        # RR21-M17CC-01: derive the additive exact transport
+        # coordinate from the row's OWN durable integer (never an
+        # independently supplied value — transport data, not a
+        # second authority domain)
+        if isinstance(data, dict) and "duration_ms_dec" not in data:
+            duration = data.get("duration_ms")
+            data["duration_ms_dec"] = (
+                None if duration is None else str(int(duration)))
+        elif (not isinstance(data, dict)
+                and getattr(data, "duration_ms", None) is not None
+                and getattr(data, "duration_ms_dec", None) is None):
+            data = {**vars(data),
+                    "duration_ms_dec": str(int(data.duration_ms))}
+        return data
+
     id: str
     project_id: str
     shot_number: int
@@ -92,6 +147,16 @@ class ShotRead(BaseModel):
     lens: str | None
     mood: str | None
     duration_ms: int | None
+    # RR21-M17CC-01: the additive EXACT transport coordinate — the
+    # backend integer's canonical decimal string ("0",
+    # "9007199254740993", …; null when unset). Derived transport
+    # data, never a second authority domain: its sole source is the
+    # same durable duration_ms integer, and it exists because
+    # JavaScript number cannot carry every lawful signed-SQLite
+    # integer (2^53+1 already rounds). The web boundary MUST use
+    # this for authoritative display, edit initialization, equality,
+    # and submission.
+    duration_ms_dec: str | None = None
     approved_take_id: str | None
     scene_id: str | None = None
     scene_position: int | None = None

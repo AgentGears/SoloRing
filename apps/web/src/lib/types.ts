@@ -28,6 +28,16 @@ export interface ShotDetail extends ShotListItem {
   lens: string | null;
   mood: string | null;
   duration_ms: number | null;
+  /**
+   * RR21-M17CC-01: the additive EXACT transport coordinate for the
+   * authoritative Shot duration — the backend integer's canonical
+   * decimal string ("0", "9007199254740993", …; null when unset).
+   * The legacy `number` field stays for non-authoritative
+   * convenience only: display, edit initialization, equality, and
+   * submission for duration MUST use this string (JavaScript
+   * `number` cannot carry every lawful signed-SQLite integer).
+   */
+  duration_ms_dec: string | null;
   approved_take_id: string | null;
   working_snapshot_hash: string | null;
   working_state_differs_from_approved: boolean | null;
@@ -477,6 +487,10 @@ export interface IntraShotIssue {
 export interface IntraShotProjection {
   shot_id: string;
   duration_ms: number | null;
+  /** RR21-M17CC-01: the exact transport coordinate (canonical
+   * decimal string; null when unset) — the timeline renders and
+   * guards against THIS, never the lossy `number`. */
+  duration_ms_dec: string | null;
   intra_shot_ready: boolean;
   event_set_hash: string | null;
   events: IntraShotEventView[];

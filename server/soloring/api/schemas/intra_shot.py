@@ -131,11 +131,27 @@ class IntraShotRead(_ClosedModel):
     intra_shot_ready: bool
     intra_shot_issues: list[IntraShotIssue]
     duration_ms: int | None
+    # RR21-M17CC-01: the additive EXACT transport coordinate — the
+    # durable duration's canonical decimal string (null when unset).
+    # Derived transport data from the same integer, never a second
+    # authority domain; the timeline renders and guards against THIS
+    # (JavaScript number cannot carry every lawful signed-SQLite
+    # integer — 2^53+1 already rounds).
+    duration_ms_dec: str | None = None
     events: list[IntraShotEventRead]
     terminal_targets: list[IntraShotTerminalTarget]
     handoffs: list[IntraShotHandoff]
     event_set_hash: str | None
     next_cursor: int | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _derive_exact_duration(cls, data):
+        if isinstance(data, dict) and "duration_ms_dec" not in data:
+            duration = data.get("duration_ms")
+            data["duration_ms_dec"] = (
+                None if duration is None else str(int(duration)))
+        return data
 
 
 # Proposal Grammar v1 is frozen in M16-A even though proposal ingestion/adoption
