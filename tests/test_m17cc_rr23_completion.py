@@ -333,6 +333,187 @@ async def test_rr23c_drift_pattern_and_minimum_refused(
 
 
 # ---------------------------------------------------------------------------
+# RR24-M17CC-01: verified vs mutated target components (the
+# already-exact generator must be a lawful no-op)
+# ---------------------------------------------------------------------------
+
+def _int_branch(document, component):
+    node = document["components"]["schemas"][component] \
+        ["properties"]["duration_ms"]
+    return next(b for b in node["anyOf"]
+                if b.get("type") == "integer")
+
+
+def _stage_maxima(monkeypatch, captured, maxima):
+    """Simulate generator output: set the two Shot integer-branch
+    maxima to the requested values (None = leave the generator's
+    own rounded float), capturing a deepcopy of the PRE-correction
+    document so the test can count actual mutations."""
+    import copy
+
+    def mutate(document):
+        for component, value in maxima.items():
+            if value is not None:
+                _int_branch(document, component)["maximum"] = value
+        captured.append(copy.deepcopy(document))
+
+    _intercept_generation(monkeypatch, mutate)
+
+
+def _assert_both_exact(document):
+    for component in ("ShotCreate", "ShotPatch"):
+        branch = _int_branch(document, component)
+        assert type(branch["maximum"]) is int, (component, branch)
+        assert branch["maximum"] == _SQLITE_MAX, (component, branch)
+
+
+def _mutation_count(pre, post):
+    changed = 0
+    for component in ("ShotCreate", "ShotPatch"):
+        before = _int_branch(pre, component)["maximum"]
+        after = _int_branch(post, component)["maximum"]
+        if isinstance(before, float) \
+                and type(after) is int and after == _SQLITE_MAX:
+            changed += 1
+        else:
+            assert before == after, (component, before, after)
+            assert type(after) is int and after == _SQLITE_MAX, \
+                (component, before, after)
+    return changed
+
+
+async def _success_case(client, monkeypatch, maxima, expected_mutations):
+    """The shared decisive shape for every SUCCESSFUL simulated
+    configuration: OpenAPI succeeds, exactly two target components
+    are VERIFIED (proven by success — the end-of-pass invariant
+    raises on any other verified count — with both components'
+    full published structure asserted here), the SIMULATED mutation
+    count is exactly as expected, and repeated generation returns
+    the exact cached document (one generation, no second
+    mutation)."""
+    captured = []
+    _stage_maxima(monkeypatch, captured, maxima)
+    app = client._transport.app
+    first = app.openapi()
+    assert len(captured) == 1, captured
+    _assert_both_exact(first)
+    assert _mutation_count(captured[0], first) == expected_mutations
+    # repeated generation: cached, stable, exact — the interceptor
+    # (and therefore the generator) ran exactly once
+    for _ in range(3):
+        again = app.openapi()
+        assert again is app.openapi_schema
+        assert again is first
+    assert len(captured) == 1, captured
+    _assert_both_exact(first)
+    return first
+
+
+@pytest.mark.asyncio
+async def test_rr24_both_rounded_current_behavior(client, monkeypatch):
+    """Configuration 1: the current FastAPI behavior (both maxima
+    the rounded float) — succeeds with TWO mutations."""
+    await _success_case(
+        client, monkeypatch,
+        {"ShotCreate": _ROUNDED, "ShotPatch": _ROUNDED},
+        expected_mutations=2)
+
+
+@pytest.mark.asyncio
+async def test_rr24_both_already_exact(client, monkeypatch):
+    """Configuration 2: a future/already-exact generator — succeeds
+    with ZERO mutations, both maxima remain exact, the document
+    caches normally, and the real HTTP /openapi.json serves the
+    exact cached document."""
+    await _success_case(
+        client, monkeypatch,
+        {"ShotCreate": _SQLITE_MAX, "ShotPatch": _SQLITE_MAX},
+        expected_mutations=0)
+    r = await client.get("/openapi.json")
+    assert r.status_code == 200, r.text
+    spec = r.json()
+    for component in ("ShotCreate", "ShotPatch"):
+        branch = _int_branch(spec, component)
+        assert type(branch["maximum"]) is int
+        assert branch["maximum"] == _SQLITE_MAX
+
+
+@pytest.mark.asyncio
+async def test_rr24_mixed_create_exact_patch_rounded(client,
+                                                     monkeypatch):
+    """Configuration 3: ShotCreate already exact / ShotPatch rounded
+    — succeeds, mutating ONLY ShotPatch."""
+    await _success_case(
+        client, monkeypatch,
+        {"ShotCreate": _SQLITE_MAX, "ShotPatch": _ROUNDED},
+        expected_mutations=1)
+
+
+@pytest.mark.asyncio
+async def test_rr24_mixed_create_rounded_patch_exact(client,
+                                                     monkeypatch):
+    """Configuration 4: ShotCreate rounded / ShotPatch already exact
+    — succeeds, mutating ONLY ShotCreate."""
+    await _success_case(
+        client, monkeypatch,
+        {"ShotCreate": _ROUNDED, "ShotPatch": _SQLITE_MAX},
+        expected_mutations=1)
+
+
+@pytest.mark.asyncio
+async def test_rr24_unexpected_exact_integer_refused(client,
+                                                     monkeypatch):
+    """Configuration 5: an unexpected exact integer maximum
+    (SQLITE_INT_MAX - 1 and SQLITE_INT_MAX + 1) refuses loudly,
+    clears the cache, and refuses again on a second attempt."""
+    app = client._transport.app
+    for bad in (_SQLITE_MAX - 1, _SQLITE_MAX + 1):
+        captured = []
+        _stage_maxima(
+            monkeypatch, captured,
+            {"ShotCreate": bad, "ShotPatch": _ROUNDED})
+        for _ in range(2):
+            with pytest.raises(RuntimeError, match="drift"):
+                app.openapi()
+        assert app.openapi_schema is None
+        monkeypatch.undo()
+
+
+@pytest.mark.asyncio
+async def test_rr24_unexpected_float_refused(client, monkeypatch):
+    """Configuration 6: an unexpected float maximum (distinct from
+    float(SQLITE_INT_MAX)) refuses loudly on every attempt with the
+    cache cleared (complements the RR23 wrong-maximum drift case)."""
+    app = client._transport.app
+    captured = []
+    _stage_maxima(
+        monkeypatch, captured,
+        {"ShotCreate": _ROUNDED, "ShotPatch": 1234.5})
+    for _ in range(2):
+        with pytest.raises(RuntimeError, match="drift"):
+            app.openapi()
+    assert app.openapi_schema is None
+
+
+@pytest.mark.asyncio
+async def test_rr24_missing_target_component_refused(client,
+                                                     monkeypatch):
+    """A missing target component leaves the verified count below
+    two — the end-of-pass invariant (not the mutation count) is
+    what refuses, loudly, with the cache cleared."""
+    app = client._transport.app
+
+    def mutate(document):
+        del document["components"]["schemas"]["ShotCreate"]
+
+    _intercept_generation(monkeypatch, mutate)
+    for _ in range(2):
+        with pytest.raises(RuntimeError, match="drift"):
+            app.openapi()
+    assert app.openapi_schema is None
+
+
+# ---------------------------------------------------------------------------
 # Point 8: runtime remains untouched + the fences
 # ---------------------------------------------------------------------------
 

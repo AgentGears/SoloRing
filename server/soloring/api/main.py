@@ -98,11 +98,17 @@ def _install_exact_duration_openapi_maximum(app: FastAPI) -> None:
     structure is present (failing LOUDLY on any drift rather than
     quietly publishing an unpatched or mis-patched contract), then
     replaces ONLY that integer branch's rounded maximum with the
-    exact Python integer from the ONE storage-domain owner. The
-    result is cached in ``app.openapi_schema`` per the normal
-    FastAPI pattern (subsequent requests reuse the corrected
-    document; the wrapper does not re-enter itself). No unrelated
-    maximum, response schema, or request model is touched."""
+    exact Python integer from the ONE storage-domain owner. An
+    already-exact integer maximum passes the SAME structural
+    verification and is accepted as a verified no-op (RR24: the
+    end-of-pass invariant requires exactly two VERIFIED target
+    components while allowing zero, one, or two MUTATIONS — the
+    hook must not depend on the current generator emitting the
+    rounded float). The result is cached in ``app.openapi_schema``
+    per the normal FastAPI pattern (subsequent requests reuse the
+    corrected document; the wrapper does not re-enter itself). No
+    unrelated maximum, response schema, or request model is
+    touched."""
     from soloring.api.schemas.shots import (
         CANONICAL_DURATION_INPUT_PATTERN,
     )
@@ -126,7 +132,14 @@ def _install_exact_duration_openapi_maximum(app: FastAPI) -> None:
             raise
 
     def _verify_and_patch(document, rounded):
-        patched = 0
+        # RR24-M17CC-01: distinguish VERIFIED target components from
+        # MUTATED ones — the end-of-pass invariant requires exactly
+        # two VERIFIED Shot components while allowing zero, one, or
+        # two MUTATIONS (a future/already-exact upstream maximum is
+        # a lawful no-op, never a failure; mutation count is never
+        # evidence that both target schemas existed)
+        verified = 0
+        mutated = 0
         components = document.setdefault("components", {}) \
             .setdefault("schemas", {})
         for name, schema in components.items():
@@ -174,30 +187,34 @@ def _install_exact_duration_openapi_maximum(app: FastAPI) -> None:
                     f"{name!r} duration_ms string branch does not "
                     "carry the canonical bounded decimal pattern")
             maximum = int_branch.get("maximum")
-            # the pre-correction value must be the KNOWN rounded
-            # representation of the storage bound — never mutate
-            # whatever happens to resemble a duration schema
+            # the accepted pre-correction values are exactly two:
+            # the KNOWN rounded representation of the storage bound
+            # (the current generator's float coercion) or the exact
+            # integer itself (already-exact upstream output) —
+            # never mutate whatever else resembles a duration schema
             if isinstance(maximum, int) and not isinstance(
                     maximum, bool):
-                if maximum == SQLITE_INT_MAX:
-                    continue  # already exact (no coercion applied)
-                raise RuntimeError(
-                    f"RR23 OpenAPI correction drift: component "
-                    f"{name!r} duration_ms integer maximum is an "
-                    f"unexpected int {maximum!r}")
-            if maximum != rounded:
+                if maximum != SQLITE_INT_MAX:
+                    raise RuntimeError(
+                        f"RR23 OpenAPI correction drift: component "
+                        f"{name!r} duration_ms integer maximum is an "
+                        f"unexpected int {maximum!r}")
+                # already exact — fully VERIFIED without mutation
+            elif maximum == rounded:
+                int_branch["maximum"] = SQLITE_INT_MAX
+                mutated += 1
+            else:
                 raise RuntimeError(
                     f"RR23 OpenAPI correction drift: component "
                     f"{name!r} duration_ms integer maximum is not "
-                    f"the known rounded storage bound ({rounded!r}); "
-                    f"got {maximum!r}")
-            int_branch["maximum"] = SQLITE_INT_MAX
-            patched += 1
-        if patched != 2:
+                    f"the known rounded storage bound ({rounded!r}) "
+                    f"nor the exact integer; got {maximum!r}")
+            verified += 1
+        if verified != 2:
             raise RuntimeError(
                 "RR23 OpenAPI correction drift: expected exactly the "
                 "ShotCreate and ShotPatch duration_ms components; "
-                f"patched {patched}")
+                f"verified {verified} (mutated {mutated})")
         app.openapi_schema = document
         return document
 
