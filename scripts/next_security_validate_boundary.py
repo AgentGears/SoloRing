@@ -152,6 +152,8 @@ ALLOWLIST = (
     "tests/test_m17cc_rr22_corrections.py",
     # RR23-M17CC correction battery
     "tests/test_m17cc_rr23_corrections.py",
+    # RR23-M17CC completion battery (the exact emitted OpenAPI maximum)
+    "tests/test_m17cc_rr23_completion.py",
     "apps/web/src/lib/exactDuration.ts",
     "apps/web/src/components/ShotForm.tsx",
     "apps/web/src/__tests__/rr21-exact-duration.test.tsx",

@@ -196,6 +196,8 @@ M16_SURFACE = (
     r"^tests/test_m17cc_rr22_corrections\.py$",
     # RR23-M17CC correction battery
     r"^tests/test_m17cc_rr23_corrections\.py$",
+    # RR23-M17CC completion battery (the exact emitted OpenAPI maximum)
+    r"^tests/test_m17cc_rr23_completion\.py$",
     r"^apps/web/src/lib/exactDuration\.ts$",
     r"^apps/web/src/components/ShotForm\.tsx$",
     r"^apps/web/src/__tests__/rr21-exact-duration\.test\.tsx$",
