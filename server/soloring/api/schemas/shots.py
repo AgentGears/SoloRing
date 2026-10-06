@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from pydantic import (
-    BaseModel, BeforeValidator, ConfigDict, Field, model_validator,
+    BaseModel, BeforeValidator, ConfigDict, Field, WithJsonSchema,
+    model_validator,
 )
 from typing import Annotated
 
@@ -71,16 +72,85 @@ def _exact_duration(value):
     return exact
 
 
-# RR22-M17CC-01: the FIELD TYPE tells the generated schema the
-# truth — the accepted input union is integer | canonical decimal
-# string | null, not merely integer | null. The BeforeValidator
-# normalizes the string branch to the exact int and enforces the
-# [0, SQLITE_INT_MAX] storage bound, rejecting everything else
-# (never letting a float or wrapper reach Pydantic's ordinary
-# coercion).
+# RR23-M17CC-01: the ONE bounded canonical-decimal input-schema
+# pattern, GENERATED from SQLITE_INT_MAX (never a hand-typed regex,
+# never a duplicated literal) — an anchored alternation admitting
+# "0", every shorter non-leading-zero digit string, and every
+# same-length decimal strictly below the maximum at each prefix
+# position, plus the maximum itself. A bare canonical regex plus
+# maxLength would admit "9999999999999999999"; this construction
+# excludes EVERY canonical decimal above SQLITE_INT_MAX.
+def _bounded_canonical_decimal_regex(max_str: str) -> str:
+    parts = ["0"]
+    n = len(max_str)
+    if n > 1:
+        # any shorter canonical form (1..n-1 digits, no leading zero)
+        parts.append(f"[1-9][0-9]{{0,{n - 2}}}")
+    for i in range(n):
+        d = int(max_str[i])
+        if d == 0:
+            continue
+        # equal prefix, digit i strictly below max's digit i, the
+        # remaining digits arbitrary
+        low = 1 if i == 0 else 0
+        rest_count = n - i - 1
+        rest = f"[0-9]{{{rest_count}}}" if rest_count else ""
+        parts.append(
+            f"{max_str[:i]}[{low}-{d - 1}]{rest}")
+    parts.append(max_str)
+    return "^(?:" + "|".join(parts) + ")$"
+
+
+# the string-branch contract of the machine-readable input schema
+CANONICAL_DURATION_INPUT_PATTERN = _bounded_canonical_decimal_regex(
+    str(SQLITE_INT_MAX))
+
+
+def _exact_duration_input_schema() -> dict:
+    """RR23-M17CC-01: the machine-readable input contract that
+    EXACTLY describes what the closed runtime gate accepts — a null,
+    a bounded integer, or a canonical bounded decimal string —
+    attached via Pydantic's WithJsonSchema (validation mode; the
+    OpenAPI request bodies consume the same declaration)."""
+    return {
+        "anyOf": [
+            {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": SQLITE_INT_MAX,
+            },
+            {
+                "type": "string",
+                "pattern": CANONICAL_DURATION_INPUT_PATTERN,
+            },
+            {
+                "type": "null",
+            },
+        ],
+        "description": (
+            "Exact Shot duration: a JSON integer in "
+            f"[0, {SQLITE_INT_MAX}], or the same integer as a "
+            "canonical decimal string (bare digits, no "
+            "sign/exponent/point/whitespace/leading zeros, at most "
+            f"{SQLITE_INT_MAX}), or null to unset. Floats and "
+            "ambiguous numeric forms are refused."),
+    }
+
+
+# RR22/RR23-M17CC-01: the FIELD TYPE + input-schema declaration.
+# The BeforeValidator normalizes the string branch to the exact int
+# and enforces the [0, SQLITE_INT_MAX] storage bound (rejecting
+# everything else — never letting a float or wrapper reach
+# Pydantic's ordinary coercion); WithJsonSchema (validation mode)
+# publishes the bounded integer/string/null input contract above so
+# the generated validation/OpenAPI schema tells exactly the truth
+# the runtime enforces — the model's post-validation value remains
+# the integer authority (no semantic widening for documentation).
 ExactDuration = Annotated[
     int | str | None,
     BeforeValidator(_exact_duration),
+    WithJsonSchema(
+        _exact_duration_input_schema(), mode="validation"),
 ]
 
 
