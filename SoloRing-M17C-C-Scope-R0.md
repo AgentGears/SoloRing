@@ -1574,3 +1574,41 @@ RR21 backend + Shot API (create/PATCH, intent, numbering) **28/28**; RR20 + RR19
 ## Fences honored
 
 No second-review rerun; no ready-mark; no merge; no publication; no `SAFE_INT_MAX` reinstatement, migration redesign, or unrelated transport refactor; no migrations/SQLite CHECKs/event grammar/storage bounds/snapshot grammar/capture semantics/proposal authority/recovery-ordering change; RR20/RR19/RR18 and every earlier register preserved and re-proven. **RR21-M17CC-01 remains OPEN until the twenty-sixth fresh independent first-pass review independently closes it** — the work stops here and holds for that review of `fe54115`.
+
+---
+
+# M17C-C RR21 ratification + topology clarification — 2026-10-06 — documentation-only
+
+Two record-only corrections to the RR21 correction record above, appended at the user's explicit direction (no source, test, validator, lockfile, or executable-head byte altered; the executable head remains `fe54115`).
+
+## 1. The dependency-drift remediation is now explicitly RATIFIED
+
+The user's standing governance decision, recorded verbatim:
+
+> **`5d6e00c8b1cd598de01d9a1cecd32e7a9f9d52c8` is RATIFIED as an out-of-scope, security-driven dependency-drift remediation required to keep the frozen audit policy satisfiable. It is not part of the RR21 product correction semantics and creates no authorization for future dependency drift or broader manifest changes.**
+
+The ratification independently verified: GitHub advisory GHSA-68fv-2mgg-jv7q / CVE-2026-93749 classifies `source-map-js` as High, affects `<1.2.2`, and names 1.2.2 as the patched version (npm publishes 1.2.2 as latest); the pre-remediation lock resolved 1.2.1 and `5d6e00c` changes only that lock entry to 1.2.2 (tarball + integrity hash; `package.json` unchanged); the frozen audit policy itself invalidates an exception once a compatible non-major fix exists and the next-security gate independently requires zero runtime high/critical findings — keeping 1.2.1 or adding a baseline exception would contradict the existing gate contract; the validator exception is narrow (`package.json` remains forbidden; only the exact `apps/web/package-lock.json` path admitted for this documented incident); and the failed CI run `37413076188` stopped exactly at the M14 boundary ("M14-BOUNDARY INVALID: apps/web/package-lock.json: frontend dependency manifest") — a boundary-policy refusal, not a product-test failure. **Do not revert `5d6e00c`.**
+
+## 2. The recorded commit ordering is corrected to the actual Git ancestry
+
+The RR21 correction record above states the head sequence "…Correction heads: `f4450a7` … → `5bb21b3` … → `5d6e00c` … → `087a215` … → `fe54115`", which is NOT the actual ancestry. The true Git topology (verified against the repository):
+
+```text
+f4450a7  RR21 implementation (+ both decisive batteries)
+   ↓
+087a215  initial RR21 validator admissions
+   ↓
+5d6e00c  ratified source-map-js lockfile remediation
+   ↓
+5bb21b3  IntraShotPanel fixture correction
+   ↓
+fe54115  m14/m16 lockfile admission follow-up
+   ↓
+f4ce589  documentation-only correction record
+```
+
+That is: `087a215` (the admissions) precedes `5d6e00c` (the remediation), and `5bb21b3` (the fixture correction) follows the remediation rather than preceding it. This misordering does not invalidate the executable correction, the gate results, or the ratification — every gate ran against the final committed tree, and the implementation commit `f4450a7` is first in both orderings — but the review ledger requires exact topology, and this clarification supplies it. The RR21 record's substantive content (the mechanism, the batteries, the first-run dispositions, the incident disclosure, the gate counts) is otherwise accurate and stands as written.
+
+## Disposition
+
+This clarification is documentation-only above `f4ce589`. The executable review head for the twenty-sixth fresh independent first-pass review remains **`fe54115`**. RR21-M17CC-01 remains OPEN until that review. No second-review rerun, ready-mark, merge, or publication is authorized.
