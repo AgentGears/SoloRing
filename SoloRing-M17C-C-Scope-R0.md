@@ -1679,3 +1679,32 @@ The twenty-seventh fresh independent review of executable head **`f9505f133f3813
 ## Frozen disposition
 
 **TWENTY-SEVENTH FRESH INDEPENDENT REVIEW COMPLETE — NOT CLEAN. RR22-M17CC-01: CLOSED. RR21, RR20, RR19, RR18, RR17, RR16, RR15, ISR2, and every earlier RR/SR/FPR finding remain CLOSED. New frozen register: `RR23-M17CC-01` — 0H / 0M / 1L — generated Shot duration request schemas expose an unconstrained integer/string union that is broader than the closed runtime contract. No other issue from this pass met the evidence threshold.** PR #26 remains draft, unmerged, unready. No RR23 correction work, second-review rerun, ready-mark, merge, or publication has been initiated — the RR23 correction cycle awaits its commission.
+
+---
+
+# M17C-C RR23-M17CC-01 CORRECTION — 2026-10-06 — IMPLEMENTED
+
+The commissioned correction cycle is complete. Correction heads: **`0529e67`** (implementation + battery, committed first) then **`c4b90f3`** (the four validator carves — the first refusal recorded verbatim; all validators ran against the committed carve-inclusive tree).
+
+## Delivered (the commission exactly)
+
+1. **The machine-readable input contract exactly describes the closed runtime gate.** Pydantic's `WithJsonSchema(mode="validation")` attaches the bounded input contract to the RR22 admission alias: `anyOf: [integer minimum 0 / maximum SQLITE_INT_MAX; string carrying the ONE bounded canonical-decimal pattern; null]`. **The pattern is GENERATED from `SQLITE_INT_MAX`** by `_bounded_canonical_decimal_regex` (one named owner, `CANONICAL_DURATION_INPUT_PATTERN`, declared beside the admission primitive; never a hand-typed regex, never a duplicated literal): it admits `"0"`, every shorter non-leading-zero form, every same-length decimal strictly below the maximum at each prefix position, and the maximum itself — a bare canonical regex + maxLength (which admits `"9999999999999999999"`) is **structurally impossible** with this construction.
+2. **The runtime law `_exact_duration` is untouched** (frozen correct); the model's post-validation value remains the integer authority — no semantic widening for documentation; `duration_ms_dec`, the response schemas, storage/migrations/CHECKs, M16 grammar, capture/recovery/proposal semantics, frontend transport, and the ratified dependency remediation all untouched.
+3. **One disclosed framework precision constraint** (discovered in the first battery run and pinned in the test): FastAPI 0.141.1's internal openapi Schema model declares `maximum/minimum: float | None` (`fastapi/openapi/models.py:160-162`), so the **published `/openapi.json` coerces any integer bound to the nearest IEEE double** — `float(SQLITE_INT_MAX) == 9.223372036854776e+18` — regardless of the declaration. The MODEL schema carries the exact integer bound; the document's integer branch is pinned to minimum 0 / the exact double of the storage maximum (never absent, never negative, never unbounded), and the STRING branch carries the exact generated pattern — the precision-critical side is exact where the framework permits exactness. This is a framework serialization constraint, not a residual overstatement in the declaration.
+
+## The decisive battery (`tests/test_m17cc_rr23_corrections.py`, 6 tests, final 6/6)
+
+**Both model schemas** (integer/string/null; the EXACT `minimum: 0` / `maximum: 9223372036854775807`; the string pattern admitting `"0"`/`"1"`/`"9007199254740993"`/`"9223372036854775807"` and rejecting `"-1"`/`"+1"`/`"01"`/`"1.0"`/`"1e3"`/whitespace/empty plus several 19-digit above-max values including `"9999999999999999999"` — a maxLength implementation cannot pass); **the generated-from-the-bound proof** (the immediate ±50 neighborhood of the maximum both directions, the digit-length ladder, and every canonical same-length above-max form — a construction typo cannot silently broaden the contract); **the actual FastAPI `/openapi.json`** request bodies for BOTH `POST /projects/{project_id}/shots` and `PATCH /shots/{shot_id}` ($ref-resolved; the bounded contract asserted to the framework's double precision); **runtime unchanged** (the canonical strings and the genuine integer tokens through `2^63−1` exact and green via raw bytes; the raw floats/exponents/ambiguous forms and `2^63` refused); and **the preserved fences** (RR22's raw-body adversaries, RR21's browser round-trip, RR20's `2^63`, RR19's TEXT adversary, RR18's capture, the event-coordinate overflow).
+
+## Gates (first-run dispositions recorded exactly, in the commissioned order)
+
+- RR23 battery **first run 4/6, disclosed** (both corrections test-side, no product change): the OpenAPI leg asserted the exact int maximum and hit the framework's float coercion — replaced with the honest double-pinned assertion, the constraint documented in the test; the fences leg missed a local `text` import — added. Rerun **6/6**.
+- RR23 + RR22 + Shot API **44/44**; RR21 + RR20 + RR19 + RR18 **17/17**; M16 duration/grammar/events/recovery/proposal/history/capture **75/75**; M17C-C history/recovery/full-restore/round-trip/migration/backup **77/77**; RR17 + RR16 + RR15 + ISR2 **20/20**; predecessor/live-seam **94/94**.
+- The **first validator run refused the unadmitted battery verbatim** (hygiene: "changed file outside the hygiene allowlist: tests/test_m17cc_rr23_corrections.py" — the only newly created surface; the schema change lives in the already-admitted `shots.py`) → the carve commit → **21/21 green**.
+- Full frontend **153/153 across 33 files + tsc + production build**.
+- Local full backend suite, FIRST RUN: **3163 passed / 8 skipped / 0 failed in 48:07, exit 0** (collection 3171 = the prior 3165 + the 6-test battery — exact).
+- **CI run `37471574965` on `c4b90f3`: SUCCESS, attempt 1 — Backend 3170 passed / 20 skipped / 0 failed** (CI total 3190 = its prior 3184 + the 6-test battery, exact); Frontend green attempt 1. Corroboration only.
+
+## Fences honored
+
+No second-review rerun; no ready-mark; no merge; no publication; no migration change, runtime-law broadening, response-wire redesign, or unrelated schema refactor; RR22/RR21/RR20/RR19/RR18 and every earlier register preserved and re-proven. **RR23-M17CC-01 remains OPEN until the twenty-eighth fresh independent first-pass review independently closes it** — the work stops here and holds for that review of `c4b90f3`.
