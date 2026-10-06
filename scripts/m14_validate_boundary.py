@@ -95,6 +95,8 @@ ALLOWED_PATTERNS = [
     r"^tests/test_m17cc_rr21_corrections\.py$",
     # RR22-M17CC correction battery
     r"^tests/test_m17cc_rr22_corrections\.py$",
+    # RR23-M17CC correction battery
+    r"^tests/test_m17cc_rr23_corrections\.py$",
     r"^apps/web/src/lib/exactDuration\.ts$",
     r"^apps/web/src/components/ShotForm\.tsx$",
     r"^apps/web/src/__tests__/rr21-exact-duration\.test\.tsx$",
