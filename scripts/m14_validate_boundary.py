@@ -248,6 +248,16 @@ ALLOWED_PATTERNS = [
     # M17B second-Codex round: the sqlalchemy <2.1 ceiling pin
     # (dependency-drift incident, CI run #161). Packaging metadata only.
     r"^pyproject\.toml$",
+    # RR21-M17CC gate remediation (2026-10-06 dependency-drift
+    # incident, mirroring the pyproject precedent): the runtime-high
+    # advisory GHSA-68fv-2mgg-jv7q (source-map-js event-loop DoS,
+    # transitive under next@15.5.25/postcss and jsdom/css-tree) made
+    # the frozen audit gates refuse the tree, and their own policy
+    # forbids excepting a COMPATIBLE fix — remediation
+    # (npm audit fix: source-map-js 1.2.1 -> 1.2.2) is the only
+    # gate-consistent path; the LOCKFILE only (package.json stays
+    # forbidden above); the frozen pins verified unchanged.
+    r"^apps/web/package-lock\.json$",
     # M16-E closure surface (reviewed successor slice): the frozen §22
     # owner rename of the P0 module, the §23 source-gate owners, and
     # the four M16 validators.
@@ -262,7 +272,7 @@ ALLOWED_PATTERNS = [
 FORBIDDEN_PATTERNS = [
     (r"^\.github/(?!workflows/ci\.yml$)",
      "repository/workflow settings beyond ci.yml"),
-    (r"^apps/web/package(-lock)?\.json$", "frontend dependency manifest"),
+    (r"^apps/web/package\.json$", "frontend dependency manifest"),
     (r"^apps/web/next\.config\.[a-z]+$", "frontend framework config"),
     (r"^apps/web/tsconfig.*\.json$", "frontend TypeScript config"),
 ]

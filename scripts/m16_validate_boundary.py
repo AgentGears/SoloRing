@@ -195,6 +195,9 @@ M16_SURFACE = (
     r"^apps/web/src/lib/exactDuration\.ts$",
     r"^apps/web/src/components/ShotForm\.tsx$",
     r"^apps/web/src/__tests__/rr21-exact-duration\.test\.tsx$",
+    # RR21 gate remediation: the remediated lockfile (see the
+    # FORBIDDEN note above)
+    r"^apps/web/package-lock\.json$",
     r"^tests/test_post_m13_next_security\.py$",
     r"^tests/test_m14_base_corpus\.py$",
 
@@ -229,7 +232,12 @@ P0_B = (
 FORBIDDEN_PATTERNS = [
     (r"^\.github/(?!workflows/ci\.yml$)",
      "repository/workflow settings beyond ci.yml"),
-    (r"^apps/web/package(-lock)?\.json$", "frontend dependency manifest"),
+    (r"^apps/web/package\.json$", "frontend dependency manifest"),
+    # RR21 gate remediation (2026-10-06 dependency-drift): the
+    # source-map-js 1.2.1 -> 1.2.2 LOCKFILE-only remediation is
+    # admitted in ALLOWED_PATTERNS below (GHSA-68fv-2mgg-jv7q; the
+    # audit gates' own policy forbids excepting a compatible fix);
+    # package.json itself stays forbidden.
     (r"^apps/web/next\.config\.[a-z]+$", "frontend framework config"),
     (r"^apps/web/tsconfig.*\.json$", "frontend TypeScript config"),
     (r"^server/soloring/executors/",
