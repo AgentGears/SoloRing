@@ -127,19 +127,22 @@ async def test_rr23_openapi_request_bodies_carry_the_contract(client):
     /projects/{project_id}/shots and PATCH /shots/{shot_id}
     request bodies (inline or through component $refs).
 
-    DISCLOSED framework precision constraint: FastAPI 0.141.1's
-    internal openapi Schema model declares ``maximum: float | None``
-    (fastapi/openapi/models.py:160), so the published document
-    coerces any integer bound to the nearest IEEE double —
-    float(SQLITE_INT_MAX) == 9.223372036854776e+18 — no matter
-    what the declaration carries. The assertion therefore pins the
-    document's integer branch to minimum 0 / the exact double of
-    the storage maximum (never absent, never negative, never
-    unbounded), and the STRING branch to the exact generated
-    pattern (which excludes every above-maximum decimal — the
-    precision-critical side is exact where the framework permits
-    exactness). The MODEL schema (point 2) carries the exact
-    integer bound."""
+    COMPLETION (the twenty-eighth review's residual): this test
+    originally pinned the document's integer maximum to the
+    framework's rounded double (accepting the loss) — the exact
+    weakness the review condemned. FastAPI's internal openapi
+    Schema model declares ``maximum: float | None`` (CI installs
+    0.142.2; the mechanism, not any pin, is what matters), so the
+    DEFAULT generator coerces the bound to the nearest IEEE double
+    — float(SQLITE_INT_MAX) == 9.223372036854776e+18, rounding the
+    INCLUSIVE maximum UP past the runtime boundary. The completion
+    (``_install_exact_duration_openapi_maximum`` in
+    soloring.api.main) corrects the published integer branch to the
+    exact Python integer after generation, so this test now asserts
+    the FROZEN decisive contract: ``type(maximum) is int`` AND
+    ``maximum == SQLITE_INT_MAX``. The full completion battery
+    (tests/test_m17cc_rr23_completion.py) carries the drift,
+    cache-stability, narrowness, and repeated-generation proofs."""
     from soloring.api.schemas.shots import (
         CANONICAL_DURATION_INPUT_PATTERN,
     )
@@ -186,8 +189,9 @@ async def test_rr23_openapi_request_bodies_carry_the_contract(client):
         int_branch = next(b for b in branches
                           if b.get("type") == "integer")
         assert int_branch.get("minimum") == 0, (name, int_branch)
-        assert int_branch.get("maximum") == float(_SQLITE_MAX), \
-            (name, int_branch)
+        maximum = int_branch.get("maximum")
+        assert type(maximum) is int, (name, repr(maximum))
+        assert maximum == _SQLITE_MAX, (name, repr(maximum))
         str_branch = next(b for b in branches
                           if b.get("type") == "string")
         assert str_branch.get("pattern") == \

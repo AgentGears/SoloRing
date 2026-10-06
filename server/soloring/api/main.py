@@ -82,6 +82,128 @@ async def lifespan(app: FastAPI):
         await engine.dispose()
 
 
+def _install_exact_duration_openapi_maximum(app: FastAPI) -> None:
+    """RR23-M17CC-01 (residual completion): the emitted OpenAPI
+    document carries the EXACT signed-SQLite integer boundary.
+
+    FastAPI's internal openapi Schema model declares
+    ``maximum: float | None`` (verified on the installed 0.142.x
+    line), so the default generator coerces the Shot-duration
+    integer bound to the nearest IEEE double — the INCLUSIVE
+    maximum rounds UP past the runtime boundary
+    (float(SQLITE_INT_MAX) == 9223372036854775808.0), publishing
+    9223372036854775808 as schema-valid while the endpoint
+    rejects it. This wrapper generates FastAPI's ordinary document
+    normally, verifies the expected Shot create/PATCH duration_ms
+    structure is present (failing LOUDLY on any drift rather than
+    quietly publishing an unpatched or mis-patched contract), then
+    replaces ONLY that integer branch's rounded maximum with the
+    exact Python integer from the ONE storage-domain owner. The
+    result is cached in ``app.openapi_schema`` per the normal
+    FastAPI pattern (subsequent requests reuse the corrected
+    document; the wrapper does not re-enter itself). No unrelated
+    maximum, response schema, or request model is touched."""
+    from soloring.api.schemas.shots import (
+        CANONICAL_DURATION_INPUT_PATTERN,
+    )
+    from soloring.domain.storage import SQLITE_INT_MAX
+
+    original_openapi = app.openapi
+
+    def openapi_with_exact_duration_maximum():
+        if app.openapi_schema:
+            return app.openapi_schema
+        document = original_openapi()
+        rounded = float(SQLITE_INT_MAX)
+        try:
+            return _verify_and_patch(document, rounded)
+        except Exception:
+            # the default generator has already cached its document
+            # on app.openapi_schema by now — a refused drift must not
+            # leave that unverified document served as if published;
+            # every subsequent generation attempt fails loudly too
+            app.openapi_schema = None
+            raise
+
+    def _verify_and_patch(document, rounded):
+        patched = 0
+        components = document.setdefault("components", {}) \
+            .setdefault("schemas", {})
+        for name, schema in components.items():
+            if name not in ("ShotCreate", "ShotPatch"):
+                continue
+            node = schema.get("properties", {}).get("duration_ms")
+            if node is None:
+                raise RuntimeError(
+                    f"RR23 OpenAPI correction drift: component "
+                    f"{name!r} has no duration_ms property — the "
+                    "Shot request schema changed; refusing to "
+                    "publish an unverified contract")
+            branches = node.get("anyOf")
+            if not isinstance(branches, list) \
+                    or len(branches) != 3:
+                raise RuntimeError(
+                    f"RR23 OpenAPI correction drift: component "
+                    f"{name!r} duration_ms is not the expected "
+                    "integer/string/null three-branch contract")
+            int_branch = next(
+                (b for b in branches if b.get("type") == "integer"),
+                None)
+            str_branch = next(
+                (b for b in branches if b.get("type") == "string"),
+                None)
+            if int_branch is None or str_branch is None \
+                    or not any(b.get("type") == "null"
+                               for b in branches):
+                raise RuntimeError(
+                    f"RR23 OpenAPI correction drift: component "
+                    f"{name!r} duration_ms branches are not the "
+                    "integer/string/null contract")
+            if int_branch.get("minimum") in (0, 0.0) \
+                    and int_branch.get("minimum") is not None:
+                pass
+            else:
+                raise RuntimeError(
+                    f"RR23 OpenAPI correction drift: component "
+                    f"{name!r} duration_ms integer minimum is not 0"
+                    f" (got {int_branch.get('minimum')!r})")
+            if str_branch.get("pattern") != \
+                    CANONICAL_DURATION_INPUT_PATTERN:
+                raise RuntimeError(
+                    f"RR23 OpenAPI correction drift: component "
+                    f"{name!r} duration_ms string branch does not "
+                    "carry the canonical bounded decimal pattern")
+            maximum = int_branch.get("maximum")
+            # the pre-correction value must be the KNOWN rounded
+            # representation of the storage bound — never mutate
+            # whatever happens to resemble a duration schema
+            if isinstance(maximum, int) and not isinstance(
+                    maximum, bool):
+                if maximum == SQLITE_INT_MAX:
+                    continue  # already exact (no coercion applied)
+                raise RuntimeError(
+                    f"RR23 OpenAPI correction drift: component "
+                    f"{name!r} duration_ms integer maximum is an "
+                    f"unexpected int {maximum!r}")
+            if maximum != rounded:
+                raise RuntimeError(
+                    f"RR23 OpenAPI correction drift: component "
+                    f"{name!r} duration_ms integer maximum is not "
+                    f"the known rounded storage bound ({rounded!r}); "
+                    f"got {maximum!r}")
+            int_branch["maximum"] = SQLITE_INT_MAX
+            patched += 1
+        if patched != 2:
+            raise RuntimeError(
+                "RR23 OpenAPI correction drift: expected exactly the "
+                "ShotCreate and ShotPatch duration_ms components; "
+                f"patched {patched}")
+        app.openapi_schema = document
+        return document
+
+    app.openapi = openapi_with_exact_duration_maximum
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     app = FastAPI(title="SoloRing", version="0.1.0", lifespan=lifespan)
@@ -125,6 +247,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(performance_router)
     app.include_router(m17c_performance_router)
     app.include_router(_m17b_without_m17c_transition_routes())
+
+    _install_exact_duration_openapi_maximum(app)
 
     return app
 
