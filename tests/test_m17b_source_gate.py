@@ -168,6 +168,13 @@ def test_h06_no_generation_workflowspec_performance_schema():
     workflows = sorted((REPO / "workflows").rglob("*.json"))
     assert workflows, "frozen workflow contracts not found"
     for wf in workflows:
+        # M17C-D FPR32-M17CD-01: the PINNED performance executor
+        # package (workflows/performance_liveportrait_v1) is the one
+        # frozen workflow contract whose keys LAWFULLY name the
+        # performance derived inputs — every predecessor workflow
+        # stays performance-free
+        if "performance_liveportrait_v1" in wf.parts:
+            continue
         doc = _json.loads(wf.read_text(encoding="utf-8"))
         _assert_no_performance(doc, wf.name)
 
