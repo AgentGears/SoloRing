@@ -206,6 +206,10 @@ M16_SURFACE = (
     r"^tests/test_m17cd_recovery_laws\.py$",
     r"^tests/test_m17cd_real_execution\.py$",
     r"^tests/test_m17cd_worker_production_path\.py$",
+    # M17C-D FPR32 correction: the integrity battery + the
+    # PINNED performance executor package
+    r"^tests/test_m17cd32_integrity\.py$",
+    r"^workflows/performance_liveportrait_v1/(manifest|workflow|workflow-package)\.json$",
     # M17C-D: the GPI sibling insert joins the ONE Generation
     # persistence primitive (frozen plan R2-FINAL W2 §2.6)
     r"^server/soloring/generation/repository\.py$",

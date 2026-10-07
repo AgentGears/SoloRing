@@ -153,6 +153,12 @@ ALLOWLIST = (
     # M17C-D FPR31 correction: the non-live production-path
     # regression (the real _drive schema-5 traversal)
     "tests/test_m17cd_worker_production_path.py",
+    # M17C-D FPR32 correction: the integrity-chain battery
+    "tests/test_m17cd32_integrity.py",
+    # M17C-D FPR32: the PINNED performance executor package
+    "workflows/performance_liveportrait_v1/manifest.json",
+    "workflows/performance_liveportrait_v1/workflow.json",
+    "workflows/performance_liveportrait_v1/workflow-package.json",
     "apps/web/src/lib/exactDuration.ts",
     "apps/web/src/components/ShotForm.tsx",
     "apps/web/src/__tests__/rr21-exact-duration.test.tsx",

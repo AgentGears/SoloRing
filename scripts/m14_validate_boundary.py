@@ -107,6 +107,10 @@ ALLOWED_PATTERNS = [
     r"^tests/test_m17cd_recovery_laws\.py$",
     r"^tests/test_m17cd_real_execution\.py$",
     r"^tests/test_m17cd_worker_production_path\.py$",
+    # M17C-D FPR32 correction: the integrity battery + the
+    # PINNED performance executor package
+    r"^tests/test_m17cd32_integrity\.py$",
+    r"^workflows/performance_liveportrait_v1/(manifest|workflow|workflow-package)\.json$",
     r"^apps/web/src/lib/exactDuration\.ts$",
     r"^apps/web/src/components/ShotForm\.tsx$",
     r"^apps/web/src/__tests__/rr21-exact-duration\.test\.tsx$",
