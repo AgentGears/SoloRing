@@ -150,6 +150,9 @@ ALLOWLIST = (
     "tests/test_m17cd_worker_lane.py",
     "tests/test_m17cd_recovery_laws.py",
     "tests/test_m17cd_real_execution.py",
+    # M17C-D FPR31 correction: the non-live production-path
+    # regression (the real _drive schema-5 traversal)
+    "tests/test_m17cd_worker_production_path.py",
     "apps/web/src/lib/exactDuration.ts",
     "apps/web/src/components/ShotForm.tsx",
     "apps/web/src/__tests__/rr21-exact-duration.test.tsx",
