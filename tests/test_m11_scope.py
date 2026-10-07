@@ -161,19 +161,19 @@ def test_no_execution_source_delta_in_m11_owned_diff():
         'server/soloring/performance/execution_sampler.py':
             '2b12d5e9a5dd6d9c28e670f81f14da5c35c15c9d',
         'server/soloring/performance/execution_spec.py':
-            '4fdf83478b86c2fd12b9ebfd04c802e21cca50bc',
+            '217dc8f9d29ebd140009100e2aca86f6105a54f7',
         'server/soloring/performance/execution_translation.py':
             '31d83591f465f28351cc8c99affcff50628a9804',
         'server/soloring/performance/worker_inputs.py':
-            '29e33d0f366f050b86afa2f2120f59d7c570f09e',
+            '06890a532657029fc6893c624aead9b8f0030d2b',
         'server/soloring/worker/comfy_pipeline.py':
-            '2da4fa4ee0decf2786b989cd972ea8ea8f033949',
+            'ae33961a6003fd9d93a574cc0cf27f3ec4e8517a',
         'server/soloring/generation/repository.py':
             'e70056c340e790da1b83ac64c47483b70613c935',
         'server/soloring/recovery/backup.py':
             '7a17e5ab492507bec432f666219c083c6e39dd15',
         "server/soloring/executors/comfy/translate.py":
-            "58a65dfc1130c51f9aacc9253b956f5d255f0121",
+            "978639dac19562ee5b597947b1e9eeea673014f6",
         "server/soloring/spatial/worker_inputs.py":
             "c9d260e6ffcf325af42a79297a84c95fe9f3c77d",
     }
