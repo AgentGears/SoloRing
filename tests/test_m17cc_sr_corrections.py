@@ -363,17 +363,15 @@ async def test_sr05_gpi_storage_classes_typed_corruption(
     as typed RECOVERY_CORRUPTION — never a raw bytes.strip TypeError,
     never acceptance."""
     from tests.test_m17cc_recovery import (
-        _TRANSLATION_ID, _insert_gpi, _materialize_translation,
-        _stage_with_generation,
+        _insert_gpi, _stage_with_generation,
     )
 
-    root, world, revision_id, gen_id, blob = (
+    root, world, revision_id, gen_id, translation = (
         await _stage_with_generation(client, tmp_path,
                                      f"sr05-{column}"))
-    _materialize_translation(root, gen_id, _TRANSLATION_ID)
-    _insert_gpi(root, gen_id, revision_id, blob,
-                role="performance.controls", key="performance:0",
-                position=0, seg_pos=0)
+    _insert_gpi(root, gen_id, revision_id, translation.gpi_rows,
+                role="performance.controls",
+                key="performance.controls", position=0, seg_pos=0)
 
     con = sqlite3.connect(root / "soloring.db")
     try:

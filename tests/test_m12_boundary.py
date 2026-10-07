@@ -120,8 +120,26 @@ def test_m12_has_no_generation_executor_or_render_source_delta():
     # future edit to either execution source must deliberately advance these
     # reviewed blob identities instead of inheriting a permanent exemption.
     post_m15_owned = {
+        # M17C-D execution succession (frozen plan R2-FINAL,
+        # authorized 2026-10-07): the D lane's sampler/spec/
+        # translation/worker modules + the touched persistence
+        # seams, byte-pinned to the committed implementation.
+        'server/soloring/performance/execution_sampler.py':
+            '2b12d5e9a5dd6d9c28e670f81f14da5c35c15c9d',
+        'server/soloring/performance/execution_spec.py':
+            '373c8ba8ac7f71c48bbfeec09c6e8183da862116',
+        'server/soloring/performance/execution_translation.py':
+            '31d83591f465f28351cc8c99affcff50628a9804',
+        'server/soloring/performance/worker_inputs.py':
+            '7a4f602e904ec0233df1185f93bf84725d6ccd88',
+        'server/soloring/worker/comfy_pipeline.py':
+            '11c96672714a5fa78d37a6aac3673cd7e45a4391',
+        'server/soloring/generation/repository.py':
+            'e70056c340e790da1b83ac64c47483b70613c935',
+        'server/soloring/recovery/backup.py':
+            '7a17e5ab492507bec432f666219c083c6e39dd15',
         "server/soloring/executors/comfy/translate.py":
-            "9d0af0782a372c57cfbb389d8accd6f8c3675ac8",
+            "661db3067237772cabb3f219d245ae9744e164ba",
         "server/soloring/spatial/worker_inputs.py":
             "c9d260e6ffcf325af42a79297a84c95fe9f3c77d",
     }

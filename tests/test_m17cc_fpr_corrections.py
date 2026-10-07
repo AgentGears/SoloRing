@@ -417,112 +417,54 @@ async def test_fpr05_physical_payload_loss_fails_closed(client, mode):
 @pytest.mark.asyncio
 async def test_fpr06_translation_identity_is_the_coordinate(client,
                                                              tmp_path):
-    from soloring.recovery.m17c_verifier import verify_m17c_binding_state
-    from tests.m17a_seed import place_blob
+    """FPR-M17CC-06 under the M17C-D completion (frozen plan
+    R2-FINAL): the IDENTITY EQUALITY law at the frozen coordinate —
+    the WorkflowSpec's dedicated performance_translation field must
+    EQUAL the row's translation identity. The D-era staging is the
+    lawful v5 state (the real translation on the §14.7-lawful FACIAL
+    world); the refusal stages the SAME lawful state with the
+    coordinate rewritten to an unrelated identity."""
+    import json as _json
+    import sqlite3
 
-    def _gpi(root, gen_id, revision_id, blob, translation, spec):
-        from soloring.domain.canonical import (
-            canonical_hash as _ch, canonical_json_str as _cj,
-        )
-        con = sqlite3.connect(root / "soloring.db")
-        child = con.execute(
-            f"SELECT performance_revision_id, "
-            f"vocal_performance_revision_id, vocal_binding_hash, "
-            f"segment_hash FROM {_CHILDREN} WHERE shot_revision_id = ? "
-            "AND position = 0", (revision_id,)).fetchone()
-        created = con.execute(
-            "SELECT created_at FROM generations WHERE id = ?",
-            (gen_id,)).fetchone()[0]
-        con.execute(
-            "UPDATE generations SET workflow_spec_json = ?, "
-            "workflow_spec_hash = ? WHERE id = ?",
-            (_cj(spec), _ch(spec), gen_id))
-        con.execute(
-            f"INSERT INTO generation_performance_inputs ("
-            "generation_id, input_key, position, artifact_role, "
-            "shot_revision_segment_position, performance_revision_id, "
-            "vocal_performance_revision_id, blob_hash, binding_hash, "
-            "segment_hash, translation_identity, derived_input_hash, "
-            "created_at) VALUES (?, 'performance:0', 0, "
-            "'performance.controls', 0, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (gen_id, child[0], child[1], blob, child[2], child[3],
-             translation, "7" * 64, created))
-        con.commit()
-        con.close()
-
-    def _gen(root, shot_id, revision_id, spec):
-        from soloring.domain.canonical import (
-            canonical_hash as _ch, canonical_json_str as _cj,
-        )
-        from soloring.domain.ids import new_uuid
-
-        gen_id = new_uuid()
-        template_hash, manifest_hash = _artifacts(root)
-        now = "2026-10-01T00:00:00.000Z"
-        con = sqlite3.connect(root / "soloring.db")
-        con.execute(
-            "INSERT INTO generations (id, shot_id, shot_revision_id, "
-            "generation_number, status, operation, executor, "
-            "workflow_id, workflow_version, workflow_template_hash, "
-            "manifest_hash, compiled_prompt, prompt_compiler_version, "
-            "parameters_json, workflow_spec_json, workflow_spec_hash, "
-            "created_at, updated_at, queued_at, "
-            "executor_submission_state) VALUES "
-            "(?, ?, ?, 1, 'queued', 'generate', 'fake', 'w', 1, ?, ?, "
-            "'p', '1', '{}', ?, ?, ?, ?, ?, 'not_started')",
-            (gen_id, shot_id, revision_id, template_hash, manifest_hash,
-             _cj(spec), _ch(spec), now, now, now))
-        con.commit()
-        con.close()
-        return gen_id
-
-    def _artifacts(root):
-        import hashlib
-
-        def _p(kind, content):
-            h = hashlib.sha256(content).hexdigest()
-            p = root / "workflow-artifacts" / kind / "sha256" / \
-                h[:2] / h[2:4] / f"{h}.json"
-            p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_bytes(content)
-            return h
-
-        return (_p("templates", b"fpr-template"),
-                _p("manifests", b'{"fixture": "fpr"}'))
-
-    world, revision = await _stage(client)
-    blob = await place_blob(client, b"fpr-derived-bytes")
-    data_dir = client._transport.app.state.settings.data_dir
-
-    # PASS: the dedicated coordinate equals the identity — an
-    # UNRELATED duplicate field changes nothing
-    root1 = await _backup(client, tmp_path, "id-pass")
-    _stage_blob(root1, blob, b"fpr-derived-bytes")
-    spec = {"schema_version": 1, "inputs": {},
-            "performance_translation": _TRANSLATION_ID,
-            "unrelated_note": _TRANSLATION_ID}
-    gen1 = _gen(root1, world["shot"], revision.id, spec)
-    _gpi(root1, gen1, revision.id, blob, _TRANSLATION_ID, spec)
-    verify_m17c_binding_state(root1 / "soloring.db", root1 / "blobs",
-                              head=_HEAD)
-
-    # REFUSE: the identity appears ONLY in an unrelated field while
-    # the dedicated coordinate names something else
-    root2 = await _backup(client, tmp_path, "id-unrelated")
-    _stage_blob(root2, blob, b"fpr-derived-bytes")
-    wrong = "soloring-executor-translation-alp/9"
-    spec2 = {"schema_version": 1, "inputs": {},
-             "performance_translation": wrong,
-             "unrelated_note": _TRANSLATION_ID}
-    gen2 = _gen(root2, world["shot"], revision.id, spec2)
-    _gpi(root2, gen2, revision.id, blob, _TRANSLATION_ID, spec2)
     from soloring.errors import SoloRingError
+    from soloring.recovery.m17c_verifier import (
+        verify_m17c_binding_state,
+    )
+    from tests.test_m17cd_recovery_laws import _insert_full
+    from tests.test_m17cc_recovery import (
+        _HEAD as _R_HEAD, _stage_with_generation, _verify, _one, _sql,
+    )
+
+    # PASS: the lawful v5 state — the coordinate equals the ONE
+    # frozen identity on every row
+    root, world, revision_id, gen_id, translation = (
+        await _stage_with_generation(client, tmp_path, "fpr06-pass"))
+    _insert_full(root, gen_id, revision_id, translation)
+    _verify(root)
+
+    # REFUSE: only the coordinate rewritten (canonical bytes/hash
+    # kept consistent) — the identity law fires on the staged row
+    root2, world2, revision2, gen2, translation2 = (
+        await _stage_with_generation(client, tmp_path, "fpr06-refuse"))
+    _insert_full(root2, gen2, revision2, translation2)
+    spec = _json.loads(_one(root2, (
+        "SELECT workflow_spec_json FROM generations WHERE id = ?"),
+        (gen2,))["workflow_spec_json"])
+    spec["performance_translation"] = (
+        "soloring-executor-translation-alp/9")
+    from soloring.domain.canonical import (
+        canonical_hash as _ch, canonical_json_str as _cj,
+    )
+    _sql(root2, (
+        "UPDATE generations SET workflow_spec_json = ?, "
+        "workflow_spec_hash = ? WHERE id = ?"),
+        (_cj(spec), _ch(spec), gen2))
     with pytest.raises(SoloRingError) as excinfo:
-        verify_m17c_binding_state(root2 / "soloring.db", root2 / "blobs",
-                                  head=_HEAD)
+        verify_m17c_binding_state(root2 / "soloring.db",
+                                  root2 / "blobs", head=_R_HEAD)
     assert excinfo.value.code == "RECOVERY_CORRUPTION"
-    assert "translation_identity disagrees with the WorkflowSpec" \
-        in excinfo.value.message
+    assert "translation_identity disagrees with the WorkflowSpec"         in excinfo.value.message
 
 
 def _stage_blob(root, blob_hash, data):

@@ -369,9 +369,17 @@ def test_rr04_validator_requires_the_schema8_fence():
     # the REAL source passes
     assert schema8_fence_check(src) == [], schema8_fence_check(src)
 
-    # deletion: the fence removed (M16 refusal kept) → the check fails
-    doctored = src.replace(
-        "PERFORMANCE_REALIZATION_UNSUPPORTED", "SOME_OTHER_CODE")
+    # M17C-D evolution (frozen plan R2-FINAL): the fence certifies
+    # the ADMISSION STRUCTURE — deletion of either admission refusal
+    # → the check fails
+    for token in ("INTRA_SHOT_REALIZATION_UNSUPPORTED",
+                  "PERFORMANCE_SPATIAL_COMPOSITION_UNSUPPORTED"):
+        doctored = src.replace(token, "SOME_OTHER_CODE")
+        assert schema8_fence_check(doctored) != []
+
+    # deletion of the gate itself → the check fails
+    doctored = src.replace("if snapshot_schema == 8:",
+                           "if snapshot_schema == 88:")
     assert schema8_fence_check(doctored) != []
 
     # relocation: the fence moved below the first Generation-owned
