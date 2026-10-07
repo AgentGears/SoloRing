@@ -424,43 +424,72 @@ async def test_exit_criterion_mutate_backup_restore_equality(
 @pytest.mark.asyncio
 async def test_gpi_rows_survive_real_backup_restore(
         client, tmp_path):
-    """§1.7 gate 5: fixture-valid derived-input rows inserted into the
-    LIVE database (with real placed Blob bytes, so the 14-path
-    liveness walk finds them) survive a REAL backup/restore with
-    exact identities, bytes, tiebacks, and translation identity; the
-    §13.6 recovery laws validate them on the restored tree. No
-    production writer is introduced."""
-    from sqlalchemy import text
+    """§1.7 gate 5, M17C-D-migrated: LAWFUL derived-input rows —
+    produced by the real translation on a §14.7-lawful FACIAL world,
+    carried by a live Generation with the complete v5 spec — survive
+    a REAL backup/restore with exact identities, bytes, tiebacks,
+    and translation identity; the COMPLETED §13.6 recovery laws
+    (shape + re-derivation + identity record) validate them on the
+    restored tree."""
     from soloring.recovery.backup import restore as rb_restore
-    from tests.m17a_seed import place_blob
+    from tests.m17cc_capture_helper import _factory
+    from tests.test_m17cd_create_path import _facial_world
 
-    world = await _bound_world(client)
-    await _lawful(client, world, extra=True)
-    revision, _visual = await _capture(client, world["shot"])
+    world = await _facial_world(client, _factory(client))
+    revision = world["revision"]
     engine = client._transport.app.state.engine
 
-    blob = await place_blob(client, b"m17cc-17-derived-bytes")
+    from soloring.performance.execution_translation import (
+        translate_captured_performance,
+    )
+
+    app = client._transport.app
+    async with app.state.session_factory() as session:
+        translation = await translate_captured_performance(
+            session, app.state.settings, revision_id=revision.id,
+            parameters={"fps_num": 25, "fps_den": 1,
+                        "frame_count": 25})
+    # a live Generation carrying the complete v5 spec, then the
+    # lawful translated rows (the production writer's exact shape)
     template_hash, manifest_hash = _write_generation_artifacts(client)
     gen_id = await _insert_live_generation(
         engine, world["shot"], revision.id, template_hash,
-        manifest_hash)
-    rows = await _live_gpi_rows(client, revision.id, gen_id, blob)
-    async with engine.begin() as conn:
-        for params in rows:
-            await conn.execute(text(
+        manifest_hash, v5_execution=translation.performance_execution)
+    import sqlite3 as _s3
+
+    con = _s3.connect(client_db_path(client))
+    try:
+        parent_created = con.execute(
+            "SELECT created_at FROM generations WHERE id = ?",
+            (gen_id,)).fetchone()[0]
+        for row in translation.gpi_rows:
+            con.execute(
                 "INSERT INTO generation_performance_inputs ("
                 "generation_id, input_key, position, artifact_role, "
                 "shot_revision_segment_position, "
-                "performance_revision_id, vocal_performance_revision_id,"
-                " blob_hash, binding_hash, segment_hash, "
-                "translation_identity, derived_input_hash, created_at) "
-                "VALUES (:g, :k, :p, :r, :sp, :pr, :v, :b, :bh, :sh, "
-                ":t, :d, :c)"), params)
+                "performance_revision_id, "
+                "vocal_performance_revision_id, blob_hash, "
+                "binding_hash, segment_hash, translation_identity, "
+                "derived_input_hash, created_at) VALUES "
+                "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (gen_id, row["input_key"], row["position"],
+                 row["artifact_role"],
+                 row["shot_revision_segment_position"],
+                 row["performance_revision_id"],
+                 row["vocal_performance_revision_id"],
+                 row["blob_hash"], row["binding_hash"],
+                 row["segment_hash"], row["translation_identity"],
+                 row["derived_input_hash"], parent_created))
+        con.commit()
+    finally:
+        con.close()
+    blob = translation.gpi_rows[0]["blob_hash"]
 
     before_gpi = _rows(client_db_path(client), _GPI,
                        "generation_id, input_key, position")
     before_gen = _rows(client_db_path(client), "generations", "id")
-    src_blob = blob_file(client._transport.app.state.settings.data_dir, blob)
+    src_blob = blob_file(client._transport.app.state.settings.data_dir,
+                         blob)
 
     root = await _backup(client, tmp_path, "gpi")
     dest = tmp_path / "m17cc-17-gpi-restored"
@@ -476,7 +505,8 @@ async def test_gpi_rows_survive_real_backup_restore(
 
 
 async def _insert_live_generation(engine, shot_id, revision_id,
-                                  template_hash, manifest_hash):
+                                  template_hash, manifest_hash,
+                                  v5_execution=None):
     from soloring.domain.canonical import (
         canonical_hash as _ch, canonical_json_str as _cj,
     )
@@ -484,11 +514,24 @@ async def _insert_live_generation(engine, shot_id, revision_id,
     from sqlalchemy import text
 
     gen_id = new_uuid()
-    # schema-1 WorkflowSpec: no frozen artifact dependencies beyond
-    # the manifest/template pair; the translation identity rides as a
-    # materialized field (fixture construction)
-    spec = {"schema_version": 1, "inputs": {},
-            "performance_translation": _TRANSLATION_ID}
+    # M17C-D: with v5_execution the fixture carries the COMPLETE
+    # schema-5 spec (the completed §13.6 laws demand it); without it
+    # the legacy schema-1 shape remains for the non-GPI fixtures
+    if v5_execution is not None:
+        from soloring.performance.execution_spec import (
+            build_workflow_spec_v5,
+        )
+
+        lower = {"schema_version": 1, "workflow_id": "w",
+                 "workflow_version": 1, "manifest_hash": manifest_hash,
+                 "inputs": {}, "prompt": "p", "parameters": {},
+                 "outputs": [{"output_key": "video",
+                              "media": "video"}]}
+        spec = build_workflow_spec_v5(
+            lower, performance_execution=v5_execution)
+    else:
+        spec = {"schema_version": 1, "inputs": {},
+                "performance_translation": _TRANSLATION_ID}
     now = "2026-09-30T00:00:00.000Z"
     async with engine.begin() as conn:
         await conn.execute(text(

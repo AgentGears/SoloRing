@@ -489,6 +489,17 @@ def _generation_artifact_requirements(spec: dict, what: str) -> list[tuple[str, 
     out: list[tuple[str, str]] = []
     if schema_version == 1:
         return out
+    if schema_version == 5:
+        # M17C-D (frozen plan R2-FINAL §2.5): schema 5 wraps the
+        # EXACT lower logical v1/v2 spec; its workflow-artifact
+        # dependencies are the lower value's, recovered via the ONE
+        # lower-projection law (v5 adds none of its own — the
+        # performance plane's derived blobs ride the ordinary Blob
+        # liveness set through the GPI bindings)
+        from soloring.performance.execution_spec import lower_projection
+
+        return _generation_artifact_requirements(
+            lower_projection(spec), what)
     if schema_version == 2:
         try:
             profile_hash = spec["realization"]["profile"]["hash"]
