@@ -968,17 +968,17 @@ async def create_generation_request(
                     "RealizationSpec parameter overrides disagree with "
                     "final captured parameters."
                 )
-    # M17C-D (frozen plan R2-FINAL §2.2–§2.5): for a schema-8 capture
-    # the translation runs NOW — after parameters resolve and BEFORE
-    # the spec builds. ALL captured segments are validated and
-    # derived in memory first; only a complete passing set places
-    # derived blobs. The rasterization facts LEAVE ``parameters``:
-    # their canonical captured home is the spec's
-    # performance_execution.rasterization block, not workflow node
-    # fields (the translator binds every captured parameter to a
-    # manifest node/field). The v5 wrap preserves the exact lower
-    # v1/v2 meaning; the GPI rows join the Generation write unit in
-    # the repository.
+    # M17C-D (frozen plan R2-FINAL §2.2–§2.5 + the FPR31-M17CD-06
+    # correction): for a schema-8 capture the translation runs NOW —
+    # after parameters resolve and BEFORE the spec builds. ALL
+    # captured segments are validated and derived in memory first;
+    # only a complete passing set places derived blobs. The
+    # rasterization facts stay IN ``parameters`` — they are ordinary
+    # node-bound manifest parameters of the performance package, and
+    # the v5 lower projection must be the EXACT lower document the
+    # same resolved package would otherwise carry;
+    # performance_execution.rasterization duplicates them as the D
+    # execution coordinate without erasing the lower meaning.
     performance_inputs: list = []
     performance_execution = None
     if snapshot_schema == 8:
@@ -991,8 +991,6 @@ async def create_generation_request(
             revision_id=revision.id, parameters=parameters)
         performance_execution = translation.performance_execution
         performance_inputs = translation.gpi_rows
-        for _fact in ("fps_num", "fps_den", "frame_count"):
-            parameters.pop(_fact, None)
     spec = build_workflow_spec(template, inputs, compiled_prompt, parameters)
     if spatial_block is not None:
         # M10E §16: spec v3 is composed exactly once, only after every

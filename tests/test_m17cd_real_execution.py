@@ -1,26 +1,35 @@
 """M17C-D W6 — G06, the decoded-pixel material-consumption
-regression (frozen plan R2-FINAL W6): the pinned A/B causal design.
+regression (frozen plan R2-FINAL W6 + the FPR31-M17CD-03
+correction): the pinned A/B causal design implemented as the frozen
+contract demands.
 
-The mechanical causality proof is the payload equality chain (W2/W4:
-the submitted control values derive from the captured rational
-timing through the shared §14.6 sampler, and the pre-submit chain
-proves the bound bytes); this battery closes the LIVE loop — two
-Generations identical in source media, workflow/package, model/
-runtime, parameters and seed, differing ONLY in the timing-derived
-controls, with the submission documents proving which exact derived
-bytes each run bound, and decoded-output pixel hashes diverging as
-the consumption evidence.
+ONE pinned world: A and B share the same source media (the same
+reference asset + the same VP retained audio), the same workflow
+package (the same captured manifest/template hashes), the same
+model/runtime, the same ordinary parameters and seed, the same
+subject/performance authority — ONLY the frozen timing authority
+that deterministically changes the derived controls/audio differs
+(the vocal mapping + its paired performance segment re-PUT with a
+lawful positive anchor between the two captures).
 
-ENVIRONMENT-GATED: the live lane requires the pinned licensed
-LivePortrait stack installed at the local executor (the M5B
-environment). When it is absent the battery SKIPS with an explicit
-reason — never faked — and the cycle record discloses which lane
-ran. Enable explicitly with SOLORING_G06_LIVE=1 plus a reachable
-ComfyUI origin.
+The test acquires worker ownership through the REAL claim/lease
+path, drives each Generation through the actual production worker
+against the pinned LivePortrait executor, reads the PERSISTED
+submission document and proves its GRAPH bindings correspond to the
+exact GPI/derived Blob identities, retrieves the generated media,
+decodes comparable frames, and compares decoded-pixel hashes.
+Terminal-status strings are never consumption evidence.
+
+ENVIRONMENT-GATED: requires SOLORING_G06_LIVE=1, the pinned
+LivePortrait stack installed at the local ComfyUI executor, and a
+reachable origin. When absent the battery SKIPS with an explicit
+reason — the environmental gate stays OPEN and is never translated
+into a pass.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 
@@ -33,60 +42,110 @@ pytestmark = pytest.mark.skipif(
            "executor to run the A/B decoded-pixel regression")
 
 
+def _pixel_hash(png_bytes: bytes) -> str:
+    """Decode one PNG to raw RGBA and hash the pixels — comparable
+    frames must hash identically iff their decoded pixels do."""
+    import io
+
+    from PIL import Image
+
+    with Image.open(io.BytesIO(png_bytes)) as image:
+        rgba = image.convert("RGBA").tobytes()
+    return hashlib.sha256(rgba).hexdigest()
+
+
 @pytest.mark.asyncio
 async def test_g06_ab_timing_drives_submitted_controls(client, factory,
                                                         tmp_path,
                                                         monkeypatch):
-    """The pinned A/B: identical everything except the timing-derived
-    controls; the submission documents prove the bound bytes; the
-    decoded pixel hashes diverge."""
+    from sqlalchemy import text
+
     from tests.test_m17cd_create_path import (
-        _attach_facial_performance, _facial_world,
-        _performance_manifest,
+        _facial_world, _performance_manifest,
     )
 
     await _performance_manifest(tmp_path, monkeypatch)
-    # A: anchor 0; B: anchor +500 ms (lawful leading silence) — the
-    # ONLY difference is the timing-derived schedule/audio
-    world_a = await _facial_world(client, factory)
-    world_b = await _facial_world(client, factory, anchor=(500, 1))
-    submissions = {}
-    for label, world in (("A", world_a), ("B", world_b)):
-        r = await client.post(f"/shots/{world['shot']}/generations")
-        assert r.status_code == 202, r.text
-        generation_id = r.json()["id"]
-        engine = client._transport.app.state.engine
-        from sqlalchemy import text
+    # ONE pinned world — everything except the timing authority is
+    # created once and never varied
+    world = await _facial_world(client, factory)
+    sid, pid = world["shot"], world["project_id"]
+    settings = client._transport.app.state.settings
+    engine = client._transport.app.state.engine
 
+    async def _snapshot_of(generation_id):
         async with engine.connect() as conn:
-            spec = json.loads((await conn.execute(text(
-                "SELECT workflow_spec_json FROM generations "
-                "WHERE id = :g"),
-                {"g": generation_id})).scalar_one())
-            rows = (await conn.execute(text(
-                "SELECT input_key, position, blob_hash FROM "
+            return (await conn.execute(text(
+                "SELECT workflow_spec_json, manifest_hash, "
+                "workflow_template_hash, parameters_json, seed "
+                "FROM generations WHERE id = :g"),
+                {"g": generation_id})).mappings().one()
+
+    # A: the original timing (anchor 0)
+    r = await client.post(f"/shots/{sid}/generations")
+    assert r.status_code == 202, r.text
+    gen_a = r.json()["id"]
+
+    # B: ONLY the timing authority changes — the same VP + mapping
+    # position, re-PUT with a lawful positive anchor (+500 ms), the
+    # paired performance segment re-PUT to match; re-capture
+    r = await client.put(
+        f"/shots/{sid}/vocal-segments/0",
+        json={
+            "vocal_performance_revision_id":
+                world["vp"]["vp"]["id"],
+            "source_start_sample": 48000,
+            "source_end_sample_exclusive": 96000,
+            "sample_rate_hz": 48000,
+            "performance_origin_ms": {"num": 0, "den": 1},
+            "shot_anchor_ms": {"num": 500, "den": 1},
+        })
+    assert r.status_code == 200, r.text
+    r = await client.put(
+        f"/shots/{sid}/performance-segments/0",
+        json={
+            "performance_revision_id": world["pr"]["id"],
+            "performance_start_ms": {"num": 0, "den": 1},
+            "performance_end_ms": {"num": 1000, "den": 1},
+            "shot_anchor_ms": {"num": 500, "den": 1},
+            "vocal_mapping_position": 0,
+        })
+    assert r.status_code == 200, r.text
+    from tests.test_m17cd_create_path import _capture_closed
+
+    await _capture_closed(client, sid)
+    r = await client.post(f"/shots/{sid}/generations")
+    assert r.status_code == 202, r.text
+    gen_b = r.json()["id"]
+
+    snap_a, snap_b = await _snapshot_of(gen_a), await _snapshot_of(
+        gen_b)
+    # the pinned coordinates are IDENTICAL
+    assert snap_a["manifest_hash"] == snap_b["manifest_hash"]
+    assert snap_a["workflow_template_hash"] == \
+        snap_b["workflow_template_hash"]
+    assert snap_a["parameters_json"] == snap_b["parameters_json"]
+    assert snap_a["seed"] == snap_b["seed"] is None
+    # ONLY the timing-derived performance execution differs
+    assert snap_a["workflow_spec_json"] != snap_b["workflow_spec_json"]
+
+    # the derived blobs differ deterministically
+    async def _gpi(generation_id):
+        async with engine.connect() as conn:
+            return (await conn.execute(text(
+                "SELECT artifact_role, blob_hash FROM "
                 "generation_performance_inputs WHERE generation_id = "
-                ":g ORDER BY input_key, position"),
-                {"g": generation_id})).mappings().all()
-        submissions[label] = (spec, [dict(r) for r in rows])
+                ":g"), {"g": generation_id})).mappings().all()
 
-    # the two runs bind DIFFERENT derived bytes (the timing-derived
-    # controls differ) while sharing the translation identity
-    hashes_a = {r["blob_hash"] for r in submissions["A"][1]}
-    hashes_b = {r["blob_hash"] for r in submissions["B"][1]}
-    assert hashes_a and hashes_a != hashes_b
-    assert submissions["A"][0]["performance_translation"] == \
-        submissions["B"][0]["performance_translation"]
-    # the live executor lane: submit both through the real worker,
-    # read the submission documents (extra_data.soloring.
-    # performance_bindings), and compare decoded-output pixel hashes
-    # — divergence is the material-consumption evidence. The pinned
-    # LivePortrait package must be installed for this lane; the
-    # environment check below keeps the gate honest.
-    from soloring.settings import get_settings
+    gpi_a = {row["artifact_role"]: row["blob_hash"]
+             for row in await _gpi(gen_a)}
+    gpi_b = {row["artifact_role"]: row["blob_hash"]
+             for row in await _gpi(gen_b)}
+    assert set(gpi_a) == set(gpi_b)
+    assert gpi_a != gpi_b
 
-    settings = get_settings()
-    origin = getattr(settings, "comfy_origin", None)
+    # ---- the live lane: real ownership + production worker ----
+    origin = os.environ.get("SOLORING_G06_ORIGIN") or getattr(
+        settings, "comfy_origin", None)
     if not origin:  # pragma: no cover — environment-dependent
         pytest.skip("no ComfyUI origin configured for the live lane")
     import httpx
@@ -94,33 +153,83 @@ async def test_g06_ab_timing_drives_submitted_controls(client, factory,
     try:
         async with httpx.AsyncClient(
                 base_url=str(origin), timeout=5) as probe:
-            response = await probe.get("/system_stats")
-            response.raise_for_status()
+            (await probe.get("/system_stats")).raise_for_status()
     except Exception as exc:  # pragma: no cover — environment
         pytest.skip(f"local executor unreachable: {exc}")
-    # executor reachable: drive both generations through the worker
-    # and compare the decoded outputs (the pinned package supplies
-    # the LivePortrait graph; the submission documents carry the
-    # bound performance inputs for the causality read)
+
+    from soloring.executors.comfy.client import ComfyClient
     from soloring.worker.comfy_pipeline import drive_comfy_generation
+    from soloring.worker.ownership import (
+        acquire_worker_lease, claim_next_generation,
+    )
 
-    outputs = {}
-    for label, world in (("A", world_a), ("B", world_b)):
-        engine = client._transport.app.state.engine
-        from sqlalchemy import text
-
-        async with engine.connect() as conn:
-            generation_id = (await conn.execute(text(
-                "SELECT id FROM generations WHERE shot_id = :s"),
-                {"s": world["shot"]})).scalar_one()
+    worker_id = "g06-worker"
+    await acquire_worker_lease(engine, worker_id, 600)
+    frames = {}
+    for label, expected_id in (("A", gen_a), ("B", gen_b)):
+        claim = await claim_next_generation(engine, worker_id)
+        assert claim is not None
+        claimed_id, attempt_id = claim
+        assert claimed_id == expected_id
         async with httpx.AsyncClient(
-                base_url=str(origin), timeout=300) as comfy_client:
-            from soloring.executors.comfy.client import ComfyClient
+                base_url=str(origin), timeout=1800) as http:
+            comfy = ComfyClient(str(origin))
+            comfy._client = http  # the real client over this session
+            outcome = await drive_comfy_generation(
+                engine, settings, worker_id, claimed_id, attempt_id,
+                comfy)
+        assert outcome == "succeeded", (label, outcome)
 
-            result = await drive_comfy_generation(
-                engine, settings, "g06-worker", generation_id,
-                "g06-attempt", ComfyClient(str(origin)))
-        outputs[label] = result
-    assert outputs["A"] != outputs["B"], \
-        "identical outputs under different timing-derived controls " \
-        "would mean the controls were never materially consumed"
+        # the PERSISTED submission document: its graph bindings
+        # correspond to the exact GPI/derived identities
+        async with engine.connect() as conn:
+            submission = (await conn.execute(text(
+                "SELECT submission_json FROM "
+                "executor_submissions WHERE generation_id = :g"),
+                {"g": claimed_id})).scalar_one()
+        document = json.loads(submission)
+        marker = document["extra_data"]["soloring"]
+        bindings = marker["performance_bindings"]
+        expected_blobs = gpi_a if label == "A" else gpi_b
+        assert {b["blob_hash"] for b in bindings} == \
+            set(expected_blobs.values())
+        graph = document["prompt"]
+        from soloring.workflows import manifest as _mm
+
+        mdoc = json.loads((_mm.WORKFLOW_DIR /
+                           "manifest.json").read_text())
+        for key in ("performance.controls",
+                    "performance.vocal_audio"):
+            decl = mdoc["inputs"][key]
+            reference = graph[decl["node"]]["inputs"][decl["field"]]
+            assert expected_blobs[key][:16] in reference, \
+                (label, key, reference)
+
+        # the generated media: decode comparable frames + hashes
+        async with engine.connect() as conn:
+            take_rows = (await conn.execute(text(
+                "SELECT output_key, blob_hash FROM takes WHERE "
+                "generation_id = :g"), {"g": claimed_id})).mappings(
+                ).all()
+        first = sorted(take_rows, key=lambda t: t["output_key"])[0]
+        blob_path = settings.blob_dir_parent if hasattr(
+            settings, "blob_dir_parent") else settings.data_dir
+        from soloring.assets.blob_store import BlobStore
+
+        data = BlobStore(settings).path_for_hash(
+            first["blob_hash"]).read_bytes()
+        import io as _io
+
+        from PIL import Image
+
+        with Image.open(_io.BytesIO(data)) as video_probe:
+            frame_count = getattr(video_probe, "n_frames", 1)
+            mid = frame_count // 2
+            video_probe.seek(mid)
+            frames[label] = hashlib.sha256(
+                video_probe.convert("RGBA").tobytes()).hexdigest()
+
+    assert frames["A"] != frames["B"], \
+        "identical decoded pixels under different timing-derived " \
+        "controls would mean the controls were never materially " \
+        "consumed"

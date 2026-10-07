@@ -1993,8 +1993,8 @@ def _verify_gpi_expected_shape_and_derivation(
             "SELECT DISTINCT generation_id "
             "FROM generation_performance_inputs")]:
         gen = con.execute(
-            "SELECT shot_revision_id, workflow_spec_json "
-            "FROM generations WHERE id = ?", (gen_id,)).fetchone()
+            "SELECT * FROM generations WHERE id = ?",
+            (gen_id,)).fetchone()
         if gen is None:
             raise _corrupt(
                 f"generation performance inputs for {gen_id!r} have "
@@ -2006,20 +2006,74 @@ def _verify_gpi_expected_shape_and_derivation(
             raise _corrupt(
                 f"{where}: workflow_spec_json malformed: {exc}") \
                 from exc
-        try:
-            _validate_v5(spec)
-        except SoloRingError as exc:
-            # the grammar mirror refuses as RECOVERY corruption (the
-            # staged document is not the lawful captured form)
-            raise _corrupt(f"{where}: {exc.message}") from exc
-        raster = spec["performance_execution"]["rasterization"]
-        fps = _Fraction(raster["fps"]["num"], raster["fps"]["den"])
-        frame_count = raster["frame_count"]
-
         children = con.execute(
             "SELECT * FROM shot_revision_performance_segments "
             "WHERE shot_revision_id = ? ORDER BY position",
             (gen["shot_revision_id"],)).fetchall()
+        try:
+            _validate_v5(spec, captured_children=children)
+        except SoloRingError as exc:
+            # the grammar mirror refuses as RECOVERY corruption (the
+            # staged document is not the lawful captured form)
+            raise _corrupt(f"{where}: {exc.message}") from exc
+        # FPR31-M17CD-04: the INDEPENDENT lower reconstruction from
+        # staged facts — the Generation row, its staged input rows,
+        # and the retained manifest artifact — compared against the
+        # v5 lower projection (never a self-projection)
+        from soloring.performance.execution_spec import (
+            expected_lower_from_retained as _expected_lower,
+            lower_projection as _lower_projection,
+        )
+
+        artifact_path = blob_root.parent / "workflow-artifacts" / \
+            "manifests" / "sha256" / gen["manifest_hash"][:2] / \
+            gen["manifest_hash"][2:4] / f"{gen['manifest_hash']}.json"
+        if not artifact_path.is_file():
+            raise _corrupt(
+                f"{where}: the retained manifest artifact "
+                f"{gen['manifest_hash']} is missing from the staged "
+                "tree")
+        from soloring.workflows.manifest import (
+            parse_manifest as _pm1, parse_manifest_v2 as _pm2,
+        )
+
+        try:
+            raw_manifest = artifact_path.read_text(encoding="utf-8")
+            projection = _lower_projection(spec)
+            manifest_doc = (
+                _pm2(raw_manifest)
+                if projection["schema_version"] == 2 else _pm1(raw_manifest))
+        except (SoloRingError, ValueError, TypeError) as exc:
+            raise _corrupt(
+                f"{where}: the retained manifest artifact does not "
+                f"parse: {exc}") from exc
+        staged_inputs = con.execute(
+            "SELECT input_key, position, asset_id, blob_hash, "
+            "reference_role FROM generation_inputs "
+            "WHERE generation_id = ? ORDER BY input_key, position",
+            (gen_id,)).fetchall()
+        expected = _expected_lower(gen, staged_inputs, manifest_doc)
+        if projection["schema_version"] == 2:
+            if gen["model"] is None or \
+                    projection["model"]["id"] != gen["model"] or \
+                    projection["model"]["version"] != \
+                    gen["model_version"]:
+                raise _corrupt(
+                    f"{where}: the v5-over-v2 model identity "
+                    "disagrees with the staged Generation row")
+            projection = {k: v for k, v in projection.items()
+                          if k not in ("schema_version", "model",
+                                       "realization")}
+            expected = {k: v for k, v in expected.items()
+                        if k != "schema_version"}
+        if projection != expected:
+            raise _corrupt(
+                f"{where}: the v5 lower projection does not EQUAL "
+                "the lower spec reconstructed from staged "
+                "Generation/input/manifest facts")
+        raster = spec["performance_execution"]["rasterization"]
+        fps = _Fraction(raster["fps"]["num"], raster["fps"]["den"])
+        frame_count = raster["frame_count"]
         child_dicts = [{
             "shot_revision_segment_position": c["position"],
             "performance_revision_id":

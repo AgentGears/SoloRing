@@ -473,6 +473,7 @@ async def _drive(
             template_graph = json.loads(template_bytes.decode("utf-8"))
             schema3_derived = None
             performance_submission_bindings = None
+            schema5_derived = None
             schema2_pending = None
             schema3_lower = None
             # M10F PD-1B (R6 §10.2.1): historical dispatch is keyed by the
@@ -485,8 +486,61 @@ async def _drive(
                     manifest_bytes.decode("utf-8")).get("schema_version")
             except ValueError:
                 retained_manifest_schema = None
+            # M17C-D (frozen plan R2-FINAL W4 + the FPR31-M17CD-01/02/05
+            # correction): schema-5 dispatch projects to its EXACT lower
+            # logical v1/v2 view FIRST — the performance prep runs here,
+            # and the manifest/template ladder below is keyed by the
+            # PROJECTED logical schema so v5-over-v1 loads the v1 view
+            # and v5-over-v2 the full v2 view (manifest, profile,
+            # fingerprint, live attestation — the same laws logical v2
+            # runs) with `manifest`/`template_graph` ALWAYS set before
+            # the common translation path. The uploaded performance
+            # references are bound INTO the submitted graph at the
+            # manifest's declared node/fields (schema5_derived —
+            # consumption, not a marker); the submission-document
+            # enumeration remains as evidence. Every refusal is terminal
+            # typed BEFORE any submission.
+            logical_schema = spec.get("schema_version")
+            if logical_schema == 5:
+                from soloring.performance.execution_spec import (
+                    lower_projection,
+                )
+                from soloring.performance.worker_inputs import (
+                    execute_schema5_performance_inputs,
+                    submission_performance_bindings,
+                )
+
+                logical_schema = lower_projection(spec)["schema_version"]
+                retained_manifest_doc = None
+                try:
+                    from soloring.workflows.manifest import (
+                        parse_manifest, parse_manifest_v2,
+                    )
+
+                    _raw = (await artifact_store.get_manifest(
+                        generation.manifest_hash)).decode("utf-8")
+                    retained_manifest_doc = (
+                        parse_manifest_v2(_raw)
+                        if logical_schema == 2 else parse_manifest(_raw))
+                except SoloRingError:
+                    # the ladder below re-parses and fails loudly on
+                    # a corrupt retained pair; the reconstruction
+                    # comparison simply cannot run here
+                    retained_manifest_doc = None
+                async with factory() as session:
+                    schema5_derived = (
+                        await execute_schema5_performance_inputs(
+                            session, blob_store,
+                            generation_id=generation_id,
+                            attempt_id=attempt_id,
+                            workflow_spec=spec,
+                            client=ClientUploader(client),
+                            manifest_doc=retained_manifest_doc,
+                        ))
+                performance_submission_bindings = (
+                    submission_performance_bindings(schema5_derived))
             if (retained_manifest_schema == "3"
-                    and spec.get("schema_version") in (1, 2)):
+                    and logical_schema in (1, 2)):
                 from soloring.spatial.package3 import (
                     check_runtime_closure,
                     parse_manifest_v3,
@@ -610,33 +664,6 @@ async def _drive(
                 manifest = lower.manifest
                 template_graph = json.loads(json.dumps(lower.template))
                 schema3_lower = lower
-            elif spec.get("schema_version") == 5:
-                # M17C-D (frozen plan R2-FINAL W4): the schema-5
-                # performance lane — the ONE grammar law, the exact
-                # expected GPI sibling set, the §14.4 per-segment
-                # equality chain INCLUDING re-derived §14.6 bytes,
-                # then the exact retained derived bytes uploaded in
-                # the frozen attempt namespace. Every refusal is a
-                # terminal typed refusal BEFORE any submission; the
-                # submission document enumerates the performance
-                # bindings (role, blob hash, input name, segment
-                # position) so causality is proven from the document.
-                from soloring.performance.worker_inputs import (
-                    execute_schema5_performance_inputs,
-                    submission_performance_bindings,
-                )
-
-                async with factory() as session:
-                    schema5_performance = (
-                        await execute_schema5_performance_inputs(
-                            session, blob_store,
-                            generation_id=generation_id,
-                            attempt_id=attempt_id,
-                            workflow_spec=spec,
-                            client=ClientUploader(client),
-                        ))
-                performance_submission_bindings = (
-                    submission_performance_bindings(schema5_performance))
             elif spec.get("schema_version") == 4:
                 # M14 frozen R2 §25.3: schema-4 historical execution
                 # reads the persisted execution closure ONLY — WorkflowSpec
@@ -886,7 +913,7 @@ async def _drive(
                         manifest_v3=manifest,
                         client=ClientUploader(client),
                     )
-            elif spec.get("schema_version") == 2:
+            elif logical_schema == 2:
                 from soloring.domain.canonical import (
                     canonical_hash as _spec_hash,
                 )
@@ -1026,6 +1053,7 @@ async def _drive(
                 client_id=worker_id,
                 schema3_derived=schema3_derived,
                 performance_bindings=performance_submission_bindings,
+                schema5_derived=schema5_derived,
             )
             payload_document = payload.to_document()
         else:
@@ -1264,6 +1292,25 @@ async def _drive(
                      if k != "spatial_bindings"}
         inherited["schema_version"] = "2"
         manifest = parse_manifest_v2(inherited)
+    elif spec.get("schema_version") == 5:
+        # M17C-D (frozen plan R2-FINAL + the FPR31-M17CD-05
+        # correction): schema-5 output interpretation is the EXACT
+        # lower logical v1/v2 view — one shared lower-projection
+        # law, the same dispatch the submission path uses; v5-over-v1
+        # interprets as v1, v5-over-v2 as v2 (model/realization
+        # semantics included via the retained package).
+        from soloring.performance.execution_spec import lower_projection
+        from soloring.workflows.manifest import parse_manifest_v2
+
+        lower = lower_projection(spec)
+        manifest_bytes_again = await artifact_store.get_manifest(
+            generation.manifest_hash)
+        if lower["schema_version"] == 2:
+            manifest = parse_manifest_v2(
+                manifest_bytes_again.decode("utf-8"))
+        else:
+            manifest = parse_manifest(
+                manifest_bytes_again.decode("utf-8"))
     elif spec.get("schema_version") == 4:
         # M14 §25.3: schema-4 output interpretation is the inherited
         # schema-3 (manifest-v3 minus spatial_bindings → v2) view of the

@@ -32,23 +32,40 @@ _FPS_NUM, _FPS_DEN, _FRAMES = 25, 1, 25  # a 1 s picture grid
 
 
 async def _performance_manifest(tmp_path, monkeypatch):
-    """A performance-capable workflow package: the installed
-    manifest plus the D-frozen rasterization parameters."""
+    """A performance-capable workflow package: the installed manifest
+    plus the D rasterization parameters (FPR31-06 correction: they
+    are ordinary NODE-BOUND manifest parameters preserved in the
+    lower spec) with matching template fields."""
     import shutil
 
     from soloring.workflows import manifest as manifest_module
 
     wf = tmp_path / "wf"
+    if wf.exists():
+        monkeypatch.setattr(manifest_module, "WORKFLOW_DIR", wf)
+        return
     shutil.copytree(manifest_module.WORKFLOW_DIR, wf)
     doc = json.loads((wf / "manifest.json").read_text())
+    graph = json.loads((wf / "workflow.json").read_text())
+    graph["31"].setdefault("inputs", {}).update({
+        "fps_num": _FPS_NUM, "fps_den": _FPS_DEN,
+        "frame_count": _FRAMES,
+        "controls_file": "performance.controls",
+        "audio_file": "performance.vocal_audio"})
+    (wf / "workflow.json").write_text(json.dumps(graph, indent=2))
+    # the performance derived inputs — declared by the pinned package
+    # at the node/fields the submitted graph consumes (FPR31-02)
+    doc["inputs"]["performance.controls"] = {
+        "node": "31", "field": "controls_file", "kind": "string",
+        "required": True, "cardinality": 1}
+    doc["inputs"]["performance.vocal_audio"] = {
+        "node": "31", "field": "audio_file", "kind": "string",
+        "required": True, "cardinality": 1}
     for name, default in (("fps_num", _FPS_NUM),
                           ("fps_den", _FPS_DEN),
                           ("frame_count", _FRAMES)):
-        # execution-facts parameters carry no graph binding (the
-        # rasterization facts are translation inputs, not node
-        # fields) — node/field are optional in the manifest grammar
         doc["parameters"][name] = {
-            "node": None, "field": None, "type": "int",
+            "node": "31", "field": name, "type": "int",
             "default": default, "min": 1, "max": 1000}
     (wf / "manifest.json").write_text(json.dumps(doc, indent=2))
     monkeypatch.setattr(manifest_module, "WORKFLOW_DIR", wf)
@@ -316,14 +333,84 @@ async def test_create_path_duplicate_keeps_identical_identities(
 @pytest.mark.asyncio
 async def test_create_path_anchor_refusal_zero_side_effects(
         client, factory, tmp_path, monkeypatch):
-    """A later-segment anchor failure in a MULTI-segment world
-    leaves ZERO released derived blobs (all-or-nothing) and no
-    Generation."""
+    """FPR31-M17CD-07 correction — the REAL multi-segment
+    later-failure adversary: segment 0 (dialogue-bound) is fully
+    derivable; the strictly LATER dialogue-bound segment 1 pairs
+    with a second vocal mapping whose anchor (1/7 ms @ 48 kHz) is
+    lawfully capturable at authority (J/L intersection holds) but
+    NOT representable on the sample grid — audio materialization
+    fails AT THE LATER SEGMENT after segment 0's derivation,
+    leaving ZERO Generation, ZERO GPI rows, and ZERO newly
+    published blobs (all-or-nothing)."""
     await _performance_manifest(tmp_path, monkeypatch)
-    world = await _facial_world(client, factory,
-                                anchor=(1, 7))  # 1/7 ms @48k ∉ Z
+    world = await _facial_world(client, factory)  # seg 0 GOOD
+    sid = world["shot"]
+
+    # a second dialogue-bound performance on its own VP + line, with
+    # a second vocal mapping carrying the unrepresentable anchor
+    from tests.m17c_seed import ARTICULATION
+
+    vp2 = await make_vp(client, pid=world["project_id"])
+    # APPEND the second subject (the plain helper replaces the set)
+    current = (await client.get(
+        f"/shots/{sid}/semantic-dependencies")).json()
+    existing = current.get("dependencies", current)         if isinstance(current, dict) else current
+    r = await client.put(
+        f"/shots/{sid}/semantic-dependencies",
+        json={"dependencies": [
+            {"entity_id": d["entity_id"], "role": d["role"]}
+            for d in existing] + [
+            {"entity_id": vp2["subject_id"], "role": "subject"}]})
+    assert r.status_code == 200, r.text
+    r = await client.put(
+        f"/dialogue-line-revisions/"
+        f"{vp2['dialogue_line_revision_id']}/vocal-selection",
+        json={"vocal_performance_revision_id": vp2["vp"]["id"],
+              "selected_by": "d"})
+    assert r.status_code == 200, r.text
+    r = await client.put(
+        f"/shots/{sid}/vocal-segments/1",
+        json={
+            "vocal_performance_revision_id": vp2["vp"]["id"],
+            "source_start_sample": 0,
+            "source_end_sample_exclusive": 48000,
+            "sample_rate_hz": 48000,
+            "performance_origin_ms": {"num": 0, "den": 1},
+            "shot_anchor_ms": {"num": 1, "den": 7},
+        })
+    assert r.status_code == 200, r.text
+    candidate = (await client.post(
+        f"/creative-entities/{vp2['subject_id']}/"
+        "dialogue-bound-performance-candidates",
+        json=dialogue_bound_body(
+            vp2["vp"]["id"], source_start=0, source_end=48000,
+            origin=(0, 1),
+            articulation_time={key: (0, 1) for key in ARTICULATION}),
+    )).json()
+    pr2 = (await client.post(
+        f"/performance-candidates/{candidate['id']}/adopt",
+        json={"adopted_by": "d"})).json()
+    r = await client.put(
+        f"/shots/{sid}/performance-segments/1",
+        json={
+            "performance_revision_id": pr2["id"],
+            "performance_start_ms": {"num": 0, "den": 1},
+            "performance_end_ms": {"num": 1000, "den": 1},
+            "shot_anchor_ms": {"num": 1, "den": 7},
+            "vocal_mapping_position": 1,
+        })
+    assert r.status_code == 200, r.text
+    readiness = (await client.get(
+        f"/shots/{sid}/performance-readiness")).json()
+    assert readiness["ready"], readiness
+    revision, _visual = await _capture_closed(client, sid)
+    snap = json.loads((await _row(client, (
+        "SELECT snapshot_json FROM shot_revisions WHERE id = :r"),
+        {"r": revision.id}))["snapshot_json"])
+    assert len(snap["performance"]["segments"]) == 2  # multi-segment
+
     blobs_before = await _blob_count(client)
-    r = await client.post(f"/shots/{world['shot']}/generations")
+    r = await client.post(f"/shots/{sid}/generations")
     assert r.status_code == 422, r.text
     assert r.json()["error_code"] == \
         "PERFORMANCE_EXECUTION_ANCHOR_UNREPRESENTABLE"

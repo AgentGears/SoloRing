@@ -54,22 +54,18 @@ async def execute_schema5_performance_inputs(
     attempt_id: str,
     workflow_spec: dict,
     client,
+    manifest_doc=None,
 ) -> list[VerifiedPerformanceInput]:
     from sqlalchemy import text as _text
 
     from soloring.performance import execution_sampler as es
     from soloring.performance.execution_spec import (
+        expected_lower_from_retained, lower_projection,
         validate_workflow_spec_v5,
     )
 
-    validate_workflow_spec_v5(workflow_spec)
-    container = workflow_spec["performance_execution"]
-    fps = Fraction(container["rasterization"]["fps"]["num"],
-                   container["rasterization"]["fps"]["den"])
-    frame_count = container["rasterization"]["frame_count"]
-
     generation = (await session.execute(_text(
-        "SELECT shot_revision_id FROM generations WHERE id = :g"),
+        "SELECT * FROM generations WHERE id = :g"),
         {"g": generation_id})).mappings().one_or_none()
     if generation is None:
         raise _refusal(f"Generation {generation_id} does not exist")
@@ -79,6 +75,55 @@ async def execute_schema5_performance_inputs(
         "SELECT * FROM shot_revision_performance_segments "
         "WHERE shot_revision_id = :r ORDER BY position"),
         {"r": revision_id})).mappings().all()
+    # FPR31-M17CD-04: the grammar law GROUNDED in the captured
+    # children — cardinality/order, every per-segment coordinate,
+    # and the generic-vs-dialogue vocal closure
+    validate_workflow_spec_v5(
+        workflow_spec, captured_children=children)
+    # the independent lower reconstruction from RETAINED facts — the
+    # Generation row + its input rows + the captured manifest —
+    # compared against the v5 lower projection (never a
+    # self-projection)
+    if manifest_doc is not None:
+        input_rows = (await session.execute(_text(
+            "SELECT input_key, position, asset_id, blob_hash, "
+            "reference_role FROM generation_inputs "
+            "WHERE generation_id = :g ORDER BY input_key, position"),
+            {"g": generation_id})).mappings().all()
+        expected = expected_lower_from_retained(
+            generation, input_rows, manifest_doc)
+        projection = lower_projection(workflow_spec)
+        if projection["schema_version"] == 2:
+            # the v2 additions (model/realization) are the retained
+            # package's own; their fingerprint/attestation closure is
+            # enforced by the schema-2 historical laws the dispatch
+            # runs for a v2 lower — here the v1 core must match and
+            # the model identity must agree with the Generation row
+            if generation["model"] is None:
+                raise _refusal(
+                    "v5-over-v2 lower meaning on a Generation with "
+                    "no retained model identity")
+            if projection["model"]["id"] != generation["model"] or \
+                    projection["model"]["version"] != \
+                    generation["model_version"]:
+                raise _refusal(
+                    "v5-over-v2 model identity disagrees with the "
+                    "retained Generation row")
+            projection = {k: v for k, v in projection.items()
+                          if k not in ("schema_version", "model",
+                                       "realization")}
+            expected = {k: v for k, v in expected.items()
+                        if k != "schema_version"}
+        if projection != expected:
+            raise _refusal(
+                "the v5 lower projection does not EQUAL the lower "
+                "spec reconstructed from retained Generation/input/"
+                "manifest facts")
+
+    container = workflow_spec["performance_execution"]
+    fps = Fraction(container["rasterization"]["fps"]["num"],
+                   container["rasterization"]["fps"]["den"])
+    frame_count = container["rasterization"]["frame_count"]
     child_dicts = [{
         "shot_revision_segment_position": c["position"],
         "performance_revision_id": c["performance_revision_id"],

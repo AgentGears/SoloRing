@@ -638,6 +638,8 @@ async def _stage_with_generation(client, tmp_path, tag):
 
 def _insert_fixture_generation_v5(root, shot_id: str, revision_id: str,
                                   performance_execution: dict) -> str:
+    import hashlib as _hl
+
     from soloring.domain.canonical import (
         canonical_hash as _ch, canonical_json_str as _cj,
     )
@@ -647,10 +649,27 @@ def _insert_fixture_generation_v5(root, shot_id: str, revision_id: str,
     )
 
     gen_id = new_uuid()
+    # the manifest artifact the FPR31-04 reconstruction reads — a
+    # REAL parseable v1 manifest whose outputs use the EMITTED spec
+    # shape, staged at the pinned content-addressed path
+    manifest_doc = {
+        "schema_version": "1", "workflow_id": "w", "version": 1,
+        "inputs": {}, "parameters": {},
+        "outputs": {"video": {"kind": "video",
+                              "expected_count": 1}}}
+    manifest_bytes = _cj(manifest_doc).encode("utf-8")
+    manifest_hash = _hl.sha256(manifest_bytes).hexdigest()
+    artifact = (root / "workflow-artifacts" / "manifests" /
+                "sha256" / manifest_hash[:2] /
+                manifest_hash[2:4] / f"{manifest_hash}.json")
+    artifact.parent.mkdir(parents=True, exist_ok=True)
+    artifact.write_bytes(manifest_bytes)
+    outputs = [{"name": "video", "kind": "video",
+                "expected_count": 1, "accepted_media_types": None}]
     lower = {"schema_version": 1, "workflow_id": "w",
-             "workflow_version": 1, "manifest_hash": "2" * 64,
+             "workflow_version": 1, "manifest_hash": manifest_hash,
              "inputs": {}, "prompt": "p", "parameters": {},
-             "outputs": [{"output_key": "video", "media": "video"}]}
+             "outputs": outputs}
     spec = build_workflow_spec_v5(
         lower, performance_execution=performance_execution)
     _sql(root, (
@@ -662,7 +681,7 @@ def _insert_fixture_generation_v5(root, shot_id: str, revision_id: str,
         "updated_at, queued_at, executor_submission_state) VALUES "
         "(?, ?, ?, 1, 'queued', 'generate', 'fake', 'w', 1, ?, ?, "
         "'p', '1', '{}', ?, ?, ?, ?, ?, 'not_started')"),
-        (gen_id, shot_id, revision_id, "1" * 64, "2" * 64,
+        (gen_id, shot_id, revision_id, "1" * 64, manifest_hash,
          _cj(spec), _ch(spec),
          "2026-09-30T00:00:00.000Z", "2026-09-30T00:00:00.000Z",
          "2026-09-30T00:00:00.000Z"))

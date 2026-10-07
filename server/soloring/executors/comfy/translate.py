@@ -139,6 +139,7 @@ def build_comfy_prompt(
     client_id: str,
     schema3_derived: Sequence | None = None,
     performance_bindings: Sequence[dict] | None = None,
+    schema5_derived: Sequence | None = None,
 ) -> ComfyPromptPayload:
     """Translate the captured triple into a complete Comfy submission payload.
 
@@ -311,6 +312,9 @@ def build_comfy_prompt(
     if schema3_derived is not None:
         _bind_schema3_derived(
             graph, manifest, schema3_derived, workflow_spec, bound_targets)
+    if schema5_derived is not None:
+        _bind_schema5_derived(
+            graph, manifest_doc, schema5_derived, bound_targets)
 
     # --- prompt / parameters / seed: write only after ownership closes ----
     if prompt_decl is not None:
@@ -486,6 +490,51 @@ def _bind_schema3_control_stream(
         head = nid
     node_inputs = _node_inputs(graph, node, what)
     _bind(node_inputs, field, [head, 0], node, what)
+
+
+def _bind_schema5_derived(
+        graph: dict,
+        manifest_doc,
+        derived: Sequence,
+        bound_targets: set[tuple[str, str]],
+) -> None:
+    """M17C-D (frozen plan R2-FINAL W4 + the FPR31-M17CD-02
+    correction): bind each verified uploaded performance derived
+    input to the EXACT node/field declared by the captured manifest
+    — the submitted GRAPH consumes the derived bytes, never a
+    marker. Fails closed on a missing manifest input declaration, a
+    missing upload reference, an undeclared/undeclared-performance
+    key, a missing template node/field, or a target collision."""
+    if not isinstance(derived, Sequence) or not derived:
+        raise TranslationFailed(
+            "schema5_derived must be a non-empty verified collection")
+    declared = dict(manifest_doc.inputs)
+    supplied: dict[str, object] = {}
+    for v in derived:
+        if v.input_key in supplied:
+            raise TranslationFailed(
+                f"duplicate performance derived input {v.input_key!r}")
+        supplied[v.input_key] = v
+    for key in sorted(supplied):
+        if key not in declared:
+            raise TranslationFailed(
+                f"performance derived input {key!r} is not declared "
+                "by the captured manifest — the graph cannot consume "
+                "it; execution refuses")
+        v = supplied[key]
+        if not getattr(v, "execution_reference", None):
+            raise TranslationFailed(
+                f"performance derived input {key!r} has no uploaded "
+                "executor reference")
+    for key in sorted(supplied):
+        decl = declared[key]
+        what = f"performance derived input {key!r}"
+        _reserve_target(
+            graph, bound_targets, node=decl.node, field=decl.field,
+            what=what)
+        node_inputs = _node_inputs(graph, decl.node, what)
+        _bind(node_inputs, decl.field, supplied[key].execution_reference,
+              decl.node, what)
 
 
 def submission_artifact(payload: ComfyPromptPayload) -> tuple[bytes, str]:

@@ -129,10 +129,16 @@ def _rational_shape(value, what: str) -> None:
             f"{what} must be an exact {{num, den}} rational")
 
 
-def validate_workflow_spec_v5(spec: dict, *, lower_spec=None) -> None:
-    """The ONE grammar law. Structural always; when the caller
-    supplies the exact lower spec (builder tests, worker pre-submit
-    proof), the full lower-projection EQUALITY is asserted too."""
+def validate_workflow_spec_v5(spec: dict, *, lower_spec=None,
+                              captured_children=None) -> None:
+    """The ONE grammar law. Structural always; ``lower_spec`` is the
+    caller's INDEPENDENTLY RECONSTRUCTED lower document (from the
+    retained Generation/package/captured-history closure — never
+    ``lower_projection(spec)`` itself, which would be tautological);
+    ``captured_children`` (the schema-8 companion child rows)
+    grounds the captured-set laws: exact cardinality/order, every
+    frozen per-segment coordinate, and generic-vs-dialogue vocal
+    closure."""
     if not is_v5(spec):
         raise _grammar_refusal("spec is not WorkflowSpec schema 5")
     if ("model" in spec) != ("realization" in spec):
@@ -216,3 +222,113 @@ def validate_workflow_spec_v5(spec: dict, *, lower_spec=None) -> None:
                 "the schema-5 lower projection does not EQUAL the "
                 "exact lower logical spec — lower execution meaning "
                 "was mutated or dropped")
+    if captured_children is not None:
+        # FPR31-M17CD-04: the captured-set laws, grounded in the
+        # schema-8 companion children — exact cardinality and order,
+        # every frozen per-segment coordinate, and the
+        # generic-vs-dialogue vocal closure
+        children = sorted(
+            captured_children,
+            key=lambda c: c["shot_revision_segment_position"]
+            if "shot_revision_segment_position" in c.keys()
+            else c["position"])
+        entries = container["segments"]
+        if [e["shot_revision_segment_position"]
+                for e in entries] != [c["position"] for c in children]:
+            raise _grammar_refusal(
+                "performance_execution.segments cardinality/order "
+                "disagrees with the captured segment set")
+        for entry, child in zip(entries, children):
+            position = entry["shot_revision_segment_position"]
+            if entry["segment_hash"] != child["segment_hash"] or \
+                    entry["subject_id"] != child["subject_id"] or \
+                    entry["performance_revision_id"] != \
+                    child["performance_revision_id"] or \
+                    entry["payload_blob_hash"] != \
+                    child["performance_payload_blob_hash"] or \
+                    entry["payload_sha256"] != \
+                    child["performance_payload_sha256"] or \
+                    entry["performance_profile_id"] != \
+                    child["performance_profile_id"] or \
+                    entry["performance_kind"] != \
+                    child["performance_kind"]:
+                raise _grammar_refusal(
+                    f"segments[{position}] identity coordinates "
+                    "disagree with the captured child")
+            for key, num, den in (
+                    ("performance_start", "performance_start_num",
+                     "performance_start_den"),
+                    ("performance_end", "performance_end_num",
+                     "performance_end_den"),
+                    ("shot_anchor", "shot_anchor_num",
+                     "shot_anchor_den")):
+                if entry[key] != {"num": child[num],
+                                  "den": child[den]}:
+                    raise _grammar_refusal(
+                        f"segments[{position}].{key} disagrees with "
+                        "the captured child")
+            dialogue = child["vocal_performance_revision_id"] \
+                is not None
+            if dialogue != (entry["vocal"] is not None):
+                raise _grammar_refusal(
+                    f"segments[{position}] vocal closure disagrees "
+                    "with the captured child (vocal must be present "
+                    "iff the segment is dialogue-bound)")
+            if dialogue:
+                vocal = entry["vocal"]
+                if vocal["vocal_performance_revision_id"] != \
+                        child["vocal_performance_revision_id"] or \
+                        vocal["vocal_binding_hash"] != \
+                        child["vocal_binding_hash"] or \
+                        vocal["source_start_sample"] != \
+                        child["source_start_sample"] or \
+                        vocal["source_end_sample_exclusive"] != \
+                        child["source_end_sample_exclusive"] or \
+                        vocal["sample_rate_hz"] != \
+                        child["sample_rate_hz"]:
+                    raise _grammar_refusal(
+                        f"segments[{position}].vocal coordinates "
+                        "disagree with the captured child")
+
+
+def expected_lower_from_retained(gen_row, input_rows, manifest_doc
+                                 ) -> dict:
+    """FPR31-M17CD-04: the INDEPENDENT lower reconstruction from
+    retained facts alone — the Generation row, its GenerationInput
+    rows, and the captured manifest document. Worker and recovery
+    compare ``lower_projection(spec)`` against THIS value; nothing
+    is read from current working state and nothing is derived from
+    the v5 document itself."""
+    import json as _json
+
+    inputs: dict = {}
+    for row in sorted(input_rows,
+                      key=lambda r: (r["input_key"], r["position"])):
+        entry = inputs.setdefault(row["input_key"], {"bindings": []})
+        entry["bindings"].append({
+            "asset_id": row["asset_id"],
+            "blob_hash": row["blob_hash"],
+            "reference_role": row["reference_role"],
+            "position": row["position"],
+        })
+    return {
+        "schema_version": 1,
+        "workflow_id": manifest_doc.workflow_id,
+        "workflow_version": manifest_doc.version,
+        "manifest_hash": gen_row["manifest_hash"],
+        "inputs": inputs,
+        "prompt": gen_row["compiled_prompt"],
+        "parameters": _json.loads(gen_row["parameters_json"]),
+        "outputs": [
+            {
+                "name": name,
+                "kind": o.kind,
+                "expected_count": o.expected_count,
+                "accepted_media_types": (
+                    list(o.accepted_media_types)
+                    if o.accepted_media_types is not None
+                    else None),
+            }
+            for name, o in manifest_doc.outputs.items()
+        ],
+    }
