@@ -505,6 +505,22 @@ async def _drive(
                 from soloring.performance.execution_spec import (
                     lower_projection,
                 )
+
+                # FPR32-M17CD-06: authenticate the stored WorkflowSpec
+                # bytes BEFORE the spec can influence upload,
+                # translation, or submission (the same law the
+                # schema-2/3/4 paths enforce; recovery always has)
+                from soloring.domain.canonical import (
+                    canonical_hash as _v5_spec_hash,
+                    canonical_json_str as _v5_spec_json,
+                )
+                from soloring.errors import internal_invariant
+
+                if _v5_spec_json(spec) != generation.workflow_spec_json                         or _v5_spec_hash(spec) !=                         generation.workflow_spec_hash:
+                    raise internal_invariant(
+                        "Stored schema-5 workflow spec bytes/hash "
+                        "disagree with the persisted canonical form."
+                    )
                 from soloring.performance.worker_inputs import (
                     execute_schema5_performance_inputs,
                     submission_performance_bindings,
@@ -554,13 +570,15 @@ async def _drive(
 
                 manifest_v3_doc = parse_manifest_v3(
                     manifest_bytes.decode("utf-8"))
+                # FPR32-M17CD-03: the projection receives the
+                # PROJECTED logical schema (v5 lowers to 1/2 first)
                 lower = project_lower_logical_execution_view(
                     manifest_v3_doc, template_graph,
                     generation.manifest_hash,
                     generation.workflow_template_hash,
-                    logical_schema_version=spec["schema_version"],
+                    logical_schema_version=logical_schema,
                 )
-                if spec["schema_version"] == 2:
+                if logical_schema == 2:
                     # §10.2.1.3 historical/structural checks (complete):
                     # the FULL retained package is validated against the
                     # ORIGINAL captured documents. Live execution
@@ -1263,8 +1281,17 @@ async def _drive(
             .decode("utf-8")).get("schema_version")
     except ValueError:
         retained_manifest_schema = None
+    # FPR32-M17CD-03: ONE projected logical schema governs the whole
+    # output dispatch (v5 lowers to 1/2 exactly as at submission)
+    from soloring.performance.execution_spec import (
+        lower_projection as _out_lower_projection,
+    )
+
+    _out_logical = spec.get("schema_version")
+    if _out_logical == 5:
+        _out_logical = _out_lower_projection(spec)["schema_version"]
     if (retained_manifest_schema == "3"
-            and spec.get("schema_version") in (1, 2)):
+            and _out_logical in (1, 2)):
         # M10F PD-1B: one canonical lower-logical view owns output
         # interpretation for retained schema-3 packages on logical v1/v2.
         from soloring.spatial.package3 import (
@@ -1282,7 +1309,7 @@ async def _drive(
         manifest = project_lower_logical_execution_view(
             manifest_v3_doc, template_graph,
             generation.manifest_hash, generation.workflow_template_hash,
-            logical_schema_version=spec["schema_version"],
+            logical_schema_version=_out_logical,
         ).manifest
     elif spec.get("schema_version") == 3:
         from soloring.spatial.package3 import parse_manifest_v3

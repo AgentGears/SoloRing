@@ -43,9 +43,38 @@ class VerifiedPerformanceInput:
     extra: dict = field(default_factory=dict)
 
 
+@dataclass
+class Schema5PerformanceInputs:
+    """The verified per-segment uploads PLUS the per-role ordered
+    segment bundles the pinned executor contract consumes natively
+    (FPR32-M17CD-02)."""
+
+    verified: list
+    role_bundles: dict
+
+
 def _refusal(message: str) -> SoloRingError:
     return SoloRingError(ErrorCode.PERFORMANCE_EXECUTION_BINDING_INVALID,
                          message, status_code=422)
+
+
+async def _retained_profile_bytes(session, profile_hash: str) -> str:
+    """The retained realization-profile artifact bytes, addressed by
+    the Generation row's OWN hash (the retained authority — never
+    the v5 document)."""
+    from pathlib import Path
+
+    from soloring.settings import get_settings
+
+    root = Path(get_settings().data_dir) / "workflow-artifacts"
+    path = (root / "realization_profiles" / "sha256" /
+            profile_hash[:2] / profile_hash[2:4] /
+            f"{profile_hash}.json")
+    if not path.is_file():
+        raise _refusal(
+            f"the retained realization profile {profile_hash} is "
+            "missing from the artifact store")
+    return path.read_text(encoding="utf-8")
 
 
 async def execute_schema5_performance_inputs(
@@ -75,11 +104,27 @@ async def execute_schema5_performance_inputs(
         "SELECT * FROM shot_revision_performance_segments "
         "WHERE shot_revision_id = :r ORDER BY position"),
         {"r": revision_id})).mappings().all()
-    # FPR31-M17CD-04: the grammar law GROUNDED in the captured
-    # children — cardinality/order, every per-segment coordinate,
-    # and the generic-vs-dialogue vocal closure
+    # FPR31/32-M17CD-04/05: the grammar law GROUNDED in the
+    # captured children + the retained immutable audio authority
+    vocal_audio_hashes = {}
+    for child in children:
+        if child["vocal_performance_revision_id"] is not None:
+            vrow = (await session.execute(_text(
+                "SELECT retained_audio_blob_hash FROM "
+                "vocal_performance_revisions WHERE id = :v"),
+                {"v": child["vocal_performance_revision_id"]}
+            )).mappings().one_or_none()
+            if vrow is None:
+                raise _refusal(
+                    "captured vocal performance "
+                    f"{child['vocal_performance_revision_id']!r} "
+                    "is missing from immutable authority")
+            vocal_audio_hashes[
+                child["vocal_performance_revision_id"]] = \
+                vrow["retained_audio_blob_hash"]
     validate_workflow_spec_v5(
-        workflow_spec, captured_children=children)
+        workflow_spec, captured_children=children,
+        vocal_audio_hashes=vocal_audio_hashes)
     # the independent lower reconstruction from RETAINED facts — the
     # Generation row + its input rows + the captured manifest —
     # compared against the v5 lower projection (never a
@@ -90,35 +135,45 @@ async def execute_schema5_performance_inputs(
             "reference_role FROM generation_inputs "
             "WHERE generation_id = :g ORDER BY input_key, position"),
             {"g": generation_id})).mappings().all()
-        expected = expected_lower_from_retained(
-            generation, input_rows, manifest_doc)
         projection = lower_projection(workflow_spec)
+        v2_profile = None
+        fingerprint_hash = None
         if projection["schema_version"] == 2:
-            # the v2 additions (model/realization) are the retained
-            # package's own; their fingerprint/attestation closure is
-            # enforced by the schema-2 historical laws the dispatch
-            # runs for a v2 lower — here the v1 core must match and
-            # the model identity must agree with the Generation row
+            # FPR32-M17CD-04: the EXACT v2 reconstruction — the
+            # retained PROFILE artifact addressed by the row's
+            # own realization_profile_hash, its override names
+            # resolved against the row's parameters; the
+            # fingerprint hash is the inherited artifact-chain
+            # validated value
             if generation["model"] is None:
                 raise _refusal(
-                    "v5-over-v2 lower meaning on a Generation with "
-                    "no retained model identity")
-            if projection["model"]["id"] != generation["model"] or \
-                    projection["model"]["version"] != \
-                    generation["model_version"]:
-                raise _refusal(
-                    "v5-over-v2 model identity disagrees with the "
-                    "retained Generation row")
-            projection = {k: v for k, v in projection.items()
-                          if k not in ("schema_version", "model",
-                                       "realization")}
-            expected = {k: v for k, v in expected.items()
-                        if k != "schema_version"}
-        if projection != expected:
+                    "v5-over-v2 lower meaning on a Generation "
+                    "with no retained model identity")
+            from soloring.realization.profile import parse_profile
+
+            profile_doc = parse_profile(
+                await _retained_profile_bytes(
+                    session,
+                    generation["realization_profile_hash"]))
+            v2_profile = profile_doc
+            fingerprint_hash = projection["model"][
+                "execution_model_fingerprint_hash"]
+        expected = expected_lower_from_retained(
+            generation, input_rows, manifest_doc,
+            v2_profile=v2_profile,
+            v2_model_fingerprint_hash=fingerprint_hash)
+        if projection["schema_version"] == 2:
+            from soloring.performance.execution_spec import (
+                compare_lower_v2,
+            )
+
+            compare_lower_v2(projection, expected,
+                             "the schema-5 worker validation")
+        elif projection != expected:
             raise _refusal(
-                "the v5 lower projection does not EQUAL the lower "
-                "spec reconstructed from retained Generation/input/"
-                "manifest facts")
+                "the v5 lower projection does not EQUAL the "
+                "lower spec reconstructed from retained "
+                "Generation/input/manifest facts")
 
     container = workflow_spec["performance_execution"]
     fps = Fraction(container["rasterization"]["fps"]["num"],
@@ -254,20 +309,77 @@ async def execute_schema5_performance_inputs(
             extra={"segment_position":
                    row["shot_revision_segment_position"],
                    "translation_identity":
-                       row["translation_identity"]}))
-    return verified
+                       row["translation_identity"],
+                   "remote_name": name, "subfolder": sub}))
+    # FPR32-M17CD-02 correction: the pinned executor contract
+    # consumes the ordered per-segment collection NATIVELY — one
+    # deterministic ROLE BUNDLE per input_key, built from the exact
+    # verified rows (a projection, never a re-derivation), uploaded
+    # once and bound at the manifest's declared node/field. Every
+    # segment retains its auditable correspondence to role + GPI
+    # position + captured segment position + exact blob identity +
+    # uploaded reference.
+    from soloring.domain.canonical import (
+        canonical_json_str as _cj,
+    )
+
+    role_bundles: dict[str, str] = {}
+    for role in ("performance.controls", "performance.vocal_audio"):
+        role_rows = [v for v in verified if v.input_key == role]
+        if not role_rows:
+            continue
+        bundle = {
+            "schema_version": 1,
+            "role": role,
+            "translation_identity": es.TRANSLATION_IDENTITY,
+            "segments": [{
+                "gpi_position": v.position,
+                "segment_position":
+                    v.shot_revision_segment_position,
+                "blob_hash": v.blob_hash,
+                "uploaded": v.execution_reference,
+            } for v in role_rows],
+        }
+        data = _cj(bundle).encode("utf-8")
+        import hashlib as _hl
+
+        digest = _hl.sha256(data).hexdigest()
+        import tempfile
+
+        tmp = store.tmp_path()
+        tmp.write_bytes(data)
+        await store.place(digest, tmp)
+        bundle_name = f"{role}_{digest[:16]}_bundle.json"
+        name, sub = await client.upload_bytes(
+            data=data, filename=bundle_name, subfolder=namespace) \
+            if hasattr(client, "upload_bytes") else \
+            await client.upload(
+                source_path=store.path_for_hash(digest),
+                filename=bundle_name, subfolder=namespace)
+        validate_returned_reference(name, sub, namespace)
+        role_bundles[role] = comfy_input_reference(name, sub)
+    return Schema5PerformanceInputs(
+        verified=verified, role_bundles=role_bundles)
 
 
 def submission_performance_bindings(
-        verified: list[VerifiedPerformanceInput]) -> list[dict]:
+        result: "Schema5PerformanceInputs") -> list[dict]:
     """The submission-document enumeration (frozen plan W4): per
     performance input — the role, blob hash, input name, AND the
-    segment position it realizes — so the A/B causality proof reads
-    from the submission document, not from pixel hashes."""
-    return [{
+    segment position it realizes — plus the per-role bundle the
+    graph consumes, so the A/B causality proof reads from the
+    submission document, not from pixel hashes."""
+    rows = [{
         "role": v.artifact_role,
         "blob_hash": v.blob_hash,
         "input_name": v.execution_reference,
+        "gpi_position": v.position,
         "segment_position": v.shot_revision_segment_position,
         "translation_identity": v.extra["translation_identity"],
-    } for v in verified]
+    } for v in result.verified]
+    rows.extend({
+        "role": role,
+        "bundle": reference,
+        "kind": "performance.segments",
+    } for role, reference in sorted(result.role_bundles.items()))
+    return rows

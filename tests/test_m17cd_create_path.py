@@ -32,42 +32,22 @@ _FPS_NUM, _FPS_DEN, _FRAMES = 25, 1, 25  # a 1 s picture grid
 
 
 async def _performance_manifest(tmp_path, monkeypatch):
-    """A performance-capable workflow package: the installed manifest
-    plus the D rasterization parameters (FPR31-06 correction: they
-    are ordinary NODE-BOUND manifest parameters preserved in the
-    lower spec) with matching template fields."""
+    """FPR32-M17CD-01 correction: install the REAL pinned
+    performance/LivePortrait executor package
+    (workflows/performance_liveportrait_v1 — the tracked contract)
+    as the workflow directory. No synthetic fields on the Hunyuan
+    KSampler: the pinned package's own manifest declares the
+    performance segment inputs and the rasterization parameters at
+    ITS graph nodes."""
     import shutil
 
     from soloring.workflows import manifest as manifest_module
 
+    pinned = (manifest_module.BASE_DIR / "workflows" /
+              "performance_liveportrait_v1")
     wf = tmp_path / "wf"
-    if wf.exists():
-        monkeypatch.setattr(manifest_module, "WORKFLOW_DIR", wf)
-        return
-    shutil.copytree(manifest_module.WORKFLOW_DIR, wf)
-    doc = json.loads((wf / "manifest.json").read_text())
-    graph = json.loads((wf / "workflow.json").read_text())
-    graph["31"].setdefault("inputs", {}).update({
-        "fps_num": _FPS_NUM, "fps_den": _FPS_DEN,
-        "frame_count": _FRAMES,
-        "controls_file": "performance.controls",
-        "audio_file": "performance.vocal_audio"})
-    (wf / "workflow.json").write_text(json.dumps(graph, indent=2))
-    # the performance derived inputs — declared by the pinned package
-    # at the node/fields the submitted graph consumes (FPR31-02)
-    doc["inputs"]["performance.controls"] = {
-        "node": "31", "field": "controls_file", "kind": "string",
-        "required": True, "cardinality": 1}
-    doc["inputs"]["performance.vocal_audio"] = {
-        "node": "31", "field": "audio_file", "kind": "string",
-        "required": True, "cardinality": 1}
-    for name, default in (("fps_num", _FPS_NUM),
-                          ("fps_den", _FPS_DEN),
-                          ("frame_count", _FRAMES)):
-        doc["parameters"][name] = {
-            "node": "31", "field": name, "type": "int",
-            "default": default, "min": 1, "max": 1000}
-    (wf / "manifest.json").write_text(json.dumps(doc, indent=2))
+    if not wf.exists():
+        shutil.copytree(pinned, wf)
     monkeypatch.setattr(manifest_module, "WORKFLOW_DIR", wf)
 
 

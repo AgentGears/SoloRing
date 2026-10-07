@@ -495,45 +495,41 @@ def _bind_schema3_control_stream(
 def _bind_schema5_derived(
         graph: dict,
         manifest_doc,
-        derived: Sequence,
+        derived,
         bound_targets: set[tuple[str, str]],
 ) -> None:
-    """M17C-D (frozen plan R2-FINAL W4 + the FPR31-M17CD-02
-    correction): bind each verified uploaded performance derived
-    input to the EXACT node/field declared by the captured manifest
-    — the submitted GRAPH consumes the derived bytes, never a
-    marker. Fails closed on a missing manifest input declaration, a
-    missing upload reference, an undeclared/undeclared-performance
-    key, a missing template node/field, or a target collision."""
-    if not isinstance(derived, Sequence) or not derived:
+    """M17C-D W4 + the FPR32-M17CD-01/02 correction: bind the
+    verified per-role ordered SEGMENT BUNDLES (the pinned executor
+    contract's native consumption of the frozen grouped-row
+    cardinality) to the EXACT node/field declared by the captured
+    manifest — the submitted GRAPH consumes the derived bytes,
+    never a marker. Every bundle is a deterministic projection of
+    the verified retained inputs with per-segment auditable
+    correspondence. Fails closed on a missing manifest declaration,
+    a missing bundle for a required role, a bundle for an
+    undeclared role, a missing template node/field, or a target
+    collision."""
+    role_bundles = getattr(derived, "role_bundles", None)
+    if not role_bundles:
         raise TranslationFailed(
-            "schema5_derived must be a non-empty verified collection")
+            "schema5_derived carries no performance role bundles — "
+            "the graph cannot consume the derived inputs; execution "
+            "refuses")
     declared = dict(manifest_doc.inputs)
-    supplied: dict[str, object] = {}
-    for v in derived:
-        if v.input_key in supplied:
+    for role in sorted(role_bundles):
+        if role not in declared:
             raise TranslationFailed(
-                f"duplicate performance derived input {v.input_key!r}")
-        supplied[v.input_key] = v
-    for key in sorted(supplied):
-        if key not in declared:
-            raise TranslationFailed(
-                f"performance derived input {key!r} is not declared "
+                f"performance derived input {role!r} is not declared "
                 "by the captured manifest — the graph cannot consume "
                 "it; execution refuses")
-        v = supplied[key]
-        if not getattr(v, "execution_reference", None):
-            raise TranslationFailed(
-                f"performance derived input {key!r} has no uploaded "
-                "executor reference")
-    for key in sorted(supplied):
-        decl = declared[key]
-        what = f"performance derived input {key!r}"
+    for role in sorted(role_bundles):
+        decl = declared[role]
+        what = f"performance derived input {role!r}"
         _reserve_target(
             graph, bound_targets, node=decl.node, field=decl.field,
             what=what)
         node_inputs = _node_inputs(graph, decl.node, what)
-        _bind(node_inputs, decl.field, supplied[key].execution_reference,
+        _bind(node_inputs, decl.field, role_bundles[role],
               decl.node, what)
 
 

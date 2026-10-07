@@ -130,7 +130,8 @@ def _rational_shape(value, what: str) -> None:
 
 
 def validate_workflow_spec_v5(spec: dict, *, lower_spec=None,
-                              captured_children=None) -> None:
+                              captured_children=None,
+                              vocal_audio_hashes=None) -> None:
     """The ONE grammar law. Structural always; ``lower_spec`` is the
     caller's INDEPENDENTLY RECONSTRUCTED lower document (from the
     retained Generation/package/captured-history closure — never
@@ -276,6 +277,28 @@ def validate_workflow_spec_v5(spec: dict, *, lower_spec=None,
                     "iff the segment is dialogue-bound)")
             if dialogue:
                 vocal = entry["vocal"]
+                # FPR32-M17CD-05: the frozen vocal coordinates are
+                # GROUNDED — the source-audio identity in the
+                # retained immutable VP/audio authority and the
+                # synchronization basis pinned to its frozen value
+                if vocal["synchronization_basis_version"] != 1:
+                    raise _grammar_refusal(
+                        f"segments[{position}].vocal "
+                        "synchronization_basis_version is not the "
+                        "frozen value 1")
+                if vocal_audio_hashes is not None:
+                    vp_id = child["vocal_performance_revision_id"]
+                    authority = vocal_audio_hashes.get(vp_id)
+                    if authority is None:
+                        raise _grammar_refusal(
+                            f"segments[{position}].vocal references "
+                            "a vocal performance absent from the "
+                            "retained audio authority")
+                    if vocal["vocal_audio_blob_hash"] != authority:
+                        raise _grammar_refusal(
+                            f"segments[{position}].vocal "
+                            "vocal_audio_blob_hash disagrees with "
+                            "the retained VP audio authority")
                 if vocal["vocal_performance_revision_id"] != \
                         child["vocal_performance_revision_id"] or \
                         vocal["vocal_binding_hash"] != \
@@ -291,14 +314,24 @@ def validate_workflow_spec_v5(spec: dict, *, lower_spec=None,
                         "disagree with the captured child")
 
 
-def expected_lower_from_retained(gen_row, input_rows, manifest_doc
+def expected_lower_from_retained(gen_row, input_rows, manifest_doc,
+                                 *, v2_profile=None,
+                                 v2_model_fingerprint_hash=None
                                  ) -> dict:
-    """FPR31-M17CD-04: the INDEPENDENT lower reconstruction from
+    """FPR31/32-M17CD-04: the INDEPENDENT lower reconstruction from
     retained facts alone — the Generation row, its GenerationInput
-    rows, and the captured manifest document. Worker and recovery
-    compare ``lower_projection(spec)`` against THIS value; nothing
-    is read from current working state and nothing is derived from
-    the v5 document itself."""
+    rows, and the captured manifest document. For a v2 lower the
+    caller supplies the retained-authority reconstructions: the
+    parsed PROFILE artifact (addressed by the row's own
+    realization_profile_hash — its declared override names resolved
+    against the row's parameters_json) and the
+    artifact-chain-validated fingerprint hash; the model and
+    realization meaning (profile identity, model identity, and the
+    COMPLETE parameter_overrides) are then compared EXACTLY — never
+    deleted to achieve equality. Worker and recovery compare
+    ``lower_projection(spec)`` against THIS value; nothing is read
+    from current working state and nothing is derived from the v5
+    document itself."""
     import json as _json
 
     inputs: dict = {}
@@ -311,8 +344,7 @@ def expected_lower_from_retained(gen_row, input_rows, manifest_doc
             "reference_role": row["reference_role"],
             "position": row["position"],
         })
-    return {
-        "schema_version": 1,
+    base = {
         "workflow_id": manifest_doc.workflow_id,
         "workflow_version": manifest_doc.version,
         "manifest_hash": gen_row["manifest_hash"],
@@ -332,3 +364,78 @@ def expected_lower_from_retained(gen_row, input_rows, manifest_doc
             for name, o in manifest_doc.outputs.items()
         ],
     }
+    if v2_profile is None:
+        base["schema_version"] = 1
+        return base
+    # the exact v2 reconstruction: the profile's declared override
+    # names resolved against the row's OWN resolved parameters (the
+    # create-time law the service asserts), the identities from the
+    # row + the retained artifacts
+    parameters = base["parameters"]
+    overrides = {}
+    for name in v2_profile["parameter_overrides"]:
+        if name not in parameters:
+            raise _grammar_refusal(
+                "the retained profile declares an override the "
+                f"Generation's parameters do not carry ({name!r})")
+        overrides[name] = parameters[name]
+    base["schema_version"] = 2
+    base["model"] = {
+        "id": gen_row["model"],
+        "version": gen_row["model_version"],
+        "execution_model_fingerprint_hash":
+            v2_model_fingerprint_hash,
+    }
+    base["realization"] = {
+        "schema_version": 1,
+        "profile": {
+            "id": v2_profile["profile_id"],
+            "version": v2_profile["profile_version"],
+            "hash": gen_row["realization_profile_hash"],
+        },
+        "model": base["model"],
+        "parameter_overrides": overrides,
+    }
+    return base
+
+
+def compare_lower_v2(projection: dict, expected: dict,
+                     what: str) -> None:
+    """The FPR32-M17CD-04 comparison law: for a v2 lower, the
+    identities + the COMPLETE parameter_overrides must match exactly
+    (never deleted to achieve equality); the realization channel /
+    omitted-optional projections remain governed by the inherited
+    schema-2 historical laws (validate_schema2_historical_state /
+    validate_realization_input_projection) which validate them
+    against the retained input rows."""
+    if projection["model"]["id"] != expected["model"]["id"] or \
+            projection["model"]["version"] != \
+            expected["model"]["version"]:
+        raise _grammar_refusal(
+            f"{what}: the v5-over-v2 model identity disagrees with "
+            "the retained Generation row")
+    if projection["realization"]["parameter_overrides"] != \
+            expected["realization"]["parameter_overrides"]:
+        raise _grammar_refusal(
+            f"{what}: the v5-over-v2 realization "
+            "parameter_overrides disagree with the retained "
+            "profile/parameters reconstruction")
+    if projection["realization"]["profile"] != \
+            expected["realization"]["profile"]:
+        raise _grammar_refusal(
+            f"{what}: the v5-over-v2 realization profile identity "
+            "disagrees with the retained authority")
+    if projection["realization"].get("schema_version") != 1:
+        raise _grammar_refusal(
+            f"{what}: the v5-over-v2 realization schema_version is "
+            "not the frozen value")
+    core_projection = {k: v for k, v in projection.items()
+                       if k not in ("schema_version", "model",
+                                    "realization")}
+    core_expected = {k: v for k, v in expected.items()
+                     if k not in ("schema_version", "model",
+                                  "realization")}
+    if core_projection != core_expected:
+        raise _grammar_refusal(
+            f"{what}: the v5 lower projection does not EQUAL the "
+            "lower spec reconstructed from retained facts")

@@ -64,23 +64,32 @@ async def test_worker_lane_verifies_and_uploads(client, factory,
     store = BlobStore(client._transport.app.state.settings)
     uploader = StubUploader()
     async with factory_session() as session:
-        verified = await execute_schema5_performance_inputs(
+        result = await execute_schema5_performance_inputs(
             session, store, generation_id=generation_id,
             attempt_id="attempt-1", workflow_spec=spec,
             client=uploader)
+    verified = result.verified
     assert [(v.artifact_role,
-             v.shot_revision_segment_position) for v in verified] == [
+             v.shot_revision_segment_position)
+            for v in verified] == [
         ("performance.controls", 0), ("performance.vocal_audio", 0)]
-    assert len(uploader.uploads) == 2
+    # two per-segment uploads + the two per-role bundles
+    assert len(uploader.uploads) == 4
     for v in verified:
         assert v.execution_reference is not None
-        assert v.blob_hash in v.execution_reference or \
-            v.blob_hash[:16] in v.execution_reference
-    bindings = submission_performance_bindings(verified)
+        assert v.blob_hash[:16] in v.execution_reference
+    assert set(result.role_bundles) == {
+        'performance.controls', 'performance.vocal_audio'}
+    bindings = submission_performance_bindings(result)
     assert {b["role"] for b in bindings} == {
         "performance.controls", "performance.vocal_audio"}
+    rows = [b for b in bindings if "kind" not in b]
+    bundles = [b for b in bindings if "kind" in b]
+    assert len(rows) == 2 and len(bundles) == 2
     assert all("segment_position" in b and "input_name" in b
-               and "blob_hash" in b for b in bindings)
+               and "gpi_position" in b and "blob_hash" in b
+               for b in rows)
+    assert all(b["bundle"] for b in bundles)
 
 
 @pytest.mark.asyncio

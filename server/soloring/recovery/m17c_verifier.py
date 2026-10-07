@@ -2010,8 +2010,27 @@ def _verify_gpi_expected_shape_and_derivation(
             "SELECT * FROM shot_revision_performance_segments "
             "WHERE shot_revision_id = ? ORDER BY position",
             (gen["shot_revision_id"],)).fetchall()
+        # FPR32-M17CD-05: the vocal source-audio authority from the
+        # STAGED immutable VP rows
+        vocal_audio_hashes = {}
+        for child in children:
+            if child["vocal_performance_revision_id"] is not None:
+                vp = con.execute(
+                    "SELECT retained_audio_blob_hash FROM "
+                    "vocal_performance_revisions WHERE id = ?",
+                    (child["vocal_performance_revision_id"],
+                     )).fetchone()
+                if vp is None:
+                    raise _corrupt(
+                        f"{where}: captured vocal performance "
+                        f"{child['vocal_performance_revision_id']!r} "
+                        "is missing from immutable authority")
+                vocal_audio_hashes[
+                    child["vocal_performance_revision_id"]] = \
+                    vp["retained_audio_blob_hash"]
         try:
-            _validate_v5(spec, captured_children=children)
+            _validate_v5(spec, captured_children=children,
+                         vocal_audio_hashes=vocal_audio_hashes)
         except SoloRingError as exc:
             # the grammar mirror refuses as RECOVERY corruption (the
             # staged document is not the lawful captured form)
@@ -2052,21 +2071,53 @@ def _verify_gpi_expected_shape_and_derivation(
             "reference_role FROM generation_inputs "
             "WHERE generation_id = ? ORDER BY input_key, position",
             (gen_id,)).fetchall()
-        expected = _expected_lower(gen, staged_inputs, manifest_doc)
+        v2_profile = None
+        fingerprint_hash = None
         if projection["schema_version"] == 2:
-            if gen["model"] is None or \
-                    projection["model"]["id"] != gen["model"] or \
-                    projection["model"]["version"] != \
-                    gen["model_version"]:
+            # FPR32-M17CD-04: the EXACT v2 reconstruction from
+            # STAGED facts — the profile artifact addressed by
+            # the row's OWN realization_profile_hash
+            if gen["model"] is None:
                 raise _corrupt(
-                    f"{where}: the v5-over-v2 model identity "
-                    "disagrees with the staged Generation row")
-            projection = {k: v for k, v in projection.items()
-                          if k not in ("schema_version", "model",
-                                       "realization")}
-            expected = {k: v for k, v in expected.items()
-                        if k != "schema_version"}
-        if projection != expected:
+                    f"{where}: v5-over-v2 lower meaning on a "
+                    "Generation with no retained model identity")
+            profile_path = (blob_root.parent /
+                            "workflow-artifacts" /
+                            "realization_profiles" / "sha256" /
+                            gen["realization_profile_hash"][:2] /
+                            gen["realization_profile_hash"][2:4] /
+                            f"{gen['realization_profile_hash']}"
+                            ".json")
+            if not profile_path.is_file():
+                raise _corrupt(
+                    f"{where}: the retained realization profile "
+                    f"{gen['realization_profile_hash']} is "
+                    "missing from the staged tree")
+            from soloring.realization.profile import parse_profile
+
+            try:
+                v2_profile = parse_profile(
+                    profile_path.read_text(encoding="utf-8"))
+            except SoloRingError as exc:
+                raise _corrupt(
+                    f"{where}: the retained realization profile "
+                    f"does not parse: {exc}") from exc
+            fingerprint_hash = projection["model"][
+                "execution_model_fingerprint_hash"]
+        expected = _expected_lower(
+            gen, staged_inputs, manifest_doc,
+            v2_profile=v2_profile,
+            v2_model_fingerprint_hash=fingerprint_hash)
+        if projection["schema_version"] == 2:
+            from soloring.performance.execution_spec import (
+                compare_lower_v2 as _compare_v2,
+            )
+
+            try:
+                _compare_v2(projection, expected, where)
+            except SoloRingError as exc:
+                raise _corrupt(str(exc.message)) from exc
+        elif projection != expected:
             raise _corrupt(
                 f"{where}: the v5 lower projection does not EQUAL "
                 "the lower spec reconstructed from staged "

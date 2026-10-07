@@ -74,31 +74,68 @@ def _claim(engine, worker_id):
 @pytest.mark.asyncio
 async def test_production_drive_binds_performance_into_graph(
         client, factory, tmp_path, monkeypatch):
-    """The real `_drive` schema-5 path: the retained package ladder
-    (the manifest local is ALWAYS initialized — the FPR31-01 class),
-    the GPI uploads, and the pure translator binding the derived
-    controls/audio references INTO the submitted graph at the
-    manifest's declared node/fields (the FPR31-02 class)."""
+    """The REAL `_drive` schema-5 path over the PINNED
+    performance/LivePortrait package, on the frozen TWO-SEGMENT
+    world (one dialogue-bound + one generic): both
+    `performance.controls` rows (the repeated grouped key) AND the
+    dialogue audio row reach the declared executor graph through
+    the per-role ordered segment bundles — consumption at the
+    pinned package's own nodes/fields (40.controls_segments /
+    41.audio_segments), never a marker, never synthetic fields on
+    the Hunyuan KSampler. The FPR32-M17CD-01/02 decisive proof."""
+    import json as _json
+
     from soloring.worker.comfy_pipeline import drive_comfy_generation
     from soloring.worker.ownership import (
         acquire_worker_lease, claim_next_generation,
     )
 
+    from tests.m17b_seed import (
+        SMILE as _SMILE_META, adopt as _adopt_generic,
+        candidate_body as _candidate_body,
+        channel as _channel, create_candidate as _create_candidate,
+        kf as _kf17b,
+    )
+    from tests.test_m17cd_create_path import (
+        _capture_closed, _facial_world,
+    )
+
     world, generation_id = await _performance_generation(
         client, factory, tmp_path, monkeypatch)
+    sid = world["shot"]
+
+    # the frozen multi-segment world: a generic FACIAL second
+    # segment (the create battery's lawful shape)
+    generic = await _create_candidate(
+        client, world["vp"]["subject_id"],
+        _candidate_body(
+            [_channel(_SMILE_META, [_kf17b(0, 1, 100000)])],
+            start=(0, 1), end=(500, 1)))
+    pr2 = await _adopt_generic(client, generic["id"], adopted_by="d")
+    r = await client.put(
+        f"/shots/{sid}/performance-segments/1",
+        json={
+            "performance_revision_id": pr2["id"],
+            "performance_start_ms": {"num": 0, "den": 1},
+            "performance_end_ms": {"num": 500, "den": 1},
+            "shot_anchor_ms": {"num": 1500, "den": 1},
+        })
+    assert r.status_code == 200, r.text
+    await _capture_closed(client, sid)
+    r = await client.post(f"/shots/{sid}/generations")
+    assert r.status_code == 202, r.text
+    generation_id = r.json()["id"]  # the TWO-SEGMENT generation
+
     engine = client._transport.app.state.engine
     settings = client._transport.app.state.settings
 
-    # stage the retained artifact pair at the captured hashes (the
-    # fixture package bypassed the comfy release capture)
     import hashlib as _hl
 
     from soloring.workflows import manifest as _mm
 
     _manifest_raw = (_mm.WORKFLOW_DIR / "manifest.json").read_bytes()
     _template_raw = (_mm.WORKFLOW_DIR / "workflow.json").read_bytes()
-    _arts = (client._transport.app.state.settings.data_dir
-             / "workflow-artifacts")
+    _arts = (settings.data_dir / "workflow-artifacts")
 
     def _place(kind: str, data: bytes) -> str:
         h = _hl.sha256(data).hexdigest()
@@ -110,9 +147,6 @@ async def test_production_drive_binds_performance_into_graph(
     _place("manifests", _manifest_raw)
     _place("templates", _template_raw)
 
-    # the worker dispatches from the PERSISTED executor — stage the
-    # row as a comfy generation (the fake-lane create is the same
-    # captured closure; only the dispatch marker changes)
     from sqlalchemy import text as _t
 
     async with engine.begin() as conn:
@@ -122,52 +156,91 @@ async def test_production_drive_binds_performance_into_graph(
 
     worker_id = "m17cd-prodtest-worker"
     await acquire_worker_lease(engine, worker_id, 60)
-    claim = await claim_next_generation(engine, worker_id)
-    assert claim is not None
-    claimed_id, attempt_id = claim
+    for _ in range(4):
+        claim = await claim_next_generation(engine, worker_id)
+        if claim is None:
+            break
+        claimed_id, attempt_id = claim
+        if claimed_id == generation_id:
+            break
+        # drain the earlier single-segment generation first (the
+        # claim path is oldest-first)
+        stub0 = RecordedClient()
+        await drive_comfy_generation(
+            engine, settings, worker_id, claimed_id, attempt_id,
+            stub0)
     assert claimed_id == generation_id
 
     stub = RecordedClient()
     outcome = await drive_comfy_generation(
         engine, settings, worker_id, generation_id,
         attempt_id, stub)
-    # the stub submit abort is a generic failure under the
-    # envelope discipline; the PREPARATION completed, which is
-    # the point of this regression
-    assert outcome == "failed"
+    assert outcome == "failed"  # the stub abort; PREP completed
 
-    # the preparation completed: the payload was reached (the
-    # manifest/template locals were bound — no UnboundLocalError)
     assert stub.payload is not None
     document = stub.payload
     graph = document["prompt"]
 
-    # the derived performance inputs were uploaded
     gpi = await _rows_local(client, generation_id)
-    controls_blob = next(r["blob_hash"] for r in gpi
-                         if r["artifact_role"] == "performance.controls")
-    vocal_blob = next(r["blob_hash"] for r in gpi
+    controls_blobs = [r["blob_hash"] for r in gpi
                       if r["artifact_role"] ==
-                      "performance.vocal_audio")
-    uploaded_controls = next(
-        u for u in stub.uploads if controls_blob[:16] in u)
-    assert any(vocal_blob[:16] in u for u in stub.uploads)
+                      "performance.controls"]
+    vocal_blobs = [r["blob_hash"] for r in gpi
+                   if r["artifact_role"] ==
+                   "performance.vocal_audio"]
+    # the frozen cardinality: TWO controls rows (the repeated
+    # grouped key) + ONE dialogue audio row
+    assert len(controls_blobs) == 2 and len(vocal_blobs) == 1
 
-    # the GRAPH consumes them: the fixture manifest declares the two
-    # performance inputs at node "31"/fields controls_file/audio_file
-    node_inputs = graph["31"]["inputs"]
-    assert uploaded_controls in node_inputs["controls_file"]
-    assert any(vocal_blob[:16] in u for u in stub.uploads
-               if u in node_inputs["audio_file"] or
-               node_inputs["audio_file"])
+    # every per-segment file was uploaded
+    for blob in controls_blobs + vocal_blobs:
+        assert any(blob[:16] in u for u in stub.uploads), blob
 
-    # the marker enumerates the same identities (evidence, not
-    # consumption)
+    # the GRAPH consumes the ROLE BUNDLES at the pinned package's
+    # declared nodes/fields (40/41 — not the Hunyuan KSampler 31)
+    controls_ref = graph["40"]["inputs"]["controls_segments"]
+    audio_ref = graph["41"]["inputs"]["audio_segments"]
+    assert controls_ref and audio_ref
+
+    # each bundle is a deterministic ordered projection listing the
+    # EXACT per-segment identities (auditable correspondence)
+    def _bundle_for(reference: str) -> dict:
+        # the bundle's remote name carries its content digest
+        # prefix; the bytes live content-addressed in the blob store
+        name = reference.rsplit("/", 1)[-1]
+        digest16 = next(
+            part for part in name.split("_")
+            if len(part) == 16
+            and set(part) <= set("0123456789abcdef"))
+        for path in (settings.data_dir / "blobs" / "sha256").rglob(
+                f"{digest16}*"):
+            return _json.loads(path.read_text(encoding="utf-8"))
+        raise AssertionError(f"bundle {name} not found")
+
+    controls_bundle = _bundle_for(controls_ref)
+    assert controls_bundle["role"] == "performance.controls"
+    assert [s["segment_position"]
+            for s in controls_bundle["segments"]] == [0, 1]
+    assert [s["blob_hash"]
+            for s in controls_bundle["segments"]] == controls_blobs
+    assert all(s["uploaded"] for s in controls_bundle["segments"])
+    audio_bundle = _bundle_for(audio_ref)
+    assert audio_bundle["role"] == "performance.vocal_audio"
+    assert [s["blob_hash"]
+            for s in audio_bundle["segments"]] == vocal_blobs
+
+    # the submission-document enumeration carries the per-segment
+    # rows AND the bundles (evidence, not consumption)
     marker = document["extra_data"]["soloring"]
     bindings = marker["performance_bindings"]
-    assert {b["blob_hash"] for b in bindings} == {
-        controls_blob, vocal_blob}
-    assert all(b["input_name"] for b in bindings)
+    rows = [b for b in bindings if "kind" not in b]
+    bundles = [b for b in bindings if "kind" in b]
+    assert {b["blob_hash"] for b in rows} == set(
+        controls_blobs + vocal_blobs)
+    assert {b["role"] for b in rows} == {
+        "performance.controls", "performance.vocal_audio"}
+    assert {b["bundle"] for b in bundles} == {
+        controls_ref, audio_ref}
 
 
 async def _rows_local(client, generation_id):
