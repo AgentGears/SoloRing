@@ -513,15 +513,19 @@ async def _drive(
                 logical_schema = lower_projection(spec)["schema_version"]
                 retained_manifest_doc = None
                 try:
-                    from soloring.workflows.manifest import (
-                        parse_manifest, parse_manifest_v2,
+                    # aliased module access — a bare `from ... import
+                    # parse_manifest` here would shadow the module-
+                    # level import for the WHOLE _drive scope
+                    from soloring.workflows import (
+                        manifest as _wf_manifest,
                     )
 
                     _raw = (await artifact_store.get_manifest(
                         generation.manifest_hash)).decode("utf-8")
                     retained_manifest_doc = (
-                        parse_manifest_v2(_raw)
-                        if logical_schema == 2 else parse_manifest(_raw))
+                        _wf_manifest.parse_manifest_v2(_raw)
+                        if logical_schema == 2
+                        else _wf_manifest.parse_manifest(_raw))
                 except SoloRingError:
                     # the ladder below re-parses and fails loudly on
                     # a corrupt retained pair; the reconstruction
@@ -1300,16 +1304,16 @@ async def _drive(
         # interprets as v1, v5-over-v2 as v2 (model/realization
         # semantics included via the retained package).
         from soloring.performance.execution_spec import lower_projection
-        from soloring.workflows.manifest import parse_manifest_v2
+        from soloring.workflows import manifest as _wf_manifest_out
 
         lower = lower_projection(spec)
         manifest_bytes_again = await artifact_store.get_manifest(
             generation.manifest_hash)
         if lower["schema_version"] == 2:
-            manifest = parse_manifest_v2(
+            manifest = _wf_manifest_out.parse_manifest_v2(
                 manifest_bytes_again.decode("utf-8"))
         else:
-            manifest = parse_manifest(
+            manifest = _wf_manifest_out.parse_manifest(
                 manifest_bytes_again.decode("utf-8"))
     elif spec.get("schema_version") == 4:
         # M14 §25.3: schema-4 output interpretation is the inherited
