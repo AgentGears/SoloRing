@@ -208,6 +208,10 @@ M16_SURFACE = (
     # M17C-D: the GPI sibling insert joins the ONE Generation
     # persistence primitive (frozen plan R2-FINAL W2 §2.6)
     r"^server/soloring/generation/repository\.py$",
+    # M17C-D gate-ladder repairs: the M11/M12 execution-scope
+    # batteries carry the D-owned execution-succession byte pins
+    r"^tests/test_m11_scope\.py$",
+    r"^tests/test_m12_boundary\.py$",
     # M17C-D: the worker schema-5 performance lane branch
     r"^server/soloring/worker/comfy_pipeline\.py$",
     # M17C-D: the ONE narrowly admitted executor-source change —
