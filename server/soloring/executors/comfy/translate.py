@@ -138,6 +138,7 @@ def build_comfy_prompt(
     attempt_id: str,
     client_id: str,
     schema3_derived: Sequence | None = None,
+    performance_bindings: Sequence[dict] | None = None,
 ) -> ComfyPromptPayload:
     """Translate the captured triple into a complete Comfy submission payload.
 
@@ -345,6 +346,20 @@ def build_comfy_prompt(
             "historical template already contains extra_data.soloring; "
             "refusing to overwrite unrelated identity"
         )
+    # M17C-D W4 (frozen plan R2-FINAL): the submission document
+    # enumerates the performance derived-input bindings (role, blob
+    # hash, input name, segment position, translation identity) under
+    # the marker's exact namespace — the persisted submission artifact
+    # stays byte-identical to THIS translator's output, and the A/B
+    # causality proof reads from the document, not from pixel hashes.
+    if performance_bindings:
+        marker = {
+            "soloring": {
+                **marker["soloring"],
+                "performance_bindings": [
+                    dict(binding) for binding in performance_bindings],
+            },
+        }
 
     return ComfyPromptPayload(prompt=graph, extra_data=marker,
                              client_id=client_id)

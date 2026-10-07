@@ -472,6 +472,7 @@ async def _drive(
             )
             template_graph = json.loads(template_bytes.decode("utf-8"))
             schema3_derived = None
+            performance_submission_bindings = None
             schema2_pending = None
             schema3_lower = None
             # M10F PD-1B (R6 §10.2.1): historical dispatch is keyed by the
@@ -609,6 +610,33 @@ async def _drive(
                 manifest = lower.manifest
                 template_graph = json.loads(json.dumps(lower.template))
                 schema3_lower = lower
+            elif spec.get("schema_version") == 5:
+                # M17C-D (frozen plan R2-FINAL W4): the schema-5
+                # performance lane — the ONE grammar law, the exact
+                # expected GPI sibling set, the §14.4 per-segment
+                # equality chain INCLUDING re-derived §14.6 bytes,
+                # then the exact retained derived bytes uploaded in
+                # the frozen attempt namespace. Every refusal is a
+                # terminal typed refusal BEFORE any submission; the
+                # submission document enumerates the performance
+                # bindings (role, blob hash, input name, segment
+                # position) so causality is proven from the document.
+                from soloring.performance.worker_inputs import (
+                    execute_schema5_performance_inputs,
+                    submission_performance_bindings,
+                )
+
+                async with factory() as session:
+                    schema5_performance = (
+                        await execute_schema5_performance_inputs(
+                            session, blob_store,
+                            generation_id=generation_id,
+                            attempt_id=attempt_id,
+                            workflow_spec=spec,
+                            client=ClientUploader(client),
+                        ))
+                performance_submission_bindings = (
+                    submission_performance_bindings(schema5_performance))
             elif spec.get("schema_version") == 4:
                 # M14 frozen R2 §25.3: schema-4 historical execution
                 # reads the persisted execution closure ONLY — WorkflowSpec
@@ -997,6 +1025,7 @@ async def _drive(
                 generation_id=generation_id, attempt_id=attempt_id,
                 client_id=worker_id,
                 schema3_derived=schema3_derived,
+                performance_bindings=performance_submission_bindings,
             )
             payload_document = payload.to_document()
         else:

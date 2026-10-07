@@ -1801,13 +1801,18 @@ def _m17cc_payload_channels(data: bytes, where: str) -> frozenset:
 
 def _verify_generation_performance_inputs(
         con: sqlite3.Connection, blob_root: Path) -> None:
-    """§13.6 structural laws constructible before the M17C-D writer:
-    parent + creation-unit coherence, role vocabulary, retained-byte
-    rehash, exact segment tieback, and translation/derived-input
-    identity validity. The control-schedule recomputation and the
-    sample-exact vocal-audio realization laws require the §14.6
-    sampler and remain M17C-D — no substitute sampler is invented
-    here. Recovery never WRITES these rows."""
+    """§13.6 laws COMPLETE under M17C-D (frozen plan R2-FINAL W5):
+    the structural laws (parent + creation-unit coherence, role
+    vocabulary, retained-byte rehash, exact segment tieback,
+    translation/derived-input identity validity), the v5 grammar
+    mirror, the ONE expected-shape law (``expected_gpi_rows`` —
+    missing/extra/duplicate-semantic/wrong-key/wrong-position/
+    wrong-role rows refuse), the ``derived_input_hash`` v1-record
+    recomputation, and the two formerly-deferred byte-level laws —
+    control-schedule re-derivation and sample-exact vocal-audio
+    realization under the shared §14.6 sampler (the same ONE law
+    the writer and the worker consume; no substitute sampler).
+    Recovery never WRITES these rows."""
     import hashlib
     for row in con.execute(
             "SELECT generation_id, input_key, position, artifact_role, "
@@ -1952,3 +1957,213 @@ def _verify_generation_performance_inputs(
                 "WorkflowSpec performance_translation coordinate "
                 f"({spec.get('performance_translation')!r} != "
                 f"{row['translation_identity']!r})")
+    _verify_gpi_expected_shape_and_derivation(con, blob_root)
+
+
+def _verify_gpi_expected_shape_and_derivation(
+        con: sqlite3.Connection, blob_root: Path) -> None:
+    """The M17C-D completion (frozen plan R2-FINAL W5): per
+    Generation carrying performance inputs — the v5 grammar mirror,
+    the ONE expected-shape law over the STAGED captured companions,
+    the v1 identity-record recomputation, and the two byte-level
+    laws re-derived under the shared §14.6 sampler from staged rows
+    + the staged blob root alone."""
+    import json as _json
+    from fractions import Fraction as _Fraction
+
+    from soloring.performance import execution_sampler as _es
+    from soloring.performance.execution_spec import (
+        validate_workflow_spec_v5 as _validate_v5,
+    )
+
+    def _staged_bytes(blob_hash: str, what: str) -> bytes:
+        path = blob_root / "sha256" / blob_hash[:2] / \
+            blob_hash[2:4] / blob_hash
+        if not path.is_file():
+            raise _corrupt(f"{what} blob {blob_hash} is missing")
+        data = path.read_bytes()
+        import hashlib as _hl
+
+        if _hl.sha256(data).hexdigest() != blob_hash:
+            raise _corrupt(
+                f"{what} blob {blob_hash} does not rehash")
+        return data
+
+    for gen_id in [r["generation_id"] for r in con.execute(
+            "SELECT DISTINCT generation_id "
+            "FROM generation_performance_inputs")]:
+        gen = con.execute(
+            "SELECT shot_revision_id, workflow_spec_json "
+            "FROM generations WHERE id = ?", (gen_id,)).fetchone()
+        if gen is None:
+            raise _corrupt(
+                f"generation performance inputs for {gen_id!r} have "
+                "no parent Generation")
+        where = f"generation {gen_id!r} performance inputs"
+        try:
+            spec = _json.loads(gen["workflow_spec_json"])
+        except (ValueError, TypeError) as exc:
+            raise _corrupt(
+                f"{where}: workflow_spec_json malformed: {exc}") \
+                from exc
+        try:
+            _validate_v5(spec)
+        except SoloRingError as exc:
+            # the grammar mirror refuses as RECOVERY corruption (the
+            # staged document is not the lawful captured form)
+            raise _corrupt(f"{where}: {exc.message}") from exc
+        raster = spec["performance_execution"]["rasterization"]
+        fps = _Fraction(raster["fps"]["num"], raster["fps"]["den"])
+        frame_count = raster["frame_count"]
+
+        children = con.execute(
+            "SELECT * FROM shot_revision_performance_segments "
+            "WHERE shot_revision_id = ? ORDER BY position",
+            (gen["shot_revision_id"],)).fetchall()
+        child_dicts = [{
+            "shot_revision_segment_position": c["position"],
+            "performance_revision_id":
+                c["performance_revision_id"],
+            "segment_hash": c["segment_hash"],
+            "vocal_performance_revision_id":
+                c["vocal_performance_revision_id"],
+            "vocal_binding_hash": c["vocal_binding_hash"],
+        } for c in children]
+        expected_rows = list(_es.expected_gpi_rows(
+            child_dicts, _es.TRANSLATION_IDENTITY))
+        expected_by_key = {(r["input_key"], r["position"]): r
+                           for r in expected_rows}
+        persisted = con.execute(
+            "SELECT * FROM generation_performance_inputs "
+            "WHERE generation_id = ? ORDER BY input_key, position",
+            (gen_id,)).fetchall()
+        persisted_keys = [(r["input_key"], r["position"])
+                          for r in persisted]
+        if len(set(persisted_keys)) != len(persisted_keys):
+            raise _corrupt(
+                f"{where}: duplicate (input_key, position) rows")
+        for row in persisted:
+            key = (row["input_key"], row["position"])
+            want = expected_by_key.get(key)
+            if want is None:
+                raise _corrupt(
+                    f"{where}: row {key!r} is not in the expected "
+                    "sibling set (extra, wrong key, or wrong "
+                    "position)")
+            for column in ("artifact_role",
+                           "shot_revision_segment_position",
+                           "performance_revision_id",
+                           "vocal_performance_revision_id",
+                           "binding_hash", "segment_hash",
+                           "translation_identity"):
+                if row[column] != want[column]:
+                    raise _corrupt(
+                        f"{where}: row {key!r} {column} "
+                        f"{row[column]!r} disagrees with the "
+                        f"expected shape {want[column]!r} "
+                        "(wrong role or semantic duplicate)")
+        for key in expected_by_key:
+            if key not in set(persisted_keys):
+                raise _corrupt(
+                    f"{where}: expected sibling {key!r} is MISSING")
+
+        # re-derive under the ONE sampler from staged rows alone
+        payload_cache: dict = {}
+        rederived: dict = {}
+        for child in children:
+            pr_id = child["performance_revision_id"]
+            if pr_id not in payload_cache:
+                payload = _json.loads(_staged_bytes(
+                    child["performance_payload_blob_hash"],
+                    "performance payload").decode("utf-8"))
+                payload_cache[pr_id] = payload
+            from soloring.domain.canonical import (
+                canonical_json_str as _cj,
+            )
+
+            try:
+                schedule = _es.control_schedule_document(
+                    segment={
+                        "shot_revision_segment_position":
+                            child["position"],
+                        "segment_hash": child["segment_hash"],
+                        "performance_revision_id": pr_id,
+                    },
+                    channels=payload_cache[pr_id]["channels"],
+                    performance_start=_Fraction(
+                        child["performance_start_num"],
+                        child["performance_start_den"]),
+                    performance_end=_Fraction(
+                        child["performance_end_num"],
+                        child["performance_end_den"]),
+                    shot_anchor=_Fraction(
+                        child["shot_anchor_num"],
+                        child["shot_anchor_den"]),
+                    fps=fps, frame_count=frame_count)
+                rederived[
+                    ("performance.controls", child["position"])] = \
+                    _cj(schedule).encode("utf-8")
+                if child["vocal_performance_revision_id"] is not None:
+                    vp_row = con.execute(
+                        "SELECT retained_audio_blob_hash FROM "
+                        "vocal_performance_revisions WHERE id = ?",
+                        (child["vocal_performance_revision_id"],
+                         )).fetchone()
+                    if vp_row is None:
+                        raise _corrupt(
+                            f"{where}: captured vocal performance "
+                            f"{child['vocal_performance_revision_id']!r} "
+                            "is missing from immutable authority")
+                    audio = _es.materialize_audio_track(
+                        wav_bytes=_staged_bytes(
+                            vp_row["retained_audio_blob_hash"],
+                            "retained vocal audio"),
+                        source_start=child["source_start_sample"],
+                        source_end_exclusive=(
+                            child["source_end_sample_exclusive"]),
+                        sample_rate_hz=child["sample_rate_hz"],
+                        anchor=_Fraction(
+                            child["shot_anchor_num"],
+                            child["shot_anchor_den"]),
+                        fps=fps, frame_count=frame_count)
+                    rederived[
+                        ("performance.vocal_audio",
+                         child["position"])] = audio
+            except SoloRingError as exc:
+                # a §14.6 refusal against STAGED data is corruption
+                # of the captured execution inputs, not a live
+                # request refusal
+                raise _corrupt(f"{where}: {exc.message}") from exc
+
+        for row in persisted:
+            expected_bytes = rederived.get(
+                (row["input_key"],
+                 row["shot_revision_segment_position"]))
+            retained = _staged_bytes(
+                row["blob_hash"], "retained derived-input")
+            if expected_bytes is None or retained != expected_bytes:
+                raise _corrupt(
+                    f"{where}: retained {row['input_key']} bytes "
+                    f"for segment "
+                    f"{row['shot_revision_segment_position']} are "
+                    "not the §14.6 re-derived bytes "
+                    "(control-schedule or sample-exact vocal-audio "
+                    "law)")
+            record = _es.derived_input_record(
+                input_key=row["input_key"],
+                position=row["position"],
+                artifact_role=row["artifact_role"],
+                shot_revision_segment_position=(
+                    row["shot_revision_segment_position"]),
+                performance_revision_id=row["performance_revision_id"],
+                vocal_performance_revision_id=(
+                    row["vocal_performance_revision_id"]),
+                binding_hash=row["binding_hash"],
+                segment_hash=row["segment_hash"],
+                translation_identity=row["translation_identity"],
+                blob_hash=row["blob_hash"])
+            if _es.derived_input_hash(record) != \
+                    row["derived_input_hash"]:
+                raise _corrupt(
+                    f"{where}: derived_input_hash does not "
+                    "recompute over the frozen v1 identity record")

@@ -572,20 +572,101 @@ async def _make_generation(client, world):
 async def _stage_with_generation(client, tmp_path, tag):
     """A schema-8 world staged with a FIXTURE generation row inserted
     on the staged copy (the m13-history pattern: recovery verifies
-    rows fixtures construct — it never writes them, and the fixture
-    avoids dragging workflow-artifact liveness into the backup)."""
+    rows fixtures construct — it never writes them). M17C-D: the
+    fixture is now a LAWFUL schema-5 state — the §14.7-lawful
+    two-segment FACIAL world (one dialogue-bound + one generic, the
+    create-path battery's shape), the production translation derives
+    the real schedules/audio, the derived blobs ride the backup
+    (placed before it), the fixture Generation carries the complete
+    v5 spec, and the GPI rows follow the D-frozen grouped-key
+    convention with true v1 identity hashes."""
+    from soloring.performance.execution_translation import (
+        translate_captured_performance,
+    )
+    from tests.m17cc_capture_helper import _factory
+    from tests.test_m17cd_create_path import (
+        _facial_world as _create_facial_world,
+    )
     from tests.test_m17c_sr26_regressions import _backup_m17c
 
-    world = await _bound_world(client)
-    await _lawful(client, world, extra=True)
-    revision, _visual = await _capture(client, world["shot"])
-    blob = hashlib.sha256(b"m17cc-gpi-derived-bytes").hexdigest()
+    world = await _create_facial_world(client, _factory(client))
+    # the generic FACIAL second segment (the create-battery shape)
+    from tests.m17b_seed import (
+        SMILE as _SMILE_META, adopt as _adopt_generic,
+        candidate_body as _candidate_body,
+        channel as _channel, create_candidate as _create_candidate,
+        kf as _kf17b,
+    )
+
+    generic = await _create_candidate(
+        client, world["vp"]["subject_id"],
+        _candidate_body(
+            [_channel(_SMILE_META, [_kf17b(0, 1, 100000)])],
+            start=(0, 1), end=(500, 1)))
+    pr2 = await _adopt_generic(client, generic["id"], adopted_by="d")
+    r = await client.put(
+        f"/shots/{world['shot']}/performance-segments/1",
+        json={
+            "performance_revision_id": pr2["id"],
+            "performance_start_ms": {"num": 0, "den": 1},
+            "performance_end_ms": {"num": 500, "den": 1},
+            "shot_anchor_ms": {"num": 1500, "den": 1},
+        })
+    assert r.status_code == 200, r.text
+    from tests.test_m17cd_create_path import _capture_closed
+
+    revision, _visual = await _capture_closed(client, world["shot"])
+    world["revision"] = revision
+    app = client._transport.app
+    async with app.state.session_factory() as session:
+        translation = await translate_captured_performance(
+            session, app.state.settings, revision_id=revision.id,
+            parameters={"fps_num": 25, "fps_den": 1,
+                        "frame_count": 25})
     root = await _backup_m17c(client, tmp_path, f"m17cc-gpi-{tag}")
-    _stage_blob(root, blob, b"m17cc-gpi-derived-bytes")
-    gen_id = _insert_fixture_generation(root, world["shot"],
-                                        revision.id)
-    _materialize_translation(root, gen_id, _TRANSLATION_ID)
-    return root, world, revision.id, gen_id, blob
+    # the derived blobs are NOT live-table-referenced (the fixture
+    # Generation exists only on the staged copy), so the backup did
+    # not acquire them — stage the exact placed bytes into the
+    # staged root (the historical _stage_blob pattern)
+    for digest, data in translation.placed_bytes:
+        _stage_blob(root, digest, data)
+    gen_id = _insert_fixture_generation_v5(
+        root, world["shot"], revision.id,
+        translation.performance_execution)
+    return root, world, revision.id, gen_id, translation
+
+
+def _insert_fixture_generation_v5(root, shot_id: str, revision_id: str,
+                                  performance_execution: dict) -> str:
+    from soloring.domain.canonical import (
+        canonical_hash as _ch, canonical_json_str as _cj,
+    )
+    from soloring.domain.ids import new_uuid
+    from soloring.performance.execution_spec import (
+        build_workflow_spec_v5,
+    )
+
+    gen_id = new_uuid()
+    lower = {"schema_version": 1, "workflow_id": "w",
+             "workflow_version": 1, "manifest_hash": "2" * 64,
+             "inputs": {}, "prompt": "p", "parameters": {},
+             "outputs": [{"output_key": "video", "media": "video"}]}
+    spec = build_workflow_spec_v5(
+        lower, performance_execution=performance_execution)
+    _sql(root, (
+        "INSERT INTO generations (id, shot_id, shot_revision_id, "
+        "generation_number, status, operation, executor, workflow_id, "
+        "workflow_version, workflow_template_hash, manifest_hash, "
+        "compiled_prompt, prompt_compiler_version, parameters_json, "
+        "workflow_spec_json, workflow_spec_hash, created_at, "
+        "updated_at, queued_at, executor_submission_state) VALUES "
+        "(?, ?, ?, 1, 'queued', 'generate', 'fake', 'w', 1, ?, ?, "
+        "'p', '1', '{}', ?, ?, ?, ?, ?, 'not_started')"),
+        (gen_id, shot_id, revision_id, "1" * 64, "2" * 64,
+         _cj(spec), _ch(spec),
+         "2026-09-30T00:00:00.000Z", "2026-09-30T00:00:00.000Z",
+         "2026-09-30T00:00:00.000Z"))
+    return gen_id
 
 
 def _insert_fixture_generation(root, shot_id: str,
@@ -614,11 +695,21 @@ def _insert_fixture_generation(root, shot_id: str,
     return gen_id
 
 
-def _insert_gpi(root, gen_id, revision_id, blob, *, role="performance.controls",
-                key="performance:0", position=0, seg_pos=0,
+def _insert_gpi(root, gen_id, revision_id, gpi_rows, *,
+                role="performance.controls",
+                key="performance.controls", position=0, seg_pos=0,
                 translation=_TRANSLATION_ID, created_at=None,
                 vid=None, binding=None, segment_hash=None,
                 pr_id=None, derived=None, no_child=False):
+    """Insert one GPI row defaulting to the LAWFUL translated values
+    for (role, seg_pos) from the staged translation rows; every
+    keyword remains a tamper knob."""
+    match = next(r for r in gpi_rows
+                 if r["artifact_role"] == role
+                 and r["shot_revision_segment_position"] == seg_pos)
+    blob = match["blob_hash"]
+    if derived is None:
+        derived = match["derived_input_hash"]
     if no_child:
         child = {"performance_revision_id":
                  "00000000-0000-4000-8000-0000000000aa",
@@ -635,6 +726,12 @@ def _insert_gpi(root, gen_id, revision_id, blob, *, role="performance.controls",
         created_at = _one(root, (
             "SELECT created_at FROM generations WHERE id = ?"),
             (gen_id,))["created_at"]
+    # the D-frozen grouped convention: vocal identity lives ONLY on
+    # vocal_audio rows (controls rows carry None) unless overridden
+    if vid is None and role == "performance.vocal_audio":
+        vid = child["vocal_performance_revision_id"]
+    if binding is None and role == "performance.vocal_audio":
+        binding = child["vocal_binding_hash"]
     _sql(root, (
         f"INSERT INTO {_GPI} (generation_id, input_key, position, "
         "artifact_role, shot_revision_segment_position, "
@@ -644,11 +741,9 @@ def _insert_gpi(root, gen_id, revision_id, blob, *, role="performance.controls",
         "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"),
         (gen_id, key, position, role, seg_pos,
          pr_id or child["performance_revision_id"],
-         vid if vid is not None else child["vocal_performance_revision_id"],
-         blob, binding if binding is not None
-         else child["vocal_binding_hash"],
+         vid, blob, binding,
          segment_hash or child["segment_hash"],
-         translation, derived or "a" * 64, created_at))
+         translation, derived, created_at))
 
 
 def _materialize_translation(root, gen_id, translation):
@@ -670,51 +765,65 @@ def _materialize_translation(root, gen_id, translation):
 
 @pytest.mark.asyncio
 async def test_gpi_structural_laws_pass_and_refuse(client, tmp_path):
-    root, world, revision_id, gen_id, blob = (
+    root, world, revision_id, gen_id, translation = (
         await _stage_with_generation(client, tmp_path, "main"))
-    _materialize_translation(root, gen_id, _TRANSLATION_ID)
 
     # lawful controls + vocal_audio siblings over both captured
-    # segments pass
-    _insert_gpi(root, gen_id, revision_id, blob, role="performance.controls",
-                key="performance:0", seg_pos=0)
-    _insert_gpi(root, gen_id, revision_id, blob,
-                role="performance.vocal_audio", key="performance:0:vocal",
-                seg_pos=0)
-    _insert_gpi(root, gen_id, revision_id, blob, role="performance.controls",
-                key="performance:1", seg_pos=1)
+    # segments pass — the D-frozen grouped-key convention
+    _insert_gpi(root, gen_id, revision_id, translation.gpi_rows,
+                role="performance.controls",
+                key="performance.controls", seg_pos=0)
+    _insert_gpi(root, gen_id, revision_id, translation.gpi_rows,
+                role="performance.vocal_audio",
+                key="performance.vocal_audio", seg_pos=0)
+    _insert_gpi(root, gen_id, revision_id, translation.gpi_rows,
+                role="performance.controls",
+                key="performance.controls", position=1, seg_pos=1)
     _verify(root)
 
     # each structural law refuses independently
     cases = [
-        ("creation_unit", ("performance:0", 0), "creation unit",
+        ("creation_unit", ("performance.controls", 0),
+         "creation unit",
          {"created_at": "1999-01-01T00:00:00.000Z"}),
-        ("tieback_segment", ("performance:0", 0),
+        ("tieback_segment", ("performance.controls", 0),
          "segment_hash does not tie back", {"segment_hash": "b" * 64}),
-        ("tieback_pr", ("performance:0", 0),
+        ("tieback_pr", ("performance.controls", 0),
          "performance_revision_id disagrees",
          {"pr_id": "00000000-0000-4000-8000-0000000000cc"}),
-        ("vocal_identity", ("performance:0:vocal", 0),
-         "vocal identity disagrees", {"vid": world["vp"]["id"]}),
-        ("vocal_audio_bare", ("performance:1:vocal", 1),
+        ("vocal_identity", ("performance.vocal_audio", 0),
+         "vocal identity disagrees",
+         {"vid": world["vp"]["vp"]["id"]}),
+        ("vocal_audio_bare", ("performance.vocal_audio", 1),
          "without its vocal identity group", {"vid": None,
-                                              "binding": None}),
-        ("translation_identity", ("performance:0", 0),
+                                              "binding": None,
+                                              "position": 1,
+                                              "seg_pos": 1}),
+        ("translation_identity", ("performance.controls", 0),
          "disagrees with the WorkflowSpec performance_translation",
          {"translation": "soloring-executor-translation-alp/9"}),
-        ("derived_hash_hex", ("performance:0", 0),
+        ("derived_hash_hex", ("performance.controls", 0),
          "lowercase hex digest", {"derived": "A" * 64}),
-        ("blob_missing", ("performance:0", 0),
+        ("blob_missing", ("performance.controls", 0),
          "retained derived-input blob", None),
     ]
     for name, (key, position), fragment, overrides in cases:
-        bad_root, _, bad_rev, bad_gen, bad_blob = (
+        bad_root, _, bad_rev, bad_gen, bad_translation = (
             await _stage_with_generation(client, tmp_path, name))
-        _materialize_translation(bad_root, bad_gen, _TRANSLATION_ID)
-        kw = dict(role="performance.controls", key=key, position=position,
-                  seg_pos=0 if name != "vocal_audio_bare" else 1)
+        kw = dict(role="performance.controls", key=key,
+                  position=position, seg_pos=0)
         if name == "vocal_audio_bare":
             kw["role"] = "performance.vocal_audio"
+            # the generic seg 1 has no vocal row — source the bytes
+            # from seg 0's lawful vocal row so the earlier structural
+            # laws (blob existence) pass and the bare-identity law
+            # is the refusal under test
+            seg0_vocal = next(
+                r for r in bad_translation.gpi_rows
+                if r["artifact_role"] == "performance.vocal_audio")
+            bad_translation.gpi_rows = [
+                {**seg0_vocal,
+                 "shot_revision_segment_position": 1}]
         if name == "vocal_identity":
             child = _one(bad_root, (
                 f"SELECT vocal_binding_hash FROM {_CHILDREN} WHERE "
@@ -723,20 +832,30 @@ async def test_gpi_structural_laws_pass_and_refuse(client, tmp_path):
             kw["binding"] = child["vocal_binding_hash"]
         if overrides:
             kw.update(overrides)
-        _insert_gpi(bad_root, bad_gen, bad_rev, bad_blob, **kw)
+        _insert_gpi(bad_root, bad_gen, bad_rev,
+                    bad_translation.gpi_rows, **kw)
         if name == "blob_missing":
-            (bad_root / "blobs" / "sha256" / bad_blob[:2]
-             / bad_blob[2:4] / bad_blob).unlink()
+            _blob = next(
+                r["blob_hash"] for r in bad_translation.gpi_rows
+                if r["artifact_role"] == "performance.controls"
+                and r["shot_revision_segment_position"] == 0)
+            (bad_root / "blobs" / "sha256" / _blob[:2]
+             / _blob[2:4] / _blob).unlink()
         _verify_refuses(bad_root, fragment)
 
     # the role vocabulary is DB-CHECK pinned — unreachable by column
     # tamper (IntegrityError), with the verifier law as the mirror
-    root2, _, rev2, gen2, blob2 = await _stage_with_generation(
+    root2, _, rev2, gen2, translation2 = await _stage_with_generation(
         client, tmp_path, "role-pin")
-    _materialize_translation(root2, gen2, _TRANSLATION_ID)
+    controls_row = next(
+        r for r in translation2.gpi_rows
+        if r["artifact_role"] == "performance.controls")
     with pytest.raises(sqlite3.IntegrityError):
-        _insert_gpi(root2, gen2, rev2, blob2, role="performance.other",
-                    key="performance:0")
+        _insert_gpi(root2, gen2, rev2,
+                    [{**controls_row,
+                      "artifact_role": "performance.other"}],
+                    role="performance.other",
+                    key="performance.controls")
 
 
 @pytest.mark.asyncio
@@ -755,5 +874,9 @@ async def test_gpi_tieback_requires_schema8(client, tmp_path):
     _stage_blob(root, blob, b"m17cc-gpi-predecessor")
     gen_id = _insert_fixture_generation(root, world["shot"],
                                         revision.id)
-    _insert_gpi(root, gen_id, revision.id, blob, no_child=True)
+    _insert_gpi(root, gen_id, revision.id, [{
+        "artifact_role": "performance.controls",
+        "shot_revision_segment_position": 0,
+        "blob_hash": blob, "derived_input_hash": "a" * 64}],
+        no_child=True)
     _verify_refuses(root, "resolves to no captured schema-8 segment")

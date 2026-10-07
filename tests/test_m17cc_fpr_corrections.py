@@ -104,16 +104,19 @@ async def _add_reference(client, world):
 
 @pytest.mark.asyncio
 async def test_fpr01_schema8_generation_refuses_typed(client):
-    """A plain schema-8 capture (no intra-shot/spatial/observation
-    planes) refuses Generation with PERFORMANCE_REALIZATION_UNSUPPORTED
-    and persists nothing."""
+    """M17C-D pin flip (frozen plan R2-FINAL): the blanket
+    PERFORMANCE_REALIZATION_UNSUPPORTED refusal is superseded by the
+    real admission structure. This staged world's captured segment
+    is BODY-kind, so the §14.7 kind gate fires at the admission
+    site — 409 PERFORMANCE_EXECUTION_KIND_UNSUPPORTED, nothing
+    persisted (the rasterization-facts typed refusal is pinned in
+    the M17C-D create-path battery on a FACIAL world)."""
     world, revision = await _stage(client)
     await _add_reference(client, world)
     r = await client.post(f"/shots/{world['shot']}/generations")
     assert r.status_code == 409, r.text
-    assert r.json()["error_code"] == "PERFORMANCE_REALIZATION_UNSUPPORTED"
-    assert "revision_id" in r.json()["details"] or \
-        "shot_revision_id" in r.json()["details"]
+    assert r.json()["error_code"] == \
+        "PERFORMANCE_EXECUTION_KIND_UNSUPPORTED"
     n = (await _row(client, "SELECT COUNT(*) AS n FROM generations",
                     ))["n"]
     assert n == 0
@@ -123,6 +126,9 @@ async def test_fpr01_schema8_generation_refuses_typed(client):
 async def test_fpr01_eight_over_seven_cannot_bypass_m16_refusal(client):
     """The motivating bypass: an 8-over-7 capture with non-empty M16
     events used to sail past INTRA_SHOT_REALIZATION_UNSUPPORTED; the
+    M17C-D gate reads THROUGH the wrap and refuses with the M16
+    error code EXPLICITLY (no longer transitively masked by the
+    retired blanket schema-8 refusal):
     successor refusal fires first and equally terminal."""
     from tests.m16_seed_b import (
         event, post_event, seed_feature_world, state,
@@ -179,7 +185,7 @@ async def test_fpr01_eight_over_seven_cannot_bypass_m16_refusal(client):
     await _add_reference(client, world)
     r = await client.post(f"/shots/{sid}/generations")
     assert r.status_code == 409, r.text
-    assert r.json()["error_code"] == "PERFORMANCE_REALIZATION_UNSUPPORTED"
+    assert r.json()["error_code"] == "INTRA_SHOT_REALIZATION_UNSUPPORTED"
     assert (await _row(client, (
         "SELECT COUNT(*) AS n FROM generations")))["n"] == 0
 
