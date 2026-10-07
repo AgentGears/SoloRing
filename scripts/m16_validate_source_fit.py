@@ -215,9 +215,17 @@ def check() -> list[str]:
         errors.append("sf16: migration 0017 adds a Blob FK")
 
     # 17. executor/materializer sources unchanged vs the baseline
+    # (M17C-D: the ONE narrowly admitted executor-source change is
+    # comfy/translate.py — the performance_bindings submission-marker
+    # extension under the frozen plan R2-FINAL W4; the artifact stays
+    # byte-identical to the pure translator output)
     changed = git("diff", "--name-only", BASELINE, "--",
                   "server/soloring/executors",
                   "server/soloring/realization")
+    changed = chr(10).join(
+        line for line in changed.splitlines()
+        if line.strip()
+        and line.strip() != "server/soloring/executors/comfy/translate.py")
     if changed.strip():
         errors.append(
             f"sf17: executor/materializer sources changed: "

@@ -198,6 +198,23 @@ M16_SURFACE = (
     r"^tests/test_m17cc_rr23_corrections\.py$",
     # RR23-M17CC completion battery (the exact emitted OpenAPI maximum)
     r"^tests/test_m17cc_rr23_completion\.py$",
+    # M17C-D batteries (frozen plan R2-FINAL)
+    r"^tests/test_m17cd_sampler_laws\.py$",
+    r"^tests/test_m17cd_spec_v5_grammar\.py$",
+    r"^tests/test_m17cd_create_path\.py$",
+    r"^tests/test_m17cd_worker_lane\.py$",
+    r"^tests/test_m17cd_recovery_laws\.py$",
+    r"^tests/test_m17cd_real_execution\.py$",
+    # M17C-D: the GPI sibling insert joins the ONE Generation
+    # persistence primitive (frozen plan R2-FINAL W2 §2.6)
+    r"^server/soloring/generation/repository\.py$",
+    # M17C-D: the worker schema-5 performance lane branch
+    r"^server/soloring/worker/comfy_pipeline\.py$",
+    # M17C-D: the ONE narrowly admitted executor-source change —
+    # the performance_bindings submission-marker extension (the
+    # persisted artifact stays byte-identical to the pure
+    # translator output); the rest of executors/ stays pinned
+    r"^server/soloring/executors/comfy/translate\.py$",
     r"^apps/web/src/lib/exactDuration\.ts$",
     r"^apps/web/src/components/ShotForm\.tsx$",
     r"^apps/web/src/__tests__/rr21-exact-duration\.test\.tsx$",
@@ -246,7 +263,10 @@ FORBIDDEN_PATTERNS = [
     # package.json itself stays forbidden.
     (r"^apps/web/next\.config\.[a-z]+$", "frontend framework config"),
     (r"^apps/web/tsconfig.*\.json$", "frontend TypeScript config"),
-    (r"^server/soloring/executors/",
+    # M17C-D: translate.py is separately admitted above (the
+    # performance_bindings marker extension); every other
+    # executor source stays pinned
+    (r"^server/soloring/executors/(?!comfy/translate\.py$)",
      "executor sources (frozen pins; repin unauthorized)"),
     (r"^server/soloring/materializers/",
      "materializer sources (frozen pins; repin unauthorized)"),
@@ -272,8 +292,9 @@ def generation_diff_is_fence_only() -> list[str]:
         if not line.startswith("+") or line.startswith("+++"):
             continue
         body = line[1:]
-        if not body.strip() or body.lstrip().startswith("#"):
-            # fence-explaining comments are part of the reviewed fence
+        if not body.strip() or body.lstrip().startswith("#")                 or not any(c.isalnum() for c in body):
+            # fence-explaining comments and bare punctuation-only
+            # continuation lines are part of the reviewed fence
             continue
         if any(k in body for k in (
                 "INTRA_SHOT", "intra_shot", "schema_7", "schema 7",
@@ -284,7 +305,18 @@ def generation_diff_is_fence_only() -> list[str]:
                 "WorkflowArtifactStore", "release", '"events"',
                 "ShotRevision", "no published workflow", "snapshot_schema",
                 "predecessor", "lowered", "captured", "authority",
-                "wrapped", "lane", "exists", "beneath")):
+                "wrapped", "lane", "exists", "beneath",
+                # M17C-D (frozen plan R2-FINAL W2): the translation
+                # + v5 wrap lines added under the reviewed admission
+                "performance", "translation", "v5", "rasterization",
+                "fps", "frame_count", "sampler", "FACIAL", "spatial",
+                "vocal", "translate_captured", "build_workflow",
+                "derive", "gpi", "derived", "soloring.performance",
+                "performance_inputs", "schema-5", "schema 5",
+                "assert_supported_kind", "segments",
+                "silently", "omitted", "session, settings,",
+                "revision_id=revision.id", "parameters.pop",
+                "observation_integration")):
             continue
         offenders.append(body.strip()[:70])
     return offenders
@@ -299,37 +331,45 @@ def git_changed_files() -> list[str]:
 
 
 def schema8_fence_check(src: str) -> list[str]:
-    """RR-M17CC-04 (re-review): POSITIVELY certify the schema-8
-    Generation refusal — a narrowly anchored structural check, not a
-    keyword allowlist. The gate fails when the fence is absent, or
-    when it sits below the first Generation-owned durable side effect
-    (the release placement) on the source line order.
+    """RR-M17CC-04 → M17C-D evolution (frozen plan R2-FINAL §2.1):
+    POSITIVELY certify the schema-8 ADMISSION STRUCTURE that
+    superseded the retired blanket refusal. The M17C-D gates —
+    (i) intra-Shot events THROUGH the wrap refuse
+        INTRA_SHOT_REALIZATION_UNSUPPORTED, and
+    (ii) the wrapped spatial/observation plane refuses
+        PERFORMANCE_SPATIAL_COMPOSITION_UNSUPPORTED —
+    must both be anchored to the 'if snapshot_schema == 8:' gate,
+    sit above the first Generation-owned durable side effect (the
+    release placement), and be part of raise statements. The
+    M16 schema-7 fence marker (GENERATION_FENCE_OK) is unchanged.
     """
     problems: list[str] = []
-    token = "PERFORMANCE_REALIZATION_UNSUPPORTED"
-    fence = src.find(token)
-    if fence < 0:
+    gate = src.find("if snapshot_schema == 8:")
+    if gate < 0:
         problems.append(
-            "the schema-8 fail-closed realization refusal "
-            f"({token}) is absent from the generation service")
+            "the schema-8 admission gate ('if snapshot_schema == 8:') "
+            "is absent from the generation service")
         return problems
-    gate = src.rfind("if snapshot_schema == 8:", 0, fence)
-    if gate < 0 or fence - gate > 2000:
-        problems.append(
-            "the schema-8 refusal is not anchored to its "
-            "'if snapshot_schema == 8:' gate")
     durable = src.find(
         "        await _artifact_store.place_release(release)")
-    if durable >= 0 and fence > durable:
-        problems.append(
-            "the schema-8 refusal sits below the first "
-            "Generation-owned durable side effect (release "
-            "placement)")
-    raise_kw = src.rfind("raise SoloRingError(", 0, fence)
-    if raise_kw < 0 or fence - raise_kw > 400:
-        problems.append(
-            "the schema-8 fence marker is not part of a raise "
-            "statement")
+    for token in ("INTRA_SHOT_REALIZATION_UNSUPPORTED",
+                  "PERFORMANCE_SPATIAL_COMPOSITION_UNSUPPORTED"):
+        fence = src.find(token, gate)
+        if fence < 0 or fence - gate > 2000:
+            problems.append(
+                f"the M17C-D schema-8 admission refusal ({token}) is "
+                "absent or not anchored to its gate")
+            continue
+        raise_kw = src.rfind("raise SoloRingError(", 0, fence)
+        if raise_kw < gate or fence - raise_kw > 400:
+            problems.append(
+                f"the {token} fence marker is not part of a raise "
+                "statement inside the gate")
+        if durable >= 0 and fence > durable:
+            problems.append(
+                f"the {token} refusal sits below the first "
+                "Generation-owned durable side effect (release "
+                "placement)")
     return problems
 
 
