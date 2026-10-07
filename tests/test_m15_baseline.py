@@ -210,6 +210,11 @@ def test_m15_source_scope_excludes_execution_source() -> None:
     # The exception is byte-pinned so later edits cannot inherit permanent
     # successor ownership merely by reusing the same pathname.
     post_m15_owned = {
+        # M17C-D FPR32: the PINNED performance executor package
+        # (the frozen LivePortrait contract), byte-pinned
+        'workflows/performance_liveportrait_v1/manifest.json': '9325779e0b863b95ec4ea3d9bfa740809b9f0173',
+        'workflows/performance_liveportrait_v1/workflow.json': '9646dfed0c0798e57fcdcb6e0c3f752b6362cffb',
+        'workflows/performance_liveportrait_v1/workflow-package.json': '9115312a738c0ecb9285aaf18ce93d061cdee059',
         # M17C-D execution succession (frozen plan R2-FINAL,
         # authorized 2026-10-07): the D lane's sampler/spec/
         # translation/worker modules + the touched persistence

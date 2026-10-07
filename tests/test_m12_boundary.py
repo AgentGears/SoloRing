@@ -120,6 +120,11 @@ def test_m12_has_no_generation_executor_or_render_source_delta():
     # future edit to either execution source must deliberately advance these
     # reviewed blob identities instead of inheriting a permanent exemption.
     post_m15_owned = {
+        # M17C-D FPR32: the PINNED performance executor package
+        # (the frozen LivePortrait contract), byte-pinned
+        'workflows/performance_liveportrait_v1/manifest.json': '9325779e0b863b95ec4ea3d9bfa740809b9f0173',
+        'workflows/performance_liveportrait_v1/workflow.json': '9646dfed0c0798e57fcdcb6e0c3f752b6362cffb',
+        'workflows/performance_liveportrait_v1/workflow-package.json': '9115312a738c0ecb9285aaf18ce93d061cdee059',
         # M17C-D execution succession (frozen plan R2-FINAL,
         # authorized 2026-10-07): the D lane's sampler/spec/
         # translation/worker modules + the touched persistence
