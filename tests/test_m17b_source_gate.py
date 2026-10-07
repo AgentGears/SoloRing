@@ -127,31 +127,33 @@ def test_h06_no_generation_workflowspec_performance_schema():
 
     src = (SERVER / "soloring" / "generation" / "service.py"
            ).read_text(encoding="utf-8", errors="replace")
-    # FPR-M17CC-01: the typed schema-8 realization refusal necessarily
-    # names the Performance plane; assert every occurrence of that
-    # vocabulary belongs to the refusal fence (the fence marker occurs
-    # exactly once and every performance word precedes it)
+    # FPR-M17CC-01 → M17C-D evolution (frozen plan R2-FINAL): the
+    # retired blanket refusal is superseded by the ADMISSION
+    # STRUCTURE; the service's performance vocabulary now spans the
+    # two M17C-D regions — the admission gates (events through the
+    # wrap + the spatial-composition refusal + the kind gate) and
+    # the translation/v5-wrap block. Every case-insensitive
+    # occurrence of the vocabulary must lie INSIDE those regions.
     lowered = src.lower()
-    # FPR-M17CC-01: the typed schema-8 realization refusal necessarily
-    # names the Performance plane — every case-insensitive occurrence
-    # of that vocabulary must lie INSIDE the refusal block (the marker
-    # line through the raise's closing parenthesis)
-    marker = lowered.find("performance_realization_unsupported")
-    assert marker >= 0, "the schema-8 refusal fence marker not found"
-    block_start = lowered.rfind("\n", 0, lowered.rfind(
-        "# fpr-m17cc-01", 0, marker))
-    raise_close = lowered.find('details={"shot_revision_id"',
-                               marker)
-    assert raise_close > 0 and ")" in lowered[raise_close:]
-    block_end = lowered.find(")", raise_close) + 1
+    gates_start = lowered.rfind(
+        "\n", 0, lowered.find("# m17c-d admission gates"))
+    assert gates_start >= 0, "the M17C-D admission gates not found"
+    marker = lowered.find(
+        "performance_spatial_composition_unsupported")
+    assert marker >= 0, \
+        "the M17C-D spatial-composition admission refusal not found"
+    wrap_end = lowered.find(
+        "performance_inputs=performance_inputs)")
+    assert wrap_end > 0, "the M17C-D persistence pass-through not found"
+    block_end = lowered.find("\n", wrap_end) + 1
     stray = [
         i for i in range(len(lowered))
         if lowered.startswith("performance", i)
-        and not (block_start <= i < block_end)
+        and not (gates_start <= i < block_end)
     ]
     assert not stray, \
         "generation service mentions performance semantics beyond " \
-        f"the typed refusal fence (offsets {stray})"
+        f"the M17C-D admission/translation regions (offsets {stray})"
 
     def _assert_no_performance(node, where: str) -> None:
         if isinstance(node, dict):
@@ -181,6 +183,16 @@ def test_h07_no_executor_integration():
     perf = (SERVER / "soloring" / "performance"
             ).glob("*.py")
     for f in perf:
+        # M17C-D (frozen plan R2-FINAL W4): worker_inputs.py IS the
+        # schema-5 performance execution lane — the one performance
+        # module deliberately consuming the executor TRANSPORT seam
+        # (the derived-input upload + the marker namespace; it never
+        # imports ComfyClient itself). Every other performance module
+        # stays executor-free.
+        if f.name == "worker_inputs.py":
+            assert "ComfyClient" not in f.read_text(
+                encoding="utf-8")
+            continue
         t = f.read_text(encoding="utf-8")
         assert "ComfyClient" not in t
         assert "comfy" not in t.lower()
