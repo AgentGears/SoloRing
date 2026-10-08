@@ -235,7 +235,10 @@ def check() -> list[str]:
             "capability_record.py",
             # the schema-8 wrap read-through (every
             # predecessor key preserved verbatim)
-            "server/soloring/realization/authority.py"))
+            "server/soloring/realization/authority.py",
+            # the explicit performance-node branch in the runtime
+            # compatibility law (the GGUF law unchanged)
+            "server/soloring/realization/runtime.py"))
     if changed.strip():
         errors.append(
             f"sf17: executor/materializer sources changed: "
