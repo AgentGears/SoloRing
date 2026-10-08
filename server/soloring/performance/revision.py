@@ -102,6 +102,34 @@ def validate_review_metadata(*, decision, reviewed_by, rationale) -> None:
             "code points")
 
 
+def read_verified_blob_bytes(settings, payload_hash: str) -> bytes:
+    """IR-05: read the physical content-addressed Blob bytes for an
+    immutable retained payload, translating the EXPECTED storage
+    failures — missing content-addressed file, unreadable through
+    permission/OS error — into structured SoloRingError domain
+    failures. Deliberately narrow: never a broad ``Exception`` catch,
+    so programming errors still surface unmasked."""
+    store = BlobStore(settings)
+    path = store.path_for_hash(payload_hash)
+    try:
+        return path.read_bytes()
+    except FileNotFoundError as exc:
+        raise _invalid(
+            ErrorCode.BLOB_BYTES_MISSING,
+            f"retained payload blob file for {payload_hash!r} is "
+            "missing from storage") from exc
+    except PermissionError as exc:
+        raise _invalid(
+            ErrorCode.BLOB_BYTES_MISSING,
+            f"retained payload blob file for {payload_hash!r} is "
+            "unreadable (permission denied)") from exc
+    except OSError as exc:
+        raise _invalid(
+            ErrorCode.BLOB_BYTES_MISSING,
+            f"retained payload blob file for {payload_hash!r} is "
+            f"unreadable through a storage error: {exc}") from exc
+
+
 async def _verify_candidate_core(
         session: AsyncSession, settings, candidate: PerformanceCandidate,
         *, row_lookup=None, blob_reader=None) -> dict:
@@ -146,8 +174,7 @@ async def _verify_candidate_core(
             raise _invalid(
                 ErrorCode.BLOB_NOT_FOUND,
                 f"candidate payload blob row {payload_hash!r} missing")
-        store = BlobStore(settings)
-        data = store.path_for_hash(payload_hash).read_bytes()
+        data = read_verified_blob_bytes(settings, payload_hash)
     actual = hashlib.sha256(data).hexdigest()
     if actual != payload_hash:
         raise _invalid(
@@ -206,14 +233,16 @@ async def _verify_candidate_core(
                 "candidate subject/project disagreement — the "
                 "candidate does not belong to its subject's project")
 
-    # alignment provenance integrity (same immutable law as creation)
+    # alignment provenance integrity (same immutable law as creation);
+    # SR26-05: on persisted-history verification a missing cited
+    # alignment is corruption, not a client lookup miss
     if row_lookup is None:
         from soloring.performance.revision import (
             _verify_alignment_provenance)
         await _verify_alignment_provenance(
             session, subject_id=candidate.subject_id,
             project_id=candidate.project_id,
-            channels=doc["channels"])
+            channels=doc["channels"], history=True)
     return {"payload_document": doc, "envelope": envelope}
 
 
@@ -246,6 +275,84 @@ async def verify_candidate_integrity(
         await _verify_retarget_evidence(
             session, settings, candidate, envelope)
     return result
+
+
+async def verify_candidate_authority_historical(
+        session: AsyncSession, settings, candidate: PerformanceCandidate,
+) -> dict:
+    """IR-03: the shared persisted-history CANDIDATE authority seam —
+    mode-independent. Executes the SAME underlying immutable verifier
+    as admission, but translates admission-oriented ``SoloRingError``
+    failures into the historical corruption contract
+    (``INTERNAL_INVARIANT_VIOLATION``, 500) with the original
+    diagnostic preserved — an ALREADY-PERSISTED candidate is authority,
+    so its defects (including structured storage failures, IR-05) are
+    corruption, never a client-input 4xx. Failures that are already
+    the correct historical 500 invariant pass through unchanged. Fresh
+    candidate creation keeps calling ``verify_candidate_integrity``
+    directly and keeps its admission 4xx contract."""
+    try:
+        return await verify_candidate_integrity(session, settings, candidate)
+    except SoloRingError as exc:
+        if exc.code == ErrorCode.INTERNAL_INVARIANT_VIOLATION \
+                and exc.status_code == 500:
+            raise
+        raise SoloRingError(
+            ErrorCode.INTERNAL_INVARIANT_VIOLATION,
+            f"persisted performance candidate "
+            f"{getattr(candidate, 'id', None)!r} violates immutable "
+            f"authority: {exc.message}",
+            status_code=500,
+        ) from exc
+
+
+# legacy alias from the previous IR cycle (same law, older name)
+verify_candidate_integrity_historical = (
+    verify_candidate_authority_historical)
+
+
+def revalidate_winner_historical(revision: PerformanceRevision,
+                                 candidate: PerformanceCandidate) -> None:
+    """IR-03: ``revalidate_winner`` under the HISTORICAL corruption
+    contract — used wherever a PERSISTED revision's copied closure or
+    adoption metadata is being treated as authority, so grammar
+    failures of already-stored history can never leak as fresh-request
+    4xx."""
+    try:
+        revalidate_winner(revision, candidate)
+    except SoloRingError as exc:
+        if exc.code == ErrorCode.INTERNAL_INVARIANT_VIOLATION \
+                and exc.status_code == 500:
+            raise
+        raise SoloRingError(
+            ErrorCode.INTERNAL_INVARIANT_VIOLATION,
+            f"persisted revision {revision.id!r} closure/adoption "
+            f"violates immutable law: {exc.message}",
+            status_code=500,
+        ) from exc
+
+
+async def verify_revision_authority_historical(
+        session: AsyncSession, settings, revision: PerformanceRevision,
+) -> PerformanceCandidate:
+    """IR-03: the shared persisted-history REVISION authority seam —
+    mode-independent historical parent authority for any consumer that
+    is about to interpret a PerformanceRevision (classification
+    NONE/VOCAL_V1 included). Proves: the adopted candidate exists;
+    FULL historical candidate integrity; the PerformanceRevision
+    copied closure equals its adopted candidate (the frozen M17B
+    closure fields); and valid persisted adoption metadata."""
+    candidate = await session.get(PerformanceCandidate,
+                                  revision.adopted_candidate_id)
+    if candidate is None:
+        raise SoloRingError(
+            ErrorCode.INTERNAL_INVARIANT_VIOLATION,
+            "adopted revision's candidate is missing",
+            status_code=500)
+    await verify_candidate_authority_historical(
+        session, settings, candidate)
+    revalidate_winner_historical(revision, candidate)
+    return candidate
 
 
 # the semantic fields a retarget candidate copies byte/scalar-exact
@@ -347,6 +454,8 @@ async def _verify_retarget_evidence(session: AsyncSession, settings,
         raise _invalid(
             ErrorCode.PERFORMANCE_PROVENANCE_INVALID,
             "retarget provenance assessment does not resolve")
+    # envelope↔assessment coordinate equality (the candidate's own
+    # provenance block must name the exact assessment coordinate)
     if (a.performance_revision_id,
             a.from_production_revision_id,
             a.to_production_revision_id) != (
@@ -356,82 +465,24 @@ async def _verify_retarget_evidence(session: AsyncSession, settings,
         raise _invalid(
             ErrorCode.PERFORMANCE_PROVENANCE_INVALID,
             "retarget provenance coordinate mismatch")
-    # assessment recomputation (recovery parity): recompute scope and
-    # report through the ASSESSMENT SERVICE's own builders — a stored
-    # verdict/verdict row that does not recompute is corruption
-    from soloring.performance.retarget import (
-        EVALUATOR_ID, EVALUATOR_VERSION, _build_report, _build_scope,
-        _evaluate)
-    from soloring.production.models import ProductionRevision
-    from_pr = await session.get(ProductionRevision,
-                                a.from_production_revision_id)
-    to_pr = await session.get(ProductionRevision,
-                              a.to_production_revision_id)
-    if from_pr is None or to_pr is None:
-        raise _invalid(
-            ErrorCode.PERFORMANCE_PROVENANCE_INVALID,
-            "retarget assessment physical revision does not resolve")
-    # persisted-row laws (recovery parity, third-Codex P1-1
-    # completion): assessment project equality, duplicated snapshot
-    # hashes, and both ProductionObjects' project ownership — none of
-    # which the recomputed scope/report bytes can express
-    from soloring.performance.retarget import (
-        verify_assessment_persisted_laws)
-    await verify_assessment_persisted_laws(
-        session, source, a, from_pr, to_pr)
-    if a.evaluator_id != EVALUATOR_ID or \
-            a.evaluator_version != EVALUATOR_VERSION or \
-            a.schema_version != 1:
-        raise _invalid(
-            ErrorCode.PERFORMANCE_PROVENANCE_INVALID,
-            "retarget assessment evaluator identity drift")
-    scope = _build_scope(
-        performance=source,
-        payload_sha=source.canonical_channel_payload_sha256,
-        from_pr=from_pr, to_pr=to_pr)
-    from soloring.domain.canonical import (canonical_hash,
-                                           canonical_json_str)
-    scope_json = canonical_json_str(scope)
-    scope_hash = canonical_hash(scope)
-    if a.scope_json != scope_json or a.scope_hash != scope_hash:
-        raise _invalid(
-            ErrorCode.PERFORMANCE_PROVENANCE_INVALID,
-            "retarget assessment scope does not recompute from "
-            "immutable rows")
-    verdict, reason = _evaluate(from_pr, to_pr)
-    report = _build_report(
-        scope_hash=scope_hash, performance_id=source.id,
-        from_id=from_pr.id, to_id=to_pr.id, verdict=verdict,
-        reason=reason, from_obj=str(from_pr.production_object_id),
-        to_obj=str(to_pr.production_object_id))
-    if a.report_json != canonical_json_str(report) or \
-            a.report_hash != canonical_hash(report) or \
-            a.overall_verdict != verdict:
-        raise _invalid(
-            ErrorCode.PERFORMANCE_PROVENANCE_INVALID,
-            "retarget assessment stored report/verdict != evaluator "
-            "recomputation")
-    if a.overall_verdict != "REQUIRES_REVIEW":
-        raise _invalid(
-            ErrorCode.PERFORMANCE_PROVENANCE_INVALID,
-            "retarget seeded from a non-REQUIRES_REVIEW assessment")
     review = await session.get(PerformanceRetargetReview,
                                ret.get("accepted_review_id"))
-    if review is None or review.assessment_id != a.id or \
-            review.decision != "ACCEPT_FOR_NEW_CANDIDATE":
+    if review is None:
         raise _invalid(
             ErrorCode.PERFORMANCE_PROVENANCE_INVALID,
             "retarget accepted review does not satisfy the review "
             "law chain")
-    # accepted-review persisted grammar (recovery parity, P1-1
-    # residue): recovery validates every review row's metadata
-    # through the shared grammar — the live authority path must not
-    # promote a referenced review whose metadata recovery would
-    # refuse (e.g. whitespace-tampered reviewed_by)
-    validate_review_metadata(
-        decision=review.decision,
-        reviewed_by=review.reviewed_by,
-        rationale=review.rationale)
+    # IND-03: the complete assessment/review half runs through the ONE
+    # shared historical verifier (the same law create_retarget_
+    # candidate proves BEFORE constructing a candidate): persisted-row
+    # laws, evaluator identity, canonical scope/report recomputation,
+    # stored-verdict equality, review ownership/decision/grammar. Its
+    # historical 500 contract is exactly the persisted-corruption
+    # contract this path already runs under.
+    from soloring.performance.retarget import (
+        verify_retarget_evidence_historical)
+    await verify_retarget_evidence_historical(
+        session, source=source, assessment=a, accepted_review=review)
 
 _CLOSURE_FIELDS = (
     "project_id", "subject_id", "performance_kind",
@@ -563,14 +614,19 @@ async def _verify_subject(session: AsyncSession, *, subject_id: str,
 async def _verify_alignment_provenance(session: AsyncSession, *,
                                        subject_id: str,
                                        project_id: str,
-                                       channels: list[dict]) -> None:
+                                       channels: list[dict],
+                                       history: bool = False) -> None:
     """Per-keyframe alignment provenance law (frozen R7 §6.5, completed
     by the publication review): the referenced M17A DialogueAlignment
     must exist, its source VP's speaker must equal the Performance
     subject, AND the alignment's dialogue line must belong to the SAME
     Project as the Performance candidate/subject (the same law the
     recovery verifier enforces through _verify_alignment_link). The
-    link is audit evidence only."""
+    link is audit evidence only.
+
+    ``history=True`` (SR26-05) translates admission-time 404/422
+    outcomes into the corruption contract, because the cited alignment
+    was already persisted with the canonical payload."""
     from soloring.performance.models import DialogueAlignment
     seen = set()
     for ch in channels:
@@ -581,6 +637,12 @@ async def _verify_alignment_provenance(session: AsyncSession, *,
             seen.add(aid)
             row = await session.get(DialogueAlignment, aid)
             if row is None:
+                if history:
+                    raise SoloRingError(
+                        ErrorCode.INTERNAL_INVARIANT_VIOLATION,
+                        f"persisted payload cites missing dialogue "
+                        f"alignment {aid!r}",
+                        status_code=500)
                 raise not_found(ErrorCode.PERFORMANCE_ALIGNMENT_NOT_FOUND,
                                 f"dialogue alignment {aid!r} not found")
             from soloring.performance.models import (
@@ -651,11 +713,17 @@ async def create_performance_candidate(
         performance_kind: str, performance_profile_id: str,
         temporal_start_num: int, temporal_start_den: int,
         temporal_end_num: int, temporal_end_den: int,
-        channels: dict, source_provenance: dict) -> PerformanceCandidate:
+        channels: dict, source_provenance: dict,
+        sync_mode: str = "NONE") -> PerformanceCandidate:
     """Frozen R7 §9: validate, canonicalize, BlobStore-place, persist —
     or leave nothing. Caller hashes and caller filesystem paths are
     never accepted. Repeated identical submissions are distinct lawful
-    evidence rows (no semantic dedupe)."""
+    evidence rows (no semantic dedupe).
+
+    SR26-01 corrective: every candidate is created together with its
+    immutable PF-03 applicability classification (NONE for the generic
+    route; the dialogue-bound service passes VOCAL_V1), so applicability
+    can never be lost together with the binding payload."""
     from soloring.continuity.models import CreativeEntity
     entity = await session.get(CreativeEntity, subject_id)
     if entity is None:
@@ -719,6 +787,17 @@ async def create_performance_candidate(
         created_at=await db_now(session))
     session.add(candidate)
     await session.flush()
+    from soloring.performance.m17c_models import (
+        PerformanceCandidateSyncClassification)
+    if sync_mode not in ("NONE", "VOCAL_V1"):
+        raise _invalid(ErrorCode.PERFORMANCE_PROVENANCE_INVALID,
+                       f"unknown sync classification mode {sync_mode!r}")
+    session.add(PerformanceCandidateSyncClassification(
+        performance_candidate_id=candidate.id,
+        sync_mode=sync_mode,
+        classification_schema_version=1,
+        created_at=await db_now(session)))
+    await session.flush()
     return candidate
 
 
@@ -770,12 +849,18 @@ async def adopt_performance_candidate(
     ).scalar_one_or_none()
     if existing is not None:
         # historical replay: winner + source-candidate integrity,
-        # never vetoed by current subject state
-        await verify_candidate_integrity(session, settings, candidate)
-        revalidate_winner(existing, candidate)
+        # never vetoed by current subject state. IR-03: the persisted
+        # candidate is HISTORICAL AUTHORITY at adoption time — its
+        # immutable integrity is consumed through the corruption seam
+        # so persisted defects can never leak as fresh-request 4xx.
+        await verify_candidate_authority_historical(
+            session, settings, candidate)
+        revalidate_winner_historical(existing, candidate)
         return existing
 
-    # first adoption: active-subject admission + full integrity
+    # first adoption: active-subject admission (an admission policy,
+    # kept plain per IR-03) + full integrity through the HISTORICAL
+    # seam — the candidate already exists in storage
     from soloring.continuity.models import CreativeEntity
     entity = await session.get(CreativeEntity, candidate.subject_id)
     if entity is None or entity.deleted_at is not None:
@@ -784,7 +869,8 @@ async def adopt_performance_candidate(
             "subject is deleted — first adoption requires an active "
             "subject; later soft deletion never invalidates adopted "
             "history")
-    await verify_candidate_integrity(session, settings, candidate)
+    await verify_candidate_authority_historical(
+        session, settings, candidate)
 
     revision = PerformanceRevision(
         id=new_uuid(), **{f: getattr(candidate, f)

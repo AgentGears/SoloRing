@@ -120,6 +120,13 @@ class DeploymentAttestation:
     process_start_fingerprint: str  # CreationDate string from the OS
     custom_node_policy: tuple  # the EXACT enforced extension set (v4)
     launched_at: str
+    # M17C-D FPR33-01(c): the EXPLICIT performance-lane identity —
+    # the content hash of the pinned in-tree soloring_performance_
+    # nodes package, recorded by the launcher when (and only when)
+    # the performance lane is deployed. None on the predecessor
+    # GGUF lane (a GGUF attestation carrying it is invalid — the
+    # lanes stay disjoint).
+    performance_nodes_hash: str | None = None
 
     def origin_matches(self, client_base: str) -> bool:
         """The attested executor must be THE executor the client targets
@@ -214,23 +221,46 @@ def load_deployment_attestation(
     # deployment identity.
     policy = att.get("custom_node_policy")
     whitelist = (policy or {}).get("whitelist")
+    required_perf = tuple(expected_whitelist)
+    _is_perf_lane = (len(required_perf) > 1
+                     or required_perf == (
+                         "soloring_performance_nodes",))
     if (not isinstance(policy, dict)
             or set(policy) != {"disable_all", "whitelist"}
             or policy.get("disable_all") is not True
             or not isinstance(whitelist, list)
-            or len(whitelist) != 1
-            or not isinstance(whitelist[0], str)
-            or not whitelist[0]):
+            or not whitelist
+            or not all(isinstance(w, str) and w for w in whitelist)):
         raise CapabilityRecordInvalid(
             "attestation custom_node_policy must be exactly "
-            '{"disable_all": true, "whitelist": [<one custom node>]}; '
+            '{"disable_all": true, "whitelist": [<custom node(s")>]}; '
             f"got {policy!r}")
-    if tuple(whitelist) != tuple(expected_whitelist):
-        raise CapabilityRecordInvalid(
-            f"attested custom-node identity {whitelist!r} does not match "
-            f"the required deployment whitelist "
-            f"{list(expected_whitelist)!r} — the attestation does not "
-            "describe the expected executable extension set")
+    if _is_perf_lane:
+        # FPR34-M17CD-02: the COMPOSED performance lane — the
+        # pinned performance node package plus whatever the
+        # captured package itself requires (schema-2/3 runtime
+        # nodes): the attested set must CONTAIN every required
+        # node (a deployment may carry the composed superset when
+        # the caller checks only the performance requirements).
+        # The predecessor single-GGUF shape below is untouched.
+        missing = set(required_perf) - set(whitelist)
+        if missing:
+            raise CapabilityRecordInvalid(
+                f"attested custom-node set {whitelist!r} lacks the "
+                f"required performance deployment nodes "
+                f"{sorted(missing)!r}")
+    else:
+        if len(whitelist) != 1:
+            raise CapabilityRecordInvalid(
+                "the predecessor-lane attestation must whitelist "
+                f"exactly ONE custom node; got {whitelist!r}")
+        if tuple(whitelist) != tuple(expected_whitelist):
+            raise CapabilityRecordInvalid(
+                f"attested custom-node identity {whitelist!r} does "
+                f"not match the required deployment whitelist "
+                f"{list(expected_whitelist)!r} — the attestation "
+                "does not describe the expected executable "
+                "extension set")
     pid = att.get("pid")
     if not isinstance(pid, int) or pid <= 0:
         raise CapabilityRecordInvalid("attestation pid missing/invalid")
@@ -241,6 +271,22 @@ def load_deployment_attestation(
     launched = att.get("launched_at")
     if not isinstance(launched, str) or not launched:
         raise CapabilityRecordInvalid("attestation launched_at missing")
+    performance_nodes_hash = None
+    if _is_perf_lane:
+        # M17C-D FPR33-01(c): the performance lane fingerprints its
+        # OWN node package (the predecessor gguf_commit slot is not
+        # reused for a different meaning)
+        raw_hash = att.get("performance_nodes_hash")
+        if not isinstance(raw_hash, str) or len(raw_hash) != 64 \
+                or raw_hash.strip("0123456789abcdef"):
+            raise CapabilityRecordInvalid(
+                "the performance-lane attestation must carry "
+                "performance_nodes_hash as a 64-hex content hash")
+        performance_nodes_hash = raw_hash
+    elif "performance_nodes_hash" in att:
+        raise CapabilityRecordInvalid(
+            "a predecessor-lane attestation must not carry "
+            "performance_nodes_hash (the lanes are disjoint)")
     return DeploymentAttestation(
         comfyui_commit=att["comfyui_commit"],
         gguf_commit=att["gguf_commit"],
@@ -249,6 +295,7 @@ def load_deployment_attestation(
         pid=pid,
         process_start_fingerprint=fingerprint,
         launched_at=launched,
+        performance_nodes_hash=performance_nodes_hash,
     )
 
 
@@ -302,6 +349,7 @@ def build_deployment_attestation(
     *, comfyui_commit: str, gguf_commit: str, launched_at: str,
     pid: int, process_start_fingerprint: str, executor_origin: str,
     custom_node_whitelist: tuple[str, ...] = ("ComfyUI-GGUF",),
+    performance_nodes_hash: str | None = None,
 ) -> dict:
     """Emit the v4 attestation document (scripts/launch_comfy.py — only
     after proving the launched process serves the whitelisted executor).
@@ -319,6 +367,8 @@ def build_deployment_attestation(
                                    "whitelist": list(custom_node_whitelist)},
             "pid": pid,
             "process_start_fingerprint": process_start_fingerprint,
+            **({"performance_nodes_hash": performance_nodes_hash}
+               if performance_nodes_hash is not None else {}),
             "launched_at": launched_at,
         },
     }

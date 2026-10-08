@@ -76,6 +76,15 @@ M14_OWNED_PREFIXES = (
 # frozen M13 proof rather than merely classify later-owned source correctly.
 SUCCESSOR_OWNED_RUNTIME_PATHS = frozenset({
     "server/soloring/executors/comfy/translate.py",
+    # M17C-D FPR33 (successor-owned, explicit predecessor impact):
+    # the performance-lane attestation field (capability_record),
+    # the explicit performance-node branch preserving the GGUF law
+    # (realization/runtime), and the schema-8 wrap read-through
+    # (realization/authority) — each recorded + regression-pinned
+    # by the FPR33 batteries
+    "server/soloring/executors/comfy/capability_record.py",
+    "server/soloring/realization/runtime.py",
+    "server/soloring/realization/authority.py",
 })
 
 

@@ -1,0 +1,65 @@
+{
+  "10": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "reference_image"
+    }
+  },
+  "20": {
+    "class_type": "SoloRingPromptPrimitive",
+    "inputs": {
+      "prompt": ""
+    }
+  },
+  "30": {
+    "class_type": "SoloRingRasterizationFacts",
+    "inputs": {
+      "fps_num": 25,
+      "fps_den": 1,
+      "frame_count": 25
+    }
+  },
+  "40": {
+    "class_type": "SoloRingLivePortraitControlsInput",
+    "inputs": {
+      "controls_segments": ""
+    }
+  },
+  "41": {
+    "class_type": "SoloRingLivePortraitAudioInput",
+    "inputs": {
+      "audio_segments": ""
+    }
+  },
+  "50": {
+    "class_type": "LivePortraitApply",
+    "inputs": {
+      "image": [
+        "10",
+        0
+      ],
+      "controls": [
+        "40",
+        0
+      ],
+      "audio": [
+        "41",
+        0
+      ],
+      "rasterization": [
+        "30",
+        0
+      ]
+    }
+  },
+  "31": {
+    "class_type": "SaveAnimatedWEBP",
+    "inputs": {
+      "images": [
+        "50",
+        0
+      ],
+      "fps": 25
+    }
+  }
+}

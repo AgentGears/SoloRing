@@ -555,15 +555,32 @@ def _verify_core(parent, children, starts, world, revision_id: str,
             raise internal_invariant(
                 f"ShotRevision {revision_id} outer snapshot intra_shot "
                 "block disagrees with the rebuilt companion history")
-        if snapshot.get("intent", {}).get("duration_ms") != \
-                parent["duration_ms"]:
+        # RR17-M17CC-01: the ONE shared captured-intent law — the
+        # nested representation is certified BEFORE the equality
+        # comparison (a non-object intent such as [] previously
+        # reached .get() here and raised raw AttributeError)
+        from soloring.continuity.intra_shot_canonical import (
+            captured_intent_duration_ms,
+        )
+        from soloring.errors import SoloRingError
+        try:
+            captured_duration = captured_intent_duration_ms(snapshot)
+        except SoloRingError as exc:
+            raise internal_invariant(
+                f"ShotRevision {revision_id} captured intent violates "
+                f"the frozen M16 representation: {exc.message}") from exc
+        if captured_duration != parent["duration_ms"]:
             raise internal_invariant(
                 f"ShotRevision {revision_id} intra_shot duration "
                 "disagrees with the captured intent duration")
-        if snapshot.get("schema_version") != 7:
+        if snapshot.get("schema_version") not in (7, 8):
+            # M17C-C §11.5: a schema-8 capture wraps the EXACT
+            # predecessor base — an intra_shot block under outer
+            # schema 8 is the wrapped schema-7 authority, valid
+            # history reconstructing through the same law
             raise internal_invariant(
                 f"ShotRevision {revision_id} carries intra_shot history "
-                "without outer snapshot schema 7")
+                "without outer snapshot schema 7 or its schema-8 wrap")
     return block
 
 

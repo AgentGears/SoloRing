@@ -129,13 +129,44 @@ def main() -> None:
     # when the PS child's handles are inherited — the M5B-6 lesson); the
     # launcher PID lands in a file and the serving PID is re-derived from
     # the port listener anyway.
+    # M17C-D FPR33-01(c): the EXPLICIT performance lane. With
+    # --performance-lane the launcher deploys the PINNED in-tree
+    # SoloRing performance node package (copied into custom_nodes
+    # so ComfyUI loads exactly these bytes), whitelists EXACTLY
+    # that one custom node, and records its content hash in the
+    # attestation — a separate deployment identity, never a
+    # widening of the predecessor GGUF whitelist.
+    performance_lane = "--performance-lane" in sys.argv
+    whitelisted_node = "ComfyUI-GGUF"
+    performance_nodes_hash = None
+    if performance_lane:
+        from soloring.performance.executor_runtime import (
+            PERFORMANCE_NODE_PACKAGE, performance_nodes_content_hash,
+        )
+
+        performance_nodes_hash = (
+            performance_nodes_content_hash())
+        target = COMFY_DIR / "custom_nodes" / (
+            PERFORMANCE_NODE_PACKAGE)
+        if target.exists():
+            import shutil
+
+            shutil.rmtree(target)
+        import shutil
+
+        shutil.copytree(
+            BASE_DIR / "server" / "soloring" / "executor_nodes" /
+            PERFORMANCE_NODE_PACKAGE, target)
+        whitelisted_node = PERFORMANCE_NODE_PACKAGE
+
     ps = (
         "Start-Process -FilePath "
         + repr(exe).replace("'", '"')
         + " -ArgumentList 'main.py','--listen','127.0.0.1','--port',"
         + f"'{COMFY_PORT}','--output-directory','output',"
         + "'--disable-all-custom-nodes',"
-        + "'--whitelist-custom-nodes','ComfyUI-GGUF'"
+        + "'--whitelist-custom-nodes','" + whitelisted_node
+        + "'"
         + " -PassThru"
         + f" -WorkingDirectory '{COMFY_DIR}' -WindowStyle Hidden"
         + f" -RedirectStandardOutput '{log_out}'"
@@ -195,6 +226,8 @@ def main() -> None:
         launched_at=launched_at, pid=serving_pid,
         process_start_fingerprint=fingerprint,
         executor_origin=f"http://127.0.0.1:{COMFY_PORT}",
+        custom_node_whitelist=(whitelisted_node,),
+        performance_nodes_hash=performance_nodes_hash,
     )
     fp_dir = BASE_DIR / "data" / "comfy-fingerprint"
     fp_dir.mkdir(parents=True, exist_ok=True)

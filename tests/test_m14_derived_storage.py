@@ -128,7 +128,7 @@ async def test_migration_upgrade_creates_exact_schema(tmp_path, monkeypatch):
     conn = _connect(db)
     head = conn.execute(
         "SELECT version_num FROM alembic_version").fetchone()[0]
-    assert head == "0019_m17b_performance_revisions"
+    assert head == "0023_m17cc_capture_closure_preimage"
 
     tables = {r[0] for r in conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table'")}
@@ -393,6 +393,10 @@ async def test_recovery_blob_fk_inventory_eight_paths(
         "0017_m16_intra_shot_consequences",
             "0018_m17a_dialogue_vocal_foundation",
         "0019_m17b_performance_revisions",
+        "0020_m17c_perf_capture_r2",
+        "0021_m17c_shot_performance_mappings",
+        "0022_m17c_schema8_capture",
+        "0023_m17cc_capture_closure_preimage",
     }), SUPPORTED_RESTORE_ALEMBIC_HEADS
     assert _blob_fk_policy_for_head(
         "0016_m15_revision_compatibility") == M14_BLOB_FK_COLUMNS
@@ -418,7 +422,9 @@ async def test_recovery_blob_fk_inventory_eight_paths(
         policy - physical)
     extra = physical - policy
     assert extra <= {
-        ("generation_derived_observation_inputs", "blob_hash")}, (
+        ("generation_derived_observation_inputs", "blob_hash"),
+        # M17C-C slice 1 (frozen R4 13.5): the 14th path at head 0022
+        ("generation_performance_inputs", "blob_hash")}, (
         "physical paths beyond the frozen inventory", extra)
     conn.close()
 

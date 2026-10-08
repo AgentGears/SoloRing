@@ -22,6 +22,7 @@ from soloring.continuity.intra_shot_history import (
     verify_working_event_row,
 )
 from soloring.domain.canonical import canonical_hash, canonical_json_str
+from soloring.recovery.outer_snapshot import load_outer_snapshot
 
 _HEX = frozenset("0123456789abcdef")
 
@@ -73,16 +74,31 @@ def _verify_proposal_source(row, rows) -> None:
         _corrupt(f"proposal {pid} pins missing source ShotRevision")
     if rev[0][0] != source_rev_hash:
         _corrupt(f"proposal {pid} source revision hash mismatch")
-    snap = json.loads(rows(
-        "SELECT snapshot_json FROM shot_revisions WHERE id = ?",
-        (source_rev_id,))[0][0])
-    if snap.get("intent", {}).get("duration_ms") is not None:
-        duration = snap["intent"]["duration_ms"]
+    snap = load_outer_snapshot(
+        rows("SELECT snapshot_json FROM shot_revisions WHERE id = ?",
+             (source_rev_id,))[0][0],
+        what=f"proposal {pid} source ShotRevision {source_rev_id}")
+    # RR17-M17CC-01: the ONE shared captured-intent law — the nested
+    # representation is certified BEFORE any .get()/equality/range
+    # arithmetic over it (the former bare 1 <= t < duration over
+    # uncertified data raised raw TypeError on cross-type values)
+    from soloring.continuity.intra_shot_canonical import (
+        captured_intent_duration_ms, require_interior_time,
+    )
+    from soloring.errors import SoloRingError
+    try:
+        duration = captured_intent_duration_ms(snap)
+    except SoloRingError as exc:
+        _corrupt(f"proposal {pid} source revision intent violates "
+                 f"the frozen M16 representation: {exc.message}")
+    if duration is not None:
         t = doc["candidate_event"]["time_ms"]
-        if not 1 <= t < duration:
+        try:
+            require_interior_time(t, duration)
+        except SoloRingError as exc:
             _corrupt(
                 f"proposal {pid} time is not interior to the captured "
-                "source duration")
+                f"source duration: {exc.message}")
 
     if source_kind == "generation":
         if source_gen_id is None or source_take_id is not None:
@@ -718,13 +734,31 @@ def verify_m16_intra_shot_state(staged_db: Path) -> None:
 
         # History is enumerated from the OUTER schema-7 snapshots: a
         # schema-7 revision without companions is corruption, and a
-        # companion parent without schema 7 is corruption.
+        # companion parent without schema 7 (or its M17C-C §11.5
+        # schema-8 wrap, which retains the exact predecessor base) is
+        # corruption.
         for rev_id, snapshot_json in rows(
                 "SELECT id, snapshot_json FROM shot_revisions"):
-            snap = json.loads(snapshot_json)
-            if snap.get("schema_version") == 7:
-                verify_intra_shot_history_sync(
-                    con, rev_id, snapshot=snap)
+            # RR16-M17CC-01: the shared TOTAL outer-snapshot parse —
+            # no predecessor semantic use of a decoded snapshot before
+            # decode/container failures convert to typed corruption
+            snap = load_outer_snapshot(
+                snapshot_json, what=f"ShotRevision {rev_id}")
+            if snap.get("schema_version") == 7 or (
+                    snap.get("schema_version") == 8
+                    and "intra_shot" in snap):
+                # RR17-M17CC-01: the shared history module's typed
+                # laws surface as the recovery corruption contract on
+                # the restore path (never raw exceptions); the live
+                # API keeps its internal-invariant vocabulary
+                from soloring.errors import SoloRingError
+                try:
+                    verify_intra_shot_history_sync(
+                        con, rev_id, snapshot=snap)
+                except SoloRingError as exc:
+                    _corrupt(
+                        f"ShotRevision {rev_id} captured intra-shot "
+                        f"history violates its law: {exc.message}")
         for (rev_id,) in rows(
                 "SELECT DISTINCT shot_revision_id FROM "
                 "shot_revision_intra_shot_events"):
@@ -735,10 +769,22 @@ def verify_m16_intra_shot_state(staged_db: Path) -> None:
                 _corrupt(
                     f"intra_shot companions reference missing "
                     f"ShotRevision {rev_id}")
-            if json.loads(snap[0][0]).get("schema_version") != 7:
+            outer = load_outer_snapshot(
+                snap[0][0], what=f"ShotRevision {rev_id}")
+            if outer.get("schema_version") == 8:
+                # the M17C-C §11.5 wrap retains the exact predecessor
+                # base — companions under schema 8 require the retained
+                # embedded block (verified through the same history law
+                # in the first loop)
+                if "intra_shot" not in outer:
+                    _corrupt(
+                        f"ShotRevision {rev_id} carries intra_shot "
+                        "companions without the retained embedded block "
+                        "under its schema-8 wrap")
+            elif outer.get("schema_version") != 7:
                 _corrupt(
                     f"ShotRevision {rev_id} carries companions without "
-                    "outer schema 7")
+                    "outer schema 7 or its schema-8 wrap")
 
         for row in rows(
                 "SELECT id, shot_id, source_kind, "

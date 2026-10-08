@@ -138,6 +138,8 @@ def build_comfy_prompt(
     attempt_id: str,
     client_id: str,
     schema3_derived: Sequence | None = None,
+    performance_bindings: Sequence[dict] | None = None,
+    schema5_derived: Sequence | None = None,
 ) -> ComfyPromptPayload:
     """Translate the captured triple into a complete Comfy submission payload.
 
@@ -310,6 +312,9 @@ def build_comfy_prompt(
     if schema3_derived is not None:
         _bind_schema3_derived(
             graph, manifest, schema3_derived, workflow_spec, bound_targets)
+    if schema5_derived is not None:
+        _bind_schema5_derived(
+            graph, manifest_doc, schema5_derived, bound_targets)
 
     # --- prompt / parameters / seed: write only after ownership closes ----
     if prompt_decl is not None:
@@ -345,6 +350,20 @@ def build_comfy_prompt(
             "historical template already contains extra_data.soloring; "
             "refusing to overwrite unrelated identity"
         )
+    # M17C-D W4 (frozen plan R2-FINAL): the submission document
+    # enumerates the performance derived-input bindings (role, blob
+    # hash, input name, segment position, translation identity) under
+    # the marker's exact namespace — the persisted submission artifact
+    # stays byte-identical to THIS translator's output, and the A/B
+    # causality proof reads from the document, not from pixel hashes.
+    if performance_bindings:
+        marker = {
+            "soloring": {
+                **marker["soloring"],
+                "performance_bindings": [
+                    dict(binding) for binding in performance_bindings],
+            },
+        }
 
     return ComfyPromptPayload(prompt=graph, extra_data=marker,
                              client_id=client_id)
@@ -471,6 +490,47 @@ def _bind_schema3_control_stream(
         head = nid
     node_inputs = _node_inputs(graph, node, what)
     _bind(node_inputs, field, [head, 0], node, what)
+
+
+def _bind_schema5_derived(
+        graph: dict,
+        manifest_doc,
+        derived,
+        bound_targets: set[tuple[str, str]],
+) -> None:
+    """M17C-D W4 + the FPR32-M17CD-01/02 correction: bind the
+    verified per-role ordered SEGMENT BUNDLES (the pinned executor
+    contract's native consumption of the frozen grouped-row
+    cardinality) to the EXACT node/field declared by the captured
+    manifest — the submitted GRAPH consumes the derived bytes,
+    never a marker. Every bundle is a deterministic projection of
+    the verified retained inputs with per-segment auditable
+    correspondence. Fails closed on a missing manifest declaration,
+    a missing bundle for a required role, a bundle for an
+    undeclared role, a missing template node/field, or a target
+    collision."""
+    role_bundles = getattr(derived, "role_bundles", None)
+    if not role_bundles:
+        raise TranslationFailed(
+            "schema5_derived carries no performance role bundles — "
+            "the graph cannot consume the derived inputs; execution "
+            "refuses")
+    declared = dict(manifest_doc.inputs)
+    for role in sorted(role_bundles):
+        if role not in declared:
+            raise TranslationFailed(
+                f"performance derived input {role!r} is not declared "
+                "by the captured manifest — the graph cannot consume "
+                "it; execution refuses")
+    for role in sorted(role_bundles):
+        decl = declared[role]
+        what = f"performance derived input {role!r}"
+        _reserve_target(
+            graph, bound_targets, node=decl.node, field=decl.field,
+            what=what)
+        node_inputs = _node_inputs(graph, decl.node, what)
+        _bind(node_inputs, decl.field, role_bundles[role],
+              decl.node, what)
 
 
 def submission_artifact(payload: ComfyPromptPayload) -> tuple[bytes, str]:

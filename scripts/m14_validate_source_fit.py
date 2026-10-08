@@ -36,12 +36,18 @@ REVIEWED_SUCCESSOR_PATHS = frozenset({
     "apps/web/src/app/shots/[id]/page.tsx",
     "apps/web/src/lib/types.ts",
     "apps/web/src/lib/api.client.ts",
+    # RR21-M17CC: the exact web duration round-trip surfaces
+    "apps/web/src/lib/exactDuration.ts",
+    "apps/web/src/components/ShotForm.tsx",
     # M16-P0 predecessor repairs.
     "server/soloring/api/continuity.py",
     "server/soloring/recovery/__init__.py",
     "server/soloring/recovery/semantic_successors.py",
     "server/soloring/recovery/successor_semantics.py",
     "server/soloring/recovery/m16_verifier.py",
+    # RR16-M17CC: the shared recovery-side outer-ShotRevision parser
+    # (consumed by the M16 verifier's ShotRevision reads)
+    "server/soloring/recovery/outer_snapshot.py",
     # M16-A exact authority/lifecycle slice + the reviewed M16-B
     # resolver/Shot-detail readiness integration seam.
     "server/soloring/continuity/intra_shot_models.py",
@@ -93,6 +99,25 @@ REVIEWED_SUCCESSOR_PATHS = frozenset({
     "server/soloring/api/main.py",
     "server/soloring/db/models.py",
     "server/soloring/errors.py",
+    # M17C-A (PR #26, second-review reconciliation): the dialogue-bound
+    # performance surface lawfully owns the PerformanceRevision
+    # vocabulary
+    "server/soloring/performance/m17c_binding.py",
+    "server/soloring/performance/m17c_contract.py",
+    "server/soloring/performance/m17c_models.py",
+    "server/soloring/performance/m17c_transition.py",
+    "server/soloring/api/m17c_performance.py",
+    "server/soloring/api/schemas/m17c_performance.py",
+    "server/soloring/recovery/m17c_verifier.py",
+    "server/alembic/versions/0021_m17c_shot_performance_mappings.py",
+    # M17C-B (PR #26): the Shot performance working-mapping surface
+    "server/soloring/performance/m17c_shot_mapping.py",
+    "server/soloring/performance/m17cc_models.py",
+    "server/soloring/performance/m17cc_capture_read.py",
+    "server/soloring/performance/m17cc_history.py",
+    # FPR-M17CC-03: the successor-aware observation-readiness
+    # unwrap legitimately names the intra-shot block
+    "server/soloring/observation/readiness.py",
 })
 
 FORBIDDEN_PATTERNS: list[tuple[str, str]] = [

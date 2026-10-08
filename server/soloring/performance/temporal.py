@@ -17,6 +17,32 @@ from soloring.errors import SoloRingError, ErrorCode
 _I64_MIN = -(2 ** 63)
 _I64_MAX = 2 ** 63 - 1
 
+# IR-04: the ONE shared mapping-position domain law. A mapping
+# position is a SQLite-storable signed-64-bit NONNEGATIVE integer —
+# bool is explicitly prohibited (bool is an int subclass and must
+# never reach storage). Both mapping services (M17A
+# ShotVocalSegmentMapping, M17C-B ShotPerformanceSegmentMapping) put
+# and delete through this primitive BEFORE any ORM/SQLite access and
+# map the failure into their own stable API error vocabulary.
+SQLITE_POSITION_MAX = _I64_MAX
+
+
+class PositionError(ValueError):
+    """The shared mapping-position domain law failed (IR-04)."""
+
+
+def validate_mapping_position(position) -> int:
+    """Validate and return a lawful mapping position: an actual int
+    (bool excluded) in [0, 2^63-1]. Raises PositionError otherwise —
+    a low-level ValueError each service maps to its own 4xx."""
+    if isinstance(position, bool) or not isinstance(position, int):
+        raise PositionError(
+            "position must be an integer (bool is not a position)")
+    if position < 0 or position > SQLITE_POSITION_MAX:
+        raise PositionError(
+            f"position must be an integer in [0, {SQLITE_POSITION_MAX}]")
+    return position
+
 
 class RationalError(SoloRingError):
     def __init__(self, reason: str):

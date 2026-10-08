@@ -28,6 +28,175 @@ ALLOWLIST = (
     "post-m16-r3-freeze/",
     "post-m16-integrated-r3-evidence/harness/",
     "SoloRing-Post-M16-Integrated-Sequence-Regression-R3-CLOSED.md",
+    # PR #26 review records (M17C-A first pass + second-review
+    # reconciliation): reviewed evidence documents, no product code
+    "SoloRing-PR26-First-Pass-Review-R1.md",
+    "SoloRing-PR26-Reconciliation-and-Correction-Record.md",
+    # M17C-A (PR #26): the frozen binding/classification migration,
+    # restored to its exact c502b81 bytes by the B-F1 migration split
+    # (unchanged frozen history, still a changed path against this
+    # validator's pre-M17C base)
+    "server/alembic/versions/0020_m17c_perf_capture_r2.py",
+    # M17C-B (PR #26, B-F1): the successor working-mapping migration
+    "server/alembic/versions/0021_m17c_shot_performance_mappings.py",
+    # DR26-04: the superseded draft-0020 migration file (deleted by the
+    # r2 identity rename; successor-maintained rename)
+    "server/alembic/versions/0020_m17c_dialogue_bound_performance.py",
+    "server/soloring/api/m17c_performance.py",
+    "server/soloring/api/schemas/m17c_performance.py",
+    "server/soloring/recovery/m17c_verifier.py",
+    "tests/m17c_seed.py",
+    "tests/test_m17c_binding_authority.py",
+    "tests/test_m17c_binding_transitions.py",
+    "tests/test_m17c_first_pass_regressions.py",
+    "tests/test_m17c_migration.py",
+    "tests/test_m17c_route_ownership.py",
+    "tests/test_m17c_sr26_regressions.py",
+    "tests/test_m17c_dr26_regressions.py",
+    "tests/test_m17c_c2_regressions.py",
+    "tests/test_m17c_c3_regressions.py",
+    "tests/test_m17c_shot_mapping.py",
+    # M17C-B B-F cycle batteries
+    "tests/test_m17c_bf_regressions.py",
+    "tests/test_m17c_bf_recovery.py",
+    # M17C-B SR2 corrective cycle battery
+    "tests/test_m17c_sr2_regressions.py",
+    # M17C-B IR corrective cycle battery
+    "tests/test_m17c_ir_regressions.py",
+    # M17C-B IR-final corrective cycle battery
+    "tests/test_m17c_irf_regressions.py",
+    # M17C-B IND corrective cycle battery
+    "tests/test_m17c_ind_regressions.py",
+    # M17C-B IND2 corrective cycle battery
+    "tests/test_m17c_ind2_regressions.py",
+    # M17C-B IND3 corrective cycle battery
+    "tests/test_m17c_ind3_regressions.py",
+    # M17C-B F corrective cycle battery
+    "tests/test_m17c_f_regressions.py",
+    # M17C-C scope record + slice-1 files (reviewed successor surfaces)
+    "SoloRing-M17C-C-Scope-R0.md",
+    "server/alembic/versions/0022_m17c_schema8_capture.py",
+    "server/alembic/versions/0023_m17cc_capture_closure_preimage.py",
+    "server/soloring/performance/m17cc_models.py",
+    "tests/test_m17cc_migration.py",
+    # M17C-C slice 2 (the coherent performance-plane read)
+    "server/soloring/performance/m17cc_capture_read.py",
+    "tests/test_m17cc_capture.py",
+    "tests/m17cc_capture_helper.py",
+    # M17C-C slice 3 (frozen-companion persistence + winner reuse)
+    "tests/test_m17cc_persist.py",
+    # M17C-C slice 4 (§12 historical inspection)
+    "server/soloring/performance/m17cc_history.py",
+    "tests/test_m17cc_history.py",
+    # M17C-C slice 5 (§13.4-13.6 recovery verifier)
+    "tests/test_m17cc_recovery.py",
+    # M17C-C slice 6 (§1.7 backup/restore + downgrade closure)
+    "tests/test_m17cc_roundtrip.py",
+    # FPR-M17CC correction battery
+    "tests/test_m17cc_fpr_corrections.py",
+    # RR-M17CC correction battery
+    "tests/test_m17cc_rr_corrections.py",
+    # RR2-M17CC correction battery
+    "tests/test_m17cc_rr2_corrections.py",
+    # RR3-M17CC correction battery
+    "tests/test_m17cc_rr3_corrections.py",
+    # RR4-M17CC correction battery
+    "tests/test_m17cc_rr4_corrections.py",
+    # RR5-M17CC correction battery
+    "tests/test_m17cc_rr5_corrections.py",
+    # RR6-M17CC correction battery
+    "tests/test_m17cc_rr6_corrections.py",
+    # RR7-M17CC correction battery
+    "tests/test_m17cc_rr7_corrections.py",
+    # RR8-M17CC correction battery
+    "tests/test_m17cc_rr8_corrections.py",
+    # RR9-M17CC correction battery
+    "tests/test_m17cc_rr9_corrections.py",
+    # RR10-M17CC correction battery
+    "tests/test_m17cc_rr10_corrections.py",
+    # SR-M17CC second-review correction battery
+    "tests/test_m17cc_sr_corrections.py",
+    # RR12-M17CC correction battery
+    "tests/test_m17cc_rr12_corrections.py",
+    # RR13-M17CC correction battery
+    "tests/test_m17cc_rr13_corrections.py",
+    # ISR2-M17CC correction battery
+    "tests/test_m17cc_isr2_corrections.py",
+    # RR15-M17CC correction battery
+    "tests/test_m17cc_rr15_corrections.py",
+    # RR16-M17CC correction battery
+    "tests/test_m17cc_rr16_corrections.py",
+    # RR17-M17CC correction battery
+    "tests/test_m17cc_rr17_corrections.py",
+    # RR18-M17CC correction battery
+    "tests/test_m17cc_rr18_corrections.py",
+    # RR19-M17CC correction battery
+    "tests/test_m17cc_rr19_corrections.py",
+    # RR20-M17CC correction battery + the shared storage-domain bound
+    "tests/test_m17cc_rr20_corrections.py",
+    "server/soloring/domain/storage.py",
+    # RR21-M17CC correction (the exact web duration round-trip)
+    "tests/test_m17cc_rr21_corrections.py",
+    # RR22-M17CC correction battery
+    "tests/test_m17cc_rr22_corrections.py",
+    # RR23-M17CC correction battery
+    "tests/test_m17cc_rr23_corrections.py",
+    # RR23-M17CC completion battery (the exact emitted OpenAPI maximum)
+    "tests/test_m17cc_rr23_completion.py",
+    # M17C-D batteries (frozen plan R2-FINAL)
+    "tests/test_m17cd_sampler_laws.py",
+    "tests/test_m17cd_spec_v5_grammar.py",
+    "tests/test_m17cd_create_path.py",
+    "tests/test_m17cd_worker_lane.py",
+    "tests/test_m17cd_recovery_laws.py",
+    "tests/test_m17cd_real_execution.py",
+    # M17C-D FPR31 correction: the non-live production-path
+    # regression (the real _drive schema-5 traversal)
+    "tests/test_m17cd_worker_production_path.py",
+    # M17C-D FPR32 correction: the integrity-chain battery
+    "tests/test_m17cd32_integrity.py",
+    # M17C-D FPR33-01(c): the performance executor lane —
+    # the in-tree node package, the attestation record, the
+    # runtime law branch, the authority wrap read-through,
+    # and the launcher performance lane
+    "scripts/launch_comfy.py",
+    "server/soloring/executor_nodes/soloring_performance_nodes/__init__.py",
+    "server/soloring/executors/comfy/capability_record.py",
+    "server/soloring/realization/authority.py",
+    "server/soloring/realization/runtime.py",
+    "tests/test_m17cd33_attestation_lane.py",
+    "tests/test_m17cd33_real_capture.py",
+    "tests/test_m17cd33_retained3.py",
+    "tests/test_m17cd33_retained3_recovery.py",
+    "tests/test_m17cd33_v2_complete.py",
+    # M17C-D FPR34 correction: the FPR34 battery set
+    "tests/test_m17cd34_attestation_gate.py",
+    "tests/test_m17cd34_generic_only.py",
+    "tests/test_m17cd34_graph_contract.py",
+    "tests/test_m17cd34_retained_identity.py",
+    "tests/test_m17cd34_terminal_outputs.py",
+    # M17C-D FPR33: the launcher-law re-pin
+    "tests/test_m5b7_binding.py",
+    # M17C-D FPR32: the PINNED performance executor package
+    "workflows/performance_liveportrait_v1/manifest.json",
+    "workflows/performance_liveportrait_v1/workflow.json",
+    "workflows/performance_liveportrait_v1/workflow-package.json",
+    "apps/web/src/lib/exactDuration.ts",
+    "apps/web/src/components/ShotForm.tsx",
+    "apps/web/src/__tests__/rr21-exact-duration.test.tsx",
+    # RR16-M17CC: the shared recovery-side outer-ShotRevision parser
+    "server/soloring/recovery/outer_snapshot.py",
+    "server/soloring/recovery/backup.py",
+    "server/soloring/recovery/successor_semantics.py",
+    "server/soloring/performance/revision.py",
+    "server/soloring/errors.py",
+    "tests/test_m14_b5_increment3.py",
+    "tests/test_m14_base_corpus.py",
+    "tests/test_m15_baseline.py",
+    "tests/test_post_m13_next_security.py",
+    "tests/test_post_m13_hygiene.py",
+    "tests/test_m16_recovery.py",
+    "scripts/m14_validate_baseline.py",
     # M17A implementation (frozen R5): the dialogue/vocal foundation
     # surface — performance package, migration, API, recovery
     # verifier, boundary validators, and the M17A tests.
@@ -39,6 +208,7 @@ ALLOWLIST = (
     "server/soloring/errors.py",
     "server/soloring/recovery/backup.py",
     "server/soloring/recovery/successor_semantics.py",
+    "server/soloring/recovery/outer_snapshot.py",
     "server/soloring/recovery/m17a_verifier.py",
     "server/alembic/versions/0018_m17a_dialogue_vocal_foundation.py",
     "scripts/hygiene_validate_boundary.py",
@@ -493,10 +663,22 @@ def main() -> int:
     admitted_0018 = "0018_m17a_dialogue_vocal_foundation.py"
     # M17B (frozen R7): the performance-revisions migration
     admitted_0019 = "0019_m17b_performance_revisions.py"
+    # M17C-A (PR #26): frozen at c502b81; the B-F1 split restored its
+    # exact bytes
+    admitted_0020 = "0020_m17c_perf_capture_r2.py"
+    # M17C-B (PR #26, B-F1): the successor working-mapping migration
+    admitted_0021 = "0021_m17c_shot_performance_mappings.py"
+    # M17C-C slice 1 (frozen R4 10.4-10.6): schema-8 capture storage
+    admitted_0022 = "0022_m17c_schema8_capture.py"
+    # FPR-M17CC-04: the closure-preimage successor
+    admitted_0023 = "0023_m17cc_capture_closure_preimage.py"
+    superseded_0020_draft = "0020_m17c_dialogue_bound_performance.py"
     mig_beyond = [p.name for p in versions.glob("*.py")
                   if p.stem >= "0015" and p.name not in (
                       admitted_0015, admitted_0016, admitted_0017,
-                      admitted_0018, admitted_0019)]
+                      admitted_0018, admitted_0019, admitted_0020,
+                      admitted_0021, admitted_0022, admitted_0023,
+                      superseded_0020_draft)]
     if mig_beyond:
         errors.append(f"migration at/beyond 0015 beyond the frozen M14/M15/"
                       f"M16-A/M17A migrations exists: {mig_beyond}")
@@ -539,6 +721,28 @@ def main() -> int:
         "performance_retarget_reviews",
     }
 
+    # M17C-A (frozen at c502b81; B-F1 restored its exact bytes): the
+    # four binding/classification companion tables
+    admitted_m17c_a_tables = {
+        "performance_candidate_vocal_bindings",
+        "performance_revision_vocal_bindings",
+        "performance_candidate_sync_classifications",
+        "performance_revision_sync_classifications",
+    }
+    # M17C-B (frozen R4 §8.1, successor migration 0021): the mutable
+    # Shot working-mapping table
+    admitted_m17c_b_tables = {
+        "shot_performance_segment_mappings",
+    }
+    # M17C-C slice 1 (successor migration 0022): schema-8 capture
+    # storage — spec parent, immutable segment children, and the
+    # Generation-owned derived-input table
+    admitted_m17c_c_tables = {
+        "shot_revision_performance_specs",
+        "shot_revision_performance_segments",
+        "generation_performance_inputs",
+    }
+
     admitted_m17a_tables = {
         "dialogue_lines",
         "dialogue_line_revisions",
@@ -573,6 +777,19 @@ def main() -> int:
                 continue
             if (f.endswith("0019_m17b_performance_revisions.py")
                     and name in admitted_m17b_tables):
+                continue
+            if (f.endswith("0020_m17c_perf_capture_r2.py")
+                    and name in admitted_m17c_a_tables):
+                continue
+            if (f.endswith("0021_m17c_shot_performance_mappings.py")
+                    and name in admitted_m17c_b_tables):
+                continue
+            if (f.endswith("0022_m17c_schema8_capture.py")
+                    and name in admitted_m17c_c_tables):
+                continue
+            if (f.endswith(
+                    "0023_m17cc_capture_closure_preimage.py")
+                    and name in admitted_m17c_c_tables):
                 continue
             errors.append(f"{f}: new table {name} in migration source")
         if f.endswith("0017_m16_intra_shot_consequences.py") and names != admitted_m16_tables:

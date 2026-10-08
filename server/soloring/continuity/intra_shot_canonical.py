@@ -16,6 +16,13 @@ from soloring.domain.ids import is_uuid
 from soloring.errors import validation_error
 
 SAFE_INT_MAX = 9_007_199_254_740_991
+# RR20-M17CC-01: the ONE shared signed-SQLite-INTEGER authority bound
+# lives in the lowest domain layer (soloring.domain.storage) so the
+# public Shot authoring schemas and these M16 canonical/recovery
+# primitives enforce the SAME physical representability domain without
+# depending upward on each other — re-exported here for the M16
+# grammar's single canonical import site
+from soloring.domain.storage import SQLITE_INT_MAX  # noqa: E402
 MAX_ACTIVE_EVENTS_PER_SHOT = 10_000
 MAX_PROPOSAL_CANONICAL_BYTES = 65_536
 MAX_PROPOSAL_REVIEW_BATCH = 10_000
@@ -39,12 +46,77 @@ def require_plain_int(value: object, *, field: str, minimum: int = 0,
 
 
 def require_interior_time(time_ms: object, duration_ms: object) -> tuple[int, int]:
-    """Return strict integer (time,duration) iff time is genuinely intra-Shot."""
+    """Return strict integer (time,duration) iff time is genuinely intra-Shot.
+
+    RR18-M17CC-01: the two integer DOMAINS stay separate — time_ms is
+    an event coordinate (plain JSON integer, JS-safe ceiling), while
+    duration_ms is the predecessor Shot duration (plain JSON integer,
+    positive, NO event-grammar ceiling; the published Shot domain is
+    unbounded above beyond SQLite's own INTEGER storage)."""
     t = require_plain_int(time_ms, field="time_ms", minimum=1)
-    duration = require_plain_int(duration_ms, field="duration_ms", minimum=1)
+    duration = require_shot_duration(duration_ms, field="duration_ms",
+                                     minimum=1)
     if t >= duration:
         raise validation_error("time_ms must be strictly less than duration_ms")
     return t, duration
+
+
+def require_shot_duration(value: object, *, field: str,
+                          minimum: int = 0) -> int:
+    """RR18/RR19-M17CC-01: the predecessor Shot-duration domain —
+    a PLAIN JSON integer (bool/float/numeric-string and every other
+    non-integer rejected), never below ``minimum`` (0 for the
+    published null-or-nonnegative Shot domain; 1 where M16 event
+    semantics require a genuine duration), and never above the
+    maximum signed SQLite INTEGER (``SQLITE_INT_MAX``) — the storage
+    domain's physical authority bound. NO JS-safe event-coordinate
+    ceiling: ``SAFE_INT_MAX`` is an event-grammar law (time_ms /
+    ordinal / positions), NOT a Shot-duration law — a lawful captured
+    duration anywhere in [0, 2^63-1] verifies exactly (a JSON-recovered
+    duration above the INTEGER storage domain is malformed durable
+    authority the production writer cannot create)."""
+    if type(value) is not int:  # bool is deliberately rejected
+        raise validation_error(f"{field} must be a plain JSON integer")
+    if value < minimum:
+        raise validation_error(f"{field} must be at least {minimum}")
+    if value > SQLITE_INT_MAX:
+        raise validation_error(
+            f"{field} is above the signed SQLite INTEGER storage "
+            f"domain (maximum {SQLITE_INT_MAX})")
+    return value
+
+
+def captured_intent_duration_ms(snapshot: dict) -> int | None:
+    """RR17-M17CC-01: the ONE shared predecessor helper for the
+    M16-owned captured-intent facts a ShotRevision consumer reads.
+
+    Establishes, BEFORE any consumer performs ``.get()``/equality/
+    range arithmetic on them: the outer snapshot's ``intent`` exists
+    in the representation the M16 consumer expects and is a JSON
+    OBJECT, and its ``duration_ms`` is either null or a PLAIN JSON
+    integer in the predecessor Shot-duration STORAGE domain
+    (``require_shot_duration`` — bool rejected, the frozen minimum
+    discipline, and the signed SQLite INTEGER upper bound; the
+    canonical writer emits integer-or-null).
+    Returns the captured duration, or ``None`` when the ShotRevision
+    captured none — no duration is ever invented. Raises the
+    canonical validation error, which each consumer maps to its own
+    typed contract. Deliberately NOT a general snapshot grammar:
+    only the nested facts actually consumed are certified."""
+    intent = snapshot.get("intent")
+    if not isinstance(intent, dict):
+        raise validation_error(
+            "captured snapshot intent must be a JSON object")
+    duration_ms = intent.get("duration_ms")
+    if duration_ms is None:
+        return None
+    # RR18/RR19-M17CC-01: the captured duration belongs to the
+    # predecessor Shot-duration STORAGE domain (plain integer in
+    # [minimum, SQLITE_INT_MAX] — no JS-safe event-coordinate
+    # ceiling; positivity stays the consumer laws' concern: the
+    # companion-duration equality and the interior rule)
+    return require_shot_duration(duration_ms,
+                                 field="intent.duration_ms")
 
 
 def require_hash(value: object, *, field: str) -> str:
@@ -143,7 +215,11 @@ def event_set_value(*, shot_id: str, duration_ms: object,
                     events: list[dict]) -> dict:
     if not is_uuid(shot_id):
         raise validation_error("shot_id must be a UUID")
-    duration = require_plain_int(duration_ms, field="duration_ms", minimum=1)
+    # RR18-M17CC-01: the event-set document's duration_ms is the SHOT
+    # duration (the predecessor domain — plain positive integer, NO
+    # JS-safe event-coordinate ceiling), not an event coordinate
+    duration = require_shot_duration(duration_ms, field="duration_ms",
+                                     minimum=1)
     return {
         "schema_version": 1,
         "shot_id": shot_id,

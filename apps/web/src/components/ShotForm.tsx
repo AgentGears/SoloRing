@@ -10,6 +10,7 @@ import { useState } from "react";
 
 import { patchShot } from "@/lib/api.client";
 import { ApiError, asApiError } from "@/lib/api.shared";
+import { durationInput, durationToTransport } from "@/lib/exactDuration";
 import type { ShotDetail } from "@/lib/types";
 import ErrorBanner from "./ErrorBanner";
 
@@ -30,7 +31,10 @@ function initialForm(shot: ShotDetail): Record<string, string> {
     const v = shot[key];
     form[key] = typeof v === "string" ? v : "";
   }
-  form.duration_ms = shot.duration_ms === null ? "" : String(shot.duration_ms);
+  // RR21-M17CC-01: initialize from the EXACT decimal transport
+  // coordinate — never from the lossy `number` (String(number)
+  // already lost the exact integer for durations above 2^53)
+  form.duration_ms = durationInput(shot.duration_ms_dec);
   return form;
 }
 
@@ -55,13 +59,28 @@ export default function ShotForm({ shot }: { shot: ShotDetail }) {
     setBusy(true);
     setError(null);
     try {
-      const payload: Record<string, string | number | null> = {};
+      const payload: Record<string, string | null> = {};
       for (const { key } of TEXT_FIELDS) {
         const v = form[key];
         payload[key] = key === "subject" ? v : v.trim() === "" ? null : v;
       }
-      const d = form.duration_ms.trim();
-      payload.duration_ms = d === "" ? null : Number(d);
+      // RR21-M17CC-01: the exact decimal string travels to the
+      // backend's deliberate canonical-decimal admission contract —
+      // NEVER through Number()/IEEE-754 (which silently rounds
+      // lawful durations above 2^53). An untouched form re-submits
+      // the exact transport string it was initialized from, so an
+      // unrelated-field save preserves the exact integer.
+      try {
+        payload.duration_ms = durationToTransport(form.duration_ms);
+      } catch (err) {
+        setBusy(false);
+        setError(new ApiError(
+          "VALIDATION_ERROR",
+          err instanceof Error ? err.message : String(err),
+          422,
+        ));
+        return;
+      }
 
       // The PATCH response is the normalized truth; reconcile local state.
       const updated = await patchShot(shot.id, payload);

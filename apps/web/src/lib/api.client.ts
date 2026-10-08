@@ -93,7 +93,12 @@ export async function getShot(id: string): Promise<ShotDetail> {
   return fetchJson<ShotDetail>(`${BASE}/shots/${id}`);
 }
 
-/** PATCH intent fields; the server response is the normalized truth. */
+/** PATCH intent fields; the server response is the normalized truth.
+ * RR21-M17CC-01: duration_ms may be the exact canonical decimal
+ * string (the web transport coordinate) — JSON.stringify carries
+ * strings losslessly and the backend's deliberate decimal-string
+ * admission contract converts it to the exact integer; it must
+ * never be converted through JavaScript `number` client-side. */
 export async function patchShot(
   id: string,
   fields: Record<string, string | number | null>,

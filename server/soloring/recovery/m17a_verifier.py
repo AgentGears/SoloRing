@@ -14,7 +14,6 @@ import json
 import math
 import re
 import sqlite3
-from fractions import Fraction
 from pathlib import Path
 
 from soloring.domain.canonical import canonical_hash, canonical_json_str
@@ -233,29 +232,37 @@ def _verify_selections(con: sqlite3.Connection) -> None:
 
 
 def _verify_mappings(con: sqlite3.Connection) -> None:
+    # RR2-M17CC-01: the canonical document is reconstructed by the ONE
+    # shared transport-neutral law (the same function the live capture
+    # path enforces) so the two definitions cannot drift; this verifier
+    # keeps its own transport and corruption vocabulary.
+    from soloring.performance.mapping import (
+        verify_stored_vocal_mapping,
+    )
     for r in con.execute("SELECT * FROM shot_vocal_segment_mappings"):
-        doc = json.loads(r["mapping_json"])
-        canonical = {"mapping_schema_version": 1,
-                     "vocal_performance_revision_id":
-                     r["vocal_performance_revision_id"],
-                     "source_start_sample": r["source_start_sample"],
-                     "source_end_sample_exclusive":
-                     r["source_end_sample_exclusive"],
-                     "sample_rate_hz": r["sample_rate_hz"],
-                     "performance_origin_ms": {
-                         "num": r["performance_origin_num"],
-                         "den": r["performance_origin_den"]},
-                     "shot_anchor_ms": {"num": r["shot_anchor_num"],
-                                        "den": r["shot_anchor_den"]}}
-        if doc != canonical or \
-                canonical_hash(canonical) != r["mapping_hash"]:
+        try:
+            verify_stored_vocal_mapping(
+                mapping_schema_version=r["mapping_schema_version"],
+                mapping_json=r["mapping_json"],
+                mapping_hash=r["mapping_hash"],
+                position=r["position"],
+                vocal_performance_revision_id=(
+                    r["vocal_performance_revision_id"]),
+                source_start_sample=r["source_start_sample"],
+                source_end_sample_exclusive=(
+                    r["source_end_sample_exclusive"]),
+                sample_rate_hz=r["sample_rate_hz"],
+                performance_origin_num=r["performance_origin_num"],
+                performance_origin_den=r["performance_origin_den"],
+                shot_anchor_num=r["shot_anchor_num"],
+                shot_anchor_den=r["shot_anchor_den"])
+        except ValueError as exc:
             raise _corrupt(f"mapping {r['shot_id']}@{r['position']} "
-                           "canonical rehash fail")
-        for n, d in ((r["performance_origin_num"],
-                      r["performance_origin_den"]),
-                     (r["shot_anchor_num"], r["shot_anchor_den"])):
-            if d <= 0 or math.gcd(abs(n), d) != 1 or (n == 0 and d != 1):
-                raise _corrupt("noncanonical rational in mapping")
+                           f"canonical rehash fail: {exc}") from exc
+        # RR4-M17CC-01: the canonical-rational law now lives INSIDE
+        # the shared row-local verifier above (live capture enforces
+        # the identical rule); the laws below are the CROSS-ROW
+        # authority checks recovery performs over its own transport
         vp = con.execute(
             "SELECT * FROM vocal_performance_revisions WHERE id = ?",
             (r["vocal_performance_revision_id"],)).fetchone()
@@ -279,20 +286,15 @@ def _verify_mappings(con: sqlite3.Connection) -> None:
         if shot is None or line is None or \
                 shot["project_id"] != line["project_id"]:
             raise _corrupt("mapping Shot/VP project mismatch")
-        if shot["duration_ms"] is None or shot["duration_ms"] <= 0:
-            raise _corrupt("mapping Shot lacks positive duration")
-        # picture intersection (readiness invariant restored historically)
-        # — EXACT rational arithmetic (source review finding 2): the
-        # anchor carries its own denominator, so the comparison is
-        # Fraction(anchor) + Fraction(delta_ms) vs the picture window;
-        # integer num*rate arithmetic silently drops anchor_den != 1
-        anchor_ms = Fraction(r["shot_anchor_num"], r["shot_anchor_den"])
-        seg_ms = Fraction(
-            (r["source_end_sample_exclusive"]
-             - r["source_start_sample"]) * 1000, r["sample_rate_hz"])
-        if not (anchor_ms + seg_ms > 0
-                and anchor_ms < Fraction(shot["duration_ms"])):
-            raise _corrupt("mapping does not intersect Shot picture")
+        # SR2-06 predecessor recovery correction: current Shot duration
+        # and picture intersection are MUTABLE current-context
+        # readiness conditions (the live M17A/PF-02 projections report
+        # them as blocked working states), not immutable vocal-mapping
+        # corruption. Restore certification proves stored
+        # structure/authority only — a lawfully created mapping whose
+        # Shot duration later drifted to NULL/0 or shrank past
+        # intersection must survive backup/restore unchanged (still
+        # blocked at read time), exactly as the live projection says.
 
 
 def _verify_alignments(con: sqlite3.Connection,

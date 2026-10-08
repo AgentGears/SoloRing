@@ -23,6 +23,7 @@ import {
   reviewIntraShotProposal,
 } from "@/lib/api.client";
 import { asApiError } from "@/lib/api.shared";
+import { timeBelowExactDuration } from "@/lib/exactDuration";
 import type {
   IntraShotDecision,
   IntraShotIssue,
@@ -123,7 +124,9 @@ export default function IntraShotPanel({ shotId }: { shotId: string }) {
   }, [reload]);
 
   const events = projection?.events ?? [];
-  const duration = projection?.duration_ms ?? null;
+  // RR21-M17CC-01: the timeline renders and guards against the EXACT
+  // decimal transport coordinate — never the lossy `number`
+  const durationDec = projection?.duration_ms_dec ?? null;
 
   // §17.1: client controls prevent submitting time zero / time-at-end
   // as an ordinary affordance; the server remains authoritative
@@ -139,7 +142,8 @@ export default function IntraShotPanel({ shotId }: { shotId: string }) {
         );
         return false;
       }
-      if (duration !== null && t >= duration) {
+      if (durationDec !== null
+        && !timeBelowExactDuration(t, durationDec)) {
         setTimeGuard(
           "time at or past the Shot end is not an interior event time — server validation remains authoritative",
         );
@@ -147,7 +151,7 @@ export default function IntraShotPanel({ shotId }: { shotId: string }) {
       }
       return true;
     },
-    [duration],
+    [durationDec],
   );
 
   const act = useCallback(
@@ -196,7 +200,7 @@ export default function IntraShotPanel({ shotId }: { shotId: string }) {
       <h4>
         Event timeline{" "}
         <span className="meta">
-          duration {duration === null ? "unset" : `${duration}ms`}
+          duration {durationDec === null ? "unset" : `${durationDec}ms`}
         </span>
       </h4>
       <p className="meta" data-testid="intra-shot-start">

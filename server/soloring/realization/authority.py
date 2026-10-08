@@ -171,14 +171,21 @@ async def reconstruct_pack(
             f"ShotRevision {revision_id} disappeared mid-reconstruction."
         )
     snapshot = json.loads(snap_json)
-    if snapshot.get("schema_version") not in (4, 5):
+    if snapshot.get("schema_version") not in (4, 5, 8):
         raise internal_invariant(
-            f"ShotRevision {revision_id} is not schema 4/5; M9 authority "
+            f"ShotRevision {revision_id} is not schema 4/5/8; M9 authority "
             "reconstruction requires captured visual provenance."
         )
     # M10E §9.2: schema 5 = schema 4 + the captured spatial_continuity
     # pack; the M9 authority plane reads ONLY the embedded
     # visual_reference_pack, which schema 5 preserves verbatim.
+    # M17C-D FPR33-05 (explicit predecessor impact, recorded): a
+    # schema-8 performance wrap preserves EVERY predecessor key
+    # verbatim — including the schema-4 visual_reference_pack — so
+    # the M9 authority reconstruction reads through the wrap exactly
+    # as it reads schema 5; no visual meaning is rewritten or
+    # dropped by the wrapper (the capture-side all-keys copy is the
+    # frozen M17C-C wrap law).
     stored_pack = snapshot.get("visual_reference_pack")
     if not isinstance(stored_pack, dict):
         raise internal_invariant(

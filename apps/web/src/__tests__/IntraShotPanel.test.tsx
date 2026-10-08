@@ -14,6 +14,9 @@ function projectionFixture(overrides: Record<string, unknown> = {}) {
   return {
     shot_id: "shot-1",
     duration_ms: 5000,
+    // RR21-M17CC-01: the exact transport coordinate the timeline
+    // now renders and guards against
+    duration_ms_dec: "5000",
     intra_shot_ready: false,
     event_set_hash: "a".repeat(64),
     events: [

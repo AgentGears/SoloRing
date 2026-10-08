@@ -78,8 +78,10 @@ def test_h05_no_shotrevision_schema_8():
                    for t in tabs)
     vers = sorted(p.name for p in
                   (SERVER / "alembic" / "versions").glob("*.py"))
-    assert vers[-1] == "0019_m17b_performance_revisions.py"
-    assert not any("schema_8" in v or "0020" in v for v in vers)
+    # M17C-A (successor-admitted): the one migration beyond 0019 is
+    # 0020; schema-8 Shot capture remains a future M17C-C surface.
+    assert vers[-1] == "0023_m17cc_capture_closure_preimage.py"
+    assert not any("schema_8" in v for v in vers)
 
 
 def test_h06_no_generation_workflowspec_performance_schema():
@@ -125,8 +127,33 @@ def test_h06_no_generation_workflowspec_performance_schema():
 
     src = (SERVER / "soloring" / "generation" / "service.py"
            ).read_text(encoding="utf-8", errors="replace")
-    assert "performance" not in src.lower(), \
-        "generation service mentions performance vocabulary"
+    # FPR-M17CC-01 → M17C-D evolution (frozen plan R2-FINAL): the
+    # retired blanket refusal is superseded by the ADMISSION
+    # STRUCTURE; the service's performance vocabulary now spans the
+    # two M17C-D regions — the admission gates (events through the
+    # wrap + the spatial-composition refusal + the kind gate) and
+    # the translation/v5-wrap block. Every case-insensitive
+    # occurrence of the vocabulary must lie INSIDE those regions.
+    lowered = src.lower()
+    gates_start = lowered.rfind(
+        "\n", 0, lowered.find("# m17c-d admission gates"))
+    assert gates_start >= 0, "the M17C-D admission gates not found"
+    marker = lowered.find(
+        "performance_spatial_composition_unsupported")
+    assert marker >= 0, \
+        "the M17C-D spatial-composition admission refusal not found"
+    wrap_end = lowered.find(
+        "performance_inputs=performance_inputs)")
+    assert wrap_end > 0, "the M17C-D persistence pass-through not found"
+    block_end = lowered.find("\n", wrap_end) + 1
+    stray = [
+        i for i in range(len(lowered))
+        if lowered.startswith("performance", i)
+        and not (gates_start <= i < block_end)
+    ]
+    assert not stray, \
+        "generation service mentions performance semantics beyond " \
+        f"the M17C-D admission/translation regions (offsets {stray})"
 
     def _assert_no_performance(node, where: str) -> None:
         if isinstance(node, dict):
@@ -141,6 +168,13 @@ def test_h06_no_generation_workflowspec_performance_schema():
     workflows = sorted((REPO / "workflows").rglob("*.json"))
     assert workflows, "frozen workflow contracts not found"
     for wf in workflows:
+        # M17C-D FPR32-M17CD-01: the PINNED performance executor
+        # package (workflows/performance_liveportrait_v1) is the one
+        # frozen workflow contract whose keys LAWFULLY name the
+        # performance derived inputs — every predecessor workflow
+        # stays performance-free
+        if "performance_liveportrait_v1" in wf.parts:
+            continue
         doc = _json.loads(wf.read_text(encoding="utf-8"))
         _assert_no_performance(doc, wf.name)
 
@@ -156,6 +190,22 @@ def test_h07_no_executor_integration():
     perf = (SERVER / "soloring" / "performance"
             ).glob("*.py")
     for f in perf:
+        # M17C-D (frozen plan R2-FINAL W4): worker_inputs.py IS the
+        # schema-5 performance execution lane — the one performance
+        # module deliberately consuming the executor TRANSPORT seam
+        # (the derived-input upload + the marker namespace; it never
+        # imports ComfyClient itself). Every other performance module
+        # stays executor-free.
+        if f.name in ("worker_inputs.py", "executor_runtime.py"):
+            # M17C-D: worker_inputs.py IS the schema-5 execution
+            # lane consuming the executor TRANSPORT seam (never
+            # ComfyClient itself); executor_runtime.py is the
+            # performance-lane ATTESTATION LAW (it names the
+            # predecessor ComfyUI-GGUF contract it preserves —
+            # documentation, never executor code)
+            assert "ComfyClient" not in f.read_text(
+                encoding="utf-8")
+            continue
         t = f.read_text(encoding="utf-8")
         assert "ComfyClient" not in t
         assert "comfy" not in t.lower()

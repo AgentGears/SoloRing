@@ -29,6 +29,7 @@ async def observation_readiness(session, settings, shot_id: str) -> dict:
         effective_working_snapshot_hash,
     )
     from soloring.domain.revisions import _snapshot_one_read
+    from soloring.domain.shots import _working_intra_pack
     from soloring.domain.ids import is_uuid
     from soloring.errors import ErrorCode, not_found
 
@@ -41,18 +42,34 @@ async def observation_readiness(session, settings, shot_id: str) -> dict:
     feature_states, relation_states, visual_result = read[3], read[4], read[5]
     spatial_result = read[6]
     production_world_result = read[7]
+    intra, performance = read[8], read[9]
     visual_pack = visual_result.pack if visual_result is not None else None
     spatial_pack = (
         spatial_result.pack if spatial_result is not None else None)
     production_world_pack = (
         production_world_result.pack
         if production_world_result is not None else None)
+    intra_shot_pack = (
+        _working_intra_pack(shot_id, intra) if intra["events"] else None)
+    # FPR-M17CC-03 (first-pass review): the working snapshot/hash
+    # consume the SAME full one-read capture consumes (intra-shot AND
+    # Performance planes included) — is_current must incorporate the
+    # Performance plane, exactly like the Shot-detail canon.
+    # RR-M17CC-02 (re-review): a lawfully non-READY Performance plane
+    # (frozen posture) makes the working hash UNAVAILABLE — a blocked
+    # state is never hashed, and no state can be "current" against a
+    # hash that cannot exist.
+    perf_unready = performance is not None and not performance["ready"]
+    hash_pack = None if perf_unready else performance
     working_snapshot, _spec = build_capturable_snapshot(
         shot, refs, resolved, feature_states, relation_states,
-        visual_pack, spatial_pack, production_world_pack)
-    working_hash = effective_working_snapshot_hash(
-        shot, refs, resolved, feature_states, relation_states,
-        visual_pack, spatial_pack, production_world_pack)
+        visual_pack, spatial_pack, production_world_pack,
+        intra_shot_pack=intra_shot_pack, performance_pack=hash_pack)
+    working_hash = None if perf_unready else (
+        effective_working_snapshot_hash(
+            shot, refs, resolved, feature_states, relation_states,
+            visual_pack, spatial_pack, production_world_pack,
+            intra_shot_pack=intra_shot_pack, performance_pack=hash_pack))
 
     async with session.bind.connect() as conn:
         captured = (await conn.execute(text(
@@ -84,19 +101,56 @@ async def observation_readiness(session, settings, shot_id: str) -> dict:
     import json as _json
 
     captured_snapshot = _json.loads(captured["snapshot_json"])
+    captured_schema = captured_snapshot["schema_version"]
     base["capture"] = {
         "revision_id": captured["id"],
-        "schema_version": captured_snapshot["schema_version"],
+        "schema_version": captured_schema,
         "is_current": captured["snapshot_hash"] == working_hash,
     }
 
-    if captured_snapshot["schema_version"] != 6:
+    # FPR-M17CC-03 (first-pass review): schema 8 wraps the EXACT
+    # predecessor base, and every predecessor block survives beneath
+    # the wrap. The observation plane's applicability therefore
+    # evaluates the WRAPPED predecessor: the schema-6 wrap is defined
+    # by its mandatory production_world block.
+    # RR-M17CC-01 (re-review): the observation compiler consumes the
+    # LITERAL schema-6 view — schema_version: 6, the M17C-C
+    # performance layer removed, and (for an 8-over-7-over-6 chain)
+    # the M16 successor layer removed as well. This is a PROJECTION
+    # for M14 consumption only; the captured ShotRevision is never
+    # rewritten or lowered.
+    if captured_schema == 8:
+        applicable = "production_world" in captured_snapshot
+        if applicable:
+            observed = {
+                k: v for k, v in captured_snapshot.items()
+                if k not in ("performance", "intra_shot")}
+            observed["schema_version"] = 6
+        else:
+            observed = captured_snapshot
+    else:
+        applicable = captured_schema == 6
+        observed = captured_snapshot
+    if not applicable:
         base["readiness"] = "not-applicable"
-        base["explanation"] = (
-            "the last captured revision (schema "
-            f"{captured_snapshot['schema_version']}) carries no "
-            "production world; the observation plane applies only to "
-            "schema-6 captures")
+        if captured_schema == 8 and "intra_shot" in captured_snapshot:
+            explanation = (
+                "the last captured revision is a schema-8 wrap of a "
+                "schema-7 predecessor that carries no production "
+                "world of its own; the observation plane applies only "
+                "to captured schema-6 authority")
+        elif captured_schema == 8:
+            explanation = (
+                "the last captured revision is a schema-8 wrap whose "
+                "predecessor base carries no production world; the "
+                "observation plane applies only to captured schema-6 "
+                "authority")
+        else:
+            explanation = (
+                "the last captured revision (schema "
+                f"{captured_schema}) carries no production world; the "
+                "observation plane applies only to schema-6 captures")
+        base["explanation"] = explanation
         return base
 
     if not base["capture"]["is_current"]:
@@ -111,7 +165,10 @@ async def observation_readiness(session, settings, shot_id: str) -> dict:
 
     release = await capture_current_release(settings)
     package = validate_package(release)
-    observation_block = package.profile_v2.get("observation")
+    # FPR-M17CC-03: an 8-over-6 capture now reaches this schema-6
+    # posture; a release without a v2 profile DECLARES no observation
+    # capability (the refused branch), never a crash
+    observation_block = (package.profile_v2 or {}).get("observation")
 
     if observation_block is None:
         base["readiness"] = "refused"
@@ -173,14 +230,16 @@ async def observation_readiness(session, settings, shot_id: str) -> dict:
             "  ON srpw.shot_revision_id = sr.id "
             "WHERE sr.id = :rid"), {"rid": captured["id"]})).mappings().one()
 
-    captured_spatial_pack = captured_snapshot["spatial_continuity"]
+    # the exact wrapped predecessor base (FPR-M17CC-03: an 8-over-6
+    # capture compiles from the retained schema-6 authority)
+    captured_spatial_pack = observed["spatial_continuity"]
     visual_pack_captured = captured_snapshot.get("visual_reference_pack")
     observation_spec = compile_world_observation_spec(
         shot_id=shot_id,
         shot_revision_id=captured["id"],
         plan_hash=spatial_schemas.plan_hash(
             captured_spatial_pack["shot_plan"]),
-        captured_schema_6=captured_snapshot,
+        captured_schema_6=observed,
         spatial_continuity_hash=companions["spatial_continuity_hash"],
         production_world_hash=companions["production_world_hash"],
         visual_reference_pack_hash=(
@@ -200,7 +259,7 @@ async def observation_readiness(session, settings, shot_id: str) -> dict:
     async with session.bind.connect() as conn:
         retained = await load_retained_mesh_sources(
             conn, _read_blob,
-            captured_production_world=captured_snapshot[
+            captured_production_world=observed[
                 "production_world"],
             captured_spatial_pack=captured_spatial_pack)
     observation_spec = merge_retained_into_spec(observation_spec, retained)

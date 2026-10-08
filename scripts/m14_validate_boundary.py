@@ -23,6 +23,116 @@ ALLOWED_PATTERNS = [
     r"^post-m16-integrated-r3-evidence/harness/",
     r"^SoloRing-Post-M16-Integrated-Sequence-Regression-R3-CLOSED"
     r"\.md$",
+    # PR #26 review records (M17C-A first pass + second-review
+    # reconciliation): reviewed evidence documents, no product code
+    r"^SoloRing-PR26-First-Pass-Review-R1\.md$",
+    r"^SoloRing-PR26-Reconciliation-and-Correction-Record\.md$",
+    # M17C-C scope record + slice-1 surfaces
+    r"^SoloRing-M17C-C-Scope-R0\.md$",
+    r"^server/alembic/versions/0022_m17c_schema8_capture"
+    r"\.py$",
+    # FPR-M17CC-04: the closure-preimage successor
+    r"^server/alembic/versions/0023_m17cc_capture_closure_preimage"
+    r"\.py$",
+    r"^tests/test_m17cc_migration\.py$",
+    # M17C-C slice 2 (the coherent performance-plane read)
+    r"^server/soloring/performance/m17cc_capture_read\.py$",
+    r"^tests/test_m17cc_capture\.py$",
+    r"^tests/m17cc_capture_helper\.py$",
+    # M17C-C slice 3 (frozen-companion persistence + winner reuse)
+    r"^tests/test_m17cc_persist\.py$",
+    # M17C-C slice 4 (§12 historical inspection)
+    r"^server/soloring/performance/m17cc_history\.py$",
+    r"^tests/test_m17cc_history\.py$",
+    # M17C-C slice 5 (§13.4-13.6 recovery verifier)
+    r"^tests/test_m17cc_recovery\.py$",
+    # M17C-C slice 6 (§1.7 backup/restore + downgrade closure)
+    r"^tests/test_m17cc_roundtrip\.py$",
+    # FPR-M17CC correction battery
+    r"^tests/test_m17cc_fpr_corrections\.py$",
+    # RR-M17CC correction battery
+    r"^tests/test_m17cc_rr_corrections\.py$",
+    # RR2-M17CC correction battery
+    r"^tests/test_m17cc_rr2_corrections\.py$",
+    # RR3-M17CC correction battery
+    r"^tests/test_m17cc_rr3_corrections\.py$",
+    # RR4-M17CC correction battery
+    r"^tests/test_m17cc_rr4_corrections\.py$",
+    # RR5-M17CC correction battery
+    r"^tests/test_m17cc_rr5_corrections\.py$",
+    # RR6-M17CC correction battery
+    r"^tests/test_m17cc_rr6_corrections\.py$",
+    # RR7-M17CC correction battery
+    r"^tests/test_m17cc_rr7_corrections\.py$",
+    # RR8-M17CC correction battery
+    r"^tests/test_m17cc_rr8_corrections\.py$",
+    # RR9-M17CC correction battery
+    r"^tests/test_m17cc_rr9_corrections\.py$",
+    # RR10-M17CC correction battery
+    r"^tests/test_m17cc_rr10_corrections\.py$",
+    # SR-M17CC second-review correction battery
+    r"^tests/test_m17cc_sr_corrections\.py$",
+    # RR12-M17CC correction battery
+    r"^tests/test_m17cc_rr12_corrections\.py$",
+    # RR13-M17CC correction battery
+    r"^tests/test_m17cc_rr13_corrections\.py$",
+    # ISR2-M17CC correction battery
+    r"^tests/test_m17cc_isr2_corrections\.py$",
+    # RR15-M17CC correction battery
+    r"^tests/test_m17cc_rr15_corrections\.py$",
+    # RR16-M17CC correction battery
+    r"^tests/test_m17cc_rr16_corrections\.py$",
+    # RR17-M17CC correction battery
+    r"^tests/test_m17cc_rr17_corrections\.py$",
+    # RR18-M17CC correction battery
+    r"^tests/test_m17cc_rr18_corrections\.py$",
+    # RR19-M17CC correction battery
+    r"^tests/test_m17cc_rr19_corrections\.py$",
+    # RR20-M17CC correction battery + the shared storage-domain bound
+    r"^tests/test_m17cc_rr20_corrections\.py$",
+    r"^server/soloring/domain/storage\.py$",
+    # RR21-M17CC correction (the exact web duration round-trip)
+    r"^tests/test_m17cc_rr21_corrections\.py$",
+    # RR22-M17CC correction battery
+    r"^tests/test_m17cc_rr22_corrections\.py$",
+    # RR23-M17CC correction battery
+    r"^tests/test_m17cc_rr23_corrections\.py$",
+    # RR23-M17CC completion battery (the exact emitted OpenAPI maximum)
+    r"^tests/test_m17cc_rr23_completion\.py$",
+    # M17C-D batteries (frozen plan R2-FINAL)
+    r"^tests/test_m17cd_sampler_laws\.py$",
+    r"^tests/test_m17cd_spec_v5_grammar\.py$",
+    r"^tests/test_m17cd_create_path\.py$",
+    r"^tests/test_m17cd_worker_lane\.py$",
+    r"^tests/test_m17cd_recovery_laws\.py$",
+    r"^tests/test_m17cd_real_execution\.py$",
+    r"^tests/test_m17cd_worker_production_path\.py$",
+    # M17C-D FPR32 correction: the integrity battery + the
+    # PINNED performance executor package
+    r"^tests/test_m17cd32_integrity\.py$",
+    # M17C-D FPR33-01(c): the performance executor lane
+    r"^scripts/launch_comfy\.py$",
+    r"^server/soloring/executor_nodes/soloring_performance_nodes/\__init__\.py$",
+    r"^server/soloring/executors/comfy/capability_record\.py$",
+    r"^server/soloring/realization/authority\.py$",
+    r"^server/soloring/realization/runtime\.py$",
+    r"^tests/test_m17cd33_attestation_lane\.py$",
+    r"^tests/test_m17cd33_real_capture\.py$",
+    r"^tests/test_m17cd33_retained3\.py$",
+    r"^tests/test_m17cd33_retained3_recovery\.py$",
+    r"^tests/test_m17cd33_v2_complete\.py$",
+    # M17C-D FPR34 correction: the FPR34 battery set
+    r"^tests/test_m17cd34_attestation_gate\.py$",
+    r"^tests/test_m17cd34_generic_only\.py$",
+    r"^tests/test_m17cd34_graph_contract\.py$",
+    r"^tests/test_m17cd34_retained_identity\.py$",
+    r"^tests/test_m17cd34_terminal_outputs\.py$",
+    # M17C-D FPR33: the launcher-law re-pin
+    r"^tests/test_m5b7_binding\.py$",
+    r"^workflows/performance_liveportrait_v1/(manifest|workflow|workflow-package)\.json$",
+    r"^apps/web/src/lib/exactDuration\.ts$",
+    r"^apps/web/src/components/ShotForm\.tsx$",
+    r"^apps/web/src/__tests__/rr21-exact-duration\.test\.tsx$",
     # M17A implementation (frozen R5): the dialogue/vocal foundation
     # surface — performance package, migration, API, recovery
     # verifier, boundary validators, and the M17A tests.
@@ -33,6 +143,8 @@ ALLOWED_PATTERNS = [
     r"^server/soloring/db/models\.py$",
     r"^server/soloring/errors\.py$",
     r"^server/soloring/recovery/backup\.py$",
+    # RR16-M17CC: the shared recovery-side outer-ShotRevision parser
+    r"^server/soloring/recovery/outer_snapshot\.py$",
     r"^server/soloring/recovery/successor_semantics\.py$",
     r"^server/soloring/recovery/m17a_verifier\.py$",
     r"^server/alembic/versions/0018_m17a_dialogue_vocal_foundation"
@@ -53,6 +165,27 @@ ALLOWED_PATTERNS = [
     r"^scripts/m17b_validate_proof_map\.py$",
     r"^server/soloring/api/m17b_performance\.py$",
     r"^server/soloring/api/schemas/m17b_performance\.py$",
+    # M17C-A (PR #26): frozen at c502b81 (B-F1 restored its exact
+    # bytes); M17C-B (PR #26, B-F1): the successor working-mapping
+    # migration — reviewed successor surface + successor-maintained
+    # files swept for the head-advance
+    r"^server/soloring/performance/m17c_[a-z_]+\.py$",
+    r"^server/soloring/performance/m17cc_models\.py$",
+    r"^server/soloring/api/m17c_performance\.py$",
+    r"^server/soloring/api/schemas/m17c_performance\.py$",
+    r"^server/soloring/recovery/m17c_verifier\.py$",
+    r"^server/alembic/versions/0020_m17c_perf_capture_r2"
+    r"\.py$",
+    r"^server/alembic/versions/0021_m17c_shot_performance_mappings"
+    r"\.py$",
+    r"^tests/m17c_seed\.py$",
+    r"^tests/test_m17c_[a-z0-9_]+\.py$",
+    r"^tests/test_post_m13_next_security\.py$",
+    r"^tests/test_m14_b5_increment3\.py$",
+    r"^tests/test_m14_base_corpus\.py$",
+    r"^tests/test_m15_baseline\.py$",
+    r"^tests/test_m16_recovery\.py$",
+    r"^scripts/m17c_validate_[a-z0-9_]+\.py$",
 
     r"^docs/SoloRing-M14-[^/]+\.md$",
     r"^scripts/m14_validate_[a-z0-9_]+\.py$",
@@ -152,6 +285,16 @@ ALLOWED_PATTERNS = [
     # M17B second-Codex round: the sqlalchemy <2.1 ceiling pin
     # (dependency-drift incident, CI run #161). Packaging metadata only.
     r"^pyproject\.toml$",
+    # RR21-M17CC gate remediation (2026-10-06 dependency-drift
+    # incident, mirroring the pyproject precedent): the runtime-high
+    # advisory GHSA-68fv-2mgg-jv7q (source-map-js event-loop DoS,
+    # transitive under next@15.5.25/postcss and jsdom/css-tree) made
+    # the frozen audit gates refuse the tree, and their own policy
+    # forbids excepting a COMPATIBLE fix — remediation
+    # (npm audit fix: source-map-js 1.2.1 -> 1.2.2) is the only
+    # gate-consistent path; the LOCKFILE only (package.json stays
+    # forbidden above); the frozen pins verified unchanged.
+    r"^apps/web/package-lock\.json$",
     # M16-E closure surface (reviewed successor slice): the frozen §22
     # owner rename of the P0 module, the §23 source-gate owners, and
     # the four M16 validators.
@@ -166,7 +309,7 @@ ALLOWED_PATTERNS = [
 FORBIDDEN_PATTERNS = [
     (r"^\.github/(?!workflows/ci\.yml$)",
      "repository/workflow settings beyond ci.yml"),
-    (r"^apps/web/package(-lock)?\.json$", "frontend dependency manifest"),
+    (r"^apps/web/package\.json$", "frontend dependency manifest"),
     (r"^apps/web/next\.config\.[a-z]+$", "frontend framework config"),
     (r"^apps/web/tsconfig.*\.json$", "frontend TypeScript config"),
 ]

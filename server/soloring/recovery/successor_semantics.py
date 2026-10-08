@@ -327,6 +327,11 @@ def install_successor_semantics(recovery: ModuleType) -> None:
     )
     recovery._verify_m17b_performance_state = (
         verify_m17b_performance_state)
+    from soloring.recovery.m17c_verifier import (
+        verify_m17c_binding_state,
+    )
+    recovery._verify_m17c_binding_state = (
+        verify_m17c_binding_state)
 
     def _verify_head_semantics(staged_db: Path, head: str,
                                blob_root=None) -> None:
@@ -356,6 +361,15 @@ def install_successor_semantics(recovery: ModuleType) -> None:
         if head == getattr(recovery, "M17A_ALEMBIC_HEAD", None):
             return
         recovery._verify_m17b_performance_state(staged_db, blob_root)
+        if head == getattr(recovery, "M17B_ALEMBIC_HEAD", None):
+            return
+        # SR26-02 corrective (SR2-02 head-aware form): the M17C
+        # verifier receives the EXACT staged head — at 0020 the four
+        # PF-03 tables are required and the PF-02 table must be ABSENT;
+        # at 0021 the PF-02 table is REQUIRED with a deterministic
+        # schema proof before its row laws run.
+        recovery._verify_m17c_binding_state(staged_db, blob_root,
+                                            head=head)
 
     recovery._verify_head_semantics = _verify_head_semantics
 
@@ -372,24 +386,59 @@ def install_successor_semantics(recovery: ModuleType) -> None:
         root (backup source root / restore staged tree), never the
         process-global Settings singleton."""
         head = recovery._staged_db_head(staged_db)
+        # M17C-A (PR #26, frozen at c502b81) + M17C-B (SR2-01/02
+        # corrective): head 0020 and head 0021 both verify through the
+        # complete predecessor chains — every verifier that applies at
+        # 0019 also applies at both successors (the M14 observation
+        # semantics included; the original sweep had dropped them at
+        # 0021, restored here).
         if head in (recovery.M14_ALEMBIC_HEAD, recovery.M15_ALEMBIC_HEAD,
                     recovery.M16_ALEMBIC_HEAD,
                     getattr(recovery, "M17A_ALEMBIC_HEAD", None),
-                    getattr(recovery, "M17B_ALEMBIC_HEAD", None)):
+                    getattr(recovery, "M17B_ALEMBIC_HEAD", None),
+                    getattr(recovery, "M17C_A_ALEMBIC_HEAD", None),
+                    getattr(recovery, "M17C_B_ALEMBIC_HEAD", None),
+                    getattr(recovery, "M17C_C_ALEMBIC_HEAD", None),
+                    getattr(recovery, "M17C_C2_ALEMBIC_HEAD", None)):
             recovery._verify_m14_observation_state(staged_db)
         if head in (recovery.M15_ALEMBIC_HEAD, recovery.M16_ALEMBIC_HEAD,
                     getattr(recovery, "M17A_ALEMBIC_HEAD", None),
-                    getattr(recovery, "M17B_ALEMBIC_HEAD", None)):
+                    getattr(recovery, "M17B_ALEMBIC_HEAD", None),
+                    getattr(recovery, "M17C_A_ALEMBIC_HEAD", None),
+                    getattr(recovery, "M17C_B_ALEMBIC_HEAD", None),
+                    getattr(recovery, "M17C_C_ALEMBIC_HEAD", None),
+                    getattr(recovery, "M17C_C2_ALEMBIC_HEAD", None)):
             recovery._verify_m15_compatibility_state(staged_db)
         if head in (recovery.M16_ALEMBIC_HEAD,
                     getattr(recovery, "M17A_ALEMBIC_HEAD", None),
-                    getattr(recovery, "M17B_ALEMBIC_HEAD", None)):
+                    getattr(recovery, "M17B_ALEMBIC_HEAD", None),
+                    getattr(recovery, "M17C_A_ALEMBIC_HEAD", None),
+                    getattr(recovery, "M17C_B_ALEMBIC_HEAD", None),
+                    getattr(recovery, "M17C_C_ALEMBIC_HEAD", None),
+                    getattr(recovery, "M17C_C2_ALEMBIC_HEAD", None)):
             recovery._verify_m16_intra_shot_state(staged_db)
         if head in (getattr(recovery, "M17A_ALEMBIC_HEAD", None),
-                    getattr(recovery, "M17B_ALEMBIC_HEAD", None)):
+                    getattr(recovery, "M17B_ALEMBIC_HEAD", None),
+                    getattr(recovery, "M17C_A_ALEMBIC_HEAD", None),
+                    getattr(recovery, "M17C_B_ALEMBIC_HEAD", None),
+                    getattr(recovery, "M17C_C_ALEMBIC_HEAD", None),
+                    getattr(recovery, "M17C_C2_ALEMBIC_HEAD", None)):
             recovery._verify_m17a_dialogue_vocal_state(staged_db)
-        if head == getattr(recovery, "M17B_ALEMBIC_HEAD", None):
+        if head in (getattr(recovery, "M17B_ALEMBIC_HEAD", None),
+                    getattr(recovery, "M17C_A_ALEMBIC_HEAD", None),
+                    getattr(recovery, "M17C_B_ALEMBIC_HEAD", None),
+                    getattr(recovery, "M17C_C_ALEMBIC_HEAD", None),
+                    getattr(recovery, "M17C_C2_ALEMBIC_HEAD", None)):
             recovery._verify_m17b_performance_state(staged_db, blob_root)
+        if head in (getattr(recovery, "M17C_A_ALEMBIC_HEAD", None),
+                    getattr(recovery, "M17C_B_ALEMBIC_HEAD", None),
+                    getattr(recovery, "M17C_C_ALEMBIC_HEAD", None),
+                    getattr(recovery, "M17C_C2_ALEMBIC_HEAD", None)):
+            # SR2-02: the exact staged head drives the M17C verifier's
+            # schema contract — 0020 requires the PF-02 table's ABSENCE,
+            # 0021 requires its presence plus a schema proof
+            recovery._verify_m17c_binding_state(staged_db, blob_root,
+                                                head=head)
         return original_enumerate(staged_db, expected_columns)
 
     recovery._enumerate_liveness = _enumerate_with_successor_semantics

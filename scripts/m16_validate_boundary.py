@@ -46,6 +46,10 @@ M16_SURFACE = (
     r"^server/soloring/api/schemas/shots\.py$",
     r"^server/soloring/recovery/backup\.py$",
     r"^server/soloring/recovery/m16_verifier\.py$",
+    # RR16-M17CC: the shared recovery-side outer-ShotRevision parser
+    r"^server/soloring/recovery/outer_snapshot\.py$",
+    r"^server/soloring/recovery/successor_semantics\.py$",
+    r"^server/soloring/observation/[a-z_]+\.py$",
     r"^server/soloring/db/models\.py$",
     r"^server/soloring/errors\.py$",
     r"^apps/web/src/(components|lib|app|__tests__)/",
@@ -105,6 +109,151 @@ M16_SURFACE = (
     r"^scripts/m17b_validate_proof_map\.py$",
     r"^server/soloring/api/m17b_performance\.py$",
     r"^server/soloring/api/schemas/m17b_performance\.py$",
+    # M17C-A (PR #26): frozen at c502b81 (B-F1 restored its exact
+    # bytes); M17C-B (PR #26, B-F1): the successor working-mapping
+    # migration — reviewed successor surface + successor-maintained
+    # files swept for the head-advance
+    r"^server/soloring/performance/m17c_[a-z_]+\.py$",
+    r"^server/soloring/performance/m17cc_models\.py$",
+    r"^server/soloring/api/m17c_performance\.py$",
+    r"^server/soloring/api/schemas/m17c_performance\.py$",
+    r"^server/soloring/recovery/m17c_verifier\.py$",
+    r"^server/alembic/versions/0020_m17c_perf_capture_r2"
+    r"\.py$",
+    r"^server/alembic/versions/0021_m17c_shot_performance_mappings"
+    r"\.py$",
+    r"^tests/m17c_seed\.py$",
+    r"^tests/test_m17c_[a-z0-9_]+\.py$",
+    r"^SoloRing-PR26-First-Pass-Review-R1\.md$",
+    r"^SoloRing-PR26-Reconciliation-and-Correction-Record\.md$",
+    # M17C-C scope record + slice-1 surfaces
+    r"^SoloRing-M17C-C-Scope-R0\.md$",
+    r"^server/alembic/versions/0022_m17c_schema8_capture"
+    r"\.py$",
+    # FPR-M17CC-04: the closure-preimage successor
+    r"^server/alembic/versions/0023_m17cc_capture_closure_preimage"
+    r"\.py$",
+    r"^tests/test_m17cc_migration\.py$",
+    # M17C-C slice 2 (the coherent performance-plane read)
+    r"^server/soloring/performance/m17cc_capture_read\.py$",
+    r"^tests/test_m17cc_capture\.py$",
+    r"^tests/m17cc_capture_helper\.py$",
+    # M17C-C slice 3 (frozen-companion persistence + winner reuse)
+    r"^tests/test_m17cc_persist\.py$",
+    # M17C-C slice 4 (§12 historical inspection)
+    r"^server/soloring/performance/m17cc_history\.py$",
+    r"^tests/test_m17cc_history\.py$",
+    # M17C-C slice 5 (§13.4-13.6 recovery verifier)
+    r"^tests/test_m17cc_recovery\.py$",
+    # M17C-C slice 6 (§1.7 backup/restore + downgrade closure)
+    r"^tests/test_m17cc_roundtrip\.py$",
+    # FPR-M17CC correction battery
+    r"^tests/test_m17cc_fpr_corrections\.py$",
+    # RR-M17CC correction battery
+    r"^tests/test_m17cc_rr_corrections\.py$",
+    # RR2-M17CC correction battery
+    r"^tests/test_m17cc_rr2_corrections\.py$",
+    # RR3-M17CC correction battery
+    r"^tests/test_m17cc_rr3_corrections\.py$",
+    # RR4-M17CC correction battery
+    r"^tests/test_m17cc_rr4_corrections\.py$",
+    # RR5-M17CC correction battery
+    r"^tests/test_m17cc_rr5_corrections\.py$",
+    # RR6-M17CC correction battery
+    r"^tests/test_m17cc_rr6_corrections\.py$",
+    # RR7-M17CC correction battery
+    r"^tests/test_m17cc_rr7_corrections\.py$",
+    # RR8-M17CC correction battery
+    r"^tests/test_m17cc_rr8_corrections\.py$",
+    # RR9-M17CC correction battery
+    r"^tests/test_m17cc_rr9_corrections\.py$",
+    # RR10-M17CC correction battery
+    r"^tests/test_m17cc_rr10_corrections\.py$",
+    # SR-M17CC second-review correction battery
+    r"^tests/test_m17cc_sr_corrections\.py$",
+    # RR12-M17CC correction battery
+    r"^tests/test_m17cc_rr12_corrections\.py$",
+    # RR13-M17CC correction battery
+    r"^tests/test_m17cc_rr13_corrections\.py$",
+    # ISR2-M17CC correction battery
+    r"^tests/test_m17cc_isr2_corrections\.py$",
+    # RR15-M17CC correction battery
+    r"^tests/test_m17cc_rr15_corrections\.py$",
+    # RR16-M17CC correction battery
+    r"^tests/test_m17cc_rr16_corrections\.py$",
+    # RR17-M17CC correction battery
+    r"^tests/test_m17cc_rr17_corrections\.py$",
+    # RR18-M17CC correction battery
+    r"^tests/test_m17cc_rr18_corrections\.py$",
+    # RR19-M17CC correction battery
+    r"^tests/test_m17cc_rr19_corrections\.py$",
+    # RR20-M17CC correction battery + the shared storage-domain bound
+    r"^tests/test_m17cc_rr20_corrections\.py$",
+    r"^server/soloring/domain/storage\.py$",
+    # RR21-M17CC correction (the exact web duration round-trip)
+    r"^tests/test_m17cc_rr21_corrections\.py$",
+    # RR22-M17CC correction battery
+    r"^tests/test_m17cc_rr22_corrections\.py$",
+    # RR23-M17CC correction battery
+    r"^tests/test_m17cc_rr23_corrections\.py$",
+    # RR23-M17CC completion battery (the exact emitted OpenAPI maximum)
+    r"^tests/test_m17cc_rr23_completion\.py$",
+    # M17C-D batteries (frozen plan R2-FINAL)
+    r"^tests/test_m17cd_sampler_laws\.py$",
+    r"^tests/test_m17cd_spec_v5_grammar\.py$",
+    r"^tests/test_m17cd_create_path\.py$",
+    r"^tests/test_m17cd_worker_lane\.py$",
+    r"^tests/test_m17cd_recovery_laws\.py$",
+    r"^tests/test_m17cd_real_execution\.py$",
+    r"^tests/test_m17cd_worker_production_path\.py$",
+    # M17C-D FPR32 correction: the integrity battery + the
+    # PINNED performance executor package
+    r"^tests/test_m17cd32_integrity\.py$",
+    # M17C-D FPR33-01(c): the performance executor lane
+    r"^scripts/launch_comfy\.py$",
+    r"^server/soloring/executor_nodes/soloring_performance_nodes/\__init__\.py$",
+    r"^server/soloring/executors/comfy/capability_record\.py$",
+    r"^server/soloring/realization/authority\.py$",
+    r"^server/soloring/realization/runtime\.py$",
+    r"^tests/test_m17cd33_attestation_lane\.py$",
+    r"^tests/test_m17cd33_real_capture\.py$",
+    r"^tests/test_m17cd33_retained3\.py$",
+    r"^tests/test_m17cd33_retained3_recovery\.py$",
+    r"^tests/test_m17cd33_v2_complete\.py$",
+    # M17C-D FPR34 correction: the FPR34 battery set
+    r"^tests/test_m17cd34_attestation_gate\.py$",
+    r"^tests/test_m17cd34_generic_only\.py$",
+    r"^tests/test_m17cd34_graph_contract\.py$",
+    r"^tests/test_m17cd34_retained_identity\.py$",
+    r"^tests/test_m17cd34_terminal_outputs\.py$",
+    # M17C-D FPR33: the launcher-law re-pin
+    r"^tests/test_m5b7_binding\.py$",
+    # M17C-D FPR33: the m13 boundary carve for the three
+    # successor-owned executor impacts
+    r"^scripts/m13_validate_boundary\.py$",
+    r"^workflows/performance_liveportrait_v1/(manifest|workflow|workflow-package)\.json$",
+    # M17C-D: the GPI sibling insert joins the ONE Generation
+    # persistence primitive (frozen plan R2-FINAL W2 §2.6)
+    r"^server/soloring/generation/repository\.py$",
+    # M17C-D gate-ladder repairs: the M11/M12 execution-scope
+    # batteries carry the D-owned execution-succession byte pins
+    r"^tests/test_m11_scope\.py$",
+    r"^tests/test_m12_boundary\.py$",
+    # M17C-D: the worker schema-5 performance lane branch
+    r"^server/soloring/worker/comfy_pipeline\.py$",
+    # M17C-D: the ONE narrowly admitted executor-source change —
+    # the performance_bindings submission-marker extension (the
+    # persisted artifact stays byte-identical to the pure
+    # translator output); the rest of executors/ stays pinned
+    r"^server/soloring/executors/comfy/translate\.py$",
+    r"^apps/web/src/lib/exactDuration\.ts$",
+    r"^apps/web/src/components/ShotForm\.tsx$",
+    r"^apps/web/src/__tests__/rr21-exact-duration\.test\.tsx$",
+    # RR21 gate remediation: the remediated lockfile (see the
+    # FORBIDDEN note above)
+    r"^apps/web/package-lock\.json$",
+    r"^tests/test_post_m13_next_security\.py$",
+    r"^tests/test_m14_base_corpus\.py$",
 
     # reviewed successor carves from the M16 correction rounds:
     # predecessor-test era head-pins/migration expectations, the m10f
@@ -137,10 +286,18 @@ P0_B = (
 FORBIDDEN_PATTERNS = [
     (r"^\.github/(?!workflows/ci\.yml$)",
      "repository/workflow settings beyond ci.yml"),
-    (r"^apps/web/package(-lock)?\.json$", "frontend dependency manifest"),
+    (r"^apps/web/package\.json$", "frontend dependency manifest"),
+    # RR21 gate remediation (2026-10-06 dependency-drift): the
+    # source-map-js 1.2.1 -> 1.2.2 LOCKFILE-only remediation is
+    # admitted in ALLOWED_PATTERNS below (GHSA-68fv-2mgg-jv7q; the
+    # audit gates' own policy forbids excepting a compatible fix);
+    # package.json itself stays forbidden.
     (r"^apps/web/next\.config\.[a-z]+$", "frontend framework config"),
     (r"^apps/web/tsconfig.*\.json$", "frontend TypeScript config"),
-    (r"^server/soloring/executors/",
+    # M17C-D: translate.py is separately admitted above (the
+    # performance_bindings marker extension); every other
+    # executor source stays pinned
+    (r"^server/soloring/executors/(?!comfy/translate\.py$|comfy/capability_record\.py$)",
      "executor sources (frozen pins; repin unauthorized)"),
     (r"^server/soloring/materializers/",
      "materializer sources (frozen pins; repin unauthorized)"),
@@ -150,6 +307,9 @@ FORBIDDEN_PATTERNS = [
 # M16 behavior there — every ADDED line in its diff must belong to the
 # schema-7 refusal fence vocabulary
 GENERATION_FENCE_OK = "INTRA_SHOT_REALIZATION_UNSUPPORTED"
+# FPR-M17CC-01: the schema-8 successor refusal is the same fence
+# family — capability refusal, never M16 semantics
+GENERATION_FENCE_OK_8 = "PERFORMANCE_REALIZATION_UNSUPPORTED"
 
 
 def generation_diff_is_fence_only() -> list[str]:
@@ -163,15 +323,31 @@ def generation_diff_is_fence_only() -> list[str]:
         if not line.startswith("+") or line.startswith("+++"):
             continue
         body = line[1:]
-        if not body.strip() or body.lstrip().startswith("#"):
-            # fence-explaining comments are part of the reviewed fence
+        if not body.strip() or body.lstrip().startswith("#")                 or not any(c.isalnum() for c in body):
+            # fence-explaining comments and bare punctuation-only
+            # continuation lines are part of the reviewed fence
             continue
         if any(k in body for k in (
                 "INTRA_SHOT", "intra_shot", "schema_7", "schema 7",
-                "REALIZATION", "SoloRingError", "status_code=409",
+                "schema_8", "schema 8", "PERFORMANCE", "Performance",
+                "M17C-D", "REALIZATION", "SoloRingError",
+                "status_code=409",
                 "details=", "ErrorCode", "_artifact_store",
                 "WorkflowArtifactStore", "release", '"events"',
-                "ShotRevision", "no published workflow")):
+                "ShotRevision", "no published workflow", "snapshot_schema",
+                "predecessor", "lowered", "captured", "authority",
+                "wrapped", "lane", "exists", "beneath",
+                # M17C-D (frozen plan R2-FINAL W2): the translation
+                # + v5 wrap lines added under the reviewed admission
+                "performance", "translation", "v5", "rasterization",
+                "fps", "frame_count", "sampler", "FACIAL", "spatial",
+                "vocal", "translate_captured", "build_workflow",
+                "derive", "gpi", "derived", "soloring.performance",
+                "performance_inputs", "schema-5", "schema 5",
+                "assert_supported_kind", "segments",
+                "silently", "omitted", "session, settings,",
+                "revision_id=revision.id", "parameters.pop",
+                "observation_integration")):
             continue
         offenders.append(body.strip()[:70])
     return offenders
@@ -183,6 +359,49 @@ def git_changed_files() -> list[str]:
         cwd=REPO, capture_output=True, text=True, check=True,
     )
     return [f for f in out.stdout.splitlines() if f.strip()]
+
+
+def schema8_fence_check(src: str) -> list[str]:
+    """RR-M17CC-04 → M17C-D evolution (frozen plan R2-FINAL §2.1):
+    POSITIVELY certify the schema-8 ADMISSION STRUCTURE that
+    superseded the retired blanket refusal. The M17C-D gates —
+    (i) intra-Shot events THROUGH the wrap refuse
+        INTRA_SHOT_REALIZATION_UNSUPPORTED, and
+    (ii) the wrapped spatial/observation plane refuses
+        PERFORMANCE_SPATIAL_COMPOSITION_UNSUPPORTED —
+    must both be anchored to the 'if snapshot_schema == 8:' gate,
+    sit above the first Generation-owned durable side effect (the
+    release placement), and be part of raise statements. The
+    M16 schema-7 fence marker (GENERATION_FENCE_OK) is unchanged.
+    """
+    problems: list[str] = []
+    gate = src.find("if snapshot_schema == 8:")
+    if gate < 0:
+        problems.append(
+            "the schema-8 admission gate ('if snapshot_schema == 8:') "
+            "is absent from the generation service")
+        return problems
+    durable = src.find(
+        "        await _artifact_store.place_release(release)")
+    for token in ("INTRA_SHOT_REALIZATION_UNSUPPORTED",
+                  "PERFORMANCE_SPATIAL_COMPOSITION_UNSUPPORTED"):
+        fence = src.find(token, gate)
+        if fence < 0 or fence - gate > 2000:
+            problems.append(
+                f"the M17C-D schema-8 admission refusal ({token}) is "
+                "absent or not anchored to its gate")
+            continue
+        raise_kw = src.rfind("raise SoloRingError(", 0, fence)
+        if raise_kw < gate or fence - raise_kw > 400:
+            problems.append(
+                f"the {token} fence marker is not part of a raise "
+                "statement inside the gate")
+        if durable >= 0 and fence > durable:
+            problems.append(
+                f"the {token} refusal sits below the first "
+                "Generation-owned durable side effect (release "
+                "placement)")
+    return problems
 
 
 def main() -> int:
@@ -206,6 +425,9 @@ def main() -> int:
                     errors.append(
                         "generation/service.py: fail-closed schema-7 "
                         "fence absent")
+                for off in schema8_fence_check(text):
+                    errors.append(
+                        "generation/service.py: " + off)
                 for off in generation_diff_is_fence_only():
                     errors.append(
                         "generation/service.py: added line outside the "

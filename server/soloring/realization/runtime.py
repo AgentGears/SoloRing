@@ -37,17 +37,30 @@ def check_runtime_compatibility(
             f" != required {rr.comfyui_commit!r}"
         )
     for name, required_commit in rr.custom_nodes.items():
+        if name == "soloring_performance_nodes":
+            # M17C-D FPR33-01(c): the EXPLICIT performance
+            # binding — satisfied only by the performance-lane
+            # attestation content-hash field (never a
+            # whitelist weakening)
+            actual = getattr(attestation,
+                             "performance_nodes_hash", None)
+            if actual != required_commit:
+                _fail(
+                    f"custom node {name!r} hash {actual!r} != "
+                    f"required {required_commit!r}")
+            continue
         if name != "ComfyUI-GGUF":
             _fail(
-                f"required custom node {name!r} has no characterized "
-                "attestation binding"
+                f"required custom node {name!r} has no "
+                "characterized attestation binding"
             )
         actual = getattr(attestation, "gguf_commit", None)
         if actual != required_commit:
             _fail(
-                f"custom node {name!r} commit {actual!r} != required "
-                f"{required_commit!r}"
+                f"custom node {name!r} commit {actual!r} != "
+                f"required {required_commit!r}"
             )
+
     live_whitelist = tuple(getattr(attestation, "custom_node_policy", ()) or ())
     if list(live_whitelist) != list(rr.custom_node_policy.whitelist):
         _fail("custom-node whitelist differs from the captured requirement")

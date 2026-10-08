@@ -243,8 +243,9 @@ def _verify_schema3_stored_spec_canonical(spec: dict,
         )
 
 
-def verify_schema3_runtime_environment(fingerprint_doc: dict,
-                                       settings) -> None:
+def verify_schema3_runtime_environment(
+        fingerprint_doc: dict, settings, *,
+        _schema5_generation: bool = False) -> None:
     """R3 §18 / E-106 B2: validate the CAPTURED schema-3
     ExecutionModelFingerprint against the ACTUAL execution environment:
     the live v4 deployment attestation proves the serving-process
@@ -276,8 +277,15 @@ def verify_schema3_runtime_environment(fingerprint_doc: dict,
             status_code=503,
         )
     required_name, required_commit = next(iter(required_nodes.items()))
+    _expected = (required_name,)
+    if _schema5_generation:
+        # FPR34-M17CD-02: a schema-5 Generation's deployment must
+        # carry BOTH the captured package's node AND the pinned
+        # performance node package (the composed lane)
+        _expected = tuple(sorted(
+            {required_name, "soloring_performance_nodes"}))
     attestation = load_live_attestation(
-        settings, expected_whitelist=(required_name,))
+        settings, expected_whitelist=_expected)
     if attestation.comfyui_commit != rr.get("comfyui_commit"):
         raise SoloRingError(
             ErrorCode.EXECUTION_MODEL_INCOMPATIBLE,
@@ -472,6 +480,8 @@ async def _drive(
             )
             template_graph = json.loads(template_bytes.decode("utf-8"))
             schema3_derived = None
+            performance_submission_bindings = None
+            schema5_derived = None
             schema2_pending = None
             schema3_lower = None
             # M10F PD-1B (R6 §10.2.1): historical dispatch is keyed by the
@@ -484,8 +494,147 @@ async def _drive(
                     manifest_bytes.decode("utf-8")).get("schema_version")
             except ValueError:
                 retained_manifest_schema = None
+            # M17C-D (frozen plan R2-FINAL W4 + the FPR31-M17CD-01/02/05
+            # correction): schema-5 dispatch projects to its EXACT lower
+            # logical v1/v2 view FIRST — the performance prep runs here,
+            # and the manifest/template ladder below is keyed by the
+            # PROJECTED logical schema so v5-over-v1 loads the v1 view
+            # and v5-over-v2 the full v2 view (manifest, profile,
+            # fingerprint, live attestation — the same laws logical v2
+            # runs) with `manifest`/`template_graph` ALWAYS set before
+            # the common translation path. The uploaded performance
+            # references are bound INTO the submitted graph at the
+            # manifest's declared node/fields (schema5_derived —
+            # consumption, not a marker); the submission-document
+            # enumeration remains as evidence. Every refusal is terminal
+            # typed BEFORE any submission.
+            logical_schema = spec.get("schema_version")
+            if logical_schema == 5:
+                from soloring.performance.execution_spec import (
+                    lower_projection,
+                )
+
+                # FPR32-M17CD-06: authenticate the stored WorkflowSpec
+                # bytes BEFORE the spec can influence upload,
+                # translation, or submission (the same law the
+                # schema-2/3/4 paths enforce; recovery always has)
+                from soloring.domain.canonical import (
+                    canonical_hash as _v5_spec_hash,
+                    canonical_json_str as _v5_spec_json,
+                )
+                from soloring.errors import internal_invariant
+
+                if _v5_spec_json(spec) != generation.workflow_spec_json                         or _v5_spec_hash(spec) !=                         generation.workflow_spec_hash:
+                    raise internal_invariant(
+                        "Stored schema-5 workflow spec bytes/hash "
+                        "disagree with the persisted canonical form."
+                    )
+                from soloring.performance.worker_inputs import (
+                    execute_schema5_performance_inputs,
+                    submission_performance_bindings,
+                )
+
+                logical_schema = lower_projection(spec)["schema_version"]
+
+                # FPR34-M17CD-02: the EFFECTIVE performance
+                # runtime gate — EVERY schema-5 submission
+                # (either lower form) authenticates the
+                # performance deployment BEFORE any upload,
+                # translation, or submission: the serving
+                # process, the custom-node set carrying the
+                # pinned performance package, and the exact
+                # implementation content hash. No unverified
+                # fallback: a missing, performance-node-less,
+                # wrong-hash, or wrong-process attestation
+                # refuses here. The retained package's OWN
+                # runtime requirements are composed into the
+                # same attestation by the inherited checks
+                # below (see the schema-5 composition there).
+                from soloring.performance.executor_runtime import (
+                    check_performance_runtime,
+                )
+                from soloring.realization.runtime import (
+                    load_live_attestation as _load_perf_attestation,
+                )
+
+                _perf_attestation = _load_perf_attestation(
+                    settings,
+                    expected_whitelist=(
+                        "soloring_performance_nodes",))
+                check_performance_runtime(_perf_attestation)
+                # the serving-PROCESS binding is part of the same
+                # gate, not an inherited-check residue: the attested
+                # origin must BE the configured executor origin
+                # (normalized equality) and the attested pid must
+                # still be that origin's listener — a perfectly
+                # hashed attestation for a DIFFERENT process
+                # refuses here, before any performance input is
+                # uploaded
+                from soloring.realization.runtime import (
+                    verify_attested_process_live,
+                )
+
+                verify_attested_process_live(_perf_attestation, settings)
+                retained_manifest_doc = None
+                try:
+                    if retained_manifest_schema == "3":
+                        # FPR34-04/05: a retained schema-3 package's
+                        # manifest parses ONLY through the schema-3
+                        # grammar (the v1/v2 parser lawfully refuses
+                        # it — which silently skipped the
+                        # reconstruction comparison on every
+                        # retained-3 drive). The reconstruction
+                        # compares against the package's LOWER-LOGICAL
+                        # manifest view — the exact v1/v2 document the
+                        # spec compiled against, the same projection
+                        # the ladder below submits under.
+                        from soloring.spatial.package3 import (
+                            parse_manifest_v3,
+                            project_lower_logical_execution_view,
+                        )
+
+                        retained_manifest_doc = (
+                            project_lower_logical_execution_view(
+                                parse_manifest_v3(
+                                    manifest_bytes.decode("utf-8")),
+                                template_graph,
+                                generation.manifest_hash,
+                                generation.workflow_template_hash,
+                                logical_schema_version=logical_schema,
+                            ).manifest)
+                    else:
+                        # aliased module access — a bare `from ... import
+                        # parse_manifest` here would shadow the module-
+                        # level import for the WHOLE _drive scope
+                        from soloring.workflows import (
+                            manifest as _wf_manifest,
+                        )
+
+                        retained_manifest_doc = (
+                            _wf_manifest.parse_manifest_v2(
+                                manifest_bytes.decode("utf-8"))
+                            if logical_schema == 2
+                            else _wf_manifest.parse_manifest(
+                                manifest_bytes.decode("utf-8")))
+                except SoloRingError:
+                    # the ladder below re-parses and fails loudly on
+                    # a corrupt retained pair; the reconstruction
+                    # comparison simply cannot run here
+                    retained_manifest_doc = None
+                async with factory() as session:
+                    schema5_derived = (
+                        await execute_schema5_performance_inputs(
+                            session, blob_store,
+                            generation_id=generation_id,
+                            attempt_id=attempt_id,
+                            workflow_spec=spec,
+                            client=ClientUploader(client),
+                            manifest_doc=retained_manifest_doc,
+                        ))
+                performance_submission_bindings = (
+                    submission_performance_bindings(schema5_derived))
             if (retained_manifest_schema == "3"
-                    and spec.get("schema_version") in (1, 2)):
+                    and logical_schema in (1, 2)):
                 from soloring.spatial.package3 import (
                     check_runtime_closure,
                     parse_manifest_v3,
@@ -495,13 +644,15 @@ async def _drive(
 
                 manifest_v3_doc = parse_manifest_v3(
                     manifest_bytes.decode("utf-8"))
+                # FPR32-M17CD-03: the projection receives the
+                # PROJECTED logical schema (v5 lowers to 1/2 first)
                 lower = project_lower_logical_execution_view(
                     manifest_v3_doc, template_graph,
                     generation.manifest_hash,
                     generation.workflow_template_hash,
-                    logical_schema_version=spec["schema_version"],
+                    logical_schema_version=logical_schema,
                 )
-                if spec["schema_version"] == 2:
+                if logical_schema == 2:
                     # §10.2.1.3 historical/structural checks (complete):
                     # the FULL retained package is validated against the
                     # ORIGINAL captured documents. Live execution
@@ -593,7 +744,9 @@ async def _drive(
                              **(fingerprint_doc.get("m10_spatial_runtime")
                                 or {}),
                              "artifacts": surviving,
-                         }}, settings)
+                         }}, settings,
+                        _schema5_generation=(
+                            spec.get("schema_version") == 5))
                     # realization-backed GenerationInput projection
                     # cross-check (§10.2.1.3): persisted input rows must
                     # project the spec's realization channels exactly
@@ -761,7 +914,9 @@ async def _drive(
                 # EXEC:06 — the runtime availability gate precedes any
                 # Comfy submission (dispatch may claim earlier).
                 verify_schema3_runtime_environment(
-                    fingerprint_doc, settings)
+                    fingerprint_doc, settings,
+                    _schema5_generation=(
+                        spec.get("schema_version") == 5))
                 async with factory() as session:
                     schema3_derived = await execute_schema4_derived_inputs(
                         session, blob_store,
@@ -848,7 +1003,9 @@ async def _drive(
                 # verification. Never a comparison against application
                 # constants.
                 verify_schema3_runtime_environment(
-                    fingerprint_doc, settings)
+                    fingerprint_doc, settings,
+                    _schema5_generation=(
+                        spec.get("schema_version") == 5))
                 async with factory() as session:
                     schema3_derived = await execute_schema3_derived_inputs(
                         session, blob_store,
@@ -858,7 +1015,7 @@ async def _drive(
                         manifest_v3=manifest,
                         client=ClientUploader(client),
                     )
-            elif spec.get("schema_version") == 2:
+            elif logical_schema == 2:
                 from soloring.domain.canonical import (
                     canonical_hash as _spec_hash,
                 )
@@ -922,7 +1079,13 @@ async def _drive(
                     verify_attested_process_live,
                 )
 
-                _attestation = load_live_attestation(settings)
+                _expected_nodes = ("ComfyUI-GGUF",)
+                if spec.get("schema_version") == 5:
+                    # FPR34-M17CD-02: the composed performance lane
+                    _expected_nodes = ("ComfyUI-GGUF",
+                                       "soloring_performance_nodes")
+                _attestation = load_live_attestation(
+                    settings, expected_whitelist=_expected_nodes)
                 check_runtime_compatibility(fingerprint, _attestation)
                 verify_attested_process_live(_attestation, settings)
                 verify_live_model_bytes(
@@ -997,6 +1160,8 @@ async def _drive(
                 generation_id=generation_id, attempt_id=attempt_id,
                 client_id=worker_id,
                 schema3_derived=schema3_derived,
+                performance_bindings=performance_submission_bindings,
+                schema5_derived=schema5_derived,
             )
             payload_document = payload.to_document()
         else:
@@ -1202,8 +1367,17 @@ async def _drive(
             .decode("utf-8")).get("schema_version")
     except ValueError:
         retained_manifest_schema = None
+    # FPR32-M17CD-03: ONE projected logical schema governs the whole
+    # output dispatch (v5 lowers to 1/2 exactly as at submission)
+    from soloring.performance.execution_spec import (
+        lower_projection as _out_lower_projection,
+    )
+
+    _out_logical = spec.get("schema_version")
+    if _out_logical == 5:
+        _out_logical = _out_lower_projection(spec)["schema_version"]
     if (retained_manifest_schema == "3"
-            and spec.get("schema_version") in (1, 2)):
+            and _out_logical in (1, 2)):
         # M10F PD-1B: one canonical lower-logical view owns output
         # interpretation for retained schema-3 packages on logical v1/v2.
         from soloring.spatial.package3 import (
@@ -1221,7 +1395,7 @@ async def _drive(
         manifest = project_lower_logical_execution_view(
             manifest_v3_doc, template_graph,
             generation.manifest_hash, generation.workflow_template_hash,
-            logical_schema_version=spec["schema_version"],
+            logical_schema_version=_out_logical,
         ).manifest
     elif spec.get("schema_version") == 3:
         from soloring.spatial.package3 import parse_manifest_v3
@@ -1235,6 +1409,25 @@ async def _drive(
                      if k != "spatial_bindings"}
         inherited["schema_version"] = "2"
         manifest = parse_manifest_v2(inherited)
+    elif spec.get("schema_version") == 5:
+        # M17C-D (frozen plan R2-FINAL + the FPR31-M17CD-05
+        # correction): schema-5 output interpretation is the EXACT
+        # lower logical v1/v2 view — one shared lower-projection
+        # law, the same dispatch the submission path uses; v5-over-v1
+        # interprets as v1, v5-over-v2 as v2 (model/realization
+        # semantics included via the retained package).
+        from soloring.performance.execution_spec import lower_projection
+        from soloring.workflows import manifest as _wf_manifest_out
+
+        lower = lower_projection(spec)
+        manifest_bytes_again = await artifact_store.get_manifest(
+            generation.manifest_hash)
+        if lower["schema_version"] == 2:
+            manifest = _wf_manifest_out.parse_manifest_v2(
+                manifest_bytes_again.decode("utf-8"))
+        else:
+            manifest = _wf_manifest_out.parse_manifest(
+                manifest_bytes_again.decode("utf-8"))
     elif spec.get("schema_version") == 4:
         # M14 §25.3: schema-4 output interpretation is the inherited
         # schema-3 (manifest-v3 minus spatial_bindings → v2) view of the

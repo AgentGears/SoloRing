@@ -628,6 +628,45 @@ async def create_generation_request(
             "that no published workflow can realize",
             status_code=409,
             details={"shot_revision_id": revision.id})
+    # M17C-D admission gates (frozen plan R2-FINAL §2.1): schema 8
+    # wraps the EXACT predecessor base, so the gates read THROUGH
+    # the wrap — a wrapped schema-7 keeps its intra-Shot event
+    # authority (M17C-D does not own event-aware execution), and a
+    # wrapped schema-5/6 keeps its spatial/observation authority
+    # (Decision A: the composition is refused, the embedded
+    # authority named and preserved — never lowered or silently
+    # omitted). The §14.7 kind gate also fires here; the full
+    # all-or-nothing translation (§2.2: anchor representability,
+    # channel readiness, body-channel lane, rasterization) runs
+    # later in THIS request before any Generation-owned performance
+    # artifact and before the row — its refusals leave zero
+    # generations, zero GPI rows, and zero released derived blobs.
+    if snapshot_schema == 8:
+        if snapshot.get("intra_shot", {}).get("events"):
+            raise SoloRingError(
+                ErrorCode.INTRA_SHOT_REALIZATION_UNSUPPORTED,
+                "schema-8 ShotRevisions wrapping intra-Shot event "
+                "authority carry M16 semantics no published workflow "
+                "can realize — predecessor authority is never "
+                "silently lowered",
+                status_code=409,
+                details={"shot_revision_id": revision.id})
+        if "spatial_continuity" in snapshot:
+            raise SoloRingError(
+                ErrorCode.PERFORMANCE_SPATIAL_COMPOSITION_UNSUPPORTED,
+                "schema-8 ShotRevisions wrapping the M10/M13/M14 "
+                "spatial/observation plane are outside the first "
+                "performance execution package — the embedded "
+                "spatial/observation authority is preserved and "
+                "named, never silently omitted",
+                status_code=409,
+                details={"shot_revision_id": revision.id})
+        from soloring.performance.execution_sampler import (
+            assert_supported_kind as _assert_supported_kind,
+        )
+        for _segment in snapshot.get("performance", {}).get(
+                "segments", []):
+            _assert_supported_kind(_segment.get("performance_kind"))
     if release is not None:
         # the captured revision proved executable: NOW the release bytes
         # take their durable content-addressed place
@@ -929,6 +968,29 @@ async def create_generation_request(
                     "RealizationSpec parameter overrides disagree with "
                     "final captured parameters."
                 )
+    # M17C-D (frozen plan R2-FINAL §2.2–§2.5 + the FPR31-M17CD-06
+    # correction): for a schema-8 capture the translation runs NOW —
+    # after parameters resolve and BEFORE the spec builds. ALL
+    # captured segments are validated and derived in memory first;
+    # only a complete passing set places derived blobs. The
+    # rasterization facts stay IN ``parameters`` — they are ordinary
+    # node-bound manifest parameters of the performance package, and
+    # the v5 lower projection must be the EXACT lower document the
+    # same resolved package would otherwise carry;
+    # performance_execution.rasterization duplicates them as the D
+    # execution coordinate without erasing the lower meaning.
+    performance_inputs: list = []
+    performance_execution = None
+    if snapshot_schema == 8:
+        from soloring.performance.execution_translation import (
+            translate_captured_performance,
+        )
+
+        translation = await translate_captured_performance(
+            session, settings,
+            revision_id=revision.id, parameters=parameters)
+        performance_execution = translation.performance_execution
+        performance_inputs = translation.gpi_rows
     spec = build_workflow_spec(template, inputs, compiled_prompt, parameters)
     if spatial_block is not None:
         # M10E §16: spec v3 is composed exactly once, only after every
@@ -987,6 +1049,16 @@ async def create_generation_request(
             ),
         }
         spec["realization"] = realization_spec
+    # M17C-D (cont.): the v5 wrap after the lower spec (v1 or v2)
+    # has settled — the exact lower meaning is preserved and the
+    # performance plane added.
+    if performance_execution is not None:
+        from soloring.performance.execution_spec import (
+            build_workflow_spec_v5,
+        )
+
+        spec = build_workflow_spec_v5(
+            spec, performance_execution=performance_execution)
     spec_json = canonical_json_str(spec)
     spec_hash = canonical_hash(spec)
     if spatial_block is not None and "pending:" in spec_json:
@@ -1019,7 +1091,8 @@ async def create_generation_request(
         session, draft, inputs, derived_inputs=derived_bindings,
         observation_binding=(
             observation_integration["observation_binding"]
-            if observation_integration is not None else None))
+            if observation_integration is not None else None),
+        performance_inputs=performance_inputs)
 
 
 async def list_generations(session: AsyncSession, shot_id: str) -> list[Generation]:

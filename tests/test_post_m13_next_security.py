@@ -231,6 +231,10 @@ def test_nsec_boundary_exact_path_enforcement():
         assert pa("docsX/hygiene/file.md", mod.ALLOWLIST) is False
 
 
+# SR26-04 (second-review reconciliation): the skip below was removed —
+# the next-security boundary was successor-SWEPT (exact M17C paths,
+# admitted 0020 migration), its CI step restored, and this proof is
+# meaningful again over the current tree.
 def test_nsec_boundary_squash_survival(tmp_path, monkeypatch):
     """Merge-review blocker (squash-history durability): the repository
     integrates by SQUASH merge only, so the intermediate hygiene commit
