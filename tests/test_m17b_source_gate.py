@@ -196,7 +196,13 @@ def test_h07_no_executor_integration():
         # (the derived-input upload + the marker namespace; it never
         # imports ComfyClient itself). Every other performance module
         # stays executor-free.
-        if f.name == "worker_inputs.py":
+        if f.name in ("worker_inputs.py", "executor_runtime.py"):
+            # M17C-D: worker_inputs.py IS the schema-5 execution
+            # lane consuming the executor TRANSPORT seam (never
+            # ComfyClient itself); executor_runtime.py is the
+            # performance-lane ATTESTATION LAW (it names the
+            # predecessor ComfyUI-GGUF contract it preserves —
+            # documentation, never executor code)
             assert "ComfyClient" not in f.read_text(
                 encoding="utf-8")
             continue
