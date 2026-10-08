@@ -221,23 +221,46 @@ def load_deployment_attestation(
     # deployment identity.
     policy = att.get("custom_node_policy")
     whitelist = (policy or {}).get("whitelist")
+    required_perf = tuple(expected_whitelist)
+    _is_perf_lane = (len(required_perf) > 1
+                     or required_perf == (
+                         "soloring_performance_nodes",))
     if (not isinstance(policy, dict)
             or set(policy) != {"disable_all", "whitelist"}
             or policy.get("disable_all") is not True
             or not isinstance(whitelist, list)
-            or len(whitelist) != 1
-            or not isinstance(whitelist[0], str)
-            or not whitelist[0]):
+            or not whitelist
+            or not all(isinstance(w, str) and w for w in whitelist)):
         raise CapabilityRecordInvalid(
             "attestation custom_node_policy must be exactly "
-            '{"disable_all": true, "whitelist": [<one custom node>]}; '
+            '{"disable_all": true, "whitelist": [<custom node(s")>]}; '
             f"got {policy!r}")
-    if tuple(whitelist) != tuple(expected_whitelist):
-        raise CapabilityRecordInvalid(
-            f"attested custom-node identity {whitelist!r} does not match "
-            f"the required deployment whitelist "
-            f"{list(expected_whitelist)!r} — the attestation does not "
-            "describe the expected executable extension set")
+    if _is_perf_lane:
+        # FPR34-M17CD-02: the COMPOSED performance lane — the
+        # pinned performance node package plus whatever the
+        # captured package itself requires (schema-2/3 runtime
+        # nodes): the attested set must CONTAIN every required
+        # node (a deployment may carry the composed superset when
+        # the caller checks only the performance requirements).
+        # The predecessor single-GGUF shape below is untouched.
+        missing = set(required_perf) - set(whitelist)
+        if missing:
+            raise CapabilityRecordInvalid(
+                f"attested custom-node set {whitelist!r} lacks the "
+                f"required performance deployment nodes "
+                f"{sorted(missing)!r}")
+    else:
+        if len(whitelist) != 1:
+            raise CapabilityRecordInvalid(
+                "the predecessor-lane attestation must whitelist "
+                f"exactly ONE custom node; got {whitelist!r}")
+        if tuple(whitelist) != tuple(expected_whitelist):
+            raise CapabilityRecordInvalid(
+                f"attested custom-node identity {whitelist!r} does "
+                f"not match the required deployment whitelist "
+                f"{list(expected_whitelist)!r} — the attestation "
+                "does not describe the expected executable "
+                "extension set")
     pid = att.get("pid")
     if not isinstance(pid, int) or pid <= 0:
         raise CapabilityRecordInvalid("attestation pid missing/invalid")
@@ -249,7 +272,7 @@ def load_deployment_attestation(
     if not isinstance(launched, str) or not launched:
         raise CapabilityRecordInvalid("attestation launched_at missing")
     performance_nodes_hash = None
-    if tuple(whitelist) == ("soloring_performance_nodes",):
+    if _is_perf_lane:
         # M17C-D FPR33-01(c): the performance lane fingerprints its
         # OWN node package (the predecessor gguf_commit slot is not
         # reused for a different meaning)

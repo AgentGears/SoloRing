@@ -58,86 +58,127 @@ def _refusal(message: str) -> SoloRingError:
                          message, status_code=422)
 
 
-async def _retained_fingerprint_hash(session, profile_doc) -> str:
-    """The retained ExecutionModelFingerprint hash for the profile's
-    model identity — resolved through the artifact store's model
-    index (the retained authority chain; the v5 document is never
-    consulted)."""
+def _read_verified_artifact(kind: str, pointer: str) -> bytes:
+    """Read a retained artifact at its content address and VERIFY the
+    bytes rehash to the address (the store's own content-address
+    law, run here so a pointer can never address wrong bytes)."""
+    import hashlib as _hl
     from pathlib import Path
 
     from soloring.settings import get_settings
 
-    root = (Path(get_settings().data_dir) /
-            "workflow-artifacts" / "execution_model_fingerprints")
-    if not root.is_dir():
+    path = (Path(get_settings().data_dir) / "workflow-artifacts" /
+            kind / "sha256" / pointer[:2] / pointer[2:4] /
+            f"{pointer}.json")
+    if not path.is_file():
         raise _refusal(
-            "the retained execution-model-fingerprint store is "
-            "absent; the v2 reconstruction cannot run")
+            f"the retained {kind} artifact addressed by the "
+            f"Generation's captured pointer {pointer} is absent")
+    data = path.read_bytes()
+    if _hl.sha256(data).hexdigest() != pointer:
+        raise _refusal(
+            f"the retained {kind} artifact addressed by {pointer} "
+            "does not rehash to its content address")
+    return data
+
+
+def _retained_profile_from_pointer(workflow_spec, generation):
+    """FPR34-05: the retained realization profile for the
+    Generation's EXACT captured release — the authenticated
+    document's ``realization.profile.hash`` is a POINTER only; the
+    content-addressed artifact is loaded, rehash-verified, bound to
+    the Generation's OWN workflow identity, and parsed. No global
+    workflow-id uniqueness: two lawful releases sharing a workflow
+    ID each resolve their own."""
     import json as _json
 
-    for path in sorted(root.rglob("*.json")):
-        try:
-            doc = _json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            continue
-        model = doc.get("model") or {}
-        if model.get("id") == profile_doc.model.id and                 model.get("version") == profile_doc.model.version:
-            name = path.stem
-            if len(name) == 64:
-                return name
-    raise _refusal(
-        "no retained execution-model fingerprint matches the "
-        "retained profile's model identity "
-        f"{profile_doc.model.id!r}")
+    from soloring.performance.execution_spec import (
+        retained_profile_pointer,
+    )
+
+    pointer = retained_profile_pointer(workflow_spec)
+    data = _read_verified_artifact("realization_profiles", pointer)
+    try:
+        doc = _json.loads(data.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise _refusal(
+            f"the retained realization profile {pointer} does not "
+            f"parse: {exc}") from exc
+    if doc.get("workflow_id") != generation["workflow_id"]:
+        raise _refusal(
+            f"the retained realization profile {pointer} is bound to "
+            f"workflow {doc.get('workflow_id')!r}, not the "
+            f"Generation's own workflow "
+            f"{generation['workflow_id']!r}")
+    raw_profile = data.decode("utf-8")
+    if doc.get("schema_version") == 2 and "spatial" in doc:
+        doc = {k: v for k, v in doc.items() if k != "spatial"}
+        doc["schema_version"] = 1
+        raw_profile = _json.dumps(doc)
+    return pointer, raw_profile
 
 
-async def _retained_profile_for_workflow(session, workflow_id: str):
-    """FPR33-03/05: the retained realization-profile artifact for a
-    Generation's OWN workflow identity — resolved by parsing the
-    artifact store's realization_profiles and matching workflow_id
-    (exactly one match required). The generations table carries no
-    profile-hash column and the v5 document is never consulted, so
-    the retained package's own artifact set IS the authority."""
+def _retained_fingerprint_from_pointer(workflow_spec, generation,
+                                       profile_doc) -> str:
+    """FPR34-05: the retained execution-model fingerprint for the
+    Generation's EXACT captured release — the authenticated
+    document's ``model.execution_model_fingerprint_hash`` pointer,
+    content-verified and bound to BOTH the Generation row's model
+    identity and the retained profile's model identity."""
     import json as _json
-    from pathlib import Path
 
-    from soloring.settings import get_settings
+    from soloring.performance.execution_spec import (
+        retained_fingerprint_pointer,
+    )
 
-    root = (Path(get_settings().data_dir) / "workflow-artifacts" /
-            "realization_profiles")
-    if not root.is_dir():
+    pointer = retained_fingerprint_pointer(workflow_spec)
+    data = _read_verified_artifact("execution_model_fingerprints",
+                                   pointer)
+    try:
+        doc = _json.loads(data.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError) as exc:
         raise _refusal(
-            "the retained realization-profile store is absent")
-    matches = []
-    for path in sorted(root.rglob("*.json")):
-        try:
-            doc = _json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            continue
-        if doc.get("workflow_id") == workflow_id:
-            matches.append((path.stem, path))
-    if len(matches) != 1:
-        raise _refusal(
-            f"expected exactly one retained realization profile for "
-            f"workflow {workflow_id!r}; found {len(matches)}")
-    profile_hash, path = matches[0]
-    return profile_hash, path.read_text(encoding="utf-8")
-
+            f"the retained execution-model fingerprint {pointer} "
+            f"does not parse: {exc}") from exc
+    model = doc.get("model")
+    if not model:
+        # the schema-3 fingerprint shape carries no model identity:
+        # its release binding is the descriptor-checked release
+        # MEMBERSHIP (the pointer addresses this release's own
+        # fingerprint member, content-verified above) plus the
+        # caller's fingerprint↔template and profile↔fingerprint
+        # closure laws — the ladder enforces both on every
+        # retained-3 submission
+        return pointer
+    for what, ident in (
+            ("the Generation row", {
+                "id": generation["model"],
+                "version": generation["model_version"]}),
+            ("the retained profile", {
+                "id": profile_doc.model.id,
+                "version": profile_doc.model.version})):
+        if (model.get("id") != ident["id"]
+                or model.get("version") != ident["version"]):
+            raise _refusal(
+                f"the retained execution-model fingerprint {pointer} "
+                f"carries model identity {model.get('id')!r}/"
+                f"{model.get('version')!r}, disagreeing with "
+                f"{what} {ident['id']!r}/{ident['version']!r}")
+    return pointer
 
 
 async def _compile_retained(session, generation, snapshot_json,
                             profile_doc, manifest_doc, profile_hash,
-                            fingerprint_hash):
+                            fingerprint_hash, requirement_map):
     """Re-run the frozen M9 realization compiler over RETAINED
-    authority only: the captured snapshot's visual pack + facet
-    requirements from the retained visual-facet rows + the retained
-    profile/manifest artifacts. The v5 document is never an
-    input."""
+    authority only: the captured snapshot's visual pack + the
+    CAPTURED facet requirements (FPR34-04: from the Generation's
+    authenticated document, never today's mutable visual_facets
+    row) + the retained profile/manifest artifacts."""
     from soloring.realization.authority import (
         build_captured_authority,
     )
     from soloring.realization.compiler import compile_realization
-    from sqlalchemy import text as _t
 
     snapshot = json.loads(snapshot_json)
     pack = snapshot.get("visual_reference_pack")
@@ -145,13 +186,6 @@ async def _compile_retained(session, generation, snapshot_json,
         raise _refusal(
             "a v5-over-v2 Generation whose snapshot carries no "
             "visual reference pack cannot be reconstructed")
-    facet_rows = (await session.execute(_t(
-        "SELECT vf.visual_facet_id, vf.requirement FROM "
-        "visual_facets vf JOIN projects p ON "
-        "p.id = vf.project_id WHERE p.id = :p"),
-        {"p": generation["project_id"]})).mappings().all()
-    requirement_map = {r["visual_facet_id"]: r["requirement"]
-                      for r in facet_rows}
     authority = build_captured_authority(pack, requirement_map)
     result = compile_realization(
         captured_visual_authority=authority,
@@ -242,28 +276,19 @@ async def execute_schema5_performance_inputs(
                     "with no retained model identity")
             from soloring.realization.profile import parse_profile
 
-            _rph, _raw_profile = await _retained_profile_for_workflow(
-                session, generation["workflow_id"])
-            # a schema-3 v2 profile carries the additive spatial
-            # wrapper; the M9 inherited portion IS the profile the
-            # spec compiled from (the same delegation
-            # parse_profile_v2 itself performs)
-            import json as _json
-
-            _pdoc = _json.loads(_raw_profile)
-            if _pdoc.get("schema_version") == 2 and "spatial" in _pdoc:
-                _pdoc = {k: v for k, v in _pdoc.items()
-                         if k != "spatial"}
-                _pdoc["schema_version"] = 1
-                _raw_profile = _json.dumps(_pdoc)
+            # FPR34-05: the authenticated document's OWN pointers
+            # address the Generation's EXACT captured release (no
+            # global workflow-id uniqueness — two lawful releases
+            # sharing a workflow ID each resolve their own); the
+            # artifacts are content-verified + identity-bound at
+            # resolution
+            _rph, _raw_profile = _retained_profile_from_pointer(
+                workflow_spec, generation)
             profile_doc = parse_profile(_raw_profile)
             v2_profile = profile_doc
             v2_profile_hash = _rph
-            # FPR33-03: the fingerprint hash comes from the RETAINED
-            # fingerprint artifact addressed by the profile's OWN
-            # model identity chain — never from the projection
-            fingerprint_hash = await _retained_fingerprint_hash(
-                session, profile_doc)
+            fingerprint_hash = _retained_fingerprint_from_pointer(
+                workflow_spec, generation, profile_doc)
         # the visual-reference-pack identity from the CAPTURED
         # snapshot (the retained M8 authority), and the profile
         # hash from the retained artifact the profile was parsed
@@ -287,10 +312,17 @@ async def execute_schema5_performance_inputs(
             # the retained authority (the snapshot's captured pack +
             # the retained profile/manifest/fingerprint) — the exact
             # realization meaning, independently of the projection
+            # (FPR34-04: the facet requirements come from the
+            # CAPTURED document coordinates, never the mutable row)
+            from soloring.performance.execution_spec import (
+                captured_requirement_map,
+            )
+
             try:
                 compiled_realization = await _compile_retained(
                     session, generation, snap, v2_profile,
-                    manifest_doc, v2_profile_hash, fingerprint_hash)
+                    manifest_doc, v2_profile_hash, fingerprint_hash,
+                    captured_requirement_map(workflow_spec))
             except SoloRingError as exc:
                 raise _refusal(str(exc.message)) from exc
         expected = expected_lower_from_retained(

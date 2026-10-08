@@ -29,9 +29,7 @@ async def test_real_comfy_capture_path_creates_native_v5(
         assert r.status_code == 202, r.text
         generation = r.json()
         assert generation["executor"] == "comfy"
-        assert generation["manifest_hash"] == (
-            "24df9c9777406ce6cc30cab19dd85592d44036814abb56c66e"
-            "52d99bbe745147")
+        assert generation["manifest_hash"] == "dfba07d7bcabf11f18be3a3ba177f115221bc48b7c4ae8bd40de1f18f1d541b8"
         spec = json.loads((await _row(client, (
             "SELECT workflow_spec_json FROM generations "
             "WHERE id = :g"),

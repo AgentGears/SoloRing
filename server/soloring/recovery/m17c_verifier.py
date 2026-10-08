@@ -1960,41 +1960,112 @@ def _verify_generation_performance_inputs(
     _verify_gpi_expected_shape_and_derivation(con, blob_root)
 
 
-def _staged_fingerprint_hash(blob_root, profile_doc) -> str:
-    """The staged ExecutionModelFingerprint hash matching the
-    retained profile's model identity (the staged authority
-    chain)."""
+def _staged_verified_artifact(blob_root, kind: str, pointer: str,
+                              where: str) -> bytes:
+    """FPR34-05: read a STAGED artifact at its content address and
+    VERIFY the bytes rehash to the address — a pointer can never
+    address wrong bytes under recovery."""
+    import hashlib as _sh
+
+    path = (blob_root.parent / "workflow-artifacts" / kind /
+            "sha256" / pointer[:2] / pointer[2:4] /
+            f"{pointer}.json")
+    if not path.is_file():
+        raise _corrupt(
+            f"{where}: the staged {kind} artifact addressed by the "
+            f"Generation's captured pointer {pointer} is absent")
+    data = path.read_bytes()
+    if _sh.sha256(data).hexdigest() != pointer:
+        raise _corrupt(
+            f"{where}: the staged {kind} artifact addressed by "
+            f"{pointer} does not rehash to its content address")
+    return data
+
+
+def _staged_fingerprint_from_pointer(blob_root, projection, gen,
+                                     profile_doc, where: str) -> str:
+    """FPR34-05: the staged ExecutionModelFingerprint for the
+    Generation's EXACT captured release — the authenticated staged
+    document's ``model.execution_model_fingerprint_hash`` pointer,
+    content-verified and bound to BOTH the staged Generation row's
+    model identity and the staged profile's model identity. No
+    global scan: two lawful releases sharing a workflow ID each
+    resolve their own."""
     import json as _sj
 
-    root = (blob_root.parent / "workflow-artifacts" /
-            "execution_model_fingerprints")
-    if not root.is_dir():
+    from soloring.performance.execution_spec import (
+        retained_fingerprint_pointer,
+    )
+
+    pointer = retained_fingerprint_pointer(projection)
+    data = _staged_verified_artifact(
+        blob_root, "execution_model_fingerprints", pointer, where)
+    try:
+        doc = _sj.loads(data.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError) as exc:
         raise _corrupt(
-            "the staged execution-model-fingerprint store is "
-            "absent; the v2 reconstruction cannot run")
-    matches = []
-    for path in sorted(root.rglob("*.json")):
-        name = path.stem
-        if len(name) != 64:
-            continue
-        try:
-            doc = _sj.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            continue
-        model = doc.get("model") or {}
-        if model.get("id") == profile_doc.model.id and                 model.get("version") == profile_doc.model.version:
-            return name
-        # a schema-3 fingerprint (the m10_spatial_runtime shape)
-        # carries no top-level model identity: the staged release
-        # places exactly one fingerprint, which IS the profile's
-        # package member — accept it as the pairing when it is the
-        # ONLY staged fingerprint
-        matches.append(name)
-    if len(matches) == 1:
-        return matches[0]
-    raise _corrupt(
-        "no staged execution-model fingerprint matches the "
-        f"retained profile model {profile_doc.model.id!r}")
+            f"{where}: the staged execution-model fingerprint "
+            f"{pointer} does not parse: {exc}") from exc
+    model = doc.get("model")
+    if not model:
+        # the schema-3 fingerprint shape carries no model identity:
+        # the release binding is the descriptor-checked release
+        # MEMBERSHIP (the pointer addresses this release's own
+        # fingerprint member, content-verified above) plus the
+        # recovery fingerprint↔template and profile↔fingerprint
+        # closure laws over the same staged artifacts
+        return pointer
+    for what, ident in (
+            ("the staged Generation row", {
+                "id": gen["model"], "version": gen["model_version"]}),
+            ("the staged profile", {
+                "id": profile_doc.model.id,
+                "version": profile_doc.model.version})):
+        if (model.get("id") != ident["id"]
+                or model.get("version") != ident["version"]):
+            raise _corrupt(
+                f"{where}: the staged execution-model fingerprint "
+                f"{pointer} carries model identity "
+                f"{model.get('id')!r}/{model.get('version')!r}, "
+                f"disagreeing with {what} "
+                f"{ident['id']!r}/{ident['version']!r}")
+    return pointer
+
+
+def _staged_profile_from_pointer(blob_root, projection, gen,
+                                 where: str):
+    """FPR34-05: the staged realization profile for the Generation's
+    EXACT captured release — the authenticated staged document's
+    ``realization.profile.hash`` pointer (an ADDRESS only),
+    content-verified, bound to the Generation's OWN workflow
+    identity, and parsed."""
+    import json as _sj
+
+    from soloring.performance.execution_spec import (
+        retained_profile_pointer,
+    )
+
+    pointer = retained_profile_pointer(projection)
+    data = _staged_verified_artifact(
+        blob_root, "realization_profiles", pointer, where)
+    try:
+        doc = _sj.loads(data.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise _corrupt(
+            f"{where}: the staged realization profile {pointer} "
+            f"does not parse: {exc}") from exc
+    if doc.get("workflow_id") != gen["workflow_id"]:
+        raise _corrupt(
+            f"{where}: the staged realization profile {pointer} is "
+            f"bound to workflow {doc.get('workflow_id')!r}, not "
+            f"the Generation's own workflow "
+            f"{gen['workflow_id']!r}")
+    raw_profile = data.decode("utf-8")
+    if doc.get("schema_version") == 2 and "spatial" in doc:
+        doc = {k: v for k, v in doc.items() if k != "spatial"}
+        doc["schema_version"] = 1
+        raw_profile = _sj.dumps(doc)
+    return pointer, raw_profile
 
 
 def _verify_gpi_expected_shape_and_derivation(
@@ -2149,60 +2220,31 @@ def _verify_gpi_expected_shape_and_derivation(
         profile_hash_key = None
         if projection["schema_version"] == 2:
             # FPR32-M17CD-04: the EXACT v2 reconstruction from
-            # STAGED facts — the profile artifact addressed by
-            # the row's OWN realization_profile_hash
+            # STAGED facts — the profile artifact addressed by the
+            # row's OWN realization_profile_hash
             if gen["model"] is None:
                 raise _corrupt(
                     f"{where}: v5-over-v2 lower meaning on a "
                     "Generation with no retained model identity")
-            # FPR33-03/05: resolve the profile by the Generation's
-            # OWN workflow identity among the STAGED artifacts —
-            # the generations table carries no profile-hash column
-            # and the v5 document is never consulted
-            profile_root = (blob_root.parent /
-                            "workflow-artifacts" /
-                            "realization_profiles")
-            if not profile_root.is_dir():
-                raise _corrupt(
-                    f"{where}: the staged realization-profile store "
-                    "is absent")
-            profile_matches = []
-            for path in sorted(profile_root.rglob("*.json")):
-                try:
-                    doc = _json.loads(
-                        path.read_text(encoding="utf-8"))
-                except (OSError, ValueError):
-                    continue
-                if doc.get("workflow_id") == gen["workflow_id"]:
-                    profile_matches.append((path.stem, path))
-            if len(profile_matches) != 1:
-                raise _corrupt(
-                    f"{where}: expected exactly one staged "
-                    f"realization profile for workflow "
-                    f"{gen['workflow_id']!r}; found "
-                    f"{len(profile_matches)}")
-            profile_hash_key, profile_path = profile_matches[0]
+            # FPR34-05: resolve the profile + fingerprint from the
+            # authenticated staged document's OWN pointers — each a
+            # content-verified, identity-bound member of the
+            # Generation's EXACT captured release. No global
+            # workflow-id uniqueness: two lawful releases sharing a
+            # workflow ID each resolve their own.
             from soloring.realization.profile import parse_profile
 
             try:
-                _raw_prof = profile_path.read_text(encoding="utf-8")
-                _pdoc = _json.loads(_raw_prof)
-                if _pdoc.get("schema_version") == 2 and "spatial"                         in _pdoc:
-                    _pdoc = {k: v for k, v in _pdoc.items()
-                             if k != "spatial"}
-                    _pdoc["schema_version"] = 1
-                    _raw_prof = _json.dumps(_pdoc)
+                (profile_hash_key,
+                 _raw_prof) = _staged_profile_from_pointer(
+                    blob_root, projection, gen, where)
                 v2_profile = parse_profile(_raw_prof)
             except SoloRingError as exc:
                 raise _corrupt(
                     f"{where}: the retained realization profile "
                     f"does not parse: {exc}") from exc
-            # FPR33-03: the fingerprint hash from the STAGED
-            # artifact chain (the profile's model identity ->
-            # the staged fingerprint artifact) — never the
-            # projection
-            fingerprint_hash = _staged_fingerprint_hash(
-                blob_root, v2_profile)
+            fingerprint_hash = _staged_fingerprint_from_pointer(
+                blob_root, projection, gen, v2_profile, where)
         snap_row = con.execute(
             "SELECT snapshot_json FROM shot_revisions WHERE id = ?",
             (gen["shot_revision_id"],)).fetchone()
@@ -2230,14 +2272,17 @@ def _verify_gpi_expected_shape_and_derivation(
                     f"{where}: a v5-over-v2 Generation whose "
                     "snapshot carries no visual reference pack "
                     "cannot be reconstructed")
-            facet_rows = con.execute(
-                "SELECT vf.id AS fid, vf.requirement FROM "
-                "visual_facets vf JOIN shots s ON "
-                "s.id = ? WHERE vf.project_id = s.project_id",
-                (gen["shot_id"],)).fetchall()
-            requirement_map = {
-                r["fid"]: r["requirement"]
-                for r in facet_rows}
+            # FPR34-04: the CAPTURED facet requirements — from the
+            # authenticated staged document's own compiled
+            # realization (channel binding `required` flags +
+            # omitted_optional records), NEVER the staged mutable
+            # visual_facets rows (a post-capture PATCH of a facet
+            # requirement must not change recovery semantics)
+            from soloring.performance.execution_spec import (
+                captured_requirement_map,
+            )
+
+            requirement_map = captured_requirement_map(projection)
             try:
                 authority = build_captured_authority(
                     visual_pack, requirement_map)

@@ -41,11 +41,15 @@ class RecordedClient:
 
 
 async def _schema3_v5_generation(client, factory, tmp_path, *,
-                                 v2: bool):
+                                 v2: bool, profile_mutate=None):
     """A schema-5 Generation whose RETAINED package is manifest
     schema 3 (the M10E smoke package) — created through the REAL
     comfy capture path; v2=True seeds the M8 visual authority so
-    the lower logical form is v2."""
+    the lower logical form is v2. ``profile_mutate`` (FPR34-05)
+    additionally mutates the package's realization-profile document
+    BEFORE capture — a lawful re-release: the descriptor is
+    re-pinned, so the mutated package stays capture-coherent with a
+    DISTINCT realization_profile_hash under the SAME workflow_id."""
     from tests.test_m10e_package3_production import (
         _schema3_package,
     )
@@ -97,7 +101,13 @@ async def _schema3_v5_generation(client, factory, tmp_path, *,
         return docs
 
     settings = client._transport.app.state.settings
-    pkg = await _schema3_package(tmp_path, mutate=_add_performance_lane)
+    def _mutate(docs):
+        docs = _add_performance_lane(docs)
+        if profile_mutate is not None:
+            docs = profile_mutate(docs)
+        return docs
+
+    pkg = await _schema3_package(tmp_path, mutate=_mutate)
     settings.executor = "comfy"
     settings.workflow_package_dir = pkg
     try:
@@ -191,26 +201,33 @@ async def _schema3_v5_generation(client, factory, tmp_path, *,
         settings.executor = "comfy"  # the drive needs comfy too
 
 
-async def _drive_to_payload(client, generation_id, pkg_fingerprint_path, monkeypatch):
-    from soloring.worker.comfy_pipeline import drive_comfy_generation
-    from soloring.worker.ownership import (
-        acquire_worker_lease, claim_next_generation,
-    )
-
-    engine = client._transport.app.state.engine
-    settings = client._transport.app.state.settings
-    # the v2 lane verifies a live attestation on every submission —
-    # write the fixture attestation matching THIS package's own
-    # fingerprint whitelist (the schema-3 lane derives it from the
-    # captured m10_spatial_runtime); the process-liveness check is
-    # bypassed by the recorded-client abort before any submit
+async def _stage_schema5_runtime(client, monkeypatch,
+                                 pkg_fingerprint_path,
+                                 *, attestation_doc=None,
+                                 write_attestation=True):
+    """The shared non-live runtime staging for EVERY schema-5
+    retained-3 drive (FPR34-02): the lawful COMPOSED performance
+    attestation (the package's captured fingerprint whitelist + the
+    pinned performance node + its content hash, bound to the
+    configured executor origin), the liveness-read bypass, and the
+    model-root configuration for the captured artifact keys.
+    ``attestation_doc``/``write_attestation`` serve the FPR34-02
+    adversaries."""
     import json as _j
 
+    settings = client._transport.app.state.settings
     fp_doc = _j.loads(
         pkg_fingerprint_path.read_text(encoding="utf-8"))
     rr = fp_doc.get("m10_spatial_runtime") or fp_doc[
         "runtime_requirements"]
     settings.comfy_base_url = "http://127.0.0.1:8188"
+    from soloring.performance.executor_runtime import (
+        performance_nodes_content_hash,
+    )
+
+    composed = sorted(
+        set(rr.get("custom_nodes") or ())
+        | {"soloring_performance_nodes"})
     d = settings.data_dir / "comfy-fingerprint"
     d.mkdir(parents=True, exist_ok=True)
     # the liveness defense is a live-process check (M5B law) — the
@@ -221,19 +238,13 @@ async def _drive_to_payload(client, generation_id, pkg_fingerprint_path, monkeyp
         "verify_live_process",
         lambda attestation, port=8188: True)
     # the live model-byte verification reads the configured model
-    # roots — the battery stages content whose sha256 equals each
-    # pinned artifact digest (the m10E closure-env precedent), so
-    # the byte law runs FOR REAL against the captured list
+    # roots — the battery stages the roots for every captured
+    # storage key and bypasses ONLY the byte-read (the
+    # liveness-class bypass precedent)
     roots = {}
     for art in rr.get("artifacts", []):
         root = d / "modelroots" / art["storage_root_key"]
         root.mkdir(parents=True, exist_ok=True)
-        # content whose sha256 IS the pinned digest (the byte law
-        # runs for real): a preimage is unnecessary — writing the
-        # digest bytes as a 32-byte file never hashes to itself, so
-        # the battery instead bypasses ONLY the byte-read (the
-        # liveness-class bypass precedent) after proving the roots
-        # are configured for every captured storage key
         roots[art["storage_root_key"]] = root
     monkeypatch.setattr(
         "soloring.realization.model_roots.verify_live_model_bytes",
@@ -246,26 +257,52 @@ async def _drive_to_payload(client, generation_id, pkg_fingerprint_path, monkeyp
             ("vae", "comfy_model_root_vae")):
         if key in roots:
             setattr(settings, attr, roots[key])
-    d = settings.data_dir / "comfy-fingerprint"
-    d.mkdir(parents=True, exist_ok=True)
-    (d / "deployment_attestation.json").write_text(_j.dumps({
-        "schema_version": 4,
-        "attestation": {
-            "comfyui_commit": rr["comfyui_commit"],
-            # the v4 single-slot commit field carries THE required
-            # node's pin (the drive compares it against the
-            # captured pin whatever the node's name)
-            "gguf_commit": next(iter(rr["custom_nodes"].values())),
-            "executor_origin": "http://127.0.0.1:8188",
-            "custom_node_policy": rr.get(
-                "custom_node_policy",
-                {"disable_all": True,
-                 "whitelist": list(rr["custom_nodes"])}),
-            "pid": 4242,
-            "process_start_fingerprint": "fixture",
-            "launched_at": "2026-01-01T00:00:00Z",
-        },
-    }))
+    if attestation_doc is None:
+        attestation_doc = {
+            "schema_version": 4,
+            "attestation": {
+                "comfyui_commit": rr["comfyui_commit"],
+                # the v4 single-slot commit field carries THE required
+                # node's pin (the drive compares it against the
+                # captured pin whatever the node's name)
+                "gguf_commit": next(iter(rr["custom_nodes"].values())),
+                "executor_origin": "http://127.0.0.1:8188",
+                "custom_node_policy": {"disable_all": True,
+                                       "whitelist": composed},
+                "performance_nodes_hash":
+                    performance_nodes_content_hash(),
+                "pid": 4242,
+                "process_start_fingerprint": "fixture",
+                "launched_at": "2026-01-01T00:00:00Z",
+            },
+        }
+    if write_attestation:
+        (d / "deployment_attestation.json").write_text(
+            _j.dumps(attestation_doc))
+
+
+async def _drive_to_payload(client, generation_id, pkg_fingerprint_path,
+                            monkeypatch, *, attestation_doc=None,
+                            write_attestation=True):
+    """Drive the REAL worker path for ``generation_id`` until the
+    recorded client submits (or the drive refuses first). The default
+    attestation is the lawful COMPOSED performance lane; the FPR34-02
+    adversaries override ``attestation_doc`` (a mutated document) or
+    suppress the file entirely (``write_attestation=False``).
+    Returns ``(stub, outcome, error_row)`` — ``error_row`` is the
+    generations row's (error_code, error_message) when the drive
+    refused before submission, else None."""
+    from soloring.worker.comfy_pipeline import drive_comfy_generation
+    from soloring.worker.ownership import (
+        acquire_worker_lease, claim_next_generation,
+    )
+
+    engine = client._transport.app.state.engine
+    settings = client._transport.app.state.settings
+    await _stage_schema5_runtime(
+        client, monkeypatch, pkg_fingerprint_path,
+        attestation_doc=attestation_doc,
+        write_attestation=write_attestation)
     worker_id = "m33-retained3-worker"
     await acquire_worker_lease(engine, worker_id, 60)
     while True:
@@ -277,18 +314,16 @@ async def _drive_to_payload(client, generation_id, pkg_fingerprint_path, monkeyp
             engine, settings, worker_id, claimed_id, attempt_id,
             stub)
         if claimed_id == generation_id:
+            error_row = None
             if stub.payload is None:
                 from sqlalchemy import text as _t
 
                 async with engine.connect() as conn:
-                    err = (await conn.execute(_t(
+                    error_row = (await conn.execute(_t(
                         "SELECT error_code, error_message FROM "
                         "generations WHERE id = :g"),
                         {"g": claimed_id})).mappings().one()
-                raise AssertionError(
-                    f"target generation failed before payload: "
-                    f"{err['error_code']}: {err['error_message']}")
-            return stub, outcome
+            return stub, outcome, error_row
 
 
 @pytest.mark.asyncio
@@ -301,9 +336,10 @@ async def test_retained3_v5_over_v1_production(client, factory,
     world, generation_id, spec, pkg = await _schema3_v5_generation(
         client, factory, tmp_path, v2=False)
     assert spec["schema_version"] == 5
-    stub, outcome = await _drive_to_payload(
+    stub, outcome, error_row = await _drive_to_payload(
         client, generation_id,
         pkg / 'execution-model-fingerprint.json', monkeypatch)
+    assert error_row is None  # the lawful composed lane drives on
     assert stub.payload is not None  # the preparation completed
     document = stub.payload
     # the manifest projection ran: the retained-3 lower-logical view
@@ -329,9 +365,10 @@ async def test_retained3_v5_over_v2_production(client, factory,
         client, factory, tmp_path, v2=True)
     assert spec["schema_version"] == 5
     assert "model" in spec and "realization" in spec  # v2 lower
-    stub, outcome = await _drive_to_payload(
+    stub, outcome, error_row = await _drive_to_payload(
         client, generation_id,
         pkg / 'execution-model-fingerprint.json', monkeypatch)
+    assert error_row is None  # the lawful composed lane drives on
     # reaching the payload proves the v2 closure + the retained
     # profile reconstruction + the lower-projection dispatch all
     # ran on the REAL path

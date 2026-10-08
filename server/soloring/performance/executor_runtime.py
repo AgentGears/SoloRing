@@ -48,9 +48,9 @@ def check_performance_runtime(attestation) -> None:
     required = performance_nodes_content_hash()
     policy = tuple(
         getattr(attestation, "custom_node_policy", ()) or ())
-    if policy != (PERFORMANCE_NODE_PACKAGE,):
+    if PERFORMANCE_NODE_PACKAGE not in policy:
         raise ModelIncompatible(
-            f"the performance deployment must attest exactly the "
+            f"the performance deployment must attest the "
             f"{PERFORMANCE_NODE_PACKAGE!r} custom node; got {policy!r}")
     actual = getattr(attestation, "performance_nodes_hash", None)
     if actual != required:

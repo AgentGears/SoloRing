@@ -55,6 +55,47 @@ async def _performance_generation(client, factory, tmp_path,
     return world, r.json()["id"]
 
 
+def _stage_performance_attestation(client, monkeypatch):
+    """FPR34-02: every schema-5 submission now authenticates the
+    performance deployment at the worker gate. The pinned package
+    (a v1 manifest) requires no custom node of its own, so the
+    lawful lane here is exactly the launcher's performance lane:
+    disable_all + the pinned performance node + its exact content
+    hash. The non-live battery bypasses ONLY the live-pid read
+    (the M5B liveness-class bypass precedent) — the origin law and
+    the hash law run for real."""
+    import json as _json
+
+    from soloring.performance.executor_runtime import (
+        performance_nodes_content_hash,
+    )
+
+    settings = client._transport.app.state.settings
+    settings.comfy_base_url = "http://127.0.0.1:8188"
+    d = settings.data_dir / "comfy-fingerprint"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "deployment_attestation.json").write_text(_json.dumps({
+        "schema_version": 4,
+        "attestation": {
+            "comfyui_commit": "a" * 40,
+            "gguf_commit": "b" * 40,
+            "executor_origin": "http://127.0.0.1:8188",
+            "custom_node_policy": {
+                "disable_all": True,
+                "whitelist": ["soloring_performance_nodes"]},
+            "performance_nodes_hash":
+                performance_nodes_content_hash(),
+            "pid": 4242,
+            "process_start_fingerprint": "fixture",
+            "launched_at": "2026-01-01T00:00:00Z",
+        },
+    }))
+    monkeypatch.setattr(
+        "soloring.executors.comfy.capability_record."
+        "verify_live_process",
+        lambda attestation, port=8188: True)
+
+
 def _claim(engine, worker_id):
     from soloring.worker.ownership import (
         acquire_worker_lease, claim_next_generation,
@@ -154,6 +195,7 @@ async def test_production_drive_binds_performance_into_graph(
             "UPDATE generations SET executor = 'comfy' "
             "WHERE id = :g"), {"g": generation_id})
 
+    _stage_performance_attestation(client, monkeypatch)
     worker_id = "m17cd-prodtest-worker"
     await acquire_worker_lease(engine, worker_id, 60)
     for _ in range(4):
@@ -177,7 +219,16 @@ async def test_production_drive_binds_performance_into_graph(
         attempt_id, stub)
     assert outcome == "failed"  # the stub abort; PREP completed
 
-    assert stub.payload is not None
+    if stub.payload is None:  # disclose the refusal verbatim
+        from sqlalchemy import text as _tt
+
+        async with engine.connect() as conn:
+            err = (await conn.execute(_tt(
+                "SELECT error_code, error_message FROM generations "
+                "WHERE id = :g"), {"g": generation_id})).mappings().one()
+        raise AssertionError(
+            f"drive refused before payload: {err['error_code']}: "
+            f"{err['error_message']}")
     document = stub.payload
     graph = document["prompt"]
 

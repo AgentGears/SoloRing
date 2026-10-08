@@ -61,14 +61,15 @@ def test_every_graph_class_is_implemented():
     # stock classes load with the executor core (no custom node
     # needed); every NON-stock class must be in the pinned package
     STOCK = {"LoadImage", "KSampler", "CheckpointLoaderSimple",
-             "CLIPTextEncode", "VAEDecode", "VAEEncode", "EmptyLatentImage"}
+             "CLIPTextEncode", "VAEDecode", "VAEEncode",
+             "EmptyLatentImage", "SaveAnimatedWEBP"}
     for node_id, node in graph.items():
         cls = node["class_type"]
         assert cls in implemented or cls in STOCK, (
             node_id, cls)
     # and the stock classes are genuinely stock
-    assert graph["31"]["class_type"] == "KSampler"
-    assert "model" in graph["31"]["inputs"]
+    assert graph["31"]["class_type"] == "SaveAnimatedWEBP"
+    assert "images" in graph["31"]["inputs"]
 
 
 def test_performance_lane_attestation_roundtrip(tmp_path):
@@ -134,9 +135,10 @@ def test_check_performance_runtime_law():
     with pytest.raises(ModelIncompatible):
         check_performance_runtime(_WrongHash())
 
+    # FPR34-02: the COMPOSED lane — the package node must be
+    # present (with its hash); a set WITHOUT it still refuses
     class _WrongPolicy:
-        custom_node_policy = ("ComfyUI-GGUF",
-                              "soloring_performance_nodes")
+        custom_node_policy = ("ComfyUI-GGUF", "ComfyUI-WanVideoWrapper")
         performance_nodes_hash = performance_nodes_content_hash()
 
     with pytest.raises(ModelIncompatible):

@@ -62,6 +62,84 @@ def _grammar_refusal(message: str) -> SoloRingError:
                          message, status_code=500)
 
 
+_HEX64 = set("0123456789abcdef")
+
+
+def captured_requirement_map(spec: dict) -> dict:
+    """FPR34-04: the CAPTURED per-facet requirement map — read from
+    the authenticated document's OWN compiled realization (every
+    channel binding's ``required`` flag plus the ``omitted_optional``
+    records), never from today's mutable ``visual_facets`` row. The
+    M9 compiler emitted exactly these coordinates at capture from
+    the coherent capture read, and the document's bytes are guarded
+    by the spec-hash authentication law, so the map is the captured
+    authority. Fails closed on an inconsistent duplicated facet (a
+    tamper shape) or a realization block absent where required."""
+    realization = (spec or {}).get("realization")
+    if not isinstance(realization, dict):
+        raise _grammar_refusal(
+            "captured_requirement_map: the document carries no "
+            "realization block (a v2 lower is required)")
+    requirement: dict[str, str] = {}
+
+    def _record(fid: str, value: str, where: str) -> None:
+        if not isinstance(fid, str) or not fid:
+            raise _grammar_refusal(
+                f"captured_requirement_map: {where} carries no "
+                "visual_facet_id")
+        prior = requirement.get(fid)
+        if prior is not None and prior != value:
+            raise _grammar_refusal(
+                f"captured_requirement_map: facet {fid!r} carries "
+                f"conflicting captured requirements ({prior!r} vs "
+                f"{value!r}) — tampered coordinates")
+        requirement[fid] = value
+
+    for channel in realization.get("channels") or []:
+        for binding in channel.get("bindings") or []:
+            _record(
+                binding.get("visual_facet_id"),
+                "required" if binding.get("required")
+                else "optional",
+                "a realization channel binding")
+    for omitted in realization.get("omitted_optional") or []:
+        _record(omitted.get("visual_facet_id"), "optional",
+                "an omitted_optional record")
+    return requirement
+
+
+def retained_profile_pointer(spec: dict) -> str:
+    """FPR34-05: the POINTER to the Generation's exact captured
+    release's realization profile — the authenticated document's own
+    ``realization.profile.hash`` (the M9 compiler filled it from the
+    SAME captured release buffers). The pointer is only an ADDRESS:
+    callers must verify it against the content-addressed retained
+    artifact (content hash + the workflow binding) before use."""
+    realization = (spec or {}).get("realization")
+    pointer = ((realization or {}).get("profile") or {}).get("hash")
+    if not isinstance(pointer, str) or len(pointer) != 64 \
+            or set(pointer) - _HEX64:
+        raise _grammar_refusal(
+            "retained_profile_pointer: the authenticated document "
+            "carries no valid realization.profile.hash pointer")
+    return pointer
+
+
+def retained_fingerprint_pointer(spec: dict) -> str:
+    """FPR34-05: the POINTER to the Generation's exact captured
+    release's execution-model fingerprint — the authenticated
+    document's own ``model.execution_model_fingerprint_hash``."""
+    pointer = ((spec or {}).get("model") or {}).get(
+        "execution_model_fingerprint_hash")
+    if not isinstance(pointer, str) or len(pointer) != 64 \
+            or set(pointer) - _HEX64:
+        raise _grammar_refusal(
+            "retained_fingerprint_pointer: the authenticated "
+            "document carries no valid model."
+            "execution_model_fingerprint_hash pointer")
+    return pointer
+
+
 def is_v5(spec: dict) -> bool:
     return isinstance(spec, dict) \
         and spec.get("schema_version") \
