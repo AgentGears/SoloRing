@@ -120,6 +120,13 @@ class DeploymentAttestation:
     process_start_fingerprint: str  # CreationDate string from the OS
     custom_node_policy: tuple  # the EXACT enforced extension set (v4)
     launched_at: str
+    # M17C-D FPR33-01(c): the EXPLICIT performance-lane identity —
+    # the content hash of the pinned in-tree soloring_performance_
+    # nodes package, recorded by the launcher when (and only when)
+    # the performance lane is deployed. None on the predecessor
+    # GGUF lane (a GGUF attestation carrying it is invalid — the
+    # lanes stay disjoint).
+    performance_nodes_hash: str | None = None
 
     def origin_matches(self, client_base: str) -> bool:
         """The attested executor must be THE executor the client targets
@@ -241,6 +248,22 @@ def load_deployment_attestation(
     launched = att.get("launched_at")
     if not isinstance(launched, str) or not launched:
         raise CapabilityRecordInvalid("attestation launched_at missing")
+    performance_nodes_hash = None
+    if tuple(whitelist) == ("soloring_performance_nodes",):
+        # M17C-D FPR33-01(c): the performance lane fingerprints its
+        # OWN node package (the predecessor gguf_commit slot is not
+        # reused for a different meaning)
+        raw_hash = att.get("performance_nodes_hash")
+        if not isinstance(raw_hash, str) or len(raw_hash) != 64 \
+                or raw_hash.strip("0123456789abcdef"):
+            raise CapabilityRecordInvalid(
+                "the performance-lane attestation must carry "
+                "performance_nodes_hash as a 64-hex content hash")
+        performance_nodes_hash = raw_hash
+    elif "performance_nodes_hash" in att:
+        raise CapabilityRecordInvalid(
+            "a predecessor-lane attestation must not carry "
+            "performance_nodes_hash (the lanes are disjoint)")
     return DeploymentAttestation(
         comfyui_commit=att["comfyui_commit"],
         gguf_commit=att["gguf_commit"],
@@ -249,6 +272,7 @@ def load_deployment_attestation(
         pid=pid,
         process_start_fingerprint=fingerprint,
         launched_at=launched,
+        performance_nodes_hash=performance_nodes_hash,
     )
 
 
@@ -302,6 +326,7 @@ def build_deployment_attestation(
     *, comfyui_commit: str, gguf_commit: str, launched_at: str,
     pid: int, process_start_fingerprint: str, executor_origin: str,
     custom_node_whitelist: tuple[str, ...] = ("ComfyUI-GGUF",),
+    performance_nodes_hash: str | None = None,
 ) -> dict:
     """Emit the v4 attestation document (scripts/launch_comfy.py — only
     after proving the launched process serves the whitelisted executor).
@@ -319,6 +344,8 @@ def build_deployment_attestation(
                                    "whitelist": list(custom_node_whitelist)},
             "pid": pid,
             "process_start_fingerprint": process_start_fingerprint,
+            **({"performance_nodes_hash": performance_nodes_hash}
+               if performance_nodes_hash is not None else {}),
             "launched_at": launched_at,
         },
     }
