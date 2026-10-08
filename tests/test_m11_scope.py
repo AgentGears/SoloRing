@@ -154,11 +154,21 @@ def test_no_execution_source_delta_in_m11_owned_diff():
     # Post-M15 review remediation is byte-pinned, not path-authorized: any
     # later semantic edit to either source must update this reviewed pin.
     post_m15_owned = {
+        # M17C-D FPR33-01(c): the performance executor lane
+        # (the node package, the attestation record, the
+        # runtime branch, the authority wrap read-through,
+        # the lane law, the launcher lane), byte-pinned
+        'scripts/launch_comfy.py': '8f2c1eef9371e4eeede418f7aeb400d7524ce154',
+        'server/soloring/executor_nodes/soloring_performance_nodes/__init__.py': 'eefd03ef4d882722c4ca10164478584631c1a350',
+        'server/soloring/executors/comfy/capability_record.py': 'f22275332be6fede36d72b83a86d8b55cff49c25',
+        'server/soloring/realization/authority.py': '3fcbac52417e4cf79f423a2dace1d834797e8e94',
+        'server/soloring/realization/runtime.py': '2749ff589e3c4db1cd0ee2c24fd887e6459e88a1',
+        'server/soloring/performance/executor_runtime.py': 'd0e57f3a6d34a0bd81bd37e6aeb7edf4936db902',
         # M17C-D FPR32: the PINNED performance executor package
         # (the frozen LivePortrait contract), byte-pinned
         'workflows/performance_liveportrait_v1/manifest.json': '9325779e0b863b95ec4ea3d9bfa740809b9f0173',
-        'workflows/performance_liveportrait_v1/workflow.json': '9646dfed0c0798e57fcdcb6e0c3f752b6362cffb',
-        'workflows/performance_liveportrait_v1/workflow-package.json': '9115312a738c0ecb9285aaf18ce93d061cdee059',
+        'workflows/performance_liveportrait_v1/workflow.json': '783f26274fcf2d458a0c5a9983fe23e160f3d82b',
+        'workflows/performance_liveportrait_v1/workflow-package.json': '65d7fcb0ab5719b6681135cb71cb678cde6a7fec',
         # M17C-D execution succession (frozen plan R2-FINAL,
         # authorized 2026-10-07): the D lane's sampler/spec/
         # translation/worker modules + the touched persistence
@@ -166,11 +176,11 @@ def test_no_execution_source_delta_in_m11_owned_diff():
         'server/soloring/performance/execution_sampler.py':
             '2b12d5e9a5dd6d9c28e670f81f14da5c35c15c9d',
         'server/soloring/performance/execution_spec.py':
-            '217dc8f9d29ebd140009100e2aca86f6105a54f7',
+            '4fe23a7ee8ac497632acdbb1b041182ab160f848',
         'server/soloring/performance/execution_translation.py':
             '31d83591f465f28351cc8c99affcff50628a9804',
         'server/soloring/performance/worker_inputs.py':
-            '06890a532657029fc6893c624aead9b8f0030d2b',
+            '095aea8dad2351493aa5eac6e5e04ef24b1cfa6a',
         'server/soloring/worker/comfy_pipeline.py':
             'ae33961a6003fd9d93a574cc0cf27f3ec4e8517a',
         'server/soloring/generation/repository.py':
