@@ -209,6 +209,20 @@ M16_SURFACE = (
     # M17C-D FPR32 correction: the integrity battery + the
     # PINNED performance executor package
     r"^tests/test_m17cd32_integrity\.py$",
+    # M17C-D FPR33-01(c): the performance executor lane
+    r"^scripts/launch_comfy\.py$",
+    r"^server/soloring/executor_nodes/soloring_performance_nodes/\__init__\.py$",
+    r"^server/soloring/executors/comfy/capability_record\.py$",
+    r"^server/soloring/realization/authority\.py$",
+    r"^server/soloring/realization/runtime\.py$",
+    r"^tests/test_m17cd33_attestation_lane\.py$",
+    r"^tests/test_m17cd33_real_capture\.py$",
+    r"^tests/test_m17cd33_retained3\.py$",
+    r"^tests/test_m17cd33_retained3_recovery\.py$",
+    r"^tests/test_m17cd33_v2_complete\.py$",
+    # M17C-D FPR33: the m13 boundary carve for the three
+    # successor-owned executor impacts
+    r"^scripts/m13_validate_boundary\.py$",
     r"^workflows/performance_liveportrait_v1/(manifest|workflow|workflow-package)\.json$",
     # M17C-D: the GPI sibling insert joins the ONE Generation
     # persistence primitive (frozen plan R2-FINAL W2 §2.6)
@@ -275,7 +289,7 @@ FORBIDDEN_PATTERNS = [
     # M17C-D: translate.py is separately admitted above (the
     # performance_bindings marker extension); every other
     # executor source stays pinned
-    (r"^server/soloring/executors/(?!comfy/translate\.py$)",
+    (r"^server/soloring/executors/(?!comfy/translate\.py$|comfy/capability_record\.py$)",
      "executor sources (frozen pins; repin unauthorized)"),
     (r"^server/soloring/materializers/",
      "materializer sources (frozen pins; repin unauthorized)"),

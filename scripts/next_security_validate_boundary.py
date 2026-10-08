@@ -164,6 +164,20 @@ ALLOWLIST = (
     "tests/test_m17cd_worker_production_path.py",
     # M17C-D FPR32 correction: the integrity-chain battery
     "tests/test_m17cd32_integrity.py",
+    # M17C-D FPR33-01(c): the performance executor lane —
+    # the in-tree node package, the attestation record, the
+    # runtime law branch, the authority wrap read-through,
+    # and the launcher performance lane
+    "scripts/launch_comfy.py",
+    "server/soloring/executor_nodes/soloring_performance_nodes/__init__.py",
+    "server/soloring/executors/comfy/capability_record.py",
+    "server/soloring/realization/authority.py",
+    "server/soloring/realization/runtime.py",
+    "tests/test_m17cd33_attestation_lane.py",
+    "tests/test_m17cd33_real_capture.py",
+    "tests/test_m17cd33_retained3.py",
+    "tests/test_m17cd33_retained3_recovery.py",
+    "tests/test_m17cd33_v2_complete.py",
     # M17C-D FPR32: the PINNED performance executor package
     "workflows/performance_liveportrait_v1/manifest.json",
     "workflows/performance_liveportrait_v1/workflow.json",
@@ -688,6 +702,19 @@ def main(repo: Path = REPO) -> int:
                 "server/soloring/domain/storage.py")
             or f.startswith(
                 "server/soloring/api/m17c_")
+            # M17C-D FPR33-01(c) successor-owned executor impacts
+            # (the performance lane: the node package, the
+            # attestation field, the runtime branch, the authority
+            # wrap read-through)
+            or f.startswith(
+                "server/soloring/executor_nodes/")
+            or f == (
+                "server/soloring/executors/comfy/"
+                "capability_record.py")
+            or f == (
+                "server/soloring/realization/authority.py")
+            or f == (
+                "server/soloring/realization/runtime.py")
             or f.startswith(
                 "server/soloring/api/schemas/m17c_")
         ):
