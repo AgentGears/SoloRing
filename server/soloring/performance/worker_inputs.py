@@ -228,6 +228,7 @@ async def execute_schema5_performance_inputs(
         projection = lower_projection(workflow_spec)
         v2_profile = None
         fingerprint_hash = None
+        v2_profile_hash = None
         if projection["schema_version"] == 2:
             # FPR32-M17CD-04: the EXACT v2 reconstruction — the
             # retained PROFILE artifact addressed by the row's
