@@ -191,19 +191,58 @@ async def test_g06_ab_timing_drives_submitted_controls(client, factory,
         marker = document["extra_data"]["soloring"]
         bindings = marker["performance_bindings"]
         expected_blobs = gpi_a if label == "A" else gpi_b
-        assert {b["blob_hash"] for b in bindings} == \
+        # FPR33-02: the bundle contract — the per-segment evidence
+        # records and the role-bundle records are SEPARATE shapes;
+        # never assume every entry carries blob_hash
+        segment_rows = [b for b in bindings if "kind" not in b]
+        bundle_rows = [b for b in bindings if "kind" in b]
+        assert {b["blob_hash"] for b in segment_rows} == \
             set(expected_blobs.values())
+        assert {b["role"] for b in bundle_rows} == {
+            "performance.controls", "performance.vocal_audio"}
         graph = document["prompt"]
-        from soloring.workflows import manifest as _mm
 
-        mdoc = json.loads((_mm.WORKFLOW_DIR /
-                           "manifest.json").read_text())
-        for key in ("performance.controls",
-                    "performance.vocal_audio"):
-            decl = mdoc["inputs"][key]
-            reference = graph[decl["node"]]["inputs"][decl["field"]]
-            assert expected_blobs[key][:16] in reference, \
-                (label, key, reference)
+        # the GRAPH carries the ROLE-BUNDLE references at the pinned
+        # package's declared nodes/fields — and each bundle
+        # deterministically enumerates the exact verified rows
+        def _load_bundle(reference: str) -> dict:
+            name = reference.rsplit("/", 1)[-1]
+            digest16 = next(
+                part for part in name.split("_")
+                if len(part) == 16
+                and set(part) <= set("0123456789abcdef"))
+            from soloring.assets.blob_store import BlobStore
+
+            for path in (settings.data_dir / "blobs" /
+                         "sha256").rglob(f"{digest16}*"):
+                return json.loads(path.read_text(encoding="utf-8"))
+            raise AssertionError(f"bundle {name} not found")
+
+        for role, blob_set in (
+                ("performance.controls",
+                 {h for k, h in expected_blobs.items()
+                  if k == "performance.controls"}),
+                ("performance.vocal_audio",
+                 {h for k, h in expected_blobs.items()
+                  if k == "performance.vocal_audio"})):
+            bundle_refs = {b["bundle"] for b in bundle_rows
+                           if b["role"] == role}
+            assert len(bundle_refs) == 1, (label, role)
+            reference = bundle_refs.pop()
+            bundle = _load_bundle(reference)
+            assert bundle["role"] == role
+            assert {s["blob_hash"]
+                    for s in bundle["segments"]} == blob_set
+            assert [s["gpi_position"]
+                    for s in bundle["segments"]] == list(
+                range(len(bundle["segments"])))
+            assert {b["bundle"] for b in bundle_rows
+                    if b["role"] == role} == {
+                graph["40" if role == "performance.controls"
+                      else "41"]["inputs"][
+                    "controls_segments"
+                    if role == "performance.controls"
+                    else "audio_segments"]}
 
         # the generated media: decode comparable frames + hashes
         async with engine.connect() as conn:
