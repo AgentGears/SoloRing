@@ -220,6 +220,12 @@ M16_SURFACE = (
     r"^tests/test_m17cd33_retained3\.py$",
     r"^tests/test_m17cd33_retained3_recovery\.py$",
     r"^tests/test_m17cd33_v2_complete\.py$",
+    # M17C-D FPR34 correction: the FPR34 battery set
+    r"^tests/test_m17cd34_attestation_gate\.py$",
+    r"^tests/test_m17cd34_generic_only\.py$",
+    r"^tests/test_m17cd34_graph_contract\.py$",
+    r"^tests/test_m17cd34_retained_identity\.py$",
+    r"^tests/test_m17cd34_terminal_outputs\.py$",
     # M17C-D FPR33: the launcher-law re-pin
     r"^tests/test_m5b7_binding\.py$",
     # M17C-D FPR33: the m13 boundary carve for the three

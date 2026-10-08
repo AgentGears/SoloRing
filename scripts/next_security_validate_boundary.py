@@ -178,6 +178,12 @@ ALLOWLIST = (
     "tests/test_m17cd33_retained3.py",
     "tests/test_m17cd33_retained3_recovery.py",
     "tests/test_m17cd33_v2_complete.py",
+    # M17C-D FPR34 correction: the FPR34 battery set
+    "tests/test_m17cd34_attestation_gate.py",
+    "tests/test_m17cd34_generic_only.py",
+    "tests/test_m17cd34_graph_contract.py",
+    "tests/test_m17cd34_retained_identity.py",
+    "tests/test_m17cd34_terminal_outputs.py",
     # M17C-D FPR33: the launcher-law re-pin
     "tests/test_m5b7_binding.py",
     # M17C-D FPR32: the PINNED performance executor package
