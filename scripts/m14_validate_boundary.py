@@ -121,6 +121,8 @@ ALLOWED_PATTERNS = [
     r"^tests/test_m17cd33_retained3\.py$",
     r"^tests/test_m17cd33_retained3_recovery\.py$",
     r"^tests/test_m17cd33_v2_complete\.py$",
+    # M17C-D FPR33: the launcher-law re-pin
+    r"^tests/test_m5b7_binding\.py$",
     r"^workflows/performance_liveportrait_v1/(manifest|workflow|workflow-package)\.json$",
     r"^apps/web/src/lib/exactDuration\.ts$",
     r"^apps/web/src/components/ShotForm\.tsx$",

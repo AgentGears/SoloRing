@@ -220,6 +220,8 @@ M16_SURFACE = (
     r"^tests/test_m17cd33_retained3\.py$",
     r"^tests/test_m17cd33_retained3_recovery\.py$",
     r"^tests/test_m17cd33_v2_complete\.py$",
+    # M17C-D FPR33: the launcher-law re-pin
+    r"^tests/test_m5b7_binding\.py$",
     # M17C-D FPR33: the m13 boundary carve for the three
     # successor-owned executor impacts
     r"^scripts/m13_validate_boundary\.py$",

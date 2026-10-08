@@ -169,6 +169,8 @@ ALLOWLIST = (
     "tests/test_m17cd33_retained3.py",
     "tests/test_m17cd33_retained3_recovery.py",
     "tests/test_m17cd33_v2_complete.py",
+    # M17C-D FPR33: the launcher-law re-pin
+    "tests/test_m5b7_binding.py",
     # M17C-D FPR32: the PINNED performance executor package
     "workflows/performance_liveportrait_v1/manifest.json",
     "workflows/performance_liveportrait_v1/workflow.json",
