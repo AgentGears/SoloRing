@@ -1972,16 +1972,26 @@ def _staged_fingerprint_hash(blob_root, profile_doc) -> str:
         raise _corrupt(
             "the staged execution-model-fingerprint store is "
             "absent; the v2 reconstruction cannot run")
+    matches = []
     for path in sorted(root.rglob("*.json")):
+        name = path.stem
+        if len(name) != 64:
+            continue
         try:
             doc = _sj.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
         model = doc.get("model") or {}
         if model.get("id") == profile_doc.model.id and                 model.get("version") == profile_doc.model.version:
-            name = path.stem
-            if len(name) == 64:
-                return name
+            return name
+        # a schema-3 fingerprint (the m10_spatial_runtime shape)
+        # carries no top-level model identity: the staged release
+        # places exactly one fingerprint, which IS the profile's
+        # package member — accept it as the pairing when it is the
+        # ONLY staged fingerprint
+        matches.append(name)
+    if len(matches) == 1:
+        return matches[0]
     raise _corrupt(
         "no staged execution-model fingerprint matches the "
         f"retained profile model {profile_doc.model.id!r}")
@@ -2066,6 +2076,9 @@ def _verify_gpi_expected_shape_and_derivation(
         # staged facts — the Generation row, its staged input rows,
         # and the retained manifest artifact — compared against the
         # v5 lower projection (never a self-projection)
+        from soloring.domain.canonical import (
+            canonical_hash as _canon_hash,
+        )
         from soloring.performance.execution_spec import (
             expected_lower_from_retained as _expected_lower,
             lower_projection as _lower_projection,
@@ -2086,9 +2099,42 @@ def _verify_gpi_expected_shape_and_derivation(
         try:
             raw_manifest = artifact_path.read_text(encoding="utf-8")
             projection = _lower_projection(spec)
-            manifest_doc = (
-                _pm2(raw_manifest)
-                if projection["schema_version"] == 2 else _pm1(raw_manifest))
+            retained_schema = None
+            try:
+                retained_schema = _json.loads(raw_manifest).get(
+                    "schema_version")
+            except ValueError:
+                retained_schema = None
+            if str(retained_schema) == "3":
+                # FPR33-05: a retained schema-3 package projects to
+                # its lower v1/v2 view (the one-projection law the
+                # worker's ladder uses) before the v1/v2 parse
+                from soloring.spatial.package3 import (
+                    parse_manifest_v3,
+                    project_lower_logical_execution_view,
+                )
+
+                template_path = (blob_root.parent /
+                                 "workflow-artifacts" / "templates" /
+                                 "sha256" /
+                                 gen["workflow_template_hash"][:2] /
+                                 gen["workflow_template_hash"][2:4] /
+                                 f"{gen['workflow_template_hash']}"
+                                 ".json")
+                template_graph = _json.loads(
+                    template_path.read_text(encoding="utf-8"))
+                lower_view = project_lower_logical_execution_view(
+                    parse_manifest_v3(raw_manifest), template_graph,
+                    gen["manifest_hash"],
+                    gen["workflow_template_hash"],
+                    logical_schema_version=projection[
+                        "schema_version"])
+                manifest_doc = lower_view.manifest
+            else:
+                manifest_doc = (
+                    _pm2(raw_manifest)
+                    if projection["schema_version"] == 2
+                    else _pm1(raw_manifest))
         except (SoloRingError, ValueError, TypeError) as exc:
             raise _corrupt(
                 f"{where}: the retained manifest artifact does not "
@@ -2100,6 +2146,7 @@ def _verify_gpi_expected_shape_and_derivation(
             (gen_id,)).fetchall()
         v2_profile = None
         fingerprint_hash = None
+        profile_hash_key = None
         if projection["schema_version"] == 2:
             # FPR32-M17CD-04: the EXACT v2 reconstruction from
             # STAGED facts — the profile artifact addressed by
@@ -2108,23 +2155,44 @@ def _verify_gpi_expected_shape_and_derivation(
                 raise _corrupt(
                     f"{where}: v5-over-v2 lower meaning on a "
                     "Generation with no retained model identity")
-            profile_path = (blob_root.parent /
+            # FPR33-03/05: resolve the profile by the Generation's
+            # OWN workflow identity among the STAGED artifacts —
+            # the generations table carries no profile-hash column
+            # and the v5 document is never consulted
+            profile_root = (blob_root.parent /
                             "workflow-artifacts" /
-                            "realization_profiles" / "sha256" /
-                            gen["realization_profile_hash"][:2] /
-                            gen["realization_profile_hash"][2:4] /
-                            f"{gen['realization_profile_hash']}"
-                            ".json")
-            if not profile_path.is_file():
+                            "realization_profiles")
+            if not profile_root.is_dir():
                 raise _corrupt(
-                    f"{where}: the retained realization profile "
-                    f"{gen['realization_profile_hash']} is "
-                    "missing from the staged tree")
+                    f"{where}: the staged realization-profile store "
+                    "is absent")
+            profile_matches = []
+            for path in sorted(profile_root.rglob("*.json")):
+                try:
+                    doc = _json.loads(
+                        path.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    continue
+                if doc.get("workflow_id") == gen["workflow_id"]:
+                    profile_matches.append((path.stem, path))
+            if len(profile_matches) != 1:
+                raise _corrupt(
+                    f"{where}: expected exactly one staged "
+                    f"realization profile for workflow "
+                    f"{gen['workflow_id']!r}; found "
+                    f"{len(profile_matches)}")
+            profile_hash_key, profile_path = profile_matches[0]
             from soloring.realization.profile import parse_profile
 
             try:
-                v2_profile = parse_profile(
-                    profile_path.read_text(encoding="utf-8"))
+                _raw_prof = profile_path.read_text(encoding="utf-8")
+                _pdoc = _json.loads(_raw_prof)
+                if _pdoc.get("schema_version") == 2 and "spatial"                         in _pdoc:
+                    _pdoc = {k: v for k, v in _pdoc.items()
+                             if k != "spatial"}
+                    _pdoc["schema_version"] = 1
+                    _raw_prof = _json.dumps(_pdoc)
+                v2_profile = parse_profile(_raw_prof)
             except SoloRingError as exc:
                 raise _corrupt(
                     f"{where}: the retained realization profile "
@@ -2135,10 +2203,67 @@ def _verify_gpi_expected_shape_and_derivation(
             # projection
             fingerprint_hash = _staged_fingerprint_hash(
                 blob_root, v2_profile)
+        snap_row = con.execute(
+            "SELECT snapshot_json FROM shot_revisions WHERE id = ?",
+            (gen["shot_revision_id"],)).fetchone()
+        visual_pack = None
+        if snap_row is not None:
+            visual_pack = (_json.loads(snap_row["snapshot_json"])
+                           .get("visual_reference_pack"))
+        vrph = (_canon_hash(visual_pack) if visual_pack else None)
+        compiled_realization = None
+        if v2_profile is not None:
+            # FPR33-03 final: re-run the FROZEN M9 compiler over
+            # the STAGED authority — the snapshot's captured pack,
+            # the staged facet requirements, the staged profile and
+            # the paired fingerprint. The v5 document is never an
+            # input.
+            from soloring.realization.authority import (
+                build_captured_authority,
+            )
+            from soloring.realization.compiler import (
+                compile_realization as _compile,
+            )
+
+            if not visual_pack:
+                raise _corrupt(
+                    f"{where}: a v5-over-v2 Generation whose "
+                    "snapshot carries no visual reference pack "
+                    "cannot be reconstructed")
+            facet_rows = con.execute(
+                "SELECT vf.id AS fid, vf.requirement FROM "
+                "visual_facets vf JOIN shots s ON "
+                "s.id = ? WHERE vf.project_id = s.project_id",
+                (gen["shot_id"],)).fetchall()
+            requirement_map = {
+                r["fid"]: r["requirement"]
+                for r in facet_rows}
+            try:
+                authority = build_captured_authority(
+                    visual_pack, requirement_map)
+                result = _compile(
+                    captured_visual_authority=authority,
+                    profile=v2_profile,
+                    manifest=manifest_doc,
+                    profile_hash=profile_hash_key,
+                    execution_model_fingerprint_hash=(
+                        fingerprint_hash),
+                )
+            except SoloRingError as exc:
+                raise _corrupt(f"{where}: {exc.message}") from exc
+            if not result.ready:
+                raise _corrupt(
+                    f"{where}: the staged authority no longer "
+                    "compiles a ready realization under the frozen "
+                    "M9 law")
+            compiled_realization = result.spec
         expected = _expected_lower(
             gen, staged_inputs, manifest_doc,
             v2_profile=v2_profile,
-            v2_model_fingerprint_hash=fingerprint_hash)
+            v2_model_fingerprint_hash=fingerprint_hash,
+            v2_visual_reference_pack_hash=vrph,
+            v2_profile_hash=profile_hash_key,
+            v2_compiled_realization=compiled_realization)
         if projection["schema_version"] == 2:
             from soloring.performance.execution_spec import (
                 compare_lower_v2 as _compare_v2,

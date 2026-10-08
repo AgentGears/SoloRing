@@ -64,9 +64,11 @@ def _expected():
     )
 
     return expected_lower_from_retained(
-        _Gen(), _INPUT_ROWS, None if False else _MANIFEST,
+        _Gen(), _INPUT_ROWS, _MANIFEST,
         v2_profile=_Profile(),
-        v2_model_fingerprint_hash="d" * 64)
+        v2_model_fingerprint_hash="d" * 64,
+        v2_visual_reference_pack_hash="b" * 64,
+        v2_profile_hash="a" * 64)
 
 
 class _Manifest:

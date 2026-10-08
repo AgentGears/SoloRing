@@ -91,23 +91,80 @@ async def _retained_fingerprint_hash(session, profile_doc) -> str:
         f"{profile_doc.model.id!r}")
 
 
-async def _retained_profile_bytes(session, profile_hash: str) -> str:
-    """The retained realization-profile artifact bytes, addressed by
-    the Generation row's OWN hash (the retained authority — never
-    the v5 document)."""
+async def _retained_profile_for_workflow(session, workflow_id: str):
+    """FPR33-03/05: the retained realization-profile artifact for a
+    Generation's OWN workflow identity — resolved by parsing the
+    artifact store's realization_profiles and matching workflow_id
+    (exactly one match required). The generations table carries no
+    profile-hash column and the v5 document is never consulted, so
+    the retained package's own artifact set IS the authority."""
+    import json as _json
     from pathlib import Path
 
     from soloring.settings import get_settings
 
-    root = Path(get_settings().data_dir) / "workflow-artifacts"
-    path = (root / "realization_profiles" / "sha256" /
-            profile_hash[:2] / profile_hash[2:4] /
-            f"{profile_hash}.json")
-    if not path.is_file():
+    root = (Path(get_settings().data_dir) / "workflow-artifacts" /
+            "realization_profiles")
+    if not root.is_dir():
         raise _refusal(
-            f"the retained realization profile {profile_hash} is "
-            "missing from the artifact store")
-    return path.read_text(encoding="utf-8")
+            "the retained realization-profile store is absent")
+    matches = []
+    for path in sorted(root.rglob("*.json")):
+        try:
+            doc = _json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if doc.get("workflow_id") == workflow_id:
+            matches.append((path.stem, path))
+    if len(matches) != 1:
+        raise _refusal(
+            f"expected exactly one retained realization profile for "
+            f"workflow {workflow_id!r}; found {len(matches)}")
+    profile_hash, path = matches[0]
+    return profile_hash, path.read_text(encoding="utf-8")
+
+
+
+async def _compile_retained(session, generation, snapshot_json,
+                            profile_doc, manifest_doc, profile_hash,
+                            fingerprint_hash):
+    """Re-run the frozen M9 realization compiler over RETAINED
+    authority only: the captured snapshot's visual pack + facet
+    requirements from the retained visual-facet rows + the retained
+    profile/manifest artifacts. The v5 document is never an
+    input."""
+    from soloring.realization.authority import (
+        build_captured_authority,
+    )
+    from soloring.realization.compiler import compile_realization
+    from sqlalchemy import text as _t
+
+    snapshot = json.loads(snapshot_json)
+    pack = snapshot.get("visual_reference_pack")
+    if not pack:
+        raise _refusal(
+            "a v5-over-v2 Generation whose snapshot carries no "
+            "visual reference pack cannot be reconstructed")
+    facet_rows = (await session.execute(_t(
+        "SELECT vf.visual_facet_id, vf.requirement FROM "
+        "visual_facets vf JOIN projects p ON "
+        "p.id = vf.project_id WHERE p.id = :p"),
+        {"p": generation["project_id"]})).mappings().all()
+    requirement_map = {r["visual_facet_id"]: r["requirement"]
+                      for r in facet_rows}
+    authority = build_captured_authority(pack, requirement_map)
+    result = compile_realization(
+        captured_visual_authority=authority,
+        profile=profile_doc,
+        manifest=manifest_doc,
+        profile_hash=profile_hash,
+        execution_model_fingerprint_hash=fingerprint_hash,
+    )
+    if not result.ready:
+        raise _refusal(
+            "the retained authority no longer compiles a ready "
+            "realization under the frozen M9 law")
+    return result.spec
 
 
 async def execute_schema5_performance_inputs(
@@ -184,20 +241,64 @@ async def execute_schema5_performance_inputs(
                     "with no retained model identity")
             from soloring.realization.profile import parse_profile
 
-            profile_doc = parse_profile(
-                await _retained_profile_bytes(
-                    session,
-                    generation["realization_profile_hash"]))
+            _rph, _raw_profile = await _retained_profile_for_workflow(
+                session, generation["workflow_id"])
+            # a schema-3 v2 profile carries the additive spatial
+            # wrapper; the M9 inherited portion IS the profile the
+            # spec compiled from (the same delegation
+            # parse_profile_v2 itself performs)
+            import json as _json
+
+            _pdoc = _json.loads(_raw_profile)
+            if _pdoc.get("schema_version") == 2 and "spatial" in _pdoc:
+                _pdoc = {k: v for k, v in _pdoc.items()
+                         if k != "spatial"}
+                _pdoc["schema_version"] = 1
+                _raw_profile = _json.dumps(_pdoc)
+            profile_doc = parse_profile(_raw_profile)
             v2_profile = profile_doc
+            v2_profile_hash = _rph
             # FPR33-03: the fingerprint hash comes from the RETAINED
             # fingerprint artifact addressed by the profile's OWN
             # model identity chain — never from the projection
             fingerprint_hash = await _retained_fingerprint_hash(
                 session, profile_doc)
+        # the visual-reference-pack identity from the CAPTURED
+        # snapshot (the retained M8 authority), and the profile
+        # hash from the retained artifact the profile was parsed
+        # from — never phantom generations columns
+        snap = (await session.execute(_text(
+            "SELECT snapshot_json FROM shot_revisions "
+            "WHERE id = :r"),
+            {"r": generation["shot_revision_id"]})).scalar_one()
+        import json as _json
+
+        visual_pack = _json.loads(snap).get(
+            "visual_reference_pack")
+        from soloring.domain.canonical import (
+            canonical_hash as _canon_hash,
+        )
+
+        vrph = _canon_hash(visual_pack) if visual_pack else None
+        compiled_realization = None
+        if v2_profile is not None:
+            # FPR33-03 final: re-run the FROZEN M9 compiler over
+            # the retained authority (the snapshot's captured pack +
+            # the retained profile/manifest/fingerprint) — the exact
+            # realization meaning, independently of the projection
+            try:
+                compiled_realization = await _compile_retained(
+                    session, generation, snap, v2_profile,
+                    manifest_doc, v2_profile_hash, fingerprint_hash)
+            except SoloRingError as exc:
+                raise _refusal(str(exc.message)) from exc
         expected = expected_lower_from_retained(
             generation, input_rows, manifest_doc,
             v2_profile=v2_profile,
-            v2_model_fingerprint_hash=fingerprint_hash)
+            v2_model_fingerprint_hash=fingerprint_hash,
+            v2_visual_reference_pack_hash=vrph,
+            v2_profile_hash=v2_profile_hash,
+            v2_compiled_realization=compiled_realization)
         if projection["schema_version"] == 2:
             from soloring.performance.execution_spec import (
                 compare_lower_v2,

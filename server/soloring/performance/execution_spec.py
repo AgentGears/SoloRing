@@ -321,7 +321,10 @@ def validate_workflow_spec_v5(spec: dict, *, lower_spec=None,
 
 def expected_lower_from_retained(gen_row, input_rows, manifest_doc,
                                  *, v2_profile=None,
-                                 v2_model_fingerprint_hash=None
+                                 v2_model_fingerprint_hash=None,
+                                 v2_visual_reference_pack_hash=None,
+                                 v2_profile_hash=None,
+                                 v2_compiled_realization=None
                                  ) -> dict:
     """FPR31/32-M17CD-04: the INDEPENDENT lower reconstruction from
     retained facts alone — the Generation row, its GenerationInput
@@ -399,16 +402,27 @@ def expected_lower_from_retained(gen_row, input_rows, manifest_doc,
             v2_model_fingerprint_hash,
     }
     base["model"] = model_block
+    # FPR33-03 final form: when the caller supplies the compiler
+    # reconstruction (worker/recovery re-run the FROZEN M9 compiler
+    # over the retained authority — profile, manifest, fingerprint,
+    # and the captured visual pack from the SNAPSHOT, never the v5
+    # document), the realization block IS that exact output; the
+    # approximation below remains only for callers without the
+    # retained visual authority (disclosed weaker, never used by
+    # the worker/recovery lanes).
+    if v2_compiled_realization is not None:
+        base["realization"] = v2_compiled_realization
+        return base
     base["realization"] = {
         "schema_version": 1,
         "profile": {
             "id": v2_profile.profile_id,
             "version": v2_profile.profile_version,
-            "hash": gen_row["realization_profile_hash"],
+            "hash": v2_profile_hash,
         },
         "model": model_block,
         "visual_reference_pack_hash":
-            gen_row["visual_reference_pack_hash"],
+            v2_visual_reference_pack_hash,
         "parameter_overrides": overrides,
         "channels": _expected_channels(v2_profile, input_rows),
         "omitted_optional": _expected_omitted(v2_profile,

@@ -218,20 +218,22 @@ async def test_lower_v2_overrides_tamper_caught_by_law(
     from soloring.performance.execution_spec import compare_lower_v2
 
     def _pair():
+        model = {"id": "m1", "version": 2,
+                 "execution_model_fingerprint_hash": "f" * 64}
+        realization = {
+            "schema_version": 1,
+            "profile": {"id": "p", "version": 1,
+                        "hash": "a" * 64},
+            "model": model,
+            "visual_reference_pack_hash": "b" * 64,
+            "parameter_overrides": {"cfg": 1.0},
+            "channels": [],
+            "omitted_optional": [],
+        }
         expected = {
             "schema_version": 2,
-            "model": {"id": "m1", "version": 2,
-                      "execution_model_fingerprint_hash":
-                          "f" * 64},
-            "realization": {
-                "schema_version": 1,
-                "profile": {"id": "p", "version": 1,
-                            "hash": "a" * 64},
-                "model": {"id": "m1", "version": 2,
-                          "execution_model_fingerprint_hash":
-                              "f" * 64},
-                "parameter_overrides": {"cfg": 1.0},
-            },
+            "model": model,
+            "realization": realization,
         }
         projection = json.loads(json.dumps(expected))
         return projection, expected
