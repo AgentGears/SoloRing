@@ -1960,6 +1960,33 @@ def _verify_generation_performance_inputs(
     _verify_gpi_expected_shape_and_derivation(con, blob_root)
 
 
+def _staged_fingerprint_hash(blob_root, profile_doc) -> str:
+    """The staged ExecutionModelFingerprint hash matching the
+    retained profile's model identity (the staged authority
+    chain)."""
+    import json as _sj
+
+    root = (blob_root.parent / "workflow-artifacts" /
+            "execution_model_fingerprints")
+    if not root.is_dir():
+        raise _corrupt(
+            "the staged execution-model-fingerprint store is "
+            "absent; the v2 reconstruction cannot run")
+    for path in sorted(root.rglob("*.json")):
+        try:
+            doc = _sj.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        model = doc.get("model") or {}
+        if model.get("id") == profile_doc.model.id and                 model.get("version") == profile_doc.model.version:
+            name = path.stem
+            if len(name) == 64:
+                return name
+    raise _corrupt(
+        "no staged execution-model fingerprint matches the "
+        f"retained profile model {profile_doc.model.id!r}")
+
+
 def _verify_gpi_expected_shape_and_derivation(
         con: sqlite3.Connection, blob_root: Path) -> None:
     """The M17C-D completion (frozen plan R2-FINAL W5): per
@@ -2102,8 +2129,12 @@ def _verify_gpi_expected_shape_and_derivation(
                 raise _corrupt(
                     f"{where}: the retained realization profile "
                     f"does not parse: {exc}") from exc
-            fingerprint_hash = projection["model"][
-                "execution_model_fingerprint_hash"]
+            # FPR33-03: the fingerprint hash from the STAGED
+            # artifact chain (the profile's model identity ->
+            # the staged fingerprint artifact) — never the
+            # projection
+            fingerprint_hash = _staged_fingerprint_hash(
+                blob_root, v2_profile)
         expected = _expected_lower(
             gen, staged_inputs, manifest_doc,
             v2_profile=v2_profile,

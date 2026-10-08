@@ -281,11 +281,16 @@ def validate_workflow_spec_v5(spec: dict, *, lower_spec=None,
                 # GROUNDED — the source-audio identity in the
                 # retained immutable VP/audio authority and the
                 # synchronization basis pinned to its frozen value
-                if vocal["synchronization_basis_version"] != 1:
+                _sbv = vocal["synchronization_basis_version"]
+                if type(_sbv) is not int or _sbv != 1:
+                    # FPR33-04: TYPE-EXACT — JSON true, 1.0, "1"
+                    # and every alias refuse (True == 1 in Python
+                    # would otherwise pass)
                     raise _grammar_refusal(
                         f"segments[{position}].vocal "
                         "synchronization_basis_version is not the "
-                        "frozen value 1")
+                        "frozen exact integer 1 "
+                        f"(got {type(_sbv).__name__})")
                 if vocal_audio_hashes is not None:
                     vp_id = child["vocal_performance_revision_id"]
                     authority = vocal_audio_hashes.get(vp_id)
@@ -371,32 +376,93 @@ def expected_lower_from_retained(gen_row, input_rows, manifest_doc,
     # names resolved against the row's OWN resolved parameters (the
     # create-time law the service asserts), the identities from the
     # row + the retained artifacts
+    # FPR33-03: consume the profile through its TYPED API (the
+    # parse_profile result is a RealizationProfileDocument — never
+    # dict-subscripted)
     parameters = base["parameters"]
     overrides = {}
-    for name in v2_profile["parameter_overrides"]:
+    for name in v2_profile.parameter_overrides:
         if name not in parameters:
             raise _grammar_refusal(
                 "the retained profile declares an override the "
                 f"Generation's parameters do not carry ({name!r})")
         overrides[name] = parameters[name]
     base["schema_version"] = 2
-    base["model"] = {
+    # NOTHING is seeded from the projection under test: the model
+    # identity comes from the Generation row and the fingerprint
+    # hash from the retained fingerprint ARTIFACT addressed by
+    # the row's own realization_profile_hash chain
+    model_block = {
         "id": gen_row["model"],
         "version": gen_row["model_version"],
         "execution_model_fingerprint_hash":
             v2_model_fingerprint_hash,
     }
+    base["model"] = model_block
     base["realization"] = {
         "schema_version": 1,
         "profile": {
-            "id": v2_profile["profile_id"],
-            "version": v2_profile["profile_version"],
+            "id": v2_profile.profile_id,
+            "version": v2_profile.profile_version,
             "hash": gen_row["realization_profile_hash"],
         },
-        "model": base["model"],
+        "model": model_block,
+        "visual_reference_pack_hash":
+            gen_row["visual_reference_pack_hash"],
         "parameter_overrides": overrides,
+        "channels": _expected_channels(v2_profile, input_rows),
+        "omitted_optional": _expected_omitted(v2_profile,
+                                              input_rows),
     }
     return base
+
+
+def _expected_channels(v2_profile, input_rows) -> list:
+    """FPR33-03: the channel bindings reconstructed from
+    the retained profile + the retained input rows — the
+    deterministic projection of which profile channels the
+    retained inputs actually carry, in the profile's frozen
+    channel order."""
+    present: dict = {}
+    for row in input_rows:
+        present.setdefault(row["input_key"], []).append({
+            "asset_id": row["asset_id"],
+            "blob_hash": row["blob_hash"],
+            "position": row["position"],
+        })
+    channels = []
+    for key in sorted(v2_profile.channels):
+        channel = v2_profile.channels[key]
+        bindings = present.get(channel.input_key, [])
+        if not bindings:
+            continue  # an unbound channel is omitted-optional
+        channels.append({
+            "channel": key,
+            "input_key": channel.input_key,
+            "bindings": bindings,
+        })
+    return channels
+
+
+def _expected_omitted(v2_profile, input_rows) -> list:
+    """The omitted-optional record: profile channels with
+    NO retained input binding are omitted (facet/target/kind/
+    reason per the frozen compiler shape)."""
+    bound_keys = {row["input_key"] for row in input_rows}
+    omitted = []
+    for key in sorted(v2_profile.channels):
+        channel = v2_profile.channels[key]
+        if channel.input_key in bound_keys:
+            continue
+        omitted.append({
+            "visual_facet_id": getattr(
+                channel, "visual_facet_id", key),
+            "target_kind": getattr(channel, "target_kind",
+                                   "channel"),
+            "facet_key": key,
+            "reason": "no retained input binding",
+        })
+    return omitted
 
 
 def compare_lower_v2(projection: dict, expected: dict,
@@ -429,6 +495,35 @@ def compare_lower_v2(projection: dict, expected: dict,
         raise _grammar_refusal(
             f"{what}: the v5-over-v2 realization schema_version is "
             "not the frozen value")
+    # FPR33-03: the COMPLETE realization meaning — nested model
+    # identity + fingerprint, visual-reference-pack identity,
+    # channels, and omitted-optionals each compared exactly
+    # against the retained-facts reconstruction
+    if projection["realization"]["model"] != \
+            expected["realization"]["model"]:
+        raise _grammar_refusal(
+            f"{what}: the v5-over-v2 realization model identity "
+            "disagrees with the retained Generation/profile "
+            "authority")
+    if projection["realization"].get(
+            "visual_reference_pack_hash") != \
+            expected["realization"]["visual_reference_pack_hash"]:
+        raise _grammar_refusal(
+            f"{what}: the v5-over-v2 realization "
+            "visual_reference_pack_hash disagrees with the "
+            "retained Generation row")
+    if projection["realization"]["channels"] != \
+            expected["realization"]["channels"]:
+        raise _grammar_refusal(
+            f"{what}: the v5-over-v2 realization channels "
+            "disagree with the retained profile/input "
+            "reconstruction")
+    if projection["realization"]["omitted_optional"] != \
+            expected["realization"]["omitted_optional"]:
+        raise _grammar_refusal(
+            f"{what}: the v5-over-v2 realization omitted_optional "
+            "disagrees with the retained profile/input "
+            "reconstruction")
     core_projection = {k: v for k, v in projection.items()
                        if k not in ("schema_version", "model",
                                     "realization")}

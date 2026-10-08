@@ -58,6 +58,39 @@ def _refusal(message: str) -> SoloRingError:
                          message, status_code=422)
 
 
+async def _retained_fingerprint_hash(session, profile_doc) -> str:
+    """The retained ExecutionModelFingerprint hash for the profile's
+    model identity — resolved through the artifact store's model
+    index (the retained authority chain; the v5 document is never
+    consulted)."""
+    from pathlib import Path
+
+    from soloring.settings import get_settings
+
+    root = (Path(get_settings().data_dir) /
+            "workflow-artifacts" / "execution_model_fingerprints")
+    if not root.is_dir():
+        raise _refusal(
+            "the retained execution-model-fingerprint store is "
+            "absent; the v2 reconstruction cannot run")
+    import json as _json
+
+    for path in sorted(root.rglob("*.json")):
+        try:
+            doc = _json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        model = doc.get("model") or {}
+        if model.get("id") == profile_doc.model.id and                 model.get("version") == profile_doc.model.version:
+            name = path.stem
+            if len(name) == 64:
+                return name
+    raise _refusal(
+        "no retained execution-model fingerprint matches the "
+        "retained profile's model identity "
+        f"{profile_doc.model.id!r}")
+
+
 async def _retained_profile_bytes(session, profile_hash: str) -> str:
     """The retained realization-profile artifact bytes, addressed by
     the Generation row's OWN hash (the retained authority — never
@@ -156,8 +189,11 @@ async def execute_schema5_performance_inputs(
                     session,
                     generation["realization_profile_hash"]))
             v2_profile = profile_doc
-            fingerprint_hash = projection["model"][
-                "execution_model_fingerprint_hash"]
+            # FPR33-03: the fingerprint hash comes from the RETAINED
+            # fingerprint artifact addressed by the profile's OWN
+            # model identity chain — never from the projection
+            fingerprint_hash = await _retained_fingerprint_hash(
+                session, profile_doc)
         expected = expected_lower_from_retained(
             generation, input_rows, manifest_doc,
             v2_profile=v2_profile,
