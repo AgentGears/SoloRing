@@ -314,9 +314,20 @@ def test_canonical_launcher_pins_whitelist():
     assert "--disable-all-custom-nodes" in src.replace("',", " ").replace(
         "''", " ")
     assert "'--disable-all-custom-nodes'" in src
-    assert "'--whitelist-custom-nodes','ComfyUI-GGUF'" in src
-    # and nothing else is whitelisted
-    import re
-
-    wl = re.findall(r"'--whitelist-custom-nodes','([^']+)'", src)
-    assert wl == ["ComfyUI-GGUF"], wl
+    # M17C-D FPR33-01(c) re-pin: the whitelisted node is now the
+    # computed `whitelisted_node` (the launcher's DEFAULT lane still
+    # exactly ComfyUI-GGUF; the --performance-lane switches it to
+    # the pinned SoloRing node package) — the law's substance
+    # (disable-all + exactly ONE whitelisted node) is unchanged
+    assert 'whitelisted_node = "ComfyUI-GGUF"' in src
+    # the whitelist argument site emits the computed variable
+    marker = "'--whitelist-custom-nodes','" + chr(34) + \
+        " + whitelisted_node"
+    assert marker in src
+    assert src.count("whitelisted_node = ") == 2
+    # the only two whitelisted identities in the file
+    assert "whitelisted_node = PERFORMANCE_NODE_PACKAGE" in src
+    assert src.count("whitelisted_node = ") == 2
+    # the GGUF lane is the DEFAULT (assigned before the lane switch)
+    assert src.index('whitelisted_node = "ComfyUI-GGUF"') < src.index(
+        "whitelisted_node = PERFORMANCE_NODE_PACKAGE")
