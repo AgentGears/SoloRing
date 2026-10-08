@@ -215,16 +215,16 @@ def test_m15_source_scope_excludes_execution_source() -> None:
         # runtime branch, the authority wrap read-through,
         # the lane law, the launcher lane), byte-pinned
         'scripts/launch_comfy.py': '8f2c1eef9371e4eeede418f7aeb400d7524ce154',
-        'server/soloring/executor_nodes/soloring_performance_nodes/__init__.py': 'eefd03ef4d882722c4ca10164478584631c1a350',
-        'server/soloring/executors/comfy/capability_record.py': 'f22275332be6fede36d72b83a86d8b55cff49c25',
+        'server/soloring/executor_nodes/soloring_performance_nodes/__init__.py': '4044507a3e72628265bd7ab01c15419c4f79cb6d',
+        'server/soloring/executors/comfy/capability_record.py': '08c79332e0de4b8e6acb20865b4866bcc781c99d',
         'server/soloring/realization/authority.py': '3fcbac52417e4cf79f423a2dace1d834797e8e94',
         'server/soloring/realization/runtime.py': '2749ff589e3c4db1cd0ee2c24fd887e6459e88a1',
-        'server/soloring/performance/executor_runtime.py': 'd0e57f3a6d34a0bd81bd37e6aeb7edf4936db902',
+        'server/soloring/performance/executor_runtime.py': '38f97f5bdd2a4d42b3e94c25eb4ce5ebd17e497b',
         # M17C-D FPR32: the PINNED performance executor package
         # (the frozen LivePortrait contract), byte-pinned
-        'workflows/performance_liveportrait_v1/manifest.json': '9325779e0b863b95ec4ea3d9bfa740809b9f0173',
-        'workflows/performance_liveportrait_v1/workflow.json': '783f26274fcf2d458a0c5a9983fe23e160f3d82b',
-        'workflows/performance_liveportrait_v1/workflow-package.json': '65d7fcb0ab5719b6681135cb71cb678cde6a7fec',
+        'workflows/performance_liveportrait_v1/manifest.json': 'aacfd334a26ca6786a5208b2975c2cc9f15a6049',
+        'workflows/performance_liveportrait_v1/workflow.json': '9a34292d6a3c8fc0b32993f4e99fbaf9eb54e6b5',
+        'workflows/performance_liveportrait_v1/workflow-package.json': 'd7d4bc075bb5f5d426bb3db928c1c4c10ce9c1b1',
         # M17C-D execution succession (frozen plan R2-FINAL,
         # authorized 2026-10-07): the D lane's sampler/spec/
         # translation/worker modules + the touched persistence
@@ -232,13 +232,13 @@ def test_m15_source_scope_excludes_execution_source() -> None:
         'server/soloring/performance/execution_sampler.py':
             '2b12d5e9a5dd6d9c28e670f81f14da5c35c15c9d',
         'server/soloring/performance/execution_spec.py':
-            '4fe23a7ee8ac497632acdbb1b041182ab160f848',
+            'ffcdb7aa6204f324e4fd8fe230c3543c28ff510f',
         'server/soloring/performance/execution_translation.py':
             '31d83591f465f28351cc8c99affcff50628a9804',
         'server/soloring/performance/worker_inputs.py':
-            '095aea8dad2351493aa5eac6e5e04ef24b1cfa6a',
+            '873167d3e5b97c590390898169b6ae3ea8ce0e4b',
         'server/soloring/worker/comfy_pipeline.py':
-            'ae33961a6003fd9d93a574cc0cf27f3ec4e8517a',
+            'bdd46705f265de7750f8620dc8991809d6026536',
         'server/soloring/generation/repository.py':
             'e70056c340e790da1b83ac64c47483b70613c935',
         'server/soloring/recovery/backup.py':
